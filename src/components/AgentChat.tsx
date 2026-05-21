@@ -1,20 +1,30 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
-import type { ChatBlock } from "../types/domain";
+import type { ChatBlock, Task } from "../types/domain";
 import { useChatStore } from "../stores/chatStore";
+import { useTaskStore } from "../stores/taskStore";
 import { MarkdownText } from "./MarkdownText";
+import { ModeSelector } from "./ModeSelector";
+import { ConstraintsEditor } from "./ConstraintsEditor";
 
 export function AgentChat() {
   const { blocks, sending, inputDraft, totalCost, approveAll, setDraft, send, reset, restoreSnapshot } =
     useChatStore();
+  const tasks = useTaskStore((s) => s.tasks);
+  const mode = useTaskStore((s) => s.mode);
+  const setMode = useTaskStore((s) => s.setMode);
+  const toggleHistory = useTaskStore((s) => s.toggleHistory);
+
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Group blocks by taskId for rendering.
+  const groups = useMemo(() => groupByTask(tasks, blocks), [tasks, blocks]);
+
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [blocks]);
+  }, [blocks, tasks]);
 
-  // Global Ctrl+K to focus the chat input.
   useEffect(() => {
     const handler = () => inputRef.current?.focus();
     window.addEventListener("ac:focus-chat", handler);
@@ -33,21 +43,25 @@ export function AgentChat() {
         {totalCost > 0 && <span className="agent-meta">· total ${totalCost.toFixed(4)}</span>}
         {approveAll && <span className="agent-meta" style={{ color: "var(--danger)" }}>· auto-approve</span>}
         <span className="spacer" />
-        <button onClick={reset} disabled={blocks.length === 0 && !sending}>Reset</button>
+        <button onClick={toggleHistory} title="Task history">History</button>
+        <button onClick={reset} disabled={tasks.length === 0 && !sending}>Reset</button>
       </div>
 
       <div className="agent-messages" ref={listRef}>
-        {blocks.length === 0 && (
+        {tasks.length === 0 && (
           <div className="placeholder">
-            Direct the agent. It runs as `claude -p` inside this repo.
-            Risky actions (Bash/Edit/Write) ask for your approval; safe reads pass through.
-            Edits appear in the Changes tab; a snapshot is created before each turn.
+            Direct the agent. Pick a mode below, optionally add constraints, then type a task.
+            Edits land in the Changes tab; a snapshot is taken before each turn so you can restore it.
           </div>
         )}
-        {blocks.map((b) => (
-          <Block key={b.id} block={b} onRestore={restoreSnapshot} />
+        {groups.map(({ task, items }) => (
+          <TaskCard key={task.id} task={task} blocks={items} onRestore={restoreSnapshot} />
         ))}
-        {sending && <div className="msg-role" style={{ marginLeft: 4 }}>working… <span className="caret" /></div>}
+      </div>
+
+      <div className="task-context">
+        <ModeSelector value={mode} onChange={setMode} disabled={sending} />
+        <ConstraintsEditor />
       </div>
 
       <form className="agent-input" onSubmit={onSubmit}>
@@ -76,38 +90,82 @@ export function AgentChat() {
   );
 }
 
-function Block({ block, onRestore }: {
-  block: ChatBlock;
-  onRestore: (sha: string, userId: string) => void;
+function groupByTask(tasks: Task[], blocks: ChatBlock[]): Array<{ task: Task; items: ChatBlock[] }> {
+  const map = new Map<string, ChatBlock[]>();
+  for (const t of tasks) map.set(t.id, []);
+  for (const b of blocks) {
+    const list = map.get(b.taskId);
+    if (list) list.push(b);
+  }
+  return tasks.map((task) => ({ task, items: map.get(task.id) ?? [] }));
+}
+
+function TaskCard({ task, blocks, onRestore }: {
+  task: Task;
+  blocks: ChatBlock[];
+  onRestore: (sha: string, userBlockId: string) => void;
 }) {
-  switch (block.kind) {
-    case "user":
-      return (
-        <div className="msg msg-user">
-          <div className="msg-role">
-            you
-            {block.snapshot && !block.restored && (
-              <button
-                className="msg-restore"
-                title="Restore working tree to before this turn"
-                onClick={() => {
-                  if (block.snapshot && confirm("Restore to before this turn? Uncommitted changes will be lost.")) {
-                    onRestore(block.snapshot.commitSha, block.id);
-                  }
-                }}
-              >
-                ↶ restore
-              </button>
-            )}
-            {block.restored && <span className="msg-restored">· restored</span>}
-          </div>
-          <div className="msg-body">{block.content}</div>
+  const userBlock = blocks.find((b): b is Extract<ChatBlock, { kind: "user" }> => b.kind === "user");
+  const others = blocks.filter((b) => b.kind !== "user");
+  const isRunning = task.status === "running" || task.status === undefined;
+  const duration = task.completedAtMs ? (task.completedAtMs - task.createdAtMs) / 1000 : null;
+
+  return (
+    <div className={`task-card task-${task.status ?? "running"}`}>
+      <div className="task-head">
+        <span className={`task-mode mode-${task.mode}`}>{task.mode}</span>
+        <span className="task-prompt">{task.prompt}</span>
+        {isRunning && <span className="caret" />}
+        {userBlock?.snapshot && !userBlock.restored && (
+          <button
+            className="msg-restore"
+            title="Restore working tree to before this turn"
+            onClick={() => {
+              if (userBlock.snapshot && confirm("Restore to before this turn? Uncommitted changes will be lost.")) {
+                onRestore(userBlock.snapshot.commitSha, userBlock.id);
+              }
+            }}
+          >↶ restore</button>
+        )}
+        {userBlock?.restored && <span className="msg-restored">· restored</span>}
+      </div>
+
+      {task.constraints.length > 0 && (
+        <div className="task-constraints">
+          {task.constraints.map((c, i) => <span key={i} className="task-constraint">{c}</span>)}
         </div>
-      );
+      )}
+
+      <div className="task-events">
+        {others.map((b) => <BlockView key={b.id} block={b} />)}
+      </div>
+
+      {!isRunning && (
+        <div className="task-summary">
+          <span className={`task-summary-status status-${task.status}`}>
+            {task.status === "completed" ? "✓ Done" : task.status === "failed" ? "✗ Failed" : "● Cancelled"}
+          </span>
+          {duration !== null && <span>· {duration.toFixed(1)}s</span>}
+          {task.costUsd != null && <span>· ${task.costUsd.toFixed(4)}</span>}
+          <div className="task-summary-aggs">
+            {task.filesRead.length > 0 &&
+              <span title={task.filesRead.join("\n")}>▸ Read {task.filesRead.length}</span>}
+            {task.filesModified.length > 0 &&
+              <span title={task.filesModified.join("\n")}>✎ Modified {task.filesModified.length}</span>}
+            {task.commandsExecuted.length > 0 &&
+              <span title={task.commandsExecuted.join("\n")}>$ Ran {task.commandsExecuted.length}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BlockView({ block }: { block: ChatBlock }) {
+  switch (block.kind) {
     case "text":
       return (
         <div className="msg msg-assistant">
-          <div className="msg-role">claude</div>
           <MarkdownText content={block.content} />
         </div>
       );
@@ -120,6 +178,9 @@ function Block({ block, onRestore }: {
       );
     case "tool":
       return <ToolBlock block={block} />;
+    case "user":
+      // User block is rendered in the card header.
+      return null;
   }
 }
 
@@ -127,9 +188,8 @@ function ToolBlock({ block }: { block: Extract<ChatBlock, { kind: "tool" }> }) {
   const icon =
     block.status === "running" ? "▸" :
     block.status === "ok"      ? "✓" : "✗";
-  const cls = `tool tool-${block.status}`;
   return (
-    <div className={cls}>
+    <div className={`tool tool-${block.status}`}>
       <span className="tool-icon">{icon}</span>
       <span className="tool-name">{block.name}</span>
       <span className="tool-input">{formatInput(block.name, block.input)}</span>

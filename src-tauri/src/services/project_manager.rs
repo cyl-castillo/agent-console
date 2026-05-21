@@ -104,6 +104,95 @@ fn build_node(path: &Path, depth: usize) -> AppResult<FileNode> {
     })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceContext {
+    pub root: PathBuf,
+    pub language: Option<String>,
+    pub framework: Option<String>,
+    pub file_count: usize,
+    pub package_scripts: Vec<String>,
+    pub entry_points: Vec<String>,
+    pub readme_preview: Option<String>,
+}
+
+pub fn workspace_context(root: &Path) -> AppResult<WorkspaceContext> {
+    if !root.is_dir() {
+        return Err(AppError::NotADirectory(root.display().to_string()));
+    }
+    let (language, framework) = detect_stack(root);
+
+    // Quick file-count walk (capped, ignored dirs skipped).
+    let mut file_count = 0usize;
+    let walker = walkdir::WalkDir::new(root)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !(e.file_type().is_dir() && IGNORED_DIRS.contains(&name.as_ref()))
+        });
+    for entry in walker.flatten().take(20_000) {
+        if entry.file_type().is_file() { file_count += 1; }
+    }
+
+    let package_scripts = read_package_scripts(root);
+    let entry_points = detect_entry_points(root);
+    let readme_preview = read_readme_preview(root);
+
+    Ok(WorkspaceContext {
+        root: root.to_path_buf(),
+        language,
+        framework,
+        file_count,
+        package_scripts,
+        entry_points,
+        readme_preview,
+    })
+}
+
+fn read_package_scripts(root: &Path) -> Vec<String> {
+    let pkg = root.join("package.json");
+    if !pkg.exists() { return Vec::new(); }
+    let Ok(txt) = std::fs::read_to_string(&pkg) else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else { return Vec::new() };
+    let Some(scripts) = v.get("scripts").and_then(|s| s.as_object()) else { return Vec::new() };
+    scripts.keys().cloned().collect()
+}
+
+fn detect_entry_points(root: &Path) -> Vec<String> {
+    let candidates = [
+        "src/main.rs", "src/lib.rs",
+        "src/index.ts", "src/index.tsx", "src/main.ts", "src/main.tsx",
+        "src/index.js", "src/main.js",
+        "main.py", "app.py", "src/main.py",
+        "main.go", "cmd/main.go",
+        "src/main/java", // dir, indicates Java entry tree
+    ];
+    candidates.iter()
+        .filter(|p| root.join(p).exists())
+        .map(|p| (*p).to_string())
+        .collect()
+}
+
+fn read_readme_preview(root: &Path) -> Option<String> {
+    for name in ["README.md", "README.MD", "Readme.md", "readme.md", "README"] {
+        let p = root.join(name);
+        if !p.exists() { continue; }
+        let txt = std::fs::read_to_string(&p).ok()?;
+        let trimmed: String = txt
+            .lines()
+            .skip_while(|l| l.starts_with('#') || l.trim().is_empty())
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(280)
+            .collect();
+        if !trimmed.is_empty() { return Some(trimmed); }
+    }
+    None
+}
+
 /// Best-effort detection based on marker files at the project root.
 fn detect_stack(root: &Path) -> (Option<String>, Option<String>) {
     let has = |f: &str| root.join(f).exists();

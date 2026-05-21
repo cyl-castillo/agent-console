@@ -37,10 +37,10 @@ export interface Snapshot {
 }
 
 export type ChatBlock =
-  | { kind: "user"; id: string; content: string; snapshot?: Snapshot; restored?: boolean }
-  | { kind: "text"; id: string; content: string }
-  | { kind: "tool"; id: string; name: string; input: unknown; status: ToolStatus; summary?: string }
-  | { kind: "thinking"; id: string; content: string };
+  | { kind: "user"; id: string; taskId: string; content: string; snapshot?: Snapshot; restored?: boolean }
+  | { kind: "text"; id: string; taskId: string; content: string }
+  | { kind: "tool"; id: string; taskId: string; name: string; input: unknown; status: ToolStatus; summary?: string }
+  | { kind: "thinking"; id: string; taskId: string; content: string };
 
 export interface RecentProject {
   path: string;
@@ -59,4 +59,34 @@ export interface FileContent {
   isBinary: boolean;
   sizeBytes: number;
   truncated: boolean;
+}
+
+export type AgentMode = "plan" | "build" | "debug" | "review";
+
+export type TaskStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface Task {
+  id: string;
+  projectRoot: string;
+  prompt: string;
+  mode: AgentMode;
+  constraints: string[];
+  createdAtMs: number;
+  completedAtMs?: number;
+  status?: TaskStatus;
+  snapshotCommitSha?: string | null;
+  filesRead: string[];
+  filesModified: string[];
+  commandsExecuted: string[];
+  costUsd?: number | null;
+}
+
+export interface WorkspaceContext {
+  root: string;
+  language: string | null;
+  framework: string | null;
+  fileCount: number;
+  packageScripts: string[];
+  entryPoints: string[];
+  readmePreview: string | null;
 }

@@ -3,7 +3,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
-  FileContent, FileNode, GitStatus, Project, RecentProject, Snapshot,
+  AgentMode, FileContent, FileNode, GitStatus, Project, RecentProject, Snapshot,
+  Task, WorkspaceContext,
 } from "../types/domain";
 
 export const ipc = {
@@ -12,6 +13,7 @@ export const ipc = {
     invoke<FileNode>("read_tree", { path, depth }),
   currentProject: () => invoke<Project | null>("current_project"),
   readFileText: (path: string) => invoke<FileContent>("read_file_text", { path }),
+  workspaceContext: () => invoke<WorkspaceContext>("workspace_context"),
 
   termSpawn: (cwd: string) => invoke<string>("term_spawn", { cwd }),
   termWrite: (id: string, data: string) =>
@@ -24,8 +26,14 @@ export const ipc = {
   gitDiffFile: (file: string) => invoke<string>("git_diff_file", { file }),
   gitRevertFile: (file: string) => invoke<void>("git_revert_file", { file }),
 
-  chatSend: (text: string) => invoke<Snapshot | null>("chat_send", { text }),
+  chatSend: (text: string, mode: AgentMode, constraints: string[]) =>
+    invoke<Snapshot | null>("chat_send", { text, mode, constraints }),
   chatReset: () => invoke<void>("chat_reset"),
+
+  taskSave: (task: Task) => invoke<void>("task_save", { task }),
+  taskList: (projectRoot?: string | null) =>
+    invoke<Task[]>("task_list", { projectRoot: projectRoot ?? null }),
+  taskDelete: (id: string) => invoke<void>("task_delete", { id }),
 
   snapshotRestore: (commitSha: string) =>
     invoke<void>("snapshot_restore", { commitSha }),

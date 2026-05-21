@@ -5,7 +5,7 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
-use crate::services::project_manager::{self, FileNode, Project};
+use crate::services::project_manager::{self, FileNode, Project, WorkspaceContext};
 use crate::state::AppState;
 
 const FILE_READ_LIMIT: u64 = 1024 * 1024; // 1 MB
@@ -39,6 +39,14 @@ pub fn read_tree(path: String, depth: Option<usize>) -> AppResult<FileNode> {
 #[tauri::command]
 pub fn current_project(state: State<'_, AppState>) -> Option<Project> {
     state.inner.lock().unwrap().project.clone()
+}
+
+#[tauri::command]
+pub fn workspace_context(state: State<'_, AppState>) -> AppResult<WorkspaceContext> {
+    let root = state.inner.lock().unwrap().project.as_ref()
+        .map(|p| p.root.clone())
+        .ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
+    project_manager::workspace_context(&root)
 }
 
 /// Read a file for the Preview tab. Truncates to 1 MB and detects binaries

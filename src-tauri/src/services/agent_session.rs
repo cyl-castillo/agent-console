@@ -12,10 +12,31 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::services::permission_bridge::PermissionBridge;
 use crate::services::snapshot_service::{self, Snapshot};
+use crate::services::task_service::AgentMode;
 
-const SYSTEM_PROMPT: &str = "You are embedded inside Agent Console, a minimalist console IDE. \
+/// Base prompt applied in every mode.
+const BASE_PROMPT: &str = "You are embedded inside Agent Console, a minimalist console IDE. \
 The user directs you from a chat panel; they also have an integrated terminal and a Changes view \
 showing git diff of your edits. Be concise. When you edit files the user will see the diffs.";
+
+/// Mode-specific addendum.
+fn mode_prompt(mode: AgentMode) -> &'static str {
+    match mode {
+        AgentMode::Plan =>
+            "PLAN mode. Analyze the codebase to understand the task. Do not edit files or run commands. \
+             Produce a concrete, ordered plan listing the steps you would take, the files you would touch, \
+             and the tests you would run. End with a short risk assessment.",
+        AgentMode::Build =>
+            "BUILD mode. Implement the requested change carefully. Make minimal, targeted edits. \
+             Prefer reading first, then editing the smallest possible scope. Run relevant tests when applicable.",
+        AgentMode::Debug =>
+            "DEBUG mode. Diagnose the issue precisely. Read logs, errors, tests, and recent diffs. \
+             Identify the root cause before proposing a fix. Be explicit about what you do not yet know.",
+        AgentMode::Review =>
+            "REVIEW mode. Examine the current changes (git diff). Identify bugs, regressions, security or \
+             clarity issues, and concrete improvements. Do not modify files yourself — produce a written review.",
+    }
+}
 
 /// PreToolUse hook script bundled with the binary and dropped to disk on first use.
 const HOOK_SCRIPT: &str = include_str!("../../resources/pretool-hook.cjs");
@@ -23,24 +44,31 @@ const HOOK_SCRIPT: &str = include_str!("../../resources/pretool-hook.cjs");
 struct AgentSession {
     child: Child,
     stdin: ChildStdin,
+    mode: AgentMode,
     #[allow(dead_code)]
     cwd: PathBuf,
 }
 
 impl AgentSession {
-    fn spawn(app: AppHandle, cwd: &Path, hook_dir: &Path) -> AppResult<Self> {
+    fn spawn(app: AppHandle, cwd: &Path, hook_dir: &Path, mode: AgentMode) -> AppResult<Self> {
         let runtime_dir = ensure_runtime_dir()?;
         let hook_script = ensure_hook_script(&runtime_dir)?;
         let settings_path = write_session_settings(&runtime_dir, &hook_script)?;
+
+        let permission_flag = match mode {
+            AgentMode::Plan | AgentMode::Review => "plan",
+            AgentMode::Build | AgentMode::Debug => "default",
+        };
+        let system_prompt = format!("{BASE_PROMPT}\n\n{}", mode_prompt(mode));
 
         let mut child = Command::new("claude")
             .arg("-p")
             .args(["--input-format", "stream-json"])
             .args(["--output-format", "stream-json"])
             .arg("--verbose")
-            .args(["--permission-mode", "default"])
+            .args(["--permission-mode", permission_flag])
             .args(["--settings", &settings_path.to_string_lossy()])
-            .args(["--append-system-prompt", SYSTEM_PROMPT])
+            .args(["--append-system-prompt", &system_prompt])
             .env("AGENT_CONSOLE_HOOK_DIR", hook_dir)
             .current_dir(cwd)
             .stdin(Stdio::piped())
@@ -80,13 +108,22 @@ impl AgentSession {
             }
         });
 
-        Ok(Self { child, stdin, cwd: cwd.to_path_buf() })
+        Ok(Self { child, stdin, mode, cwd: cwd.to_path_buf() })
     }
 
-    fn send_user(&mut self, text: &str) -> AppResult<()> {
+    fn send_user(&mut self, text: &str, constraints: &[String]) -> AppResult<()> {
+        let mut full_text = text.to_string();
+        if !constraints.is_empty() {
+            full_text.push_str("\n\n---\nConstraints for this turn:\n");
+            for c in constraints {
+                full_text.push_str("- ");
+                full_text.push_str(c);
+                full_text.push('\n');
+            }
+        }
         let payload = json!({
             "type": "user",
-            "message": { "role": "user", "content": text },
+            "message": { "role": "user", "content": full_text },
         });
         writeln!(self.stdin, "{payload}")
             .map_err(|e| AppError::Other(format!("write stdin: {e}")))?;
@@ -101,7 +138,6 @@ impl AgentSession {
     }
 }
 
-/// One agent session per active project.
 #[derive(Default)]
 pub struct AgentRegistry {
     session: Mutex<Option<AgentSession>>,
@@ -111,26 +147,36 @@ pub struct AgentRegistry {
 impl AgentRegistry {
     pub fn new() -> Self { Self::default() }
 
-    /// Send a user turn. Creates a snapshot first; events relay both snapshot + tokens.
-    pub fn send(&self, app: AppHandle, cwd: &Path, text: String) -> AppResult<Option<Snapshot>> {
-        // Snapshot first so we can restore even if spawn fails later.
+    /// Send a user turn. Creates a snapshot first; respawns if mode changed.
+    pub fn send(
+        &self,
+        app: AppHandle,
+        cwd: &Path,
+        text: String,
+        mode: AgentMode,
+        constraints: Vec<String>,
+    ) -> AppResult<Option<Snapshot>> {
         let turn_id = Uuid::new_v4().to_string();
         let snapshot = snapshot_service::create(cwd, &turn_id)?;
 
         let mut slot = self.session.lock().unwrap();
-        if slot.is_none() {
+        // If mode changed (or no session yet), respawn.
+        let needs_respawn = match slot.as_ref() {
+            None => true,
+            Some(s) => s.mode != mode,
+        };
+        if needs_respawn {
+            if let Some(mut prev) = slot.take() { prev.kill(); }
             let hook_dir = self.permissions.ensure(&app, &turn_id)?;
-            *slot = Some(AgentSession::spawn(app.clone(), cwd, &hook_dir)?);
-            let _ = app.emit("chat://session-started", ());
+            *slot = Some(AgentSession::spawn(app.clone(), cwd, &hook_dir, mode)?);
+            let _ = app.emit("chat://session-started", json!({ "mode": mode.as_str() }));
         }
-        slot.as_mut().unwrap().send_user(&text)?;
+        slot.as_mut().unwrap().send_user(&text, &constraints)?;
         Ok(snapshot)
     }
 
     pub fn reset(&self) {
-        if let Some(mut s) = self.session.lock().unwrap().take() {
-            s.kill();
-        }
+        if let Some(mut s) = self.session.lock().unwrap().take() { s.kill(); }
         self.permissions.clear();
     }
 }
@@ -224,7 +270,6 @@ fn ensure_runtime_dir() -> AppResult<PathBuf> {
 
 fn ensure_hook_script(runtime_dir: &Path) -> AppResult<PathBuf> {
     let path = runtime_dir.join("pretool-hook.cjs");
-    // Always overwrite so app updates ship a fresh hook.
     fs::write(&path, HOOK_SCRIPT)?;
     #[cfg(unix)]
     {

@@ -16,6 +16,7 @@ pub fn run() {
             commands::project::read_tree,
             commands::project::current_project,
             commands::project::read_file_text,
+            commands::project::workspace_context,
             commands::terminal::term_spawn,
             commands::terminal::term_write,
             commands::terminal::term_resize,
@@ -33,6 +34,9 @@ pub fn run() {
             commands::projects::projects_last,
             commands::projects::projects_forget,
             commands::projects::projects_remember,
+            commands::task::task_save,
+            commands::task::task_list,
+            commands::task::task_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

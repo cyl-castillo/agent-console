@@ -11,12 +11,12 @@ import {
 } from "../ipc/tauri";
 import type { ChatBlock, PermissionRequest } from "../types/domain";
 import { useChangesStore } from "./changesStore";
+import { useTaskStore } from "./taskStore";
 
-/// Tools whose completion can leave new diffs on disk → refresh Changes view.
 const MUTATING_TOOLS = new Set([
   "Edit", "Write", "MultiEdit", "NotebookEdit", "Bash",
 ]);
-/// Tools that should request the user's approval (the bundled hook will block until decided).
+const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS"]);
 const DANGEROUS_TOOLS = new Set([
   "Edit", "Write", "MultiEdit", "NotebookEdit", "Bash",
 ]);
@@ -25,12 +25,9 @@ interface ChatState {
   blocks: ChatBlock[];
   sending: boolean;
   inputDraft: string;
-  lastCost: number | null;
   totalCost: number;
   pendingPermissions: PermissionRequest[];
   approveAll: boolean;
-  /// Bumped each time the agent first mutates files in the current turn —
-  /// the UI uses this to auto-switch tabs once per turn.
   autoSwitchSignal: number;
   hasMutatedThisTurn: boolean;
 
@@ -53,7 +50,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   blocks: [],
   sending: false,
   inputDraft: "",
-  lastCost: null,
   totalCost: 0,
   pendingPermissions: [],
   approveAll: false,
@@ -64,39 +60,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   send: async (text) => {
     if (!text.trim() || get().sending) return;
-    const userId = crypto.randomUUID();
+    const taskStore = useTaskStore.getState();
+    const task = taskStore.beginTask(text);
     set((s) => ({
       sending: true,
       inputDraft: "",
       hasMutatedThisTurn: false,
-      blocks: [...s.blocks, { kind: "user", id: userId, content: text }],
+      blocks: [...s.blocks, { kind: "user", id: crypto.randomUUID(), taskId: task.id, content: text }],
     }));
     try {
-      const snap = await ipc.chatSend(text);
+      const snap = await ipc.chatSend(text, task.mode, task.constraints);
       if (snap) {
-        set((s) => ({
-          blocks: s.blocks.map((b) =>
-            b.kind === "user" && b.id === userId ? { ...b, snapshot: snap } : b,
-          ),
-        }));
+        taskStore.attachSnapshot(task.id, snap.commitSha);
       }
     } catch (err) {
       set({ sending: false });
       set((s) => ({
         blocks: [
           ...s.blocks,
-          { kind: "text", id: crypto.randomUUID(), content: `error: ${err}` },
+          { kind: "text", id: crypto.randomUUID(), taskId: task.id, content: `error: ${err}` },
         ],
       }));
+      useTaskStore.getState().completeTask(task.id, null, String(err));
     }
   },
 
   reset: async () => {
     try { await ipc.chatReset(); } catch { /* ignore */ }
     set({
-      blocks: [], sending: false, lastCost: null, totalCost: 0,
+      blocks: [], sending: false, totalCost: 0,
       pendingPermissions: [], hasMutatedThisTurn: false,
     });
+    useTaskStore.getState().resetSession();
   },
 
   decidePermission: async (allow) => {
@@ -112,7 +107,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ approveAll: on });
     try { await ipc.permSetApproveAll(on); } catch { /* ignore */ }
     if (on) {
-      // Drain any queued requests as approved.
       while (get().pendingPermissions.length > 0) {
         await get().decidePermission(true);
       }
@@ -132,24 +126,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         blocks: [
           ...s.blocks,
-          { kind: "text", id: crypto.randomUUID(), content: `restore failed: ${err}` },
+          { kind: "text", id: crypto.randomUUID(), taskId: "", content: `restore failed: ${err}` },
         ],
       }));
     }
   },
 
-  _onText: (text) => set((s) => ({
-    blocks: [...s.blocks, { kind: "text", id: crypto.randomUUID(), content: text }],
-  })),
+  _onText: (text) => {
+    const taskId = useTaskStore.getState().currentTaskId ?? "";
+    set((s) => ({
+      blocks: [...s.blocks, { kind: "text", id: crypto.randomUUID(), taskId, content: text }],
+    }));
+  },
 
   _onToolUse: (e) => {
+    const taskStore = useTaskStore.getState();
+    const taskId = taskStore.currentTaskId ?? "";
     set((s) => ({
       blocks: [...s.blocks, {
-        kind: "tool", id: e.id, name: e.name, input: e.input, status: "running",
+        kind: "tool", id: e.id, taskId, name: e.name, input: e.input, status: "running",
       }],
     }));
-    // Dangerous tools will be paused by the hook; for safe ones the request never fires.
-    // We don't need to act here — the perm:// event drives the modal.
+    // Record into task aggregates immediately on tool_use; tool_result will confirm or mark error.
+    const input = (e.input ?? {}) as Record<string, unknown>;
+    const path = (typeof input.file_path === "string" ? input.file_path : null)
+              ?? (typeof input.path === "string" ? input.path : null);
+    if (e.name === "Bash" && typeof input.command === "string") {
+      taskStore.recordCommand(input.command);
+    } else if (MUTATING_TOOLS.has(e.name) && path) {
+      taskStore.recordFileModified(path);
+    } else if (READ_TOOLS.has(e.name) && path) {
+      taskStore.recordFileRead(path);
+    }
   },
 
   _onToolResult: (e) => {
@@ -169,23 +177,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  _onThinking: (e) => set((s) => ({
-    blocks: [...s.blocks, { kind: "thinking", id: crypto.randomUUID(), content: e.text }],
-  })),
+  _onThinking: (e) => {
+    const taskId = useTaskStore.getState().currentTaskId ?? "";
+    set((s) => ({
+      blocks: [...s.blocks, { kind: "thinking", id: crypto.randomUUID(), taskId, content: e.text }],
+    }));
+  },
 
-  _onDone: (e) => set((s) => ({
-    sending: false,
-    lastCost: e.cost,
-    totalCost: s.totalCost + (e.cost ?? 0),
-  })),
+  _onDone: (e) => {
+    const taskStore = useTaskStore.getState();
+    const taskId = taskStore.currentTaskId;
+    set((s) => ({
+      sending: false,
+      totalCost: s.totalCost + (e.cost ?? 0),
+    }));
+    if (taskId) {
+      taskStore.completeTask(taskId, e.cost, e.error);
+    }
+  },
 
   _onPerm: (r) => {
-    // If approve-all is on, auto-accept immediately.
     if (get().approveAll) {
       ipc.permRespond(r.id, true).catch(() => {});
       return;
     }
-    // Some hooks may fire for safe tools if matchers loosen; double-check.
     if (!DANGEROUS_TOOLS.has(r.toolName)) {
       ipc.permRespond(r.id, true).catch(() => {});
       return;

@@ -5,6 +5,7 @@ import { attachChatListeners, useChatStore } from "./stores/chatStore";
 import { useChangesStore } from "./stores/changesStore";
 import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
+import { useTaskStore } from "./stores/taskStore";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { FileTree } from "./components/FileTree";
 import { Terminal } from "./components/Terminal";
@@ -13,6 +14,7 @@ import { AgentChat } from "./components/AgentChat";
 import { Preview } from "./components/Preview";
 import { PermissionModal } from "./components/PermissionModal";
 import { AboutModal } from "./components/AboutModal";
+import { TaskHistoryDrawer } from "./components/TaskHistoryDrawer";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 export default function App() {
@@ -24,6 +26,10 @@ export default function App() {
   const clearChanges = useChangesStore((s) => s.clear);
   const autoSwitchSignal = useChatStore((s) => s.autoSwitchSignal);
   const clearPreview = usePreviewStore((s) => s.clear);
+  const loadWorkspace = useTaskStore((s) => s.loadWorkspaceContext);
+  const clearWorkspace = useTaskStore((s) => s.clearWorkspaceContext);
+  const workspace = useTaskStore((s) => s.workspace);
+  const branch = useChangesStore((s) => s.status?.branch ?? null);
   const [showAbout, setShowAbout] = useState(false);
 
   useKeyboardShortcuts({ setTab });
@@ -35,9 +41,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (project) refreshChanges();
-    else { clearChanges(); clearPreview(); }
-  }, [project, refreshChanges, clearChanges, clearPreview]);
+    if (project) { refreshChanges(); loadWorkspace(); }
+    else { clearChanges(); clearPreview(); clearWorkspace(); }
+  }, [project, refreshChanges, clearChanges, clearPreview, loadWorkspace, clearWorkspace]);
 
   useEffect(() => {
     if (autoSwitchSignal > 0) setTab("changes");
@@ -61,6 +67,8 @@ export default function App() {
           <span className="meta">
             {project.language ?? "unknown"}
             {project.framework ? ` · ${project.framework}` : ""}
+            {branch ? ` · ${branch}` : ""}
+            {workspace?.fileCount ? ` · ${workspace.fileCount} files` : ""}
           </span>
           <span className="meta" style={{ opacity: 0.6 }}>{project.root}</span>
           <span className="spacer" />
@@ -115,6 +123,7 @@ export default function App() {
         </aside>
       </div>
       <PermissionModal />
+      <TaskHistoryDrawer />
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </>
   );
