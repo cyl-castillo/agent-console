@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Agent Console",
+  "version": "0.1.0",
+  "identifier": "dev.agentconsole.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Agent Console",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "Minimalist AI-native console for directing agents inside a repository.",
+    "longDescription": "Agent Console is a small, terminal-first desktop app that puts an integrated shell, git diff viewer, and Claude Code agent side-by-side. It is designed for developers who want to direct an agent — not write code in an IDE.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["resources/pretool-hook.cjs"],
+    "linux": {
+      "deb": {
+        "depends": ["nodejs"]
+      }
+    }
+  }
+}
