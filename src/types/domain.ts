@@ -40,7 +40,8 @@ export type ChatBlock =
   | { kind: "user"; id: string; taskId: string; content: string; snapshot?: Snapshot; restored?: boolean }
   | { kind: "text"; id: string; taskId: string; content: string }
   | { kind: "tool"; id: string; taskId: string; name: string; input: unknown; status: ToolStatus; summary?: string }
-  | { kind: "thinking"; id: string; taskId: string; content: string };
+  | { kind: "thinking"; id: string; taskId: string; content: string }
+  | { kind: "info"; id: string; taskId: string; content: string };
 
 export interface RecentProject {
   path: string;

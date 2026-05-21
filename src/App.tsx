@@ -118,7 +118,7 @@ export default function App() {
         </main>
 
         <aside className="panel right">
-          <div className="panel-header">Agent</div>
+          <div className="panel-header">Console</div>
           <AgentChat />
         </aside>
       </div>

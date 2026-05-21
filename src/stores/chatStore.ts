@@ -12,6 +12,7 @@ import {
 import type { ChatBlock, PermissionRequest } from "../types/domain";
 import { useChangesStore } from "./changesStore";
 import { useTaskStore } from "./taskStore";
+import { HELP_TEXT, parseCommand } from "../utils/parseCommand";
 
 const MUTATING_TOOLS = new Set([
   "Edit", "Write", "MultiEdit", "NotebookEdit", "Bash",
@@ -59,17 +60,64 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setDraft: (s) => set({ inputDraft: s }),
 
   send: async (text) => {
-    if (!text.trim() || get().sending) return;
+    if (get().sending) return;
+    const parsed = parseCommand(text);
+    if (parsed.kind === "noop") return;
+
     const taskStore = useTaskStore.getState();
-    const task = taskStore.beginTask(text);
+
+    if (parsed.kind === "reset") {
+      set({ inputDraft: "" });
+      await get().reset();
+      return;
+    }
+    if (parsed.kind === "help") {
+      set((s) => ({
+        inputDraft: "",
+        blocks: [...s.blocks, {
+          kind: "info", id: crypto.randomUUID(), taskId: "",
+          content: HELP_TEXT,
+        }],
+      }));
+      return;
+    }
+    if (parsed.kind === "status") {
+      const tasks = taskStore.tasks;
+      const completed = tasks.filter((t) => t.status === "completed").length;
+      const running = tasks.filter((t) => t.status === "running" || !t.status).length;
+      const cost = get().totalCost;
+      const branch = useChangesStore.getState().status?.branch ?? "(none)";
+      const status = [
+        `session · ${taskStore.mode}`,
+        `branch: ${branch}`,
+        `tasks: ${tasks.length} (${completed} done, ${running} running)`,
+        `cost so far: $${cost.toFixed(4)}`,
+        `approve-all: ${get().approveAll ? "on" : "off"}`,
+      ].join("\n");
+      set((s) => ({
+        inputDraft: "",
+        blocks: [...s.blocks, {
+          kind: "info", id: crypto.randomUUID(), taskId: "",
+          content: status,
+        }],
+      }));
+      return;
+    }
+
+    // parsed.kind === "send"
+    if (parsed.mode) taskStore.setMode(parsed.mode);
+    const body = parsed.body;
+    if (!body) return;
+
+    const task = taskStore.beginTask(body);
     set((s) => ({
       sending: true,
       inputDraft: "",
       hasMutatedThisTurn: false,
-      blocks: [...s.blocks, { kind: "user", id: crypto.randomUUID(), taskId: task.id, content: text }],
+      blocks: [...s.blocks, { kind: "user", id: crypto.randomUUID(), taskId: task.id, content: body }],
     }));
     try {
-      const snap = await ipc.chatSend(text, task.mode, task.constraints);
+      const snap = await ipc.chatSend(body, task.mode, task.constraints);
       if (snap) {
         taskStore.attachSnapshot(task.id, snap.commitSha);
       }
