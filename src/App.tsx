@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { useSessionStore } from "./stores/sessionStore";
 import { attachChatListeners, useChatStore } from "./stores/chatStore";
@@ -12,6 +12,7 @@ import { ChangesView } from "./components/ChangesView";
 import { AgentChat } from "./components/AgentChat";
 import { Preview } from "./components/Preview";
 import { PermissionModal } from "./components/PermissionModal";
+import { AboutModal } from "./components/AboutModal";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
   const clearChanges = useChangesStore((s) => s.clear);
   const autoSwitchSignal = useChatStore((s) => s.autoSwitchSignal);
   const clearPreview = usePreviewStore((s) => s.clear);
+  const [showAbout, setShowAbout] = useState(false);
 
   useKeyboardShortcuts({ setTab });
 
@@ -46,6 +48,7 @@ export default function App() {
       <>
         <ProjectPicker />
         <PermissionModal />
+        {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       </>
     );
   }
@@ -61,6 +64,7 @@ export default function App() {
           </span>
           <span className="meta" style={{ opacity: 0.6 }}>{project.root}</span>
           <span className="spacer" />
+          <button className="topbar-icon" onClick={() => setShowAbout(true)} title="About Agent Console">ⓘ</button>
           <button onClick={closeProject}>Close</button>
         </div>
 
@@ -111,6 +115,7 @@ export default function App() {
         </aside>
       </div>
       <PermissionModal />
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </>
   );
 }

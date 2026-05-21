@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & discussions
+    url: https://github.com/cyl-castillo/agent-console/discussions
+    about: Ask questions, share workflows, or discuss roadmap ideas.

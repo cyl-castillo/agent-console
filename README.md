@@ -28,15 +28,17 @@ Not an IDE. Not a chat client. A small terminal-first desktop app that pairs the
 
 ## Vision
 
-Most "AI coding tools" make agents pretend to be IDE features. Agent Console flips it: the editor is the agent, the user is the lead. The center of the app is the chat + terminal + diff, not a code editor. You don't read code here — you direct the agent and verify its work via diffs and shell output.
+Agent Console is **not trying to replace VS Code**. It is designed as an **AI-native development console** focused on supervising coding agents through terminal, diffs, and controlled workflows.
+
+The center of the app is the chat, the terminal, and the git diff — not a code editor. You don't read code here; you direct the agent and verify its work.
 
 Principles:
 
 - **Terminal-first, agent-first, diff-first.**
-- **Liviano** — Tauri + Rust, not Electron.
+- **Lightweight** — Tauri + Rust, not Electron.
 - **Cross-platform** by design (Linux/macOS/Windows), Linux-first in practice.
-- **Control humano obligatorio** before risky actions.
-- **No competir con VS Code.** Be the parallel console.
+- **Human control mandatory** before risky actions.
+- **Local-first, fast, developer-centric.** No accounts, no cloud sync, no marketplace.
 
 ## What's in v0.1
 
@@ -186,7 +188,16 @@ Not on the list:
 
 ## Status
 
-v0.1 — single user, local only, no telemetry, no auto-update. Suitable for daily personal use and demos. Not packaged for distribution channels (Snap/Flatpak/Homebrew/MS Store) yet.
+**Early preview · v0.1.** Single user, local only, no telemetry, no auto-update. Suitable for daily personal use and demos. Not packaged for distribution channels (Snap/Flatpak/Homebrew/MS Store) yet. APIs and event names may still change between minor releases.
+
+## Support
+
+If Agent Console is useful to you and you'd like to help shape where it goes, you can sponsor the project. Sponsorships fund focused time on the roadmap above — more tools, better safety, broader platforms.
+
+- [GitHub Sponsors](https://github.com/sponsors/cyl-castillo)
+- [Buy Me a Coffee](https://www.buymeacoffee.com/cylcastillo)
+
+Non-financial support also counts: a ⭐ on the repo, a thoughtful issue, a workflow shared in [Discussions](https://github.com/cyl-castillo/agent-console/discussions).
 
 ## License
 
