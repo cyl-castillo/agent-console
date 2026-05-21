@@ -29,19 +29,10 @@ export interface GitStatus {
   changes: GitFileChange[];
 }
 
-export type ToolStatus = "running" | "ok" | "error";
-
 export interface Snapshot {
   id: string;
   commitSha: string;
 }
-
-export type ChatBlock =
-  | { kind: "user"; id: string; taskId: string; content: string; snapshot?: Snapshot; restored?: boolean }
-  | { kind: "text"; id: string; taskId: string; content: string }
-  | { kind: "tool"; id: string; taskId: string; name: string; input: unknown; status: ToolStatus; summary?: string }
-  | { kind: "thinking"; id: string; taskId: string; content: string }
-  | { kind: "info"; id: string; taskId: string; content: string };
 
 export interface RecentProject {
   path: string;
@@ -49,37 +40,11 @@ export interface RecentProject {
   lastOpenedMs: number;
 }
 
-export interface PermissionRequest {
-  id: string;
-  toolName: string;
-  toolInput: unknown;
-}
-
 export interface FileContent {
   content: string;
   isBinary: boolean;
   sizeBytes: number;
   truncated: boolean;
-}
-
-export type AgentMode = "plan" | "build" | "debug" | "review";
-
-export type TaskStatus = "running" | "completed" | "failed" | "cancelled";
-
-export interface Task {
-  id: string;
-  projectRoot: string;
-  prompt: string;
-  mode: AgentMode;
-  constraints: string[];
-  createdAtMs: number;
-  completedAtMs?: number;
-  status?: TaskStatus;
-  snapshotCommitSha?: string | null;
-  filesRead: string[];
-  filesModified: string[];
-  commandsExecuted: string[];
-  costUsd?: number | null;
 }
 
 export interface WorkspaceContext {
@@ -90,4 +55,29 @@ export interface WorkspaceContext {
   packageScripts: string[];
   entryPoints: string[];
   readmePreview: string | null;
+}
+
+/// A discovered Claude Code unit: skill, slash-command, or agent definition.
+export interface Skill {
+  name: string;
+  kind: "skill" | "command" | "agent";
+  source: "project" | "user";
+  path: string;
+  description: string | null;
+  allowedTools: string[];
+}
+
+export interface HooksStatus {
+  sessionDir: string;
+  scriptPath: string;
+  installed: boolean;
+  settingsPath: string;
+}
+
+/// A user_prompt event observed by the hook watcher.
+export interface HookUserPromptEvent {
+  type: "user_prompt";
+  ts: number;
+  prompt: string;
+  skill?: string;
 }

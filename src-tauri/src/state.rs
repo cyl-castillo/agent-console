@@ -1,24 +1,29 @@
 use std::sync::Mutex;
 
-use crate::services::agent_session::AgentRegistry;
+use crate::services::hooks_service::HooksRuntime;
 use crate::services::project_manager::Project;
 use crate::services::terminal_runner::TerminalRegistry;
 
-/// Global application state. One active session at a time in v0.
 pub struct AppState {
     pub inner: Mutex<SessionState>,
     pub terminals: TerminalRegistry,
-    pub agent: AgentRegistry,
+    pub hooks: HooksRuntime,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
+impl AppState {
+    pub fn new() -> Self {
+        let hooks = HooksRuntime::new()
+            .expect("failed to initialize hooks runtime");
         Self {
             inner: Mutex::new(SessionState::default()),
             terminals: TerminalRegistry::new(),
-            agent: AgentRegistry::new(),
+            hooks,
         }
     }
+}
+
+impl Default for AppState {
+    fn default() -> Self { Self::new() }
 }
 
 #[derive(Default)]

@@ -1,8 +1,7 @@
-pub mod chat;
 pub mod git;
-pub mod permission;
+pub mod hooks;
 pub mod project;
 pub mod projects;
+pub mod skills;
 pub mod snapshot;
-pub mod task;
 pub mod terminal;

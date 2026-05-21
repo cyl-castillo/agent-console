@@ -3,8 +3,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
-  AgentMode, FileContent, FileNode, GitStatus, Project, RecentProject, Snapshot,
-  Task, WorkspaceContext,
+  FileContent, FileNode, GitStatus, HooksStatus, Project, RecentProject,
+  Skill, WorkspaceContext,
 } from "../types/domain";
 
 export const ipc = {
@@ -26,28 +26,21 @@ export const ipc = {
   gitDiffFile: (file: string) => invoke<string>("git_diff_file", { file }),
   gitRevertFile: (file: string) => invoke<void>("git_revert_file", { file }),
 
-  chatSend: (text: string, mode: AgentMode, constraints: string[]) =>
-    invoke<Snapshot | null>("chat_send", { text, mode, constraints }),
-  chatReset: () => invoke<void>("chat_reset"),
-
-  taskSave: (task: Task) => invoke<void>("task_save", { task }),
-  taskList: (projectRoot?: string | null) =>
-    invoke<Task[]>("task_list", { projectRoot: projectRoot ?? null }),
-  taskDelete: (id: string) => invoke<void>("task_delete", { id }),
-
   snapshotRestore: (commitSha: string) =>
     invoke<void>("snapshot_restore", { commitSha }),
   snapshotDelete: (id: string) => invoke<void>("snapshot_delete", { id }),
-
-  permRespond: (id: string, allow: boolean, reason: string | null = null) =>
-    invoke<void>("perm_respond", { id, allow, reason }),
-  permSetApproveAll: (enabled: boolean) =>
-    invoke<void>("perm_set_approve_all", { enabled }),
 
   projectsRecent: () => invoke<RecentProject[]>("projects_recent"),
   projectsLast: () => invoke<RecentProject | null>("projects_last"),
   projectsForget: (path: string) => invoke<void>("projects_forget", { path }),
   projectsRemember: (path: string) => invoke<void>("projects_remember", { path }),
+
+  skillList: () => invoke<Skill[]>("skill_list"),
+  skillRead: (path: string) => invoke<string>("skill_read", { path }),
+
+  hooksStatus: () => invoke<HooksStatus>("hooks_status"),
+  hooksInstall: () => invoke<HooksStatus>("hooks_install"),
+  hooksUninstall: () => invoke<HooksStatus>("hooks_uninstall"),
 };
 
 export async function pickFolder(): Promise<string | null> {
@@ -58,9 +51,3 @@ export async function pickFolder(): Promise<string | null> {
 
 export interface TermOutput { id: string; data: string }
 export interface TermExit { id: string; code: number | null }
-
-export interface ChatAssistantText { text: string }
-export interface ChatToolUse { id: string; name: string; input: unknown }
-export interface ChatToolResult { toolUseId: string; ok: boolean; summary: string }
-export interface ChatThinking { text: string }
-export interface ChatDone { cost: number | null; error: string | null }

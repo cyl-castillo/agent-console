@@ -46,6 +46,10 @@ impl TerminalRegistry {
 
     /// Spawn a new PTY in `cwd` running the user's default shell.
     pub fn spawn(&self, app: AppHandle, cwd: &Path) -> AppResult<String> {
+        self.spawn_with_env(app, cwd, &[])
+    }
+
+    pub fn spawn_with_env(&self, app: AppHandle, cwd: &Path, extra_env: &[(String, String)]) -> AppResult<String> {
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize { rows: 30, cols: 100, pixel_width: 0, pixel_height: 0 })
@@ -60,6 +64,10 @@ impl TerminalRegistry {
             cmd.env("HOME", home);
         }
         cmd.env("TERM", "xterm-256color");
+        cmd.env("AGENT_CONSOLE", "1");
+        for (k, v) in extra_env {
+            cmd.env(k, v);
+        }
 
         let mut child = pair
             .slave

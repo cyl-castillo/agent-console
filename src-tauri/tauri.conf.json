@@ -38,7 +38,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/pretool-hook.cjs"],
+    "resources": ["resources/userprompt-hook.cjs"],
     "linux": {
       "deb": {
         "depends": ["nodejs"]

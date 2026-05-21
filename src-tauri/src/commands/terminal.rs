@@ -11,7 +11,11 @@ pub fn term_spawn(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<String> {
-    state.terminals.spawn(app, &PathBuf::from(cwd))
+    let session_dir = state.hooks.session_dir().to_string_lossy().to_string();
+    let extra = vec![
+        ("AGENT_CONSOLE_SESSION_DIR".to_string(), session_dir),
+    ];
+    state.terminals.spawn_with_env(app, &PathBuf::from(cwd), &extra)
 }
 
 #[tauri::command]

@@ -4,6 +4,7 @@ mod services;
 mod state;
 
 use crate::state::AppState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +12,13 @@ pub fn run() {
         .manage(AppState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // Start the events.jsonl watcher as soon as the app is up so
+            // hook events arriving from any terminal session are observed.
+            let state = app.state::<AppState>();
+            state.hooks.start_watcher(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::project::open_project,
             commands::project::read_tree,
@@ -24,19 +32,18 @@ pub fn run() {
             commands::git::git_status,
             commands::git::git_diff_file,
             commands::git::git_revert_file,
-            commands::chat::chat_send,
-            commands::chat::chat_reset,
             commands::snapshot::snapshot_restore,
             commands::snapshot::snapshot_delete,
-            commands::permission::perm_respond,
-            commands::permission::perm_set_approve_all,
             commands::projects::projects_recent,
             commands::projects::projects_last,
             commands::projects::projects_forget,
             commands::projects::projects_remember,
-            commands::task::task_save,
-            commands::task::task_list,
-            commands::task::task_delete,
+            commands::skills::skill_list,
+            commands::skills::skill_read,
+            commands::hooks::hooks_status,
+            commands::hooks::hooks_install,
+            commands::hooks::hooks_uninstall,
+            commands::hooks::hooks_start_watcher,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

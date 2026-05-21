@@ -1,21 +1,20 @@
 import { useEffect, useState } from "react";
 
 import { useSessionStore } from "./stores/sessionStore";
-import { attachChatListeners, useChatStore } from "./stores/chatStore";
 import { useChangesStore } from "./stores/changesStore";
 import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
-import { useTaskStore } from "./stores/taskStore";
+import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { FileTree } from "./components/FileTree";
 import { Terminal } from "./components/Terminal";
 import { ChangesView } from "./components/ChangesView";
-import { AgentChat } from "./components/AgentChat";
 import { Preview } from "./components/Preview";
-import { PermissionModal } from "./components/PermissionModal";
+import { SkillsPanel } from "./components/SkillsPanel";
 import { AboutModal } from "./components/AboutModal";
-import { TaskHistoryDrawer } from "./components/TaskHistoryDrawer";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { ipc } from "./ipc/tauri";
+import type { WorkspaceContext } from "./types/domain";
 
 export default function App() {
   const { project, tree, closeProject } = useSessionStore();
@@ -24,36 +23,38 @@ export default function App() {
   const changesCount = useChangesStore((s) => s.status?.changes.length ?? 0);
   const refreshChanges = useChangesStore((s) => s.refresh);
   const clearChanges = useChangesStore((s) => s.clear);
-  const autoSwitchSignal = useChatStore((s) => s.autoSwitchSignal);
   const clearPreview = usePreviewStore((s) => s.clear);
-  const loadWorkspace = useTaskStore((s) => s.loadWorkspaceContext);
-  const clearWorkspace = useTaskStore((s) => s.clearWorkspaceContext);
-  const workspace = useTaskStore((s) => s.workspace);
+  const refreshSkills = useSkillsStore((s) => s.refresh);
   const branch = useChangesStore((s) => s.status?.branch ?? null);
+  const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
 
   useKeyboardShortcuts({ setTab });
 
+  // Attach hook event bridge once.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    attachChatListeners().then((u) => { unlisten = u; });
+    attachSkillsListeners().then((u) => { unlisten = u; });
     return () => { unlisten?.(); };
   }, []);
 
+  // Reload git status + skills + workspace when project changes.
   useEffect(() => {
-    if (project) { refreshChanges(); loadWorkspace(); }
-    else { clearChanges(); clearPreview(); clearWorkspace(); }
-  }, [project, refreshChanges, clearChanges, clearPreview, loadWorkspace, clearWorkspace]);
-
-  useEffect(() => {
-    if (autoSwitchSignal > 0) setTab("changes");
-  }, [autoSwitchSignal, setTab]);
+    if (project) {
+      refreshChanges();
+      refreshSkills();
+      ipc.workspaceContext().then(setWorkspace).catch(() => setWorkspace(null));
+    } else {
+      clearChanges();
+      clearPreview();
+      setWorkspace(null);
+    }
+  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview]);
 
   if (!project) {
     return (
       <>
         <ProjectPicker />
-        <PermissionModal />
         {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       </>
     );
@@ -118,12 +119,10 @@ export default function App() {
         </main>
 
         <aside className="panel right">
-          <div className="panel-header">Console</div>
-          <AgentChat />
+          <div className="panel-header">Workbench</div>
+          <SkillsPanel />
         </aside>
       </div>
-      <PermissionModal />
-      <TaskHistoryDrawer />
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
     </>
   );
