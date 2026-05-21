@@ -39,10 +39,19 @@
       "icons/icon.ico"
     ],
     "resources": ["resources/userprompt-hook.cjs"],
+    "createUpdaterArtifacts": true,
     "linux": {
       "deb": {
         "depends": ["nodejs"]
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/cyl-castillo/agent-console/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMyNUYzQjJBNjAxODFGM0UKUldRK0h4aGdLanRmd3BZU0gvK0JhT2Q1VWlTTXlrZEorN2c5VnoyVDZYdURsYS9oelhOSGgrTW0K"
     }
   }
 }
