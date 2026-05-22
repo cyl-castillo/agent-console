@@ -265,10 +265,15 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .changes-list {
   border-right: 1px solid var(--border);
-  overflow: auto;
   font-family: var(--font-mono);
   font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
+.changes-list > .changes-list-header,
+.changes-list > .change-group { flex-shrink: 0; }
+.changes-list > .change-group { overflow-y: auto; }
 .changes-list-header {
   display: flex;
   align-items: center;
@@ -1710,4 +1715,81 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .terminals-stack .terminal-host {
   flex: 1;
   min-height: 0;
+}
+
+/* --- Changes view: groups + commit box --- */
+.change-group {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.change-group:last-of-type { border-bottom: none; }
+.change-group-header {
+  padding: 6px 8px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-faint);
+  user-select: none;
+}
+.change-action {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  border-radius: 3px;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+.change-action:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.commit-box {
+  margin-top: auto;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev-1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.commit-message {
+  width: 100%;
+  resize: vertical;
+  min-height: 56px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+.commit-message:focus { border-color: var(--accent); }
+.commit-message:disabled { opacity: 0.6; }
+.commit-button {
+  align-self: stretch;
+  padding: 6px 10px;
+  background: var(--accent);
+  color: #0d0f12;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.commit-button:disabled {
+  background: var(--bg-elev-2, rgba(255,255,255,0.04));
+  color: var(--text-faint);
+  border-color: var(--border);
+  cursor: not-allowed;
 }

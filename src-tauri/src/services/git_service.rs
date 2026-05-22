@@ -112,6 +112,64 @@ pub fn diff_file(repo: &Path, file: &str) -> AppResult<String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
+/// `git add -- file`. Works for modifications, additions, deletions, and untracked files.
+pub fn stage_file(repo: &Path, file: &str) -> AppResult<()> {
+    let out = Command::new("git")
+        .args(["add", "--", file])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).to_string();
+        return Err(AppError::Other(format!("git add: {msg}")));
+    }
+    Ok(())
+}
+
+/// `git restore --staged -- file`. Removes from index, leaves working tree alone.
+/// Falls back to `git reset HEAD -- file` for older git versions or for files
+/// staged in an initial commit (no HEAD yet).
+pub fn unstage_file(repo: &Path, file: &str) -> AppResult<()> {
+    let out = Command::new("git")
+        .args(["restore", "--staged", "--", file])
+        .current_dir(repo)
+        .output()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    // Initial commit / no HEAD yet: `git rm --cached` removes from index without touching disk.
+    let fallback = Command::new("git")
+        .args(["rm", "--cached", "--quiet", "--", file])
+        .current_dir(repo)
+        .output()?;
+    if !fallback.status.success() {
+        let msg = String::from_utf8_lossy(&fallback.stderr).to_string();
+        return Err(AppError::Other(format!("git unstage: {msg}")));
+    }
+    Ok(())
+}
+
+/// `git commit -m <message>`. Returns the new commit SHA.
+pub fn commit(repo: &Path, message: &str) -> AppResult<String> {
+    if message.trim().is_empty() {
+        return Err(AppError::InvalidArgument("commit message is empty".into()));
+    }
+    let out = Command::new("git")
+        .args(["commit", "-m", message])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        return Err(AppError::Other(format!("git commit failed: {msg}{stdout}")));
+    }
+    let sha_out = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo)
+        .output()?;
+    let sha = String::from_utf8_lossy(&sha_out.stdout).trim().to_string();
+    Ok(sha)
+}
+
 /// Revert a single change. Tracked files: `git checkout HEAD -- file`.
 /// Untracked files: delete from disk.
 pub fn revert_file(repo: &Path, file: &str) -> AppResult<()> {

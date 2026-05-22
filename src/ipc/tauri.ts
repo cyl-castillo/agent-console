@@ -25,6 +25,9 @@ export const ipc = {
   gitStatus: () => invoke<GitStatus>("git_status"),
   gitDiffFile: (file: string) => invoke<string>("git_diff_file", { file }),
   gitRevertFile: (file: string) => invoke<void>("git_revert_file", { file }),
+  gitStageFile: (file: string) => invoke<void>("git_stage_file", { file }),
+  gitUnstageFile: (file: string) => invoke<void>("git_unstage_file", { file }),
+  gitCommit: (message: string) => invoke<string>("git_commit", { message }),
 
   snapshotRestore: (commitSha: string) =>
     invoke<void>("snapshot_restore", { commitSha }),

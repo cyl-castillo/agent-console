@@ -9,11 +9,17 @@ interface ChangesState {
   diff: string;
   loading: boolean;
   error: string | null;
+  commitMessage: string;
+  committing: boolean;
 
   setSelected: (file: string | null) => Promise<void>;
+  setCommitMessage: (msg: string) => void;
   refresh: () => Promise<void>;
+  stage: (file: string) => Promise<void>;
+  unstage: (file: string) => Promise<void>;
   revert: (file: string) => Promise<void>;
   revertAll: () => Promise<void>;
+  commit: () => Promise<string | null>;
   clear: () => void;
 }
 
@@ -23,12 +29,13 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
   diff: "",
   loading: false,
   error: null,
+  commitMessage: "",
+  committing: false,
 
   refresh: async () => {
     set({ loading: true, error: null });
     try {
       const status = await ipc.gitStatus();
-      // Keep current selection if it still exists; otherwise pick the first.
       const prev = get().selected;
       const stillThere = prev && status.changes.find((c) => c.path === prev);
       const next = stillThere ? prev : (status.changes[0]?.path ?? null);
@@ -48,8 +55,27 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     if (!file) { set({ diff: "" }); return; }
     try {
       const diff = await ipc.gitDiffFile(file);
-      // Only commit if still selected (avoid races on rapid clicks).
       if (get().selected === file) set({ diff });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  setCommitMessage: (msg) => set({ commitMessage: msg }),
+
+  stage: async (file) => {
+    try {
+      await ipc.gitStageFile(file);
+      await get().refresh();
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  unstage: async (file) => {
+    try {
+      await ipc.gitUnstageFile(file);
+      await get().refresh();
     } catch (e) {
       set({ error: String(e) });
     }
@@ -73,5 +99,23 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     await get().refresh();
   },
 
-  clear: () => set({ status: null, selected: null, diff: "", error: null }),
+  commit: async () => {
+    const msg = get().commitMessage.trim();
+    if (!msg) return null;
+    set({ committing: true, error: null });
+    try {
+      const sha = await ipc.gitCommit(msg);
+      set({ commitMessage: "", committing: false });
+      await get().refresh();
+      return sha;
+    } catch (e) {
+      set({ error: String(e), committing: false });
+      return null;
+    }
+  },
+
+  clear: () => set({
+    status: null, selected: null, diff: "", error: null,
+    commitMessage: "", committing: false,
+  }),
 }));

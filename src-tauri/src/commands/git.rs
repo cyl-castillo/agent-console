@@ -32,3 +32,21 @@ pub fn git_revert_file(file: String, state: State<'_, AppState>) -> AppResult<()
     let repo = current_repo(&state)?;
     git_service::revert_file(&repo, &file)
 }
+
+#[tauri::command]
+pub fn git_stage_file(file: String, state: State<'_, AppState>) -> AppResult<()> {
+    let repo = current_repo(&state)?;
+    git_service::stage_file(&repo, &file)
+}
+
+#[tauri::command]
+pub fn git_unstage_file(file: String, state: State<'_, AppState>) -> AppResult<()> {
+    let repo = current_repo(&state)?;
+    git_service::unstage_file(&repo, &file)
+}
+
+#[tauri::command]
+pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<String> {
+    let repo = current_repo(&state)?;
+    git_service::commit(&repo, &message)
+}
