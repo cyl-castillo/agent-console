@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 const REPO_URL = "https://github.com/cyl-castillo/agent-console";
 const SPONSORS_URL = "https://github.com/sponsors/cyl-castillo";
 const BMC_URL = "https://www.buymeacoffee.com/cylcastillo";
