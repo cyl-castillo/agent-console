@@ -5,16 +5,23 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
+import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 
 interface Props {
-  cwd: string;
+  session: TerminalSession;
+  visible: boolean;
 }
 
-/// Single PTY-backed terminal. Owns its xterm instance and Tauri listeners.
-/// Killing the terminal is handled on unmount.
-export function Terminal({ cwd }: Props) {
+/// Single PTY-backed terminal owned by one TerminalSession. Stays mounted
+/// while the session exists (visibility toggled via CSS so the PTY survives
+/// tab/session switches). Tear-down only happens when the session is closed.
+export function Terminal({ session, visible }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const appendOutput = useTerminalsStore((s) => s.appendOutput);
+  const markLive = useTerminalsStore((s) => s.markLive);
+  const fitRef = useRef<FitAddon | null>(null);
 
+  // Spawn once per session id.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -32,9 +39,19 @@ export function Terminal({ cwd }: Props) {
       scrollback: 5000,
     });
     const fit = new FitAddon();
+    fitRef.current = fit;
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
+
+    // Replay saved scrollback from a previous run, dimmed, with a divider.
+    if (session.initialScrollback) {
+      term.write(
+        `\x1b[90m── previous session (${new Date(session.createdAtMs).toLocaleString()}) ──\x1b[0m\r\n`,
+      );
+      term.write(session.initialScrollback);
+      term.write(`\r\n\x1b[90m── resumed ──\x1b[0m\r\n`);
+    }
 
     let termId: string | null = null;
     let unlistenOutput: UnlistenFn | null = null;
@@ -42,9 +59,11 @@ export function Terminal({ cwd }: Props) {
     let disposed = false;
 
     (async () => {
-      // Listeners BEFORE spawn so we don't miss the first bytes.
       unlistenOutput = await listen<TermOutput>("term://output", (e) => {
-        if (e.payload.id === termId) term.write(e.payload.data);
+        if (e.payload.id === termId) {
+          term.write(e.payload.data);
+          appendOutput(session.id, e.payload.data);
+        }
       });
       unlistenExit = await listen<TermExit>("term://exit", (e) => {
         if (e.payload.id === termId) {
@@ -53,34 +72,31 @@ export function Terminal({ cwd }: Props) {
       });
 
       try {
-        termId = await ipc.termSpawn(cwd);
+        termId = await ipc.termSpawn(session.cwd);
         if (disposed) {
           await ipc.termKill(termId);
           return;
         }
+        markLive(session.id);
         await ipc.termResize(termId, term.cols, term.rows);
       } catch (err) {
         term.write(`\x1b[31mfailed to spawn terminal: ${err}\x1b[0m\r\n`);
         return;
       }
 
-      // Pipe keystrokes to the PTY.
       term.onData((data) => {
         if (termId) ipc.termWrite(termId, data).catch(() => {});
       });
-      // Keep PTY size in sync with the xterm grid.
       term.onResize(({ cols, rows }) => {
         if (termId) ipc.termResize(termId, cols, rows).catch(() => {});
       });
     })();
 
-    // Resize on host element changes.
     const ro = new ResizeObserver(() => {
       try { fit.fit(); } catch { /* host not mounted yet */ }
     });
     ro.observe(host);
 
-    // Global Ctrl+L clear listener.
     const onClear = () => { term.clear(); };
     window.addEventListener("ac:clear-terminal", onClear);
 
@@ -93,7 +109,22 @@ export function Terminal({ cwd }: Props) {
       window.removeEventListener("ac:clear-terminal", onClear);
       term.dispose();
     };
-  }, [cwd]);
+    // session.id is stable; we deliberately don't re-run on cwd/name changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id]);
 
-  return <div ref={hostRef} className="terminal-host" />;
+  // Re-fit when becoming visible (xterm needs a real size at layout time).
+  useEffect(() => {
+    if (visible) {
+      try { fitRef.current?.fit(); } catch { /* ignore */ }
+    }
+  }, [visible]);
+
+  return (
+    <div
+      ref={hostRef}
+      className="terminal-host"
+      style={{ display: visible ? "block" : "none" }}
+    />
+  );
 }

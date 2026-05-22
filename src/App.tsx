@@ -6,12 +6,14 @@ import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { useUpdaterStore } from "./stores/updaterStore";
+import { useTerminalsStore } from "./stores/terminalsStore";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { FileTree } from "./components/FileTree";
 import { Terminal } from "./components/Terminal";
 import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
+import { SessionList } from "./components/SessionList";
 import { AboutModal } from "./components/AboutModal";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -28,36 +30,64 @@ export default function App() {
   const clearPreview = usePreviewStore((s) => s.clear);
   const refreshSkills = useSkillsStore((s) => s.refresh);
   const branch = useChangesStore((s) => s.status?.branch ?? null);
+  const terminalSessions = useTerminalsStore((s) => s.sessions);
+  const activeTerminalId = useTerminalsStore((s) => s.activeId);
+  const hydrateTerminals = useTerminalsStore((s) => s.hydrate);
+  const clearTerminals = useTerminalsStore((s) => s.clear);
+  const persistTerminals = useTerminalsStore((s) => s.persist);
+  const addTerminal = useTerminalsStore((s) => s.add);
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
 
   useKeyboardShortcuts({ setTab });
 
-  // Attach hook event bridge once.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     attachSkillsListeners().then((u) => { unlisten = u; });
     return () => { unlisten?.(); };
   }, []);
 
-  // Silent update check on startup.
   useEffect(() => {
     checkForUpdates({ silentIfNone: true });
   }, [checkForUpdates]);
 
-  // Reload git status + skills + workspace when project changes.
+  // Reload git/skills/workspace and hydrate sessions when project changes.
   useEffect(() => {
-    if (project) {
-      refreshChanges();
-      refreshSkills();
-      ipc.workspaceContext().then(setWorkspace).catch(() => setWorkspace(null));
-    } else {
+    if (!project) {
       clearChanges();
       clearPreview();
+      clearTerminals();
       setWorkspace(null);
+      return;
     }
-  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview]);
+    refreshChanges();
+    refreshSkills();
+    ipc.workspaceContext().then(setWorkspace).catch(() => setWorkspace(null));
+    (async () => {
+      await hydrateTerminals(project.root);
+      // Auto-spawn one live session if nothing was restored from disk.
+      if (useTerminalsStore.getState().sessions.length === 0) {
+        addTerminal(project.root);
+      }
+    })();
+  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal]);
+
+  // Persist sessions on tab close / app unload.
+  useEffect(() => {
+    const onUnload = () => { persistTerminals(); };
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, [persistTerminals]);
+
+  // Periodic persist so a hard kill doesn't lose more than ~10s of scrollback.
+  useEffect(() => {
+    if (!project) return;
+    const t = setInterval(() => { persistTerminals(); }, 10_000);
+    return () => clearInterval(t);
+  }, [project, persistTerminals]);
+
+  const liveTerminals = terminalSessions.filter((s) => s.status === "live");
 
   if (!project) {
     return (
@@ -83,12 +113,15 @@ export default function App() {
           <span className="meta" style={{ opacity: 0.6 }}>{project.root}</span>
           <span className="spacer" />
           <button className="topbar-icon" onClick={() => setShowAbout(true)} title="About Agent Console">ⓘ</button>
-          <button onClick={closeProject}>Close</button>
+          <button onClick={() => { persistTerminals(); closeProject(); }}>Close</button>
         </div>
 
         <aside className="panel left">
+          <SessionList />
           <div className="panel-header">Files</div>
-          {tree ? <FileTree root={tree} /> : <div className="placeholder">Loading…</div>}
+          <div className="left-files">
+            {tree ? <FileTree root={tree} /> : <div className="placeholder">Loading…</div>}
+          </div>
         </aside>
 
         <main className="panel center">
@@ -117,7 +150,21 @@ export default function App() {
             </button>
           </div>
           <div className="tab-pane" style={{ display: tab === "terminal" ? "flex" : "none" }}>
-            <Terminal cwd={project.root} />
+            {liveTerminals.length === 0 ? (
+              <div className="placeholder" style={{ padding: 16 }}>
+                No active session. Click <strong>+ new</strong> in the Sessions panel.
+              </div>
+            ) : (
+              <div className="terminals-stack">
+                {liveTerminals.map((s) => (
+                  <Terminal
+                    key={s.id}
+                    session={s}
+                    visible={tab === "terminal" && s.id === activeTerminalId}
+                  />
+                ))}
+              </div>
+            )}
           </div>
           <div className="tab-pane" style={{ display: tab === "changes" ? "flex" : "none" }}>
             <ChangesView />

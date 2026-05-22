@@ -1593,3 +1593,121 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   color: #0d0f12;
   border-color: var(--accent);
 }
+
+/* --- Sessions (left sidebar top section) --- */
+.panel.left { overflow: hidden; }
+.left-files { flex: 1; overflow: auto; min-height: 0; }
+
+.sessions {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  max-height: 40%;
+  min-height: 80px;
+}
+.sessions-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+.sessions-header .spacer { flex: 1; }
+.sessions-new {
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.sessions-new:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.sessions-new:disabled { opacity: 0.4; cursor: not-allowed; }
+.sessions-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  user-select: none;
+}
+.session-row:hover { background: var(--bg-elev-2, rgba(255,255,255,0.04)); }
+.session-row.active {
+  background: rgba(106, 169, 255, 0.12);
+  color: var(--accent);
+}
+.session-row.stopped .session-name { color: var(--text-faint); font-style: italic; }
+.session-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4d5560;
+  flex-shrink: 0;
+}
+.session-dot.live { background: #4ade80; box-shadow: 0 0 4px rgba(74, 222, 128, 0.6); }
+.session-dot.stopped { background: #4d5560; }
+.session-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-name-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font: inherit;
+  padding: 1px 4px;
+  border-radius: 2px;
+  outline: none;
+}
+.session-close {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  opacity: 0;
+}
+.session-row:hover .session-close,
+.session-row.active .session-close { opacity: 1; }
+.session-close:hover { color: var(--danger, #f87171); }
+
+/* Multi-terminal stack: each terminal-host fills the container, only the
+   active one is `display: block` (set inline). */
+.terminals-stack {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-height: 0;
+}
+.terminals-stack .terminal-host {
+  flex: 1;
+  min-height: 0;
+}

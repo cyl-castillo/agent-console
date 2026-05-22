@@ -2,6 +2,7 @@ pub mod git_service;
 pub mod hooks_service;
 pub mod project_manager;
 pub mod projects_service;
+pub mod sessions_service;
 pub mod skills_service;
 pub mod snapshot_service;
 pub mod terminal_runner;

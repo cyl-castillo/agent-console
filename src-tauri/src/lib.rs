@@ -46,6 +46,8 @@ pub fn run() {
             commands::hooks::hooks_install,
             commands::hooks::hooks_uninstall,
             commands::hooks::hooks_start_watcher,
+            commands::sessions::sessions_list,
+            commands::sessions::sessions_save,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

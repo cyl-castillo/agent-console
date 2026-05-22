@@ -3,8 +3,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
-  FileContent, FileNode, GitStatus, HooksStatus, Project, RecentProject,
-  Skill, WorkspaceContext,
+  FileContent, FileNode, GitStatus, HooksStatus, PersistedSession, Project,
+  RecentProject, Skill, WorkspaceContext,
 } from "../types/domain";
 
 export const ipc = {
@@ -41,6 +41,11 @@ export const ipc = {
   hooksStatus: () => invoke<HooksStatus>("hooks_status"),
   hooksInstall: () => invoke<HooksStatus>("hooks_install"),
   hooksUninstall: () => invoke<HooksStatus>("hooks_uninstall"),
+
+  sessionsList: (projectRoot: string) =>
+    invoke<PersistedSession[]>("sessions_list", { projectRoot }),
+  sessionsSave: (projectRoot: string, sessions: PersistedSession[]) =>
+    invoke<void>("sessions_save", { projectRoot, sessions }),
 };
 
 export async function pickFolder(): Promise<string | null> {

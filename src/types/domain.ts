@@ -67,6 +67,14 @@ export interface Skill {
   allowedTools: string[];
 }
 
+export interface PersistedSession {
+  id: string;
+  name: string;
+  cwd: string;
+  createdAtMs: number;
+  scrollback: string;
+}
+
 export interface HooksStatus {
   sessionDir: string;
   scriptPath: string;

@@ -2,12 +2,14 @@ use std::sync::Mutex;
 
 use crate::services::hooks_service::HooksRuntime;
 use crate::services::project_manager::Project;
+use crate::services::sessions_service::SessionsService;
 use crate::services::terminal_runner::TerminalRegistry;
 
 pub struct AppState {
     pub inner: Mutex<SessionState>,
     pub terminals: TerminalRegistry,
     pub hooks: HooksRuntime,
+    pub sessions: SessionsService,
 }
 
 impl AppState {
@@ -18,6 +20,7 @@ impl AppState {
             inner: Mutex::new(SessionState::default()),
             terminals: TerminalRegistry::new(),
             hooks,
+            sessions: SessionsService::new(),
         }
     }
 }
