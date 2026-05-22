@@ -15,6 +15,16 @@ pub struct GitStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitCommitInfo {
+    pub sha: String,
+    pub short_sha: String,
+    pub subject: String,
+    pub author: String,
+    pub date_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitFileChange {
     pub path: String,
     /// Two-char porcelain code, e.g. " M", "M ", "??", "A ", "MM".
@@ -168,6 +178,42 @@ pub fn commit(repo: &Path, message: &str) -> AppResult<String> {
         .output()?;
     let sha = String::from_utf8_lossy(&sha_out.stdout).trim().to_string();
     Ok(sha)
+}
+
+/// `git log -n <limit> --pretty=... -- <file>`. Empty if file is untracked or
+/// has no history yet. Best-effort: returns empty list on failure.
+pub fn file_log(repo: &Path, file: &str, limit: u32) -> AppResult<Vec<GitCommitInfo>> {
+    // Separator unlikely to appear in subjects/author names.
+    const SEP: &str = "\u{1f}";
+    let format = format!("%H{SEP}%h{SEP}%s{SEP}%an{SEP}%at");
+    let out = Command::new("git")
+        .args([
+            "log",
+            &format!("-n{limit}"),
+            &format!("--pretty=format:{format}"),
+            "--",
+            file,
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        return Ok(Vec::new());
+    }
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let mut commits = Vec::new();
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.split(SEP).collect();
+        if parts.len() != 5 { continue; }
+        let date_ms = parts[4].parse::<i64>().unwrap_or(0) * 1000;
+        commits.push(GitCommitInfo {
+            sha: parts[0].to_string(),
+            short_sha: parts[1].to_string(),
+            subject: parts[2].to_string(),
+            author: parts[3].to_string(),
+            date_ms,
+        });
+    }
+    Ok(commits)
 }
 
 /// Revert a single change. Tracked files: `git checkout HEAD -- file`.

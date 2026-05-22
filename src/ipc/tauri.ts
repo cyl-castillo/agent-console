@@ -3,8 +3,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
-  FileContent, FileNode, GitStatus, HooksStatus, PersistedSession, Project,
-  RecentProject, Skill, WorkspaceContext,
+  FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus, PersistedSession,
+  Project, RecentProject, Skill, WorkspaceContext,
 } from "../types/domain";
 
 export const ipc = {
@@ -28,6 +28,8 @@ export const ipc = {
   gitStageFile: (file: string) => invoke<void>("git_stage_file", { file }),
   gitUnstageFile: (file: string) => invoke<void>("git_unstage_file", { file }),
   gitCommit: (message: string) => invoke<string>("git_commit", { message }),
+  gitFileLog: (file: string, limit = 5) =>
+    invoke<GitCommitInfo[]>("git_file_log", { file, limit }),
 
   snapshotRestore: (commitSha: string) =>
     invoke<void>("snapshot_restore", { commitSha }),

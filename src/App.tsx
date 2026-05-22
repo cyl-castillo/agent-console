@@ -14,6 +14,7 @@ import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { SessionList } from "./components/SessionList";
+import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -175,8 +176,14 @@ export default function App() {
         </main>
 
         <aside className="panel right">
-          <div className="panel-header">Workbench</div>
-          <SkillsPanel />
+          {tab === "changes" ? (
+            <FileInspector />
+          ) : (
+            <>
+              <div className="panel-header">Workbench</div>
+              <SkillsPanel />
+            </>
+          )}
         </aside>
       </div>
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}

@@ -29,6 +29,14 @@ export interface GitStatus {
   changes: GitFileChange[];
 }
 
+export interface GitCommitInfo {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  dateMs: number;
+}
+
 export interface Snapshot {
   id: string;
   commitSha: string;

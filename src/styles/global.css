@@ -1793,3 +1793,102 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   border-color: var(--border);
   cursor: not-allowed;
 }
+
+/* --- File Inspector (right panel when Changes tab active) --- */
+.inspector-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.inspector-section:last-of-type { border-bottom: none; }
+.inspector-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.inspector-path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  word-break: break-all;
+}
+.inspector-abspath {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-top: 4px;
+  word-break: break-all;
+}
+.inspector-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.inspector-status {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.inspector-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--text-dim);
+}
+.inspector-status-text {
+  font-size: 12px;
+  color: var(--text);
+}
+.inspector-stats {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  display: flex;
+  gap: 8px;
+}
+.inspector-plus  { color: #6cd16c; }
+.inspector-minus { color: #ff6a6a; }
+
+.inspector-actions {
+  display: flex;
+  gap: 6px;
+}
+.inspector-actions button {
+  flex: 1;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.inspector-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.inspector-log-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  gap: 8px;
+  padding: 4px 0;
+  align-items: baseline;
+  border-bottom: 1px solid var(--border);
+}
+.inspector-log-row:last-child { border-bottom: none; }
+.inspector-sha {
+  color: var(--accent);
+  letter-spacing: 0.3px;
+}
+.inspector-subject {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-date {
+  color: var(--text-faint);
+  font-size: 10px;
+}
