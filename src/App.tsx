@@ -5,6 +5,7 @@ import { useChangesStore } from "./stores/changesStore";
 import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
+import { useUpdaterStore } from "./stores/updaterStore";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { FileTree } from "./components/FileTree";
 import { Terminal } from "./components/Terminal";
@@ -12,6 +13,7 @@ import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { AboutModal } from "./components/AboutModal";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { ipc } from "./ipc/tauri";
 import type { WorkspaceContext } from "./types/domain";
@@ -28,6 +30,7 @@ export default function App() {
   const branch = useChangesStore((s) => s.status?.branch ?? null);
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
+  const checkForUpdates = useUpdaterStore((s) => s.check);
 
   useKeyboardShortcuts({ setTab });
 
@@ -37,6 +40,11 @@ export default function App() {
     attachSkillsListeners().then((u) => { unlisten = u; });
     return () => { unlisten?.(); };
   }, []);
+
+  // Silent update check on startup.
+  useEffect(() => {
+    checkForUpdates({ silentIfNone: true });
+  }, [checkForUpdates]);
 
   // Reload git status + skills + workspace when project changes.
   useEffect(() => {
@@ -56,6 +64,7 @@ export default function App() {
       <>
         <ProjectPicker />
         {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+        <UpdateBanner />
       </>
     );
   }
@@ -124,6 +133,7 @@ export default function App() {
         </aside>
       </div>
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      <UpdateBanner />
     </>
   );
 }

@@ -1561,3 +1561,35 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .terminal-host .xterm-viewport {
   background: transparent !important;
 }
+
+/* --- Update banner (in-app updater toast) --- */
+.update-banner {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  color: var(--text);
+  max-width: 420px;
+}
+.update-banner-text { color: var(--text); }
+.update-banner-text strong { color: var(--accent); font-weight: 600; }
+.update-banner-actions { display: flex; gap: 6px; }
+.update-banner-actions button {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+.update-banner-actions button.primary {
+  background: var(--accent);
+  color: #0d0f12;
+  border-color: var(--accent);
+}
