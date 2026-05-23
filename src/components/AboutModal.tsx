@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 
-const VERSION = "0.3.1";
 const REPO_URL = "https://github.com/cyl-castillo/agent-console";
 const SPONSORS_URL = "https://github.com/sponsors/cyl-castillo";
 const BMC_URL = "https://www.buymeacoffee.com/cylcastillo";
@@ -10,6 +10,12 @@ interface Props {
 }
 
 export function AboutModal({ onClose }: Props) {
+  const [version, setVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => setVersion(""));
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
@@ -21,7 +27,7 @@ export function AboutModal({ onClose }: Props) {
       <div className="modal about-modal" onClick={(e) => e.stopPropagation()}>
         <div className="about-head">
           <div className="about-title">Agent Console</div>
-          <div className="about-version">v{VERSION} · early preview</div>
+          <div className="about-version">{version ? `v${version}` : ""} · early preview</div>
         </div>
 
         <div className="about-quote">
