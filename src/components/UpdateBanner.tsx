@@ -3,12 +3,18 @@ import { useUpdaterStore } from "../stores/updaterStore";
 export function UpdateBanner() {
   const phase = useUpdaterStore((s) => s.phase);
   const info = useUpdaterStore((s) => s.info);
+  const manualInfo = useUpdaterStore((s) => s.manualInfo);
   const error = useUpdaterStore((s) => s.error);
   const install = useUpdaterStore((s) => s.install);
+  const openDownload = useUpdaterStore((s) => s.openDownload);
   const dismiss = useUpdaterStore((s) => s.dismiss);
 
-  if (phase !== "available" && phase !== "installing" && phase !== "error") return null;
-  if (phase === "error" && !error) return null;
+  const visible =
+    phase === "available" ||
+    phase === "available-manual" ||
+    phase === "installing" ||
+    (phase === "error" && !!error);
+  if (!visible) return null;
 
   return (
     <div className="update-banner" role="status">
@@ -19,6 +25,18 @@ export function UpdateBanner() {
           </span>
           <span className="update-banner-actions">
             <button className="primary" onClick={() => install()}>Install &amp; restart</button>
+            <button onClick={dismiss}>Later</button>
+          </span>
+        </>
+      )}
+      {phase === "available-manual" && manualInfo && (
+        <>
+          <span className="update-banner-text">
+            Update available · v{manualInfo.currentVersion} → <strong>v{manualInfo.version}</strong>
+            <span className="update-banner-hint"> · download the new package manually</span>
+          </span>
+          <span className="update-banner-actions">
+            <button className="primary" onClick={() => openDownload()}>Download</button>
             <button onClick={dismiss}>Later</button>
           </span>
         </>
