@@ -42,6 +42,14 @@ export function PermissionsPanel() {
 
   const allRules = snapshot?.rules ?? [];
 
+  const counts = useMemo(() => ({
+    total: allRules.length,
+    allow: allRules.filter((r) => r.effect === "allow").length,
+    deny: allRules.filter((r) => r.effect === "deny").length,
+    ask: allRules.filter((r) => r.effect === "ask").length,
+    external: allRules.filter((r) => r.source === "external").length,
+  }), [allRules]);
+
   const flaggedCount = useMemo(
     () => allRules.filter((r) => {
       if (r.effect !== "allow") return false;
@@ -73,20 +81,28 @@ export function PermissionsPanel() {
     return { project, global };
   }, [filteredRules]);
 
+  const onAdd = (scope?: Scope) => {
+    setEditTarget(null);
+    setFormOpen(true);
+    if (scope) setNewScopeOverride(scope);
+  };
+  const [newScopeOverride, setNewScopeOverride] = useState<Scope | null>(null);
+
   return (
     <div className="permissions-panel">
-      <div className="panel-header">
-        <span>Permissions</span>
-        <div className="perm-header-actions">
-          {lastOp && (
-            <button className="link-btn" onClick={undo} title="Undo last change">↶ undo</button>
-          )}
-          <button className="link-btn" onClick={() => refresh()} disabled={loading}>refresh</button>
-          <button
-            className="link-btn primary"
-            onClick={() => { setEditTarget(null); setFormOpen(true); }}
-          >+ add</button>
-        </div>
+      <div className="workbench-header">
+        <span className="workbench-title">Permissions</span>
+        {counts.total > 0 && <span className="wb-count">{counts.total}</span>}
+        <span className="spacer" />
+        {lastOp && (
+          <button className="workbench-action" onClick={undo} title="Undo last change">↶</button>
+        )}
+        <button className="workbench-action" onClick={() => refresh()} disabled={loading} title="Refresh">↻</button>
+        <button
+          className="workbench-action perm-add"
+          onClick={() => onAdd()}
+          title="Add new rule"
+        >+ add</button>
       </div>
 
       {error && (
@@ -107,14 +123,21 @@ export function PermissionsPanel() {
         </div>
       )}
 
-      <FilterBar filter={filter} setFilter={setFilter} />
+      <FilterBar filter={filter} setFilter={setFilter} counts={counts} />
+
+      {filter.query && (
+        <div className="perm-result-count">
+          {filteredRules.length} of {counts.total} rules
+          <button className="link-btn" onClick={() => setFilter({ ...filter, query: "" })}>clear</button>
+        </div>
+      )}
 
       {(formOpen || editTarget) && (
         <RuleForm
           edit={editTarget}
-          defaultScope={editTarget?.scope ?? (snapshot?.projectSettingsPath ? "project" : "global")}
+          defaultScope={editTarget?.scope ?? newScopeOverride ?? (snapshot?.projectSettingsPath ? "project" : "global")}
           hasProject={!!snapshot?.projectSettingsPath}
-          onClose={() => { setFormOpen(false); setEditTarget(null); }}
+          onClose={() => { setFormOpen(false); setEditTarget(null); setNewScopeOverride(null); }}
         />
       )}
 
@@ -126,20 +149,26 @@ export function PermissionsPanel() {
             title="Project"
             path={snapshot.projectSettingsPath ?? "(no project open)"}
             rules={grouped.project}
+            totalInScope={allRules.filter((r) => r.scope === "project").length}
             disabled={!snapshot.projectSettingsPath}
+            filtered={!!filter.query || onlyFlagged || !filter.effects.allow || !filter.effects.deny || !filter.effects.ask || !filter.showExternal}
             onRemove={(r) => remove(r.scope, r.effect, r.raw)}
             onEdit={(r) => setEditTarget(r)}
             onMove={(r) => move(r, "global")}
+            onAdd={() => onAdd("project")}
             moveLabel="→ global"
           />
           <RuleGroup
             title="Global"
             path={snapshot.globalSettingsPath}
             rules={grouped.global}
+            totalInScope={allRules.filter((r) => r.scope === "global").length}
             disabled={false}
+            filtered={!!filter.query || onlyFlagged || !filter.effects.allow || !filter.effects.deny || !filter.effects.ask || !filter.showExternal}
             onRemove={(r) => remove(r.scope, r.effect, r.raw)}
             onEdit={(r) => setEditTarget(r)}
             onMove={snapshot.projectSettingsPath ? (r) => move(r, "project") : undefined}
+            onAdd={() => onAdd("global")}
             moveLabel="→ project"
           />
         </>
@@ -150,34 +179,64 @@ export function PermissionsPanel() {
 
 // --- FilterBar ---------------------------------------------------------------
 
-function FilterBar({ filter, setFilter }: { filter: FilterState; setFilter: (f: FilterState) => void }) {
+interface CountMap {
+  total: number;
+  allow: number;
+  deny: number;
+  ask: number;
+  external: number;
+}
+
+function FilterBar({
+  filter,
+  setFilter,
+  counts,
+}: {
+  filter: FilterState;
+  setFilter: (f: FilterState) => void;
+  counts: CountMap;
+}) {
   return (
     <div className="perm-filter">
-      <input
-        type="text"
-        placeholder="filter rules…"
-        value={filter.query}
-        onChange={(e) => setFilter({ ...filter, query: e.target.value })}
-      />
+      <div className="perm-search">
+        <input
+          type="text"
+          placeholder="Search rules…"
+          value={filter.query}
+          onChange={(e) => setFilter({ ...filter, query: e.target.value })}
+        />
+        {filter.query && (
+          <button
+            className="perm-search-clear"
+            onClick={() => setFilter({ ...filter, query: "" })}
+            title="Clear"
+          >×</button>
+        )}
+      </div>
       <div className="perm-filter-toggles">
         {(["allow", "deny", "ask"] as const).map((e) => (
-          <label key={e} className={`chip eff-${e} ${filter.effects[e] ? "on" : ""}`}>
-            <input
-              type="checkbox"
-              checked={filter.effects[e]}
-              onChange={(ev) => setFilter({ ...filter, effects: { ...filter.effects, [e]: ev.target.checked } })}
-            />
+          <button
+            key={e}
+            type="button"
+            className={`perm-chip eff-${e} ${filter.effects[e] ? "on" : ""}`}
+            onClick={() => setFilter({ ...filter, effects: { ...filter.effects, [e]: !filter.effects[e] } })}
+            disabled={counts[e] === 0}
+            title={filter.effects[e] ? `Hide ${e}` : `Show ${e}`}
+          >
             {e}
-          </label>
+            <span className="perm-chip-count">{counts[e]}</span>
+          </button>
         ))}
-        <label className={`chip ${filter.showExternal ? "on" : ""}`}>
-          <input
-            type="checkbox"
-            checked={filter.showExternal}
-            onChange={(e) => setFilter({ ...filter, showExternal: e.target.checked })}
-          />
+        <button
+          type="button"
+          className={`perm-chip ext ${filter.showExternal ? "on" : ""}`}
+          onClick={() => setFilter({ ...filter, showExternal: !filter.showExternal })}
+          disabled={counts.external === 0}
+          title="External rules (from outside Agent Console)"
+        >
           ext
-        </label>
+          <span className="perm-chip-count">{counts.external}</span>
+        </button>
       </div>
     </div>
   );
@@ -329,24 +388,45 @@ interface GroupProps {
   title: string;
   path: string;
   rules: StoredRule[];
+  totalInScope: number;
   disabled: boolean;
+  filtered: boolean;
   onRemove: (r: StoredRule) => void;
   onEdit: (r: StoredRule) => void;
   onMove?: (r: StoredRule) => void;
+  onAdd: () => void;
   moveLabel: string;
 }
 
-function RuleGroup({ title, path, rules, disabled, onRemove, onEdit, onMove, moveLabel }: GroupProps) {
+function RuleGroup({
+  title, path, rules, totalInScope, disabled, filtered,
+  onRemove, onEdit, onMove, onAdd, moveLabel,
+}: GroupProps) {
   return (
     <div className="rule-group">
       <div className="rule-group-head">
         <span className="rule-group-title">{title}</span>
+        <span className="rule-group-count">
+          {filtered && totalInScope !== rules.length
+            ? `${rules.length} of ${totalInScope}`
+            : rules.length}
+        </span>
+        <span className="spacer" />
         <code className="rule-group-path" title={path}>{path}</code>
       </div>
       {disabled ? (
         <div className="placeholder">—</div>
       ) : rules.length === 0 ? (
-        <div className="placeholder">No rules.</div>
+        <div className="rule-empty">
+          {totalInScope === 0 ? (
+            <>
+              <span>No {title.toLowerCase()} rules yet.</span>
+              <button className="link-btn" onClick={onAdd}>+ add one</button>
+            </>
+          ) : (
+            <span>No rules match the current filter.</span>
+          )}
+        </div>
       ) : (
         <ul className="rule-list">
           {rules.map((r) => {
@@ -361,10 +441,12 @@ function RuleGroup({ title, path, rules, disabled, onRemove, onEdit, onMove, mov
                 {(risk === "broad" || risk === "dangerous") && r.effect === "allow" && (
                   <span className={`risk risk-${risk}`}>{risk}</span>
                 )}
-                {r.source === "external" && <span className="rule-src">ext</span>}
-                <button className="rule-act" title="Edit" onClick={() => onEdit(r)}>✎</button>
-                {onMove && <button className="rule-act" title="Move scope" onClick={() => onMove(r)}>{moveLabel}</button>}
-                <button className="rule-rm" title="Remove rule" onClick={() => onRemove(r)}>×</button>
+                {r.source === "external" && <span className="rule-src" title="External: added outside Agent Console">ext</span>}
+                <div className="rule-actions">
+                  <button className="rule-act" title="Edit" onClick={() => onEdit(r)}>✎</button>
+                  {onMove && <button className="rule-act" title="Move scope" onClick={() => onMove(r)}>{moveLabel}</button>}
+                  <button className="rule-rm" title="Remove rule" onClick={() => onRemove(r)}>×</button>
+                </div>
               </li>
             );
           })}

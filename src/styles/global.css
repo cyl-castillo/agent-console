@@ -2462,3 +2462,112 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   min-width: 14px;
   text-align: center;
 }
+
+/* --- Permissions panel v2: header, search, chips, group, row hover --- */
+.permissions-panel { display: flex; flex-direction: column; min-height: 0; }
+.permissions-panel .workbench-header { padding: 6px 10px; }
+.permissions-panel .workbench-action.perm-add {
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.permissions-panel .workbench-action.perm-add:hover {
+  background: rgba(106, 169, 255, 0.2);
+}
+
+.perm-search { position: relative; }
+.perm-search input[type="text"] {
+  width: 100%;
+  padding-right: 24px;
+}
+.perm-search-clear {
+  position: absolute;
+  right: 4px; top: 50%;
+  transform: translateY(-50%);
+  background: transparent; border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 14px; line-height: 1;
+  padding: 0 4px;
+}
+.perm-search-clear:hover { color: var(--text); background: transparent; border: none; }
+
+.perm-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+}
+.perm-chip:hover:not(:disabled):not(.on) { color: var(--text); border-color: var(--text-faint); background: transparent; }
+.perm-chip:disabled { opacity: 0.35; cursor: not-allowed; }
+.perm-chip.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+.perm-chip.on.eff-allow { color: var(--ok); border-color: var(--ok); background: rgba(108, 209, 108, 0.10); }
+.perm-chip.on.eff-deny  { color: var(--danger); border-color: var(--danger); background: rgba(255, 106, 106, 0.10); }
+.perm-chip.on.eff-ask   { color: #ffb450; border-color: #ffb450; background: rgba(255, 180, 80, 0.10); }
+.perm-chip-count {
+  font-size: 9px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-faint);
+  border-radius: 8px;
+  padding: 0 5px;
+  min-width: 14px;
+  text-align: center;
+  letter-spacing: 0;
+}
+.perm-chip.on .perm-chip-count {
+  background: rgba(255,255,255,0.1);
+  color: inherit;
+  opacity: 0.85;
+}
+
+.perm-result-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Group header with count */
+.rule-group-head { padding: 8px 0 4px; }
+.rule-group-count {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-faint);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.rule-group-head .spacer { flex: 1; }
+
+/* Rule rows: hide actions until hover */
+.rule-item { position: relative; }
+.rule-actions {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.08s ease-in;
+}
+.rule-item:hover .rule-actions { opacity: 1; }
+
+/* Empty state in groups with optional CTA */
+.rule-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
