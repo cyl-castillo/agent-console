@@ -90,9 +90,7 @@ export function PermissionsPanel() {
 
   return (
     <div className="permissions-panel">
-      <div className="workbench-header">
-        <span className="workbench-title">Permissions</span>
-        {counts.total > 0 && <span className="wb-count">{counts.total}</span>}
+      <div className="workbench-header workbench-header-slim">
         <span className="spacer" />
         {lastOp && (
           <button className="workbench-action" onClick={undo} title="Undo last change">↶</button>

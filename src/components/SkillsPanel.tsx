@@ -80,9 +80,7 @@ export function SkillsPanel() {
 
   return (
     <div className="workbench">
-      <div className="workbench-header">
-        <span className="workbench-title">Skills</span>
-        {installed.length > 0 && <span className="wb-count">{installed.length}</span>}
+      <div className="workbench-header workbench-header-slim">
         <span className="spacer" />
         <button className="workbench-action" onClick={refresh} title="Refresh">↻</button>
       </div>

@@ -2180,14 +2180,66 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .approval-confirm { font-size: 11px; color: var(--text-dim); }
 
 /* --- Permissions panel --- */
-.workbench-tabs { display: flex; gap: 4px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); }
-.wb-tab {
-  background: transparent; border: none; border-bottom: 2px solid transparent;
-  padding: 6px 10px; font-family: var(--font-mono); font-size: 11px;
-  color: var(--text-dim); cursor: pointer; text-transform: uppercase; letter-spacing: 0.6px;
-  border-radius: 0;
+.workbench-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-1);
 }
-.wb-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.wb-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 6px 10px 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  border-radius: 0;
+  position: relative;
+  top: 1px;
+}
+.wb-tab:hover { color: var(--text); background: transparent; border-color: transparent; border-bottom-color: var(--border); }
+.wb-tab.active { color: var(--accent); border-bottom-color: var(--accent); background: transparent; }
+.wb-tab-label { line-height: 1; }
+.wb-tab-count {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-faint);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 10px;
+  min-width: 16px;
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.wb-tab.active .wb-tab-count {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.wb-tab-flag {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 10px;
+  min-width: 16px;
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.3);
+}
+
+.workbench-header-slim {
+  min-height: 0;
+  padding: 4px 8px;
+  border-bottom: 1px solid transparent;
+}
 
 .permissions-panel { display: flex; flex-direction: column; gap: 10px; padding: 0 0 10px; overflow: auto; }
 .permissions-panel .panel-header { display: flex; align-items: center; justify-content: space-between; }

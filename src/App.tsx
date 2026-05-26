@@ -15,6 +15,7 @@ import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { PermissionsPanel } from "./components/PermissionsPanel";
+import { WorkbenchTabs } from "./components/WorkbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
@@ -189,16 +190,7 @@ export default function App() {
             <FileInspector />
           ) : (
             <>
-              <div className="workbench-tabs">
-                <button
-                  className={`wb-tab ${workbenchTab === "skills" ? "active" : ""}`}
-                  onClick={() => setWorkbenchTab("skills")}
-                >Skills</button>
-                <button
-                  className={`wb-tab ${workbenchTab === "permissions" ? "active" : ""}`}
-                  onClick={() => setWorkbenchTab("permissions")}
-                >Permissions</button>
-              </div>
+              <WorkbenchTabs active={workbenchTab} onChange={setWorkbenchTab} />
               {workbenchTab === "skills" ? <SkillsPanel /> : <PermissionsPanel />}
             </>
           )}
