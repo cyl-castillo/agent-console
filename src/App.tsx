@@ -43,6 +43,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions">("skills");
+  const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
 
   useKeyboardShortcuts({ setTab });
@@ -108,8 +109,13 @@ export default function App() {
 
   return (
     <>
-      <div className="app">
+      <div className={`app ${leftOpen ? "" : "left-collapsed"}`}>
         <div className="topbar">
+          <button
+            className="topbar-icon"
+            onClick={() => setLeftOpen((v) => !v)}
+            title={leftOpen ? "Hide files" : "Show files"}
+          >Files</button>
           <span className="title">{project.name}</span>
           <span className="meta">
             {project.language ?? "unknown"}
@@ -123,13 +129,15 @@ export default function App() {
           <button onClick={() => { persistTerminals(); closeProject(); }}>Close</button>
         </div>
 
-        <aside className="panel left">
-          <SessionList />
-          <div className="panel-header">Files</div>
-          <div className="left-files">
-            {tree ? <FileTree root={tree} /> : <div className="placeholder">Loading…</div>}
-          </div>
-        </aside>
+        {leftOpen && (
+          <aside className="panel left">
+            <SessionList />
+            <div className="panel-header">Files</div>
+            <div className="left-files">
+              {tree ? <FileTree root={tree} /> : <div className="placeholder">Loading…</div>}
+            </div>
+          </aside>
+        )}
 
         <main className="panel center">
           <div className="tabs">

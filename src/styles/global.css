@@ -88,6 +88,12 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   flex-direction: column;
 }
 .panel.left   { grid-area: left; }
+.app.left-collapsed {
+  grid-template-columns: 0 1fr 320px;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "center center right";
+}
 .panel.center { grid-area: center; background: var(--bg); border-right: 1px solid var(--border); }
 .panel.right  { grid-area: right; border-right: none; border-left: 1px solid var(--border); }
 
