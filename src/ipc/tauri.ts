@@ -3,8 +3,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
-  FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus, PersistedSession,
-  Project, RecentProject, Skill, WorkspaceContext,
+  FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus, PermissionsSnapshot,
+  PersistedSession, Project, RecentProject, Skill, StoredRule, WorkspaceContext,
 } from "../types/domain";
 
 export const ipc = {
@@ -46,6 +46,21 @@ export const ipc = {
   hooksStatus: () => invoke<HooksStatus>("hooks_status"),
   hooksInstall: () => invoke<HooksStatus>("hooks_install"),
   hooksUninstall: () => invoke<HooksStatus>("hooks_uninstall"),
+
+  approvalRespond: (id: string, decision: "allow" | "deny" | "ask", reason?: string) =>
+    invoke<void>("approval_respond", { id, decision, reason: reason ?? null }),
+
+  permissionsSnapshot: () => invoke<PermissionsSnapshot>("permissions_snapshot"),
+  permissionsAdd: (
+    scope: "project" | "global",
+    effect: "allow" | "deny" | "ask",
+    raw: string,
+  ) => invoke<StoredRule>("permissions_add", { scope, effect, raw }),
+  permissionsRemove: (
+    scope: "project" | "global",
+    effect: "allow" | "deny" | "ask",
+    raw: string,
+  ) => invoke<void>("permissions_remove", { scope, effect, raw }),
 
   sessionsList: (projectRoot: string) =>
     invoke<PersistedSession[]>("sessions_list", { projectRoot }),

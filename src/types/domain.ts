@@ -86,8 +86,35 @@ export interface PersistedSession {
 export interface HooksStatus {
   sessionDir: string;
   scriptPath: string;
+  pretooluseScriptPath: string;
   installed: boolean;
+  pretooluseInstalled: boolean;
   settingsPath: string;
+}
+
+/// A PreToolUse approval request emitted by the bridge hook.
+export interface ApprovalRequest {
+  id: string;
+  ts: number;
+  sessionDir: string;
+  cwd: string;
+  tool: string;
+  input: Record<string, unknown>;
+}
+
+export interface StoredRule {
+  scope: "project" | "global";
+  effect: "allow" | "deny" | "ask";
+  raw: string;
+  source: "agent-console" | "external";
+  createdAtMs: number | null;
+  settingsPath: string;
+}
+
+export interface PermissionsSnapshot {
+  rules: StoredRule[];
+  projectSettingsPath: string | null;
+  globalSettingsPath: string;
 }
 
 /// A user_prompt event observed by the hook watcher.

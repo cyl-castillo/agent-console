@@ -50,6 +50,10 @@ pub fn run() {
             commands::hooks::hooks_install,
             commands::hooks::hooks_uninstall,
             commands::hooks::hooks_start_watcher,
+            commands::hooks::approval_respond,
+            commands::permissions::permissions_snapshot,
+            commands::permissions::permissions_add,
+            commands::permissions::permissions_remove,
             commands::sessions::sessions_list,
             commands::sessions::sessions_save,
         ])

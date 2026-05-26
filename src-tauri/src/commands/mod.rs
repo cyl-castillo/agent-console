@@ -1,5 +1,6 @@
 pub mod git;
 pub mod hooks;
+pub mod permissions;
 pub mod project;
 pub mod projects;
 pub mod sessions;

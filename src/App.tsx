@@ -5,6 +5,7 @@ import { useChangesStore } from "./stores/changesStore";
 import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
+import { attachApprovalListener } from "./stores/approvalStore";
 import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -13,6 +14,8 @@ import { Terminal } from "./components/Terminal";
 import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
+import { PermissionsPanel } from "./components/PermissionsPanel";
+import { ApprovalModal } from "./components/ApprovalModal";
 import { SessionList } from "./components/SessionList";
 import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
@@ -39,14 +42,17 @@ export default function App() {
   const addTerminal = useTerminalsStore((s) => s.add);
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
+  const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions">("skills");
   const checkForUpdates = useUpdaterStore((s) => s.check);
 
   useKeyboardShortcuts({ setTab });
 
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    attachSkillsListeners().then((u) => { unlisten = u; });
-    return () => { unlisten?.(); };
+    let offSkills: (() => void) | null = null;
+    let offApproval: (() => void) | null = null;
+    attachSkillsListeners().then((u) => { offSkills = u; });
+    attachApprovalListener().then((u) => { offApproval = u; });
+    return () => { offSkills?.(); offApproval?.(); };
   }, []);
 
   useEffect(() => {
@@ -180,14 +186,24 @@ export default function App() {
             <FileInspector />
           ) : (
             <>
-              <div className="panel-header">Workbench</div>
-              <SkillsPanel />
+              <div className="workbench-tabs">
+                <button
+                  className={`wb-tab ${workbenchTab === "skills" ? "active" : ""}`}
+                  onClick={() => setWorkbenchTab("skills")}
+                >Skills</button>
+                <button
+                  className={`wb-tab ${workbenchTab === "permissions" ? "active" : ""}`}
+                  onClick={() => setWorkbenchTab("permissions")}
+                >Permissions</button>
+              </div>
+              {workbenchTab === "skills" ? <SkillsPanel /> : <PermissionsPanel />}
             </>
           )}
         </aside>
       </div>
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       <UpdateBanner />
+      <ApprovalModal />
     </>
   );
 }

@@ -24,3 +24,13 @@ pub fn hooks_start_watcher(app: AppHandle, state: State<'_, AppState>) -> AppRes
     state.hooks.start_watcher(app);
     Ok(())
 }
+
+#[tauri::command]
+pub fn approval_respond(
+    id: String,
+    decision: String,
+    reason: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    state.hooks.respond(&id, &decision, reason.as_deref())
+}

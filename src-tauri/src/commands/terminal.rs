@@ -14,6 +14,7 @@ pub fn term_spawn(
     let session_dir = state.hooks.session_dir().to_string_lossy().to_string();
     let extra = vec![
         ("AGENT_CONSOLE_SESSION_DIR".to_string(), session_dir),
+        ("AGENT_CONSOLE_BRIDGE".to_string(), "1".to_string()),
     ];
     state.terminals.spawn_with_env(app, &PathBuf::from(cwd), &extra)
 }

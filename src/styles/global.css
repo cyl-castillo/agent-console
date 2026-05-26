@@ -1892,3 +1892,204 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   color: var(--text-faint);
   font-size: 10px;
 }
+
+/* --- Approval modal --- */
+.approval-modal { width: 560px; max-width: 92vw; padding: 16px 18px; }
+.approval-head {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.6px; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 10px;
+}
+.approval-tool {
+  padding: 2px 8px; border-radius: 3px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.approval-cwd { color: var(--text-faint); text-transform: none; letter-spacing: 0; }
+.approval-primary {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 10px 12px; font-family: var(--font-mono); font-size: 12px;
+  white-space: pre-wrap; word-break: break-all; margin: 0 0 6px;
+  color: var(--text); max-height: 160px; overflow: auto;
+}
+.approval-secondary {
+  font-size: 11px; color: var(--text-faint); margin-bottom: 12px;
+}
+.approval-actions {
+  display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
+}
+.approval-actions button { min-width: 96px; }
+.btn-approve { background: rgba(108, 209, 108, 0.12); border-color: var(--ok); color: var(--ok); }
+.btn-deny    { background: rgba(255, 106, 106, 0.10); border-color: var(--danger); color: var(--danger); }
+.btn-secondary { color: var(--text-dim); }
+
+.approval-always { display: flex; flex-direction: column; gap: 10px; }
+.approval-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.approval-row .label { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.6px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.seg button {
+  background: transparent; border: none; border-radius: 0;
+  padding: 3px 10px; font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-dim); cursor: pointer;
+}
+.seg button.on { background: var(--accent-soft); color: var(--accent); }
+
+.approval-suggestions { list-style: none; margin: 0; padding: 0; }
+.approval-suggestions li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+  margin-bottom: 4px; cursor: pointer; font-size: 12px;
+  background: var(--bg);
+}
+.approval-suggestions li.selected { border-color: var(--accent); background: var(--accent-soft); }
+.sug-label { color: var(--text); }
+
+.approval-preview {
+  background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 4px;
+  padding: 8px 10px; font-size: 11px; display: flex; flex-direction: column; gap: 4px;
+}
+.preview-line { display: flex; align-items: center; gap: 8px; }
+.preview-line .label { color: var(--text-faint); min-width: 64px; text-transform: uppercase; letter-spacing: 0.6px; font-size: 10px; }
+.preview-line code { color: var(--text); }
+.preview-reason { color: var(--text-faint); font-style: italic; padding-left: 72px; }
+.path { color: var(--text-dim); }
+
+.risk { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.6px; }
+.risk-safe      { background: rgba(108, 209, 108, 0.12); color: var(--ok); }
+.risk-moderate  { background: rgba(106, 169, 255, 0.12); color: var(--accent); }
+.risk-broad     { background: rgba(255, 180, 80, 0.14); color: #ffb450; }
+.risk-dangerous { background: rgba(255, 106, 106, 0.16); color: var(--danger); }
+
+.approval-blocked {
+  border: 1px solid var(--danger); background: rgba(255,106,106,0.08);
+  color: var(--danger); font-size: 11px; padding: 8px 10px; border-radius: 4px;
+}
+.approval-typegate { display: flex; flex-direction: column; gap: 6px; font-size: 11px; }
+.approval-typegate label { color: var(--text-dim); }
+.approval-typegate input {
+  background: var(--bg); border: 1px solid var(--danger); color: var(--text);
+  font-family: var(--font-mono); font-size: 12px; padding: 6px 8px; border-radius: 4px;
+}
+.approval-confirm { font-size: 11px; color: var(--text-dim); }
+
+/* --- Permissions panel --- */
+.workbench-tabs { display: flex; gap: 4px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); }
+.wb-tab {
+  background: transparent; border: none; border-bottom: 2px solid transparent;
+  padding: 6px 10px; font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-dim); cursor: pointer; text-transform: uppercase; letter-spacing: 0.6px;
+  border-radius: 0;
+}
+.wb-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.permissions-panel { display: flex; flex-direction: column; gap: 10px; padding: 0 0 10px; overflow: auto; }
+.permissions-panel .panel-header { display: flex; align-items: center; justify-content: space-between; }
+.link-btn {
+  background: none; border: none; color: var(--text-faint);
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; cursor: pointer;
+}
+.link-btn:hover { color: var(--accent); }
+
+.rule-group { padding: 0 10px; }
+.rule-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.rule-group-title {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.6px; color: var(--text-dim);
+}
+.rule-group-path { color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.rule-list { list-style: none; margin: 0; padding: 0; }
+.rule-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px; border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.rule-effect {
+  padding: 1px 6px; border-radius: 3px; font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.6px; min-width: 44px; text-align: center;
+}
+.eff-allow { background: rgba(108, 209, 108, 0.12); color: var(--ok); }
+.eff-deny  { background: rgba(255, 106, 106, 0.12); color: var(--danger); }
+.eff-ask   { background: rgba(255, 180, 80, 0.14); color: #ffb450; }
+.rule-raw { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rule-src {
+  font-size: 9px; color: var(--text-faint); padding: 1px 4px;
+  border: 1px solid var(--border); border-radius: 3px;
+}
+.rule-rm {
+  background: transparent; border: none; color: var(--text-faint);
+  cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1;
+}
+.rule-rm:hover { color: var(--danger); }
+
+/* --- Permissions panel extras --- */
+.perm-header-actions { display: flex; gap: 8px; align-items: center; }
+.link-btn.primary { color: var(--accent); }
+
+.lint-banner {
+  margin: 6px 10px;
+  padding: 6px 10px;
+  background: rgba(255, 180, 80, 0.10);
+  border-left: 2px solid #ffb450;
+  color: #ffb450;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 0 3px 3px 0;
+}
+.lint-banner:hover { background: rgba(255, 180, 80, 0.18); }
+
+.perm-filter {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+}
+.perm-filter input[type="text"] {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 3px; padding: 4px 8px; font-family: var(--font-mono); font-size: 11px;
+  outline: none;
+}
+.perm-filter input[type="text"]:focus { border-color: var(--accent); }
+.perm-filter-toggles { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px; font-size: 10px; border: 1px solid var(--border);
+  border-radius: 3px; color: var(--text-faint); cursor: pointer;
+  text-transform: uppercase; letter-spacing: 0.6px;
+}
+.chip input { display: none; }
+.chip.on { color: var(--text); border-color: var(--accent); }
+.chip.on.eff-allow { color: var(--ok); border-color: var(--ok); }
+.chip.on.eff-deny { color: var(--danger); border-color: var(--danger); }
+.chip.on.eff-ask { color: #ffb450; border-color: #ffb450; }
+
+.perm-form {
+  margin: 6px 10px;
+  padding: 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.perm-form-head {
+  font-family: var(--font-mono); font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.6px; color: var(--accent);
+}
+.perm-form-row {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 11px;
+}
+.perm-form-row .label { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.6px; font-size: 10px; }
+.perm-form-row select, .perm-form-row input[type="text"], .perm-form-row input:not([type]) {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 3px; padding: 4px 6px; font-family: var(--font-mono); font-size: 11px;
+  outline: none;
+}
+.perm-form-row select:focus, .perm-form-row input:focus { border-color: var(--accent); }
+.perm-form-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+.rule-act {
+  background: transparent; border: 1px solid var(--border); color: var(--text-faint);
+  cursor: pointer; padding: 1px 5px; font-size: 10px; border-radius: 3px;
+  font-family: var(--font-mono);
+}
+.rule-act:hover { color: var(--accent); border-color: var(--accent); }
