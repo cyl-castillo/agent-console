@@ -81,6 +81,7 @@ export interface PersistedSession {
   cwd: string;
   createdAtMs: number;
   scrollback: string;
+  claudeSessionId?: string;
 }
 
 export interface HooksStatus {
@@ -123,4 +124,5 @@ export interface HookUserPromptEvent {
   ts: number;
   prompt: string;
   skill?: string;
+  sessionId?: string;
 }

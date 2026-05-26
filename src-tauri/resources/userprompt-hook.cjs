@@ -23,6 +23,11 @@ process.stdin.on("end", () => {
     prompt: typeof prompt === "string" ? prompt : "",
   };
 
+  // Claude's hook payload carries the session id; surface it so the UI can
+  // associate a terminal session with a resumable Claude conversation.
+  const sid = input.session_id ?? input.sessionId;
+  if (typeof sid === "string" && sid.length > 0) event.sessionId = sid;
+
   // Detect a leading slash command — likely a skill or custom command invocation.
   if (event.prompt.startsWith("/")) {
     const m = event.prompt.match(/^\/([\w.-]+)/);

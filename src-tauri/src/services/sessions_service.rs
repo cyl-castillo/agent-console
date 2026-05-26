@@ -16,6 +16,10 @@ pub struct PersistedSession {
     pub created_at_ms: u64,
     #[serde(default)]
     pub scrollback: String,
+    /// Claude Code session id captured from the UserPromptSubmit hook; used to
+    /// auto-resume a Claude conversation when the user reactivates this terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_session_id: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

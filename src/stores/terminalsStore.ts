@@ -15,6 +15,9 @@ export interface TerminalSession {
   liveScrollback: string;
   /// "stopped" = not spawned yet (from disk); "live" = PTY currently running.
   status: "live" | "stopped";
+  /// Claude Code session id captured from the UserPromptSubmit hook. When set,
+  /// resuming this terminal auto-runs `claude --resume <id>` after spawn.
+  claudeSessionId?: string;
 }
 
 interface TerminalsState {
@@ -32,6 +35,8 @@ interface TerminalsState {
   rename: (id: string, name: string) => void;
   /// Mark session live (e.g., after spawn succeeded).
   markLive: (id: string) => void;
+  /// Tag a terminal session with the Claude Code session id from the hook.
+  setClaudeSessionId: (id: string, claudeId: string) => void;
   /// Buffer output bytes into the live scrollback (called frequently — does not notify subscribers).
   appendOutput: (id: string, chunk: string) => void;
   /// Remove session entirely (kill+delete).
@@ -73,6 +78,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       initialScrollback: p.scrollback,
       liveScrollback: "",
       status: "stopped",
+      claudeSessionId: p.claudeSessionId,
     }));
     set({ projectRoot, sessions, activeId: null });
   },
@@ -125,6 +131,19 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     });
   },
 
+  setClaudeSessionId: (id, claudeId) => {
+    const { sessions } = get();
+    const target = sessions.find((s) => s.id === id);
+    if (!target || target.claudeSessionId === claudeId) return;
+    set({
+      sessions: sessions.map((s) =>
+        s.id === id ? { ...s, claudeSessionId: claudeId } : s,
+      ),
+    });
+    // Persist immediately so a crash doesn't lose the association.
+    get().persist();
+  },
+
   // Mutates in place — frequent calls (output streaming) should not trigger React re-renders.
   // We never depend on liveScrollback in selectors; it's only read at persist() time.
   appendOutput: (id, chunk) => {
@@ -161,6 +180,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         cwd: s.cwd,
         createdAtMs: s.createdAtMs,
         scrollback: trimmed,
+        claudeSessionId: s.claudeSessionId,
       };
     });
     try {

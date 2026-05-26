@@ -7,6 +7,17 @@ import "@xterm/xterm/css/xterm.css";
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 
+// Heuristic: does this scrollback look like a Claude Code session? We pick
+// strings that only appear when claude is actually running a conversation
+// (model name, token counter, interrupt hint) rather than the bare word
+// "claude" which can show up in unrelated code/output.
+// No word boundaries: scrollback contains ANSI escape sequences (ending in
+// "m") immediately before these markers, which breaks `\b` matching.
+const CLAUDE_MARKERS = /(Opus|Sonnet|Haiku|Tokens used|esc to interrupt|Auto-update|claude-code)/;
+function looksLikeClaudeSession(scrollback: string): boolean {
+  return CLAUDE_MARKERS.test(scrollback);
+}
+
 interface Props {
   session: TerminalSession;
   visible: boolean;
@@ -82,6 +93,29 @@ export function Terminal({ session, visible }: Props) {
       } catch (err) {
         term.write(`\x1b[31mfailed to spawn terminal: ${err}\x1b[0m\r\n`);
         return;
+      }
+
+      // Auto-resume claude when this terminal was previously running it.
+      // Prefer the captured session id (precise); fall back to `--continue`
+      // when the scrollback shows claude markers but no id was captured
+      // (older sessions, or hook missed the prompt).
+      if (session.initialScrollback && termId) {
+        const cmd = session.claudeSessionId
+          ? `claude --resume ${session.claudeSessionId}`
+          : looksLikeClaudeSession(session.initialScrollback)
+            ? "claude --continue"
+            : null;
+        if (cmd) {
+          const tid = termId;
+          const label = session.claudeSessionId
+            ? `claude (${session.claudeSessionId.slice(0, 8)}…)`
+            : "last claude conversation";
+          setTimeout(() => {
+            if (disposed) return;
+            term.write(`\x1b[90m── auto-resuming ${label} ──\x1b[0m\r\n`);
+            ipc.termWrite(tid, `${cmd}\r`).catch(() => {});
+          }, 600);
+        }
       }
 
       term.onData((data) => {

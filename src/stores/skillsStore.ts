@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ipc } from "../ipc/tauri";
 import type { HooksStatus, HookUserPromptEvent, Skill, Snapshot } from "../types/domain";
 import { useChangesStore } from "./changesStore";
+import { useTerminalsStore } from "./terminalsStore";
 
 /// What the user (or agent in the terminal) has been doing — captured from
 /// the UserPromptSubmit hook stream.
@@ -89,6 +90,15 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       skill: e.skill,
     };
     set((s) => ({ recent: [entry, ...s.recent].slice(0, MAX_RECENT) }));
+
+    // Associate the Claude session id with whatever terminal is active when the
+    // prompt fires. This is best-effort: there's no field in the hook payload
+    // pointing back to a specific PTY, so we assume the active terminal is the
+    // one running claude.
+    if (e.sessionId) {
+      const { activeId } = useTerminalsStore.getState();
+      if (activeId) useTerminalsStore.getState().setClaudeSessionId(activeId, e.sessionId);
+    }
   },
 
   _onSnapshot: (snap) => {
