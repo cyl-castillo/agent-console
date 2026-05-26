@@ -1474,9 +1474,9 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .wb-skill-list { list-style: none; margin: 0; padding: 0; }
 .wb-skill {
   display: grid;
-  grid-template-columns: 20px 1fr;
+  grid-template-columns: 20px 1fr auto;
   gap: 8px;
-  align-items: start;
+  align-items: center;
   padding: 6px 8px;
   border-radius: 4px;
   cursor: pointer;
@@ -1551,12 +1551,218 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   padding: 12px;
   background: var(--bg);
   border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+}
+.wb-detail-md .markdown { font-size: 12px; }
+.wb-detail-md pre, .wb-detail-md code {
   font-family: var(--font-mono);
   font-size: 11px;
-  line-height: 1.5;
+}
+
+/* --- Skills panel v2: header, search, chips, integration, detail invoke --- */
+.workbench-title {
   color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.2px;
+}
+
+/* Integration banner — compact, collapsible */
+.wb-integration { padding-bottom: 0; }
+.wb-integration-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0 0 6px;
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.wb-integration-header:hover { color: var(--text); background: transparent; }
+.wb-integration-header .caret { font-size: 10px; width: 10px; color: var(--text-faint); }
+.wb-integration-body { padding-bottom: 4px; }
+
+/* Search */
+.wb-search {
+  position: relative;
+  margin: 6px 0 8px;
+}
+.wb-search-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 24px 5px 10px;
+  outline: none;
+}
+.wb-search-input:focus { border-color: var(--accent); }
+.wb-search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.wb-search-clear:hover { color: var(--text); background: transparent; border: none; }
+
+/* Filter chips */
+.wb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.wb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.wb-chip:hover:not(:disabled):not(.active) { color: var(--text); border-color: var(--text-faint); background: transparent; }
+.wb-chip.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.wb-chip:disabled { opacity: 0.35; cursor: not-allowed; }
+.wb-chip-count {
+  font-size: 10px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-faint);
+  border-radius: 8px;
+  padding: 0 5px;
+  min-width: 14px;
+  text-align: center;
+}
+.wb-chip.active .wb-chip-count {
+  background: rgba(106, 169, 255, 0.25);
+  color: var(--accent);
+}
+
+/* Skill row tweaks */
+.wb-skill-source {
+  font-size: 10px;
+  color: var(--text-faint);
+  background: rgba(255,255,255,0.05);
+  border-radius: 3px;
+  padding: 0 5px;
+  margin-left: 6px;
+  font-weight: 400;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.wb-skill-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.wb-skill-pin,
+.wb-skill-invoke {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+}
+.wb-skill:hover .wb-skill-pin,
+.wb-skill:hover .wb-skill-invoke { opacity: 1; }
+.wb-skill-pin.active { opacity: 1; color: var(--warning, #fbbf24); }
+.wb-skill-pin:hover { color: var(--warning, #fbbf24); border-color: rgba(251,191,36,0.4); background: transparent; }
+.wb-skill-invoke:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.wb-skill.pinned { background: rgba(251, 191, 36, 0.04); }
+.wb-skill.pinned:hover { background: rgba(251, 191, 36, 0.08); }
+
+.wb-cta-sm {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+/* Show-more */
+.wb-show-more {
+  display: block;
+  margin: 4px 0 0;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+/* Detail view: name in header, invocation card, meta */
+.wb-detail-name {
+  margin-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-detail-invoke {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 0 12px 10px;
+}
+.wb-detail-invoke code {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-size: 12px;
+  background: transparent;
+  padding: 0;
+}
+.wb-detail-invoke-hint {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-left: auto;
+}
+.wb-detail-meta {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 0 12px 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.wb-detail-source { text-transform: uppercase; letter-spacing: 0.4px; }
+.wb-detail-meta .wb-detail-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
 }
 
 /* --- Terminal --- */
