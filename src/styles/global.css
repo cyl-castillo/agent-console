@@ -2688,3 +2688,77 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   font-size: 11px;
   color: var(--text-faint);
 }
+
+/* ===== Advisor panel ===== */
+.wb-advisor-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.wb-advisor {
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.06));
+  border-radius: 6px;
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+.wb-advisor.dimmed { opacity: 0.55; }
+.wb-advisor-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.wb-advisor-head:hover { background: rgba(255,255,255,0.03); }
+.wb-advisor-head .caret { color: var(--text-faint); width: 10px; }
+.wb-advisor-text { flex: 1; min-width: 0; }
+.wb-advisor-name { font-weight: 500; font-size: 12px; }
+.wb-advisor-desc { font-size: 11px; color: var(--text-muted, #aab); margin-top: 2px; }
+.wb-advisor-body { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border-faint, rgba(255,255,255,0.05)); }
+.wb-advisor-why { font-size: 11px; color: var(--text-muted, #aab); margin: 4px 0; line-height: 1.4; }
+.wb-advisor-why strong { color: var(--text); margin-right: 4px; }
+.wb-advisor-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.wb-advisor-scope { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.wb-advisor-scope select {
+  background: var(--bg-elev-1);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+.wb-advisor-actions { display: inline-flex; align-items: center; gap: 8px; }
+.wb-advisor-preview summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-faint);
+  padding: 4px 0;
+}
+.wb-advisor-md {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border-faint, rgba(255,255,255,0.05));
+  border-radius: 4px;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+  color: var(--text-muted);
+}
+.wb-advisor-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-faint);
+}
+.wb-advisor-badge.status-created { background: rgba(60,180,120,0.18); color: #6cd49b; }
+.wb-advisor-badge.status-error { background: rgba(255,90,90,0.18); color: #ff8585; }
+.wb-advisor-badge.status-skipped { color: var(--text-faint); }
+.wb-cta-sm { padding: 3px 10px; font-size: 11px; }

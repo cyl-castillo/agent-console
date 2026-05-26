@@ -2,9 +2,10 @@ import { useMemo } from "react";
 
 import { useSkillsStore } from "../stores/skillsStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
+import { useAdvisorStore } from "../stores/advisorStore";
 import { parseRaw, classify } from "../permissions/rules";
 
-export type WorkbenchTab = "skills" | "permissions";
+export type WorkbenchTab = "skills" | "permissions" | "advisor";
 
 export function WorkbenchTabs({
   active,
@@ -16,6 +17,10 @@ export function WorkbenchTabs({
   const skillsCount = useSkillsStore((s) => s.installed.length);
   const permsCount = usePermissionsStore((s) => s.snapshot?.rules.length ?? 0);
   const permsRules = usePermissionsStore((s) => s.snapshot?.rules);
+  const advisorPending = useAdvisorStore((s) =>
+    s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
+  );
+  const advisorAnalyzing = useAdvisorStore((s) => s.status === "analyzing");
 
   const flagged = useMemo(() => {
     if (!permsRules) return 0;
@@ -44,6 +49,12 @@ export function WorkbenchTabs({
         flagged={flagged}
         active={active === "permissions"}
         onClick={() => onChange("permissions")}
+      />
+      <TabButton
+        label={advisorAnalyzing ? "Advisor…" : "Advisor"}
+        count={advisorPending}
+        active={active === "advisor"}
+        onClick={() => onChange("advisor")}
       />
     </div>
   );

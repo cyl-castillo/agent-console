@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  AdvisorAnalysisResult,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus, PermissionsSnapshot,
   PersistedSession, Project, RecentProject, Skill, StoredRule, WorkspaceContext,
 } from "../types/domain";
@@ -66,6 +67,14 @@ export const ipc = {
     invoke<PersistedSession[]>("sessions_list", { projectRoot }),
   sessionsSave: (projectRoot: string, sessions: PersistedSession[]) =>
     invoke<void>("sessions_save", { projectRoot, sessions }),
+
+  advisorAnalyze: () => invoke<AdvisorAnalysisResult>("advisor_analyze"),
+  advisorCreateSkill: (
+    scope: "project" | "user",
+    name: string,
+    skillMdContent: string,
+  ) =>
+    invoke<string>("advisor_create_skill", { scope, name, skillMdContent }),
 };
 
 export async function pickFolder(): Promise<string | null> {

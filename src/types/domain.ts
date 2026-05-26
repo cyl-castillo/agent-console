@@ -118,6 +118,20 @@ export interface PermissionsSnapshot {
   globalSettingsPath: string;
 }
 
+/// A skill recommendation returned by the Advisor analysis.
+export interface AdvisorRecommendation {
+  name: string;
+  description: string;
+  whyItFits: string;
+  scope: "project" | "user";
+  skillMdContent: string;
+}
+
+export interface AdvisorAnalysisResult {
+  recommendations: AdvisorRecommendation[];
+  rawExcerpt: string;
+}
+
 /// A user_prompt event observed by the hook watcher.
 export interface HookUserPromptEvent {
   type: "user_prompt";

@@ -56,6 +56,8 @@ pub fn run() {
             commands::permissions::permissions_remove,
             commands::sessions::sessions_list,
             commands::sessions::sessions_save,
+            commands::advisor::advisor_analyze,
+            commands::advisor::advisor_create_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

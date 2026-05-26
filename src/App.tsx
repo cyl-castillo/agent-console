@@ -15,6 +15,7 @@ import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { PermissionsPanel } from "./components/PermissionsPanel";
+import { AdvisorPanel } from "./components/AdvisorPanel";
 import { WorkbenchTabs } from "./components/WorkbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
@@ -42,7 +43,7 @@ export default function App() {
   const addTerminal = useTerminalsStore((s) => s.add);
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
-  const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions">("skills");
+  const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions" | "advisor">("skills");
   const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
 
@@ -220,7 +221,9 @@ export default function App() {
           ) : (
             <>
               <WorkbenchTabs active={workbenchTab} onChange={setWorkbenchTab} />
-              {workbenchTab === "skills" ? <SkillsPanel /> : <PermissionsPanel />}
+              {workbenchTab === "skills" && <SkillsPanel />}
+              {workbenchTab === "permissions" && <PermissionsPanel />}
+              {workbenchTab === "advisor" && <AdvisorPanel />}
             </>
           )}
         </aside>

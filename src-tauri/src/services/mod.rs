@@ -1,3 +1,4 @@
+pub mod advisor_service;
 pub mod git_service;
 pub mod hooks_service;
 pub mod permissions_service;
