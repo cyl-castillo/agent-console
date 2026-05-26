@@ -80,6 +80,71 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .topbar .meta { color: var(--text-faint); }
 .topbar .spacer { flex: 1; }
 
+/* Project name as a click-to-copy chip */
+.tb-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 8px;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  max-width: 240px;
+  overflow: hidden;
+}
+.tb-project:hover { background: var(--bg-elev-2); border-color: var(--border); }
+.tb-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Meta pills: language, framework, branch, file count */
+.tb-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.tb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-faint);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+.tb-pill-icon { font-size: 11px; opacity: 0.7; }
+.tb-pill-lang { color: var(--accent); background: var(--accent-soft); }
+.tb-pill-branch {
+  color: var(--text);
+  background: rgba(167, 139, 250, 0.10);
+  border-color: rgba(167, 139, 250, 0.25);
+}
+.tb-pill-files { color: var(--text-faint); }
+
+.tb-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.tb-close:hover { color: var(--danger, #f87171); border-color: var(--danger, #f87171); background: transparent; }
+
 .panel {
   background: var(--bg-elev-1);
   border-right: 1px solid var(--border);

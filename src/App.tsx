@@ -120,17 +120,46 @@ export default function App() {
             <span>Workspace</span>
             {changesCount > 0 && <span className="sidebar-toggle-badge">{changesCount}</span>}
           </button>
-          <span className="title">{project.name}</span>
-          <span className="meta">
-            {project.language ?? "unknown"}
-            {project.framework ? ` · ${project.framework}` : ""}
-            {branch ? ` · ${branch}` : ""}
-            {workspace?.fileCount ? ` · ${workspace.fileCount} files` : ""}
-          </span>
-          <span className="meta" style={{ opacity: 0.6 }}>{project.root}</span>
+
+          <button
+            className="tb-project"
+            onClick={() => { navigator.clipboard?.writeText(project.root).catch(() => {}); }}
+            title={`${project.root}\n(click to copy path)`}
+          >
+            <span className="tb-project-name">{project.name}</span>
+          </button>
+
+          <div className="tb-pills">
+            {project.language && (
+              <span className="tb-pill tb-pill-lang" title="Language">{project.language}</span>
+            )}
+            {project.framework && (
+              <span className="tb-pill" title="Framework">{project.framework}</span>
+            )}
+            {branch && (
+              <span className="tb-pill tb-pill-branch" title="Git branch">
+                <span className="tb-pill-icon">⎇</span>{branch}
+              </span>
+            )}
+            {workspace?.fileCount ? (
+              <span className="tb-pill tb-pill-files" title="Tracked files">
+                {workspace.fileCount} files
+              </span>
+            ) : null}
+          </div>
+
           <span className="spacer" />
-          <button className="topbar-icon" onClick={() => setShowAbout(true)} title="About Agent Console">ⓘ</button>
-          <button onClick={() => { persistTerminals(); closeProject(); }}>Close</button>
+
+          <button
+            className="topbar-icon"
+            onClick={() => setShowAbout(true)}
+            title="About Agent Console"
+          >ⓘ</button>
+          <button
+            className="tb-close"
+            onClick={() => { persistTerminals(); closeProject(); }}
+            title="Close project"
+          >Close</button>
         </div>
 
         {leftOpen && <LeftSidebar />}
