@@ -1,8 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useUIStore } from "../stores/uiStore";
+
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+  return now;
+}
+
+function formatUptime(ms: number): string {
+  if (ms < 60_000) return `${Math.max(1, Math.floor(ms / 1000))}s`;
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
+  return `${Math.floor(ms / 86_400_000)}d`;
+}
 
 export function SessionList() {
   const sessions = useTerminalsStore((s) => s.sessions);
@@ -32,10 +48,12 @@ export function SessionList() {
     setTab("terminal");
   };
 
+  const liveCount = sessions.filter((s) => s.status === "live").length;
+
   return (
     <div className="sessions">
-      <div className="sessions-header">
-        <span>Sessions</span>
+      <div className="sessions-actions">
+        {liveCount > 0 && <span className="sessions-count">{liveCount} live</span>}
         <span className="spacer" />
         <button
           className="sessions-new"
@@ -76,6 +94,10 @@ function SessionRow({ session, active, onActivate, onClose, onRename }: {
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.name);
+  const now = useNow(30_000);
+  const meta = session.status === "live"
+    ? formatUptime(Math.max(0, now - session.createdAtMs))
+    : "stopped";
 
   const commit = () => {
     const v = draft.trim();
@@ -109,6 +131,7 @@ function SessionRow({ session, active, onActivate, onClose, onRename }: {
           onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
         >{session.name}</span>
       )}
+      <span className="session-meta">{meta}</span>
       <button
         className="session-close"
         onClick={(e) => { e.stopPropagation(); onClose(); }}

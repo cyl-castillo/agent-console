@@ -9,14 +9,13 @@ import { attachApprovalListener } from "./stores/approvalStore";
 import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
 import { ProjectPicker } from "./components/ProjectPicker";
-import { FileTree } from "./components/FileTree";
+import { LeftSidebar } from "./components/LeftSidebar";
 import { Terminal } from "./components/Terminal";
 import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { PermissionsPanel } from "./components/PermissionsPanel";
 import { ApprovalModal } from "./components/ApprovalModal";
-import { SessionList } from "./components/SessionList";
 import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -25,7 +24,7 @@ import { ipc } from "./ipc/tauri";
 import type { WorkspaceContext } from "./types/domain";
 
 export default function App() {
-  const { project, tree, closeProject } = useSessionStore();
+  const { project, closeProject } = useSessionStore();
   const tab = useUIStore((s) => s.tab);
   const setTab = useUIStore((s) => s.setTab);
   const changesCount = useChangesStore((s) => s.status?.changes.length ?? 0);
@@ -112,10 +111,14 @@ export default function App() {
       <div className={`app ${leftOpen ? "" : "left-collapsed"}`}>
         <div className="topbar">
           <button
-            className="topbar-icon"
+            className={`sidebar-toggle ${leftOpen ? "open" : ""}`}
             onClick={() => setLeftOpen((v) => !v)}
-            title={leftOpen ? "Hide files" : "Show files"}
-          >Files</button>
+            title={leftOpen ? "Hide workspace" : "Show workspace"}
+          >
+            <span className="sidebar-toggle-icon">{leftOpen ? "◧" : "◨"}</span>
+            <span>Workspace</span>
+            {changesCount > 0 && <span className="sidebar-toggle-badge">{changesCount}</span>}
+          </button>
           <span className="title">{project.name}</span>
           <span className="meta">
             {project.language ?? "unknown"}
@@ -129,15 +132,7 @@ export default function App() {
           <button onClick={() => { persistTerminals(); closeProject(); }}>Close</button>
         </div>
 
-        {leftOpen && (
-          <aside className="panel left">
-            <SessionList />
-            <div className="panel-header">Files</div>
-            <div className="left-files">
-              {tree ? <FileTree root={tree} /> : <div className="placeholder">Loading…</div>}
-            </div>
-          </aside>
-        )}
+        {leftOpen && <LeftSidebar />}
 
         <main className="panel center">
           <div className="tabs">
