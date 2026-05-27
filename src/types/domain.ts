@@ -128,6 +128,36 @@ export interface PermissionsSnapshot {
   globalSettingsPath: string;
 }
 
+/// Stat record returned by the Context service.
+export interface ContextFileStat {
+  path: string;
+  exists: boolean;
+  sizeBytes: number;
+  modifiedMs: number;
+}
+
+export interface ContextDirStat {
+  path: string;
+  exists: boolean;
+  entryCount: number;
+}
+
+export interface ContextStatus {
+  projectClaudeMd: ContextFileStat | null;
+  globalClaudeMd: ContextFileStat;
+  memoryDir: ContextDirStat;
+}
+
+/// One entry inside the project's memory directory.
+export interface MemoryEntry {
+  name: string;
+  kind: string | null;
+  description: string | null;
+  sizeBytes: number;
+  modifiedMs: number;
+  isIndex: boolean;
+}
+
 /// A Vault entry as exposed to the UI — never contains the value, only
 /// metadata. Use `vaultGetValue` to fetch one on demand (reveal action).
 export interface VaultEntryView {

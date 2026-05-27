@@ -5,7 +5,9 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   AdvisorAnalysisResult,
   BranchInfo,
-  FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus, PermissionsSnapshot,
+  ContextFileStat, ContextStatus,
+  FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
+  MemoryEntry, PermissionsSnapshot,
   PersistedSession, Project, RecentProject, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
 } from "../types/domain";
@@ -74,6 +76,18 @@ export const ipc = {
     invoke<PersistedSession[]>("sessions_list", { projectRoot }),
   sessionsSave: (projectRoot: string, sessions: PersistedSession[]) =>
     invoke<void>("sessions_save", { projectRoot, sessions }),
+
+  contextStatus: () => invoke<ContextStatus>("context_status"),
+  contextReadMd: (scope: "project" | "global") =>
+    invoke<string>("context_read_md", { scope }),
+  contextWriteMd: (scope: "project" | "global", content: string, expectedMtimeMs: number | null) =>
+    invoke<ContextFileStat>("context_write_md", { scope, content, expectedMtimeMs }),
+  contextOpenMdExternally: (scope: "project" | "global") =>
+    invoke<void>("context_open_md_externally", { scope }),
+  contextGenerateStarter: () => invoke<string>("context_generate_starter"),
+  memoryList: () => invoke<MemoryEntry[]>("memory_list"),
+  memoryRead: (name: string) => invoke<string>("memory_read", { name }),
+  memoryDelete: (name: string) => invoke<void>("memory_delete", { name }),
 
   vaultList: () => invoke<VaultEntryView[]>("vault_list"),
   vaultUpsert: (params: {

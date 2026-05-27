@@ -67,6 +67,14 @@ pub fn run() {
             commands::vault::vault_upsert,
             commands::vault::vault_delete,
             commands::vault::vault_get_value,
+            commands::context::context_status,
+            commands::context::context_read_md,
+            commands::context::context_write_md,
+            commands::context::context_open_md_externally,
+            commands::context::context_generate_starter,
+            commands::context::memory_list,
+            commands::context::memory_read,
+            commands::context::memory_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

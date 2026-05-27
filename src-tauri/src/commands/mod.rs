@@ -1,4 +1,5 @@
 pub mod advisor;
+pub mod context;
 pub mod git;
 pub mod hooks;
 pub mod permissions;

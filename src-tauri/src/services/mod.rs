@@ -1,6 +1,8 @@
 pub mod advisor_service;
+pub mod context_service;
 pub mod git_service;
 pub mod git_watcher;
+pub mod memory_service;
 pub mod hooks_service;
 pub mod permissions_service;
 pub mod project_manager;

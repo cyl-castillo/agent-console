@@ -4,9 +4,10 @@ import { useSkillsStore } from "../stores/skillsStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
 import { useAdvisorStore } from "../stores/advisorStore";
 import { useVaultStore } from "../stores/vaultStore";
+import { useContextStore } from "../stores/contextStore";
 import { parseRaw, classify } from "../permissions/rules";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context";
 
 export function WorkbenchTabs({
   active,
@@ -23,6 +24,7 @@ export function WorkbenchTabs({
   );
   const advisorAnalyzing = useAdvisorStore((s) => s.status === "analyzing");
   const vaultCount = useVaultStore((s) => s.entries.length);
+  const memoriesCount = useContextStore((s) => s.memories.length);
 
   const flagged = useMemo(() => {
     if (!permsRules) return 0;
@@ -63,6 +65,12 @@ export function WorkbenchTabs({
         count={vaultCount}
         active={active === "vault"}
         onClick={() => onChange("vault")}
+      />
+      <TabButton
+        label="Context"
+        count={memoriesCount}
+        active={active === "context"}
+        onClick={() => onChange("context")}
       />
     </div>
   );

@@ -17,6 +17,7 @@ import { SkillsPanel } from "./components/SkillsPanel";
 import { PermissionsPanel } from "./components/PermissionsPanel";
 import { AdvisorPanel } from "./components/AdvisorPanel";
 import { VaultPanel } from "./components/VaultPanel";
+import { ContextPanel } from "./components/ContextPanel";
 import { WorkbenchTabs } from "./components/WorkbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
@@ -50,7 +51,7 @@ export default function App() {
   const [showGettingStarted, setShowGettingStarted] = useState(false);
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
-  const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions" | "advisor" | "vault">("skills");
+  const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions" | "advisor" | "vault" | "context">("skills");
   const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
 
@@ -257,6 +258,7 @@ export default function App() {
               {workbenchTab === "permissions" && <PermissionsPanel />}
               {workbenchTab === "advisor" && <AdvisorPanel />}
               {workbenchTab === "vault" && <VaultPanel />}
+              {workbenchTab === "context" && <ContextPanel />}
             </>
           )}
         </aside>
