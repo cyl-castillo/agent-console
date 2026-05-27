@@ -29,6 +29,16 @@ export interface GitStatus {
   changes: GitFileChange[];
 }
 
+export interface BranchInfo {
+  name: string;
+  current: boolean;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  lastCommitMs: number;
+  lastSubject: string;
+}
+
 export interface GitCommitInfo {
   sha: string;
   shortSha: string;

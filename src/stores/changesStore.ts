@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
-import type { GitStatus } from "../types/domain";
+import type { BranchInfo, GitStatus } from "../types/domain";
 
 interface ChangesState {
   status: GitStatus | null;
@@ -26,6 +26,11 @@ interface ChangesState {
   loadCommitHistory: () => Promise<void>;
   loadHeadMessage: () => Promise<string>;
   recentMessages: string[];
+
+  branches: BranchInfo[];
+  branchesLoading: boolean;
+  loadBranches: () => Promise<void>;
+  checkoutBranch: (name: string) => Promise<void>;
   clear: () => void;
 }
 
@@ -38,6 +43,8 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
   commitMessage: "",
   committing: false,
   recentMessages: [],
+  branches: [],
+  branchesLoading: false,
 
   refresh: async () => {
     set({ loading: true, error: null });
@@ -114,6 +121,27 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     catch { return ""; }
   },
 
+  loadBranches: async () => {
+    set({ branchesLoading: true });
+    try {
+      const branches = await ipc.gitBranches();
+      set({ branches, branchesLoading: false });
+    } catch (e) {
+      set({ error: String(e), branchesLoading: false });
+    }
+  },
+
+  checkoutBranch: async (name) => {
+    try {
+      await ipc.gitCheckoutBranch(name);
+      await get().refresh();
+      await get().loadBranches();
+    } catch (e) {
+      set({ error: String(e) });
+      throw e;
+    }
+  },
+
   revert: async (file) => {
     try {
       await ipc.gitRevertFile(file);
@@ -153,6 +181,7 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
   clear: () => set({
     status: null, selected: null, diff: "", error: null,
     commitMessage: "", committing: false, recentMessages: [],
+    branches: [], branchesLoading: false,
   }),
 }));
 

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   AdvisorAnalysisResult,
+  BranchInfo,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus, PermissionsSnapshot,
   PersistedSession, Project, RecentProject, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
@@ -35,6 +36,8 @@ export const ipc = {
   gitHeadMessage: () => invoke<string>("git_head_message"),
   gitFileLog: (file: string, limit = 5) =>
     invoke<GitCommitInfo[]>("git_file_log", { file, limit }),
+  gitBranches: () => invoke<BranchInfo[]>("git_branches"),
+  gitCheckoutBranch: (name: string) => invoke<void>("git_checkout_branch", { name }),
 
   snapshotRestore: (commitSha: string) =>
     invoke<void>("snapshot_restore", { commitSha }),

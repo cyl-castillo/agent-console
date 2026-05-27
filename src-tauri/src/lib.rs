@@ -41,6 +41,8 @@ pub fn run() {
             commands::git::git_head_message,
             commands::git::git_amend_commit,
             commands::git::git_file_log,
+            commands::git::git_branches,
+            commands::git::git_checkout_branch,
             commands::snapshot::snapshot_restore,
             commands::snapshot::snapshot_delete,
             commands::projects::projects_recent,

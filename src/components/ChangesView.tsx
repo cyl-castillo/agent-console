@@ -4,6 +4,7 @@ import { useChangesStore } from "../stores/changesStore";
 import { DiffViewer } from "./DiffViewer";
 import { SideBySideDiffViewer } from "./SideBySideDiffViewer";
 import { ChangeTree } from "./ChangeTree";
+import { BranchSwitcher } from "./BranchSwitcher";
 
 const SUBJECT_LIMIT = 72;
 
@@ -85,9 +86,12 @@ export function ChangesView() {
     <div className="changes">
       <div className="changes-list">
         <div className="changes-list-header">
-          <span>
-            {status.branch ? `▎ ${status.branch}` : "(detached)"} · {allChanges.length} change{allChanges.length === 1 ? "" : "s"}
-          </span>
+          <div className="changes-list-header-left">
+            <BranchSwitcher currentBranch={status.branch} />
+            <span className="changes-count">
+              · {allChanges.length} change{allChanges.length === 1 ? "" : "s"}
+            </span>
+          </div>
           <span style={{ display: "flex", gap: 4 }}>
             <button onClick={refresh} title="Refresh status">↻</button>
             {allChanges.length > 0 && (

@@ -216,6 +216,96 @@ pub fn file_log(repo: &Path, file: &str, limit: u32) -> AppResult<Vec<GitCommitI
     Ok(commits)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchInfo {
+    pub name: String,
+    pub current: bool,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub last_commit_ms: i64,
+    pub last_subject: String,
+}
+
+/// List local branches with ahead/behind vs their upstream (if any) and the
+/// latest commit info. Output is sorted by recency desc.
+pub fn branches(repo: &Path) -> AppResult<Vec<BranchInfo>> {
+    const SEP: &str = "\u{1f}";
+    // %(HEAD) yields "*" for the current branch, " " otherwise.
+    // %(upstream:short) may be empty when there is no tracking branch.
+    let format = format!(
+        "%(HEAD){SEP}%(refname:short){SEP}%(upstream:short){SEP}%(committerdate:unix){SEP}%(contents:subject)"
+    );
+    let out = Command::new("git")
+        .args([
+            "for-each-ref",
+            "--sort=-committerdate",
+            &format!("--format={format}"),
+            "refs/heads",
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).to_string();
+        return Err(AppError::Other(format!("git for-each-ref: {msg}")));
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).to_string();
+    let mut result = Vec::new();
+    for line in raw.lines() {
+        let parts: Vec<&str> = line.splitn(5, SEP).collect();
+        if parts.len() < 5 { continue; }
+        let current = parts[0].trim() == "*";
+        let name = parts[1].to_string();
+        let upstream = if parts[2].is_empty() { None } else { Some(parts[2].to_string()) };
+        let last_commit_ms = parts[3].parse::<i64>().unwrap_or(0) * 1000;
+        let last_subject = parts[4].to_string();
+
+        let (ahead, behind) = if let Some(up) = upstream.as_ref() {
+            ahead_behind(repo, &name, up).unwrap_or((0, 0))
+        } else {
+            (0, 0)
+        };
+
+        result.push(BranchInfo {
+            name, current, upstream, ahead, behind, last_commit_ms, last_subject,
+        });
+    }
+    Ok(result)
+}
+
+fn ahead_behind(repo: &Path, branch: &str, upstream: &str) -> AppResult<(u32, u32)> {
+    let out = Command::new("git")
+        .args([
+            "rev-list",
+            "--left-right",
+            "--count",
+            &format!("{upstream}...{branch}"),
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() { return Ok((0, 0)); }
+    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let nums: Vec<u32> = raw.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+    if nums.len() != 2 { return Ok((0, 0)); }
+    // Left side = upstream (behind), right side = branch (ahead).
+    Ok((nums[1], nums[0]))
+}
+
+/// `git checkout <name>`. Fails loudly if the working tree has conflicting
+/// uncommitted changes — that's git's natural protection.
+pub fn checkout_branch(repo: &Path, name: &str) -> AppResult<()> {
+    let out = Command::new("git")
+        .args(["checkout", name])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).to_string();
+        return Err(AppError::Other(format!("git checkout: {msg}")));
+    }
+    Ok(())
+}
+
 /// Recent commit messages from the current branch (subject + body).
 /// Best-effort: returns empty on failure or detached HEAD.
 pub fn recent_messages(repo: &Path, limit: u32) -> AppResult<Vec<String>> {
