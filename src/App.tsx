@@ -25,6 +25,8 @@ import { AboutModal } from "./components/AboutModal";
 import { GettingStartedModal } from "./components/GettingStartedModal";
 import { OnboardingBanner } from "./components/OnboardingBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { CommandPalette } from "./components/CommandPalette";
+import { usePaletteStore } from "./stores/paletteStore";
 import { useOnboardingStore } from "./stores/onboardingStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { ipc } from "./ipc/tauri";
@@ -54,8 +56,33 @@ export default function App() {
   const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions" | "advisor" | "vault" | "context">("skills");
   const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
+  const reloadPaletteIndex = usePaletteStore((s) => s.reloadIndex);
+  const resetPaletteForProject = usePaletteStore((s) => s.resetForProject);
 
   useKeyboardShortcuts({ setTab });
+
+  // Listen for palette-triggered navigation events.
+  useEffect(() => {
+    const onOpenTab = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d === "terminal" || d === "changes" || d === "preview") setTab(d);
+    };
+    const onOpenWb = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d === "skills" || d === "permissions" || d === "advisor" || d === "vault" || d === "context") {
+        setWorkbenchTab(d);
+      }
+    };
+    const onGettingStarted = () => setShowGettingStarted(true);
+    window.addEventListener("ac:open-tab", onOpenTab);
+    window.addEventListener("ac:open-workbench-tab", onOpenWb);
+    window.addEventListener("ac:open-getting-started", onGettingStarted);
+    return () => {
+      window.removeEventListener("ac:open-tab", onOpenTab);
+      window.removeEventListener("ac:open-workbench-tab", onOpenWb);
+      window.removeEventListener("ac:open-getting-started", onGettingStarted);
+    };
+  }, [setTab]);
 
   useEffect(() => {
     let offSkills: (() => void) | null = null;
@@ -88,10 +115,13 @@ export default function App() {
       clearPreview();
       clearTerminals();
       setWorkspace(null);
+      resetPaletteForProject(null);
       return;
     }
     refreshChanges();
     refreshSkills();
+    resetPaletteForProject(project.root);
+    void reloadPaletteIndex();
     ipc.workspaceContext().then(setWorkspace).catch(() => setWorkspace(null));
     (async () => {
       await hydrateTerminals(project.root);
@@ -100,7 +130,7 @@ export default function App() {
         addTerminal(project.root);
       }
     })();
-  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal]);
+  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal, reloadPaletteIndex, resetPaletteForProject]);
 
   // Persist sessions on tab close / app unload.
   useEffect(() => {
@@ -273,6 +303,7 @@ export default function App() {
       <OnboardingBanner onOpen={() => setShowGettingStarted(true)} />
       <UpdateBanner />
       <ApprovalModal />
+      <CommandPalette />
     </>
   );
 }

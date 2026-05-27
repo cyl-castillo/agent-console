@@ -41,6 +41,9 @@ export const ipc = {
   gitBranches: () => invoke<BranchInfo[]>("git_branches"),
   gitCheckoutBranch: (name: string) => invoke<void>("git_checkout_branch", { name }),
 
+  paletteIndexFiles: (limit?: number) =>
+    invoke<string[]>("palette_index_files", { limit: limit ?? null }),
+
   snapshotRestore: (commitSha: string) =>
     invoke<void>("snapshot_restore", { commitSha }),
   snapshotDelete: (id: string) => invoke<void>("snapshot_delete", { id }),

@@ -75,6 +75,7 @@ pub fn run() {
             commands::context::memory_list,
             commands::context::memory_read,
             commands::context::memory_delete,
+            commands::palette::palette_index_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

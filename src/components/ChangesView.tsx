@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useChangesStore } from "../stores/changesStore";
 import { DiffViewer } from "./DiffViewer";
@@ -19,6 +19,13 @@ export function ChangesView() {
   const [diffMode, setDiffMode] = useState<"unified" | "split">("split");
   const [amend, setAmend] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const commitRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const onFocus = () => commitRef.current?.focus();
+    window.addEventListener("ac:focus-commit", onFocus);
+    return () => window.removeEventListener("ac:focus-commit", onFocus);
+  }, []);
 
   useEffect(() => {
     if (!status) refresh();
@@ -198,6 +205,7 @@ export function ChangesView() {
           )}
 
           <textarea
+            ref={commitRef}
             className="commit-message"
             placeholder={
               amend

@@ -2,6 +2,7 @@ pub mod advisor;
 pub mod context;
 pub mod git;
 pub mod hooks;
+pub mod palette;
 pub mod permissions;
 pub mod project;
 pub mod projects;

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { useChangesStore } from "../stores/changesStore";
+import { usePaletteStore } from "../stores/paletteStore";
 
 import type { CenterTab } from "../stores/uiStore";
 
@@ -17,6 +18,11 @@ export function useKeyboardShortcuts({ setTab }: Args) {
       const target = e.target as HTMLElement | null;
 
       switch (e.key) {
+        case "p":
+        case "P":
+          usePaletteStore.getState().openPalette();
+          e.preventDefault();
+          break;
         case "1":
           setTab("terminal");
           e.preventDefault();
