@@ -52,6 +52,24 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
 }
 
 #[tauri::command]
+pub fn git_recent_messages(limit: Option<u32>, state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    let repo = current_repo(&state)?;
+    git_service::recent_messages(&repo, limit.unwrap_or(10))
+}
+
+#[tauri::command]
+pub fn git_head_message(state: State<'_, AppState>) -> AppResult<String> {
+    let repo = current_repo(&state)?;
+    git_service::head_message(&repo)
+}
+
+#[tauri::command]
+pub fn git_amend_commit(message: String, state: State<'_, AppState>) -> AppResult<String> {
+    let repo = current_repo(&state)?;
+    git_service::amend_commit(&repo, &message)
+}
+
+#[tauri::command]
 pub fn git_file_log(
     file: String,
     limit: Option<u32>,

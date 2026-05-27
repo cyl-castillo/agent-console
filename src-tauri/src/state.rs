@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use crate::services::git_watcher::GitWatcher;
 use crate::services::hooks_service::HooksRuntime;
 use crate::services::project_manager::Project;
 use crate::services::sessions_service::SessionsService;
@@ -10,6 +11,7 @@ pub struct AppState {
     pub terminals: TerminalRegistry,
     pub hooks: HooksRuntime,
     pub sessions: SessionsService,
+    pub git_watcher: GitWatcher,
 }
 
 impl AppState {
@@ -21,6 +23,7 @@ impl AppState {
             terminals: TerminalRegistry::new(),
             hooks,
             sessions: SessionsService::new(),
+            git_watcher: GitWatcher::new(),
         }
     }
 }

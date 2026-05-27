@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::project_manager::{self, FileNode, Project, WorkspaceContext};
@@ -20,13 +20,17 @@ pub struct FileContent {
 }
 
 #[tauri::command]
-pub fn open_project(path: String, state: State<'_, AppState>) -> AppResult<Project> {
+pub fn open_project(path: String, app: AppHandle, state: State<'_, AppState>) -> AppResult<Project> {
     let path_buf = PathBuf::from(&path);
     let project = project_manager::open_project(&path_buf)?;
-    let mut s = state.inner.lock().unwrap();
-    s.project = Some(project.clone());
+    {
+        let mut s = state.inner.lock().unwrap();
+        s.project = Some(project.clone());
+    }
     // Record in recents — best effort, never fails the open.
     let _ = crate::services::projects_service::remember(&path_buf);
+    // Start the git filesystem watcher so the UI auto-refreshes Changes.
+    state.git_watcher.watch(app, path_buf);
     Ok(project)
 }
 

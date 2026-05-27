@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
 import type { GitStatus } from "../types/domain";
@@ -17,9 +18,14 @@ interface ChangesState {
   refresh: () => Promise<void>;
   stage: (file: string) => Promise<void>;
   unstage: (file: string) => Promise<void>;
+  stageMany: (files: string[]) => Promise<void>;
+  unstageMany: (files: string[]) => Promise<void>;
   revert: (file: string) => Promise<void>;
   revertAll: () => Promise<void>;
-  commit: () => Promise<string | null>;
+  commit: (opts?: { amend?: boolean }) => Promise<string | null>;
+  loadCommitHistory: () => Promise<void>;
+  loadHeadMessage: () => Promise<string>;
+  recentMessages: string[];
   clear: () => void;
 }
 
@@ -31,6 +37,7 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
   error: null,
   commitMessage: "",
   committing: false,
+  recentMessages: [],
 
   refresh: async () => {
     set({ loading: true, error: null });
@@ -81,6 +88,32 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     }
   },
 
+  stageMany: async (files) => {
+    for (const f of files) {
+      try { await ipc.gitStageFile(f); } catch { /* keep going */ }
+    }
+    await get().refresh();
+  },
+
+  unstageMany: async (files) => {
+    for (const f of files) {
+      try { await ipc.gitUnstageFile(f); } catch { /* keep going */ }
+    }
+    await get().refresh();
+  },
+
+  loadCommitHistory: async () => {
+    try {
+      const msgs = await ipc.gitRecentMessages(10);
+      set({ recentMessages: msgs });
+    } catch { /* ignore */ }
+  },
+
+  loadHeadMessage: async () => {
+    try { return await ipc.gitHeadMessage(); }
+    catch { return ""; }
+  },
+
   revert: async (file) => {
     try {
       await ipc.gitRevertFile(file);
@@ -99,14 +132,17 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     await get().refresh();
   },
 
-  commit: async () => {
+  commit: async (opts) => {
     const msg = get().commitMessage.trim();
     if (!msg) return null;
     set({ committing: true, error: null });
     try {
-      const sha = await ipc.gitCommit(msg);
+      const sha = opts?.amend
+        ? await ipc.gitAmendCommit(msg)
+        : await ipc.gitCommit(msg);
       set({ commitMessage: "", committing: false });
       await get().refresh();
+      await get().loadCommitHistory();
       return sha;
     } catch (e) {
       set({ error: String(e), committing: false });
@@ -116,6 +152,21 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
 
   clear: () => set({
     status: null, selected: null, diff: "", error: null,
-    commitMessage: "", committing: false,
+    commitMessage: "", committing: false, recentMessages: [],
   }),
 }));
+
+/// Subscribe once to the backend `git://changed` filesystem watcher and
+/// trigger a debounced refresh of the Changes view. Returns an unlisten fn
+/// for cleanup. The debounce smooths bursts (e.g. a build that touches many
+/// files in <500ms) so we don't thrash `git status`.
+export async function attachGitWatcherListener(): Promise<UnlistenFn> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const debouncedRefresh = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      useChangesStore.getState().refresh();
+    }, 300);
+  };
+  return await listen("git://changed", debouncedRefresh);
+}

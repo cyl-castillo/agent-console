@@ -216,6 +216,66 @@ pub fn file_log(repo: &Path, file: &str, limit: u32) -> AppResult<Vec<GitCommitI
     Ok(commits)
 }
 
+/// Recent commit messages from the current branch (subject + body).
+/// Best-effort: returns empty on failure or detached HEAD.
+pub fn recent_messages(repo: &Path, limit: u32) -> AppResult<Vec<String>> {
+    const SEP: &str = "\u{1e}";
+    let format = format!("%B{SEP}");
+    let out = Command::new("git")
+        .args([
+            "log",
+            &format!("-n{limit}"),
+            &format!("--pretty=format:{format}"),
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        return Ok(Vec::new());
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).to_string();
+    let msgs: Vec<String> = raw
+        .split(SEP)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    Ok(msgs)
+}
+
+/// Full commit message (subject + body) of HEAD. Empty string if there is no
+/// HEAD yet (fresh repo).
+pub fn head_message(repo: &Path) -> AppResult<String> {
+    let out = Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        return Ok(String::new());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
+}
+
+/// `git commit --amend -m <message>`. Allows amending HEAD with no new
+/// staged changes (just rewords the message).
+pub fn amend_commit(repo: &Path, message: &str) -> AppResult<String> {
+    if message.trim().is_empty() {
+        return Err(AppError::InvalidArgument("commit message is empty".into()));
+    }
+    let out = Command::new("git")
+        .args(["commit", "--amend", "-m", message])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        return Err(AppError::Other(format!("git commit --amend failed: {msg}{stdout}")));
+    }
+    let sha_out = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo)
+        .output()?;
+    Ok(String::from_utf8_lossy(&sha_out.stdout).trim().to_string())
+}
+
 /// Revert a single change. Tracked files: `git checkout HEAD -- file`.
 /// Untracked files: delete from disk.
 pub fn revert_file(repo: &Path, file: &str) -> AppResult<()> {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useSessionStore } from "./stores/sessionStore";
-import { useChangesStore } from "./stores/changesStore";
+import { attachGitWatcherListener, useChangesStore } from "./stores/changesStore";
 import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
@@ -58,9 +58,11 @@ export default function App() {
   useEffect(() => {
     let offSkills: (() => void) | null = null;
     let offApproval: (() => void) | null = null;
+    let offGit: (() => void) | null = null;
     attachSkillsListeners().then((u) => { offSkills = u; });
     attachApprovalListener().then((u) => { offApproval = u; });
-    return () => { offSkills?.(); offApproval?.(); };
+    attachGitWatcherListener().then((u) => { offGit = u; });
+    return () => { offSkills?.(); offApproval?.(); offGit?.(); };
   }, []);
 
   useEffect(() => {

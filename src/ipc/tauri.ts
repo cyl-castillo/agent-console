@@ -29,6 +29,9 @@ export const ipc = {
   gitStageFile: (file: string) => invoke<void>("git_stage_file", { file }),
   gitUnstageFile: (file: string) => invoke<void>("git_unstage_file", { file }),
   gitCommit: (message: string) => invoke<string>("git_commit", { message }),
+  gitAmendCommit: (message: string) => invoke<string>("git_amend_commit", { message }),
+  gitRecentMessages: (limit = 10) => invoke<string[]>("git_recent_messages", { limit }),
+  gitHeadMessage: () => invoke<string>("git_head_message"),
   gitFileLog: (file: string, limit = 5) =>
     invoke<GitCommitInfo[]>("git_file_log", { file, limit }),
 
