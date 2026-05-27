@@ -9,3 +9,4 @@ pub mod sessions_service;
 pub mod skills_service;
 pub mod snapshot_service;
 pub mod terminal_runner;
+pub mod vault_service;

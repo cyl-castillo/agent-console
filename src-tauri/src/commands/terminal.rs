@@ -12,10 +12,18 @@ pub fn term_spawn(
     state: State<'_, AppState>,
 ) -> AppResult<String> {
     let session_dir = state.hooks.session_dir().to_string_lossy().to_string();
-    let extra = vec![
+    let mut extra = vec![
         ("AGENT_CONSOLE_SESSION_DIR".to_string(), session_dir),
         ("AGENT_CONSOLE_BRIDGE".to_string(), "1".to_string()),
     ];
+    // Inject Vault entries (project overrides global) so the agent can use
+    // `$KEY` in shell commands without ever seeing the value in its context.
+    let project_root = state.inner.lock().unwrap().project.as_ref().map(|p| p.root.clone());
+    if let Ok(vault_env) = crate::services::vault_service::env_for_spawn(project_root.as_deref()) {
+        for (k, v) in vault_env {
+            extra.push((k, v));
+        }
+    }
     state.terminals.spawn_with_env(app, &PathBuf::from(cwd), &extra)
 }
 

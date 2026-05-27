@@ -5,7 +5,8 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
   AdvisorAnalysisResult,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus, PermissionsSnapshot,
-  PersistedSession, Project, RecentProject, Skill, StoredRule, WorkspaceContext,
+  PersistedSession, Project, RecentProject, Skill, StoredRule, VaultEntryView,
+  WorkspaceContext,
 } from "../types/domain";
 
 export const ipc = {
@@ -70,6 +71,19 @@ export const ipc = {
     invoke<PersistedSession[]>("sessions_list", { projectRoot }),
   sessionsSave: (projectRoot: string, sessions: PersistedSession[]) =>
     invoke<void>("sessions_save", { projectRoot, sessions }),
+
+  vaultList: () => invoke<VaultEntryView[]>("vault_list"),
+  vaultUpsert: (params: {
+    scope: "project" | "global";
+    key: string;
+    description: string;
+    secret: boolean;
+    value: string | null;
+  }) => invoke<VaultEntryView>("vault_upsert", params),
+  vaultDelete: (scope: "project" | "global", key: string) =>
+    invoke<void>("vault_delete", { scope, key }),
+  vaultGetValue: (scope: "project" | "global", key: string) =>
+    invoke<string>("vault_get_value", { scope, key }),
 
   advisorAnalyze: () => invoke<AdvisorAnalysisResult>("advisor_analyze"),
   advisorCreateSkill: (

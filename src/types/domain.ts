@@ -118,6 +118,18 @@ export interface PermissionsSnapshot {
   globalSettingsPath: string;
 }
 
+/// A Vault entry as exposed to the UI — never contains the value, only
+/// metadata. Use `vaultGetValue` to fetch one on demand (reveal action).
+export interface VaultEntryView {
+  key: string;
+  scope: "project" | "global";
+  description: string;
+  secret: boolean;
+  hasValue: boolean;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
 /// A skill recommendation returned by the Advisor analysis.
 export interface AdvisorRecommendation {
   name: string;

@@ -61,6 +61,10 @@ pub fn run() {
             commands::sessions::sessions_save,
             commands::advisor::advisor_analyze,
             commands::advisor::advisor_create_skill,
+            commands::vault::vault_list,
+            commands::vault::vault_upsert,
+            commands::vault::vault_delete,
+            commands::vault::vault_get_value,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,3 +8,4 @@ pub mod sessions;
 pub mod skills;
 pub mod snapshot;
 pub mod terminal;
+pub mod vault;
