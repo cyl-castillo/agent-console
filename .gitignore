@@ -37,3 +37,6 @@ Thumbs.db
 *.env
 .env.local
 .env.*.local
+
+# Claude Code per-project state (skills, vault, VAULT.md, etc.) — local only
+.claude/
