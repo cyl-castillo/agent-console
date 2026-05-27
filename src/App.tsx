@@ -20,7 +20,10 @@ import { WorkbenchTabs } from "./components/WorkbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
+import { GettingStartedModal } from "./components/GettingStartedModal";
+import { OnboardingBanner } from "./components/OnboardingBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { useOnboardingStore } from "./stores/onboardingStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { ipc } from "./ipc/tauri";
 import type { WorkspaceContext } from "./types/domain";
@@ -43,6 +46,9 @@ export default function App() {
   const addTerminal = useTerminalsStore((s) => s.add);
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
+  const [showGettingStarted, setShowGettingStarted] = useState(false);
+  const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
+  const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
   const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions" | "advisor">("skills");
   const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
@@ -60,6 +66,16 @@ export default function App() {
   useEffect(() => {
     checkForUpdates({ silentIfNone: true });
   }, [checkForUpdates]);
+
+  // First-time auto-open of the Getting Started guide.
+  useEffect(() => {
+    if (!seenWelcome) setShowGettingStarted(true);
+  }, [seenWelcome]);
+
+  // Mark permissions tab as visited as soon as the user opens it.
+  useEffect(() => {
+    if (workbenchTab === "permissions") markVisitedPermissions();
+  }, [workbenchTab, markVisitedPermissions]);
 
   // Reload git/skills/workspace and hydrate sessions when project changes.
   useEffect(() => {
@@ -103,6 +119,12 @@ export default function App() {
       <>
         <ProjectPicker />
         {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+        {showGettingStarted && (
+          <GettingStartedModal
+            onClose={() => setShowGettingStarted(false)}
+            onJumpToTab={setWorkbenchTab}
+          />
+        )}
         <UpdateBanner />
       </>
     );
@@ -153,6 +175,11 @@ export default function App() {
 
           <button
             className="topbar-icon"
+            onClick={() => setShowGettingStarted(true)}
+            title="Getting started guide"
+          >?</button>
+          <button
+            className="topbar-icon"
             onClick={() => setShowAbout(true)}
             title="About Agent Console"
           >ⓘ</button>
@@ -193,7 +220,9 @@ export default function App() {
           <div className="tab-pane" style={{ display: tab === "terminal" ? "flex" : "none" }}>
             {liveTerminals.length === 0 ? (
               <div className="placeholder" style={{ padding: 16 }}>
-                No active session. Click <strong>+ new</strong> in the Sessions panel.
+                No hay sesiones activas. Abrí el sidebar (botón <strong>Workspace</strong>)
+                y dale <strong>+ new</strong> en Sessions. Cada terminal nueva
+                auto-ejecuta <code>claude</code>.
               </div>
             ) : (
               <div className="terminals-stack">
@@ -229,6 +258,13 @@ export default function App() {
         </aside>
       </div>
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      {showGettingStarted && (
+        <GettingStartedModal
+          onClose={() => setShowGettingStarted(false)}
+          onJumpToTab={(t) => { setWorkbenchTab(t); }}
+        />
+      )}
+      <OnboardingBanner onOpen={() => setShowGettingStarted(true)} />
       <UpdateBanner />
       <ApprovalModal />
     </>

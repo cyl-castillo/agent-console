@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { ipc } from "../ipc/tauri";
 import type { AdvisorRecommendation } from "../types/domain";
 import { useSkillsStore } from "./skillsStore";
+import { useOnboardingStore } from "./onboardingStore";
 
 export type AdvisorStatus = "idle" | "analyzing" | "results" | "error";
 
@@ -38,6 +39,7 @@ export const useAdvisorStore = create<AdvisorState>((set, get) => ({
 
   analyze: async () => {
     set({ status: "analyzing", errorMessage: null, items: [], rawExcerpt: null });
+    useOnboardingStore.getState().markTriggeredAdvisor();
     try {
       const result = await ipc.advisorAnalyze();
       const items: AdvisorItem[] = result.recommendations.map((r, i) => ({
@@ -76,6 +78,7 @@ export const useAdvisorStore = create<AdvisorState>((set, get) => ({
           it.id === id ? { ...it, status: "created", createdPath: path } : it,
         ),
       }));
+      useOnboardingStore.getState().markCreatedSkill();
       // Refresh the Skills panel so the new entry shows up.
       useSkillsStore.getState().refresh();
     } catch (err) {

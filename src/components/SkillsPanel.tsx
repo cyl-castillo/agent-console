@@ -183,10 +183,17 @@ export function SkillsPanel() {
           )}
 
           {installed.length === 0 ? (
-            <p className="wb-hint">
-              No skills, commands, or agents found in <code>.claude/skills</code>,
-              {" "}<code>.claude/commands</code>, <code>.claude/agents</code> (project or user).
-            </p>
+            <div className="wb-empty">
+              <p className="wb-hint">
+                Sin skills todavía. Las skills viven en
+                {" "}<code>.claude/skills</code>, <code>.claude/commands</code> y
+                {" "}<code>.claude/agents</code> y se invocan desde Claude en la terminal.
+              </p>
+              <p className="wb-hint">
+                ¿Lo más rápido? Abrí el tab <strong>Advisor</strong>: analiza tu
+                proyecto y te propone skills concretas con un click.
+              </p>
+            </div>
           ) : filtered.length === 0 ? (
             <p className="wb-hint">No matches for the current filter.</p>
           ) : (
