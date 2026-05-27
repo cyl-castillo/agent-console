@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-console"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
