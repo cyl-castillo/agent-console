@@ -3746,3 +3746,22 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   color: var(--text);
 }
 :root[data-theme="light"] .feedback-context { background: rgba(0,0,0,0.03); }
+
+/* Theme toggle in the project picker, top-right corner. */
+.picker { position: relative; }
+.picker-theme-toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.picker-theme-toggle:hover { color: var(--accent); border-color: var(--accent); }

@@ -6,6 +6,12 @@ import "@xterm/xterm/css/xterm.css";
 
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
+import { useThemeStore } from "../stores/themeStore";
+
+const TERM_THEMES = {
+  dark:  { background: "#0d0f12", foreground: "#d9dde3", cursor: "#6aa9ff" },
+  light: { background: "#fbfcfd", foreground: "#1a1d23", cursor: "#2563eb" },
+} as const;
 
 interface Props {
   session: TerminalSession;
@@ -20,6 +26,8 @@ export function Terminal({ session, visible }: Props) {
   const appendOutput = useTerminalsStore((s) => s.appendOutput);
   const markLive = useTerminalsStore((s) => s.markLive);
   const fitRef = useRef<FitAddon | null>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const theme = useThemeStore((s) => s.theme);
 
   // Spawn once per session id.
   useEffect(() => {
@@ -29,15 +37,12 @@ export function Terminal({ session, visible }: Props) {
     const term = new XTerm({
       fontFamily: '"JetBrains Mono", ui-monospace, monospace',
       fontSize: 13,
-      theme: {
-        background: "#0d0f12",
-        foreground: "#d9dde3",
-        cursor: "#6aa9ff",
-      },
+      theme: TERM_THEMES[useThemeStore.getState().theme],
       cursorBlink: true,
       convertEol: true,
       scrollback: 5000,
     });
+    termRef.current = term;
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
@@ -176,6 +181,13 @@ export function Terminal({ session, visible }: Props) {
       try { fitRef.current?.fit(); } catch { /* ignore */ }
     }
   }, [visible]);
+
+  // Live-swap xterm theme on toggle so it matches the rest of the UI.
+  useEffect(() => {
+    const t = termRef.current;
+    if (!t) return;
+    t.options.theme = TERM_THEMES[theme];
+  }, [theme]);
 
   return (
     <div

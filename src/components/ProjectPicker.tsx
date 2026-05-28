@@ -2,13 +2,18 @@ import { useEffect } from "react";
 
 import { useSessionStore } from "../stores/sessionStore";
 import { useProjectsStore } from "../stores/projectsStore";
+import { useThemeStore } from "../stores/themeStore";
 import { pickFolder } from "../ipc/tauri";
+import { Icon } from "./Icon";
 
 export function ProjectPicker() {
   const { openProject, loading, error } = useSessionStore();
   const recent = useProjectsStore((s) => s.recent);
   const loadRecent = useProjectsStore((s) => s.load);
   const forget = useProjectsStore((s) => s.forget);
+
+  const theme = useThemeStore((s) => s.theme);
+  const toggleTheme = useThemeStore((s) => s.toggle);
 
   useEffect(() => { loadRecent(); }, [loadRecent]);
 
@@ -19,6 +24,13 @@ export function ProjectPicker() {
 
   return (
     <div className="picker">
+      <button
+        className="picker-theme-toggle"
+        onClick={toggleTheme}
+        title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+      >
+        <Icon name={theme === "dark" ? "sun" : "moon"} size={16} />
+      </button>
       <div className="picker-card">
         <h1>AGENT CONSOLE</h1>
         <p>
