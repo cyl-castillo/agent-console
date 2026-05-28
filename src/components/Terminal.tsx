@@ -117,13 +117,32 @@ export function Terminal({ session, visible }: Props) {
       term.onData((data) => {
         if (termId) ipc.termWrite(termId, data).catch(() => {});
       });
+      // Dedupe resize calls: conpty (Windows) re-emits the whole buffer on
+      // resize, and that redraw can change DOM metrics, which would re-trigger
+      // ResizeObserver in a loop. Only send when cols/rows actually changed.
+      let lastCols = -1;
+      let lastRows = -1;
       term.onResize(({ cols, rows }) => {
-        if (termId) ipc.termResize(termId, cols, rows).catch(() => {});
+        if (!termId) return;
+        if (cols === lastCols && rows === lastRows) return;
+        lastCols = cols; lastRows = rows;
+        ipc.termResize(termId, cols, rows).catch(() => {});
       });
     })();
 
+    // Coalesce fit() calls into the next animation frame and skip while the
+    // host has no real size (hidden tab). Without this, conpty's redraw on
+    // each resize loops back through ResizeObserver and the terminal flickers.
+    let rafPending = false;
     const ro = new ResizeObserver(() => {
-      try { fit.fit(); } catch { /* host not mounted yet */ }
+      if (rafPending) return;
+      const rect = host.getBoundingClientRect();
+      if (rect.width < 8 || rect.height < 8) return;
+      rafPending = true;
+      requestAnimationFrame(() => {
+        rafPending = false;
+        try { fit.fit(); } catch { /* host not mounted yet */ }
+      });
     });
     ro.observe(host);
 
