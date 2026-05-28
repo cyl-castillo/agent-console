@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useAdvisorStore, type AdvisorItem } from "../stores/advisorStore";
 
@@ -8,6 +8,17 @@ export function AdvisorPanel() {
   const errorMessage = useAdvisorStore((s) => s.errorMessage);
   const analyze = useAdvisorStore((s) => s.analyze);
   const reset = useAdvisorStore((s) => s.reset);
+
+  // Elapsed-time counter while analyzing, so the wait reads as live progress
+  // rather than a frozen panel.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (status !== "analyzing") { setElapsed(0); return; }
+    setElapsed(0);
+    const started = Date.now();
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [status]);
 
   return (
     <div className="workbench">
@@ -41,10 +52,18 @@ export function AdvisorPanel() {
 
         {status === "analyzing" && (
           <section className="wb-section">
-            <p className="wb-hint">
-              Running <code>claude -p</code> in plan mode… this usually takes
-              30–90 seconds.
-            </p>
+            <div className="wb-working">
+              <span className="wb-spinner" />
+              <div className="wb-working-text">
+                <div className="wb-working-title">
+                  Working… <span className="wb-working-elapsed">{formatElapsed(elapsed)}</span>
+                </div>
+                <div className="wb-working-sub">
+                  Analyzing the project with Claude in the background (usually
+                  30–90s). You can keep using the app — results land here when ready.
+                </div>
+              </div>
+            </div>
           </section>
         )}
 
@@ -154,6 +173,13 @@ function AdvisorRow({ item }: { item: AdvisorItem }) {
       )}
     </li>
   );
+}
+
+function formatElapsed(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
 function StatusBadge({ status }: { status: AdvisorItem["status"] }) {

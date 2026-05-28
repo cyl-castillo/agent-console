@@ -215,25 +215,29 @@ export interface FeedbackContext {
 }
 
 export interface InstalledPlugin {
+  /// Full id, e.g. "rust-analyzer-lsp@claude-plugins-official".
+  id: string;
   name: string;
-  slug: string;
+  marketplace: string | null;
   version: string | null;
-  description: string | null;
-  path: string;
+  scope: string | null;
+  enabled: boolean;
+  path: string | null;
 }
 
 export interface MarketplacePlugin {
+  /// Id passed to `claude plugin install`, e.g. "name@marketplace".
+  installId: string;
   name: string;
-  slug: string;
+  marketplace: string;
   description: string;
   author: string | null;
-  repoUrl: string | null;
-  tags: string[];
+  category: string | null;
+  homepage: string | null;
 }
 
-export interface MarketplaceSnapshot {
-  source: string;
-  fetchedAtMs: number;
-  isFallback: boolean;
+export interface AvailableSnapshot {
+  /// Names of configured marketplaces (empty => none added yet).
+  marketplaces: string[];
   plugins: MarketplacePlugin[];
 }

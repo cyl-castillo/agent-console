@@ -80,7 +80,8 @@ pub fn run() {
             commands::feedback::feedback_context,
             commands::feedback::feedback_submit,
             commands::plugins::plugins_list_installed,
-            commands::plugins::plugins_marketplace,
+            commands::plugins::plugins_list_available,
+            commands::plugins::plugins_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

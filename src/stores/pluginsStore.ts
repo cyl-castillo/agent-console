@@ -1,35 +1,38 @@
 import { create } from "zustand";
 
 import { ipc } from "../ipc/tauri";
-import { useTerminalsStore } from "./terminalsStore";
-import type { InstalledPlugin, MarketplacePlugin, MarketplaceSnapshot } from "../types/domain";
+import type { InstalledPlugin, MarketplacePlugin } from "../types/domain";
+
+export type PluginScope = "user" | "project" | "local";
 
 interface PluginsState {
   installed: InstalledPlugin[];
-  marketplace: MarketplacePlugin[];
-  marketplaceSource: string | null;
-  marketplaceFetchedAtMs: number | null;
-  marketplaceIsFallback: boolean;
+  available: MarketplacePlugin[];
+  marketplaces: string[];
   query: string;
   installedLoading: boolean;
-  marketplaceLoading: boolean;
+  availableLoading: boolean;
+  /// install ids currently being installed (drives per-row spinners).
+  installing: Record<string, true>;
+  /// last install error keyed by install id.
+  installErrors: Record<string, string>;
   error: string | null;
 
   setQuery: (q: string) => void;
   refreshInstalled: () => Promise<void>;
-  refreshMarketplace: (force?: boolean) => Promise<void>;
-  installViaTerminal: (slug: string) => string | null;
+  refreshAvailable: () => Promise<void>;
+  install: (installId: string, scope?: PluginScope) => Promise<void>;
 }
 
-export const usePluginsStore = create<PluginsState>((set) => ({
+export const usePluginsStore = create<PluginsState>((set, get) => ({
   installed: [],
-  marketplace: [],
-  marketplaceSource: null,
-  marketplaceFetchedAtMs: null,
-  marketplaceIsFallback: false,
+  available: [],
+  marketplaces: [],
   query: "",
   installedLoading: false,
-  marketplaceLoading: false,
+  availableLoading: false,
+  installing: {},
+  installErrors: {},
   error: null,
 
   setQuery: (q) => set({ query: q }),
@@ -44,32 +47,47 @@ export const usePluginsStore = create<PluginsState>((set) => ({
     }
   },
 
-  refreshMarketplace: async (force) => {
-    set({ marketplaceLoading: true, error: null });
+  refreshAvailable: async () => {
+    set({ availableLoading: true, error: null });
     try {
-      const snap: MarketplaceSnapshot = await ipc.pluginsMarketplace(!!force);
+      const snap = await ipc.pluginsListAvailable();
       set({
-        marketplace: snap.plugins,
-        marketplaceSource: snap.source,
-        marketplaceFetchedAtMs: snap.fetchedAtMs,
-        marketplaceIsFallback: snap.isFallback,
-        marketplaceLoading: false,
+        available: snap.plugins,
+        marketplaces: snap.marketplaces,
+        availableLoading: false,
       });
     } catch (e) {
-      set({ marketplaceLoading: false, error: String(e) });
+      set({ availableLoading: false, error: String(e) });
     }
   },
 
-  installViaTerminal: (slug) => {
-    const term = useTerminalsStore.getState();
-    const activeId = term.activeId;
-    const session = term.sessions.find((s) => s.id === activeId);
-    if (!session) return "no-active-session";
-    // Switch to terminal tab so the user sees the command land.
-    window.dispatchEvent(new CustomEvent("ac:open-tab", { detail: "terminal" }));
-    // Write the slash command + Enter.
-    const cmd = `/plugin install ${slug}\r`;
-    void import("../ipc/tauri").then(({ ipc }) => ipc.termWrite(session.id, cmd).catch(() => {}));
-    return null;
+  install: async (installId, scope = "user") => {
+    if (get().installing[installId]) return;
+    set((s) => ({
+      installing: { ...s.installing, [installId]: true },
+      installErrors: { ...s.installErrors, [installId]: "" },
+    }));
+    try {
+      await ipc.pluginsInstall(installId, scope);
+      // Refresh the installed list; the row moves out of "available" since the
+      // panel filters out already-installed slugs.
+      await get().refreshInstalled();
+      set((s) => {
+        const installing = { ...s.installing };
+        delete installing[installId];
+        const installErrors = { ...s.installErrors };
+        delete installErrors[installId];
+        return { installing, installErrors };
+      });
+    } catch (e) {
+      set((s) => {
+        const installing = { ...s.installing };
+        delete installing[installId];
+        return {
+          installing,
+          installErrors: { ...s.installErrors, [installId]: String(e) },
+        };
+      });
+    }
   },
 }));

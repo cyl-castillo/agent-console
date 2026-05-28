@@ -8,7 +8,7 @@ import type {
   ContextFileStat, ContextStatus,
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
-  InstalledPlugin, MarketplaceSnapshot,
+  InstalledPlugin, AvailableSnapshot,
   MemoryEntry, PermissionsSnapshot,
   PersistedSession, Project, RecentProject, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
@@ -108,8 +108,9 @@ export const ipc = {
     invoke<string>("vault_get_value", { scope, key }),
 
   pluginsListInstalled: () => invoke<InstalledPlugin[]>("plugins_list_installed"),
-  pluginsMarketplace: (force?: boolean) =>
-    invoke<MarketplaceSnapshot>("plugins_marketplace", { force: force ?? null }),
+  pluginsListAvailable: () => invoke<AvailableSnapshot>("plugins_list_available"),
+  pluginsInstall: (installId: string, scope?: "user" | "project" | "local") =>
+    invoke<string>("plugins_install", { installId, scope: scope ?? null }),
 
   feedbackDevEnabled: () => invoke<boolean>("feedback_dev_enabled"),
   feedbackContext: () => invoke<FeedbackContext>("feedback_context"),
