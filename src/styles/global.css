@@ -3768,3 +3768,40 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   cursor: pointer;
 }
 .picker-theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ===== Inline session rename suggestion ===== */
+.session-row { position: relative; flex-wrap: wrap; }
+.session-suggestion {
+  flex-basis: 100%;
+  margin: 4px 0 2px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: default;
+}
+.session-suggestion-label strong { font-weight: 600; }
+.session-suggestion-accept,
+.session-suggestion-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.session-suggestion-accept { color: var(--ok, #6cd16c); }
+.session-suggestion-accept:hover { background: rgba(108, 209, 108, 0.18); }
+.session-suggestion-dismiss { color: var(--text-faint); }
+.session-suggestion-dismiss:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+:root[data-theme="light"] .session-suggestion-dismiss:hover { background: rgba(0,0,0,0.06); }

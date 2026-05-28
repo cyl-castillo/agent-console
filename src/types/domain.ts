@@ -92,6 +92,7 @@ export interface PersistedSession {
   createdAtMs: number;
   scrollback: string;
   claudeSessionId?: string;
+  nameSuggested?: boolean;
 }
 
 export interface HooksStatus {

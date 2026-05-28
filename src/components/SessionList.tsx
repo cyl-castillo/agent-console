@@ -29,6 +29,8 @@ export function SessionList() {
   const close = useTerminalsStore((s) => s.close);
   const rename = useTerminalsStore((s) => s.rename);
   const persist = useTerminalsStore((s) => s.persist);
+  const acceptSuggestion = useTerminalsStore((s) => s.acceptSuggestion);
+  const dismissSuggestion = useTerminalsStore((s) => s.dismissSuggestion);
   const project = useSessionStore((s) => s.project);
   const setTab = useUIStore((s) => s.setTab);
 
@@ -77,6 +79,8 @@ export function SessionList() {
                 await close(s.id);
               }}
               onRename={(name) => { rename(s.id, name); persist(); }}
+              onAcceptSuggestion={() => { acceptSuggestion(s.id); }}
+              onDismissSuggestion={() => { dismissSuggestion(s.id); }}
             />
           ))}
         </ul>
@@ -85,12 +89,14 @@ export function SessionList() {
   );
 }
 
-function SessionRow({ session, active, onActivate, onClose, onRename }: {
+function SessionRow({ session, active, onActivate, onClose, onRename, onAcceptSuggestion, onDismissSuggestion }: {
   session: TerminalSession;
   active: boolean;
   onActivate: () => void;
   onClose: () => void;
   onRename: (name: string) => void;
+  onAcceptSuggestion: () => void;
+  onDismissSuggestion: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.name);
@@ -137,6 +143,23 @@ function SessionRow({ session, active, onActivate, onClose, onRename }: {
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         title="Close session"
       >×</button>
+      {session.suggestedName && session.suggestedName !== session.name && !editing && (
+        <div className="session-suggestion" onClick={(e) => e.stopPropagation()}>
+          <span className="session-suggestion-label">
+            Rename to <strong>“{session.suggestedName}”</strong>?
+          </span>
+          <button
+            className="session-suggestion-accept"
+            onClick={onAcceptSuggestion}
+            title="Accept suggestion"
+          >✓</button>
+          <button
+            className="session-suggestion-dismiss"
+            onClick={onDismissSuggestion}
+            title="Dismiss"
+          >✕</button>
+        </div>
+      )}
     </li>
   );
 }

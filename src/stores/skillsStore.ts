@@ -19,6 +19,28 @@ export interface PromptEvent {
 
 const MAX_RECENT = 30;
 
+/// Turn a user prompt into a short, file-name-ish label for the session row.
+/// Local & instant — first ~5 meaningful words, trimmed, capitalised.
+function deriveSessionLabel(prompt: string): string {
+  if (!prompt) return "";
+  let s = prompt
+    .replace(/```[\s\S]*?```/g, " ")  // drop fenced code blocks
+    .replace(/`[^`]*`/g, " ")          // drop inline code
+    .replace(/https?:\/\/\S+/g, " ")   // drop urls
+    .replace(/[#*_>`~|]/g, " ")        // drop markdown punctuation
+    .replace(/[\r\n]+/g, " ")
+    .trim();
+  // Cut at the first sentence boundary if present.
+  const m = s.match(/^[^.!?\n]{3,}/);
+  if (m) s = m[0];
+  const words = s.split(/\s+/).filter(Boolean).slice(0, 5);
+  let label = words.join(" ").slice(0, 40).trim();
+  if (!label) return "";
+  // Capitalise first letter, leave the rest as the user wrote it.
+  label = label.charAt(0).toUpperCase() + label.slice(1);
+  return label;
+}
+
 interface SkillsState {
   installed: Skill[];
   recent: PromptEvent[];
@@ -99,7 +121,21 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     // one running claude.
     if (e.sessionId) {
       const { activeId } = useTerminalsStore.getState();
-      if (activeId) useTerminalsStore.getState().setClaudeSessionId(activeId, e.sessionId);
+      if (activeId) {
+        useTerminalsStore.getState().setClaudeSessionId(activeId, e.sessionId);
+        // Offer a meaningful rename derived from the first prompt — only if
+        // this is still the first prompt (the session had no claudeSessionId
+        // before we just set it).
+        const target = useTerminalsStore.getState().sessions.find((s) => s.id === activeId);
+        const hadNoPriorClaude = !!target && target.claudeSessionId === e.sessionId
+          && !target.suggestedName; // not yet suggested
+        if (hadNoPriorClaude) {
+          const label = deriveSessionLabel(e.prompt);
+          if (label && label !== target.name) {
+            useTerminalsStore.getState().suggestName(activeId, label);
+          }
+        }
+      }
     }
   },
 

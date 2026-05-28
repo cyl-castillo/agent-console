@@ -20,6 +20,10 @@ pub struct PersistedSession {
     /// auto-resume a Claude conversation when the user reactivates this terminal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_session_id: Option<String>,
+    /// True once the rename suggestion has been offered for this session, so
+    /// we don't re-suggest on every subsequent prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_suggested: Option<bool>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

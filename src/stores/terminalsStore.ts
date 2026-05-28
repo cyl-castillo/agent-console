@@ -18,6 +18,12 @@ export interface TerminalSession {
   /// Claude Code session id captured from the UserPromptSubmit hook. When set,
   /// resuming this terminal auto-runs `claude --resume <id>` after spawn.
   claudeSessionId?: string;
+  /// Derived from the first user prompt; offered inline as a rename suggestion.
+  /// Cleared once accepted, dismissed, or when the user renames manually.
+  suggestedName?: string;
+  /// True after the very first auto-suggestion fires for this session. Keeps
+  /// us from re-suggesting on every subsequent prompt.
+  nameSuggested?: boolean;
 }
 
 interface TerminalsState {
@@ -37,6 +43,9 @@ interface TerminalsState {
   markLive: (id: string) => void;
   /// Tag a terminal session with the Claude Code session id from the hook.
   setClaudeSessionId: (id: string, claudeId: string) => void;
+  suggestName: (id: string, name: string) => void;
+  acceptSuggestion: (id: string) => void;
+  dismissSuggestion: (id: string) => void;
   /// Buffer output bytes into the live scrollback (called frequently — does not notify subscribers).
   appendOutput: (id: string, chunk: string) => void;
   /// Remove session entirely (kill+delete).
@@ -75,6 +84,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       name: p.name,
       cwd: p.cwd,
       createdAtMs: p.createdAtMs,
+      nameSuggested: p.nameSuggested,
       initialScrollback: p.scrollback,
       liveScrollback: "",
       status: "stopped",
@@ -118,7 +128,42 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   rename: (id, name) => {
     const { sessions } = get();
     set({
-      sessions: sessions.map((s) => (s.id === id ? { ...s, name } : s)),
+      // Manual rename clears any pending suggestion.
+      sessions: sessions.map((s) => (s.id === id ? { ...s, name, suggestedName: undefined } : s)),
+    });
+  },
+
+  suggestName: (id, name) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const { sessions } = get();
+    const target = sessions.find((s) => s.id === id);
+    if (!target) return;
+    if (target.nameSuggested) return;               // already had its shot
+    if (target.name === trimmed) return;            // already named that
+    if (target.suggestedName === trimmed) return;   // same suggestion already pending
+    set({
+      sessions: sessions.map((s) => (s.id === id ? { ...s, suggestedName: trimmed, nameSuggested: true } : s)),
+    });
+    get().persist();
+  },
+
+  acceptSuggestion: (id) => {
+    const { sessions } = get();
+    const target = sessions.find((s) => s.id === id);
+    if (!target?.suggestedName) return;
+    set({
+      sessions: sessions.map((s) =>
+        s.id === id ? { ...s, name: s.suggestedName ?? s.name, suggestedName: undefined } : s,
+      ),
+    });
+    get().persist();
+  },
+
+  dismissSuggestion: (id) => {
+    const { sessions } = get();
+    set({
+      sessions: sessions.map((s) => (s.id === id ? { ...s, suggestedName: undefined } : s)),
     });
   },
 
@@ -181,6 +226,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         createdAtMs: s.createdAtMs,
         scrollback: trimmed,
         claudeSessionId: s.claudeSessionId,
+        nameSuggested: s.nameSuggested,
       };
     });
     try {
