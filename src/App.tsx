@@ -28,6 +28,7 @@ import { GettingStartedModal } from "./components/GettingStartedModal";
 import { OnboardingBanner } from "./components/OnboardingBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { CommandPalette } from "./components/CommandPalette";
+import { StatusBar } from "./components/StatusBar";
 import { usePaletteStore } from "./stores/paletteStore";
 import { useOnboardingStore } from "./stores/onboardingStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -303,6 +304,7 @@ export default function App() {
             </div>
           )}
         </aside>
+        <StatusBar />
       </div>
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showGettingStarted && (

@@ -56,10 +56,11 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .app {
   display: grid;
   grid-template-columns: 240px 1fr 320px;
-  grid-template-rows: 32px 1fr;
+  grid-template-rows: 32px 1fr 22px;
   grid-template-areas:
     "topbar topbar topbar"
-    "left   center right";
+    "left   center right"
+    "status status status";
   height: 100vh;
   width: 100vw;
 }
@@ -157,7 +158,8 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   grid-template-columns: 0 1fr 320px;
   grid-template-areas:
     "topbar topbar topbar"
-    "center center right";
+    "center center right"
+    "status status status";
 }
 .panel.center { grid-area: center; background: var(--bg); border-right: 1px solid var(--border); }
 .panel.right  { grid-area: right; border-right: none; border-left: 1px solid var(--border); }
@@ -3657,3 +3659,48 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   justify-content: center;
   line-height: 1;
 }
+
+/* ===== Status bar ===== */
+.statusbar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--bg-elev-1);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+  user-select: none;
+}
+.sb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  height: 22px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: default;
+  border-radius: 0;
+}
+.sb-clickable { cursor: pointer; }
+.sb-clickable:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+.sb-icon { opacity: 0.85; }
+.sb-sub { color: var(--text-faint); margin-left: 2px; }
+.sb-spacer { flex: 1 1 auto; }
+.sb-muted { color: var(--text-faint); }
+.sb-warn { color: #fbbf24; }
+.sb-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-faint);
+}
+.sb-dot-live { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.6); }
+.sb-dot-stopped { background: var(--text-faint); }
+
+/* Muted side section (e.g. Changes when not a git repo). */
+.side-section.muted .side-section-header .title { color: var(--text-faint); }
