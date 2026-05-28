@@ -24,6 +24,10 @@ pub struct PersistedSession {
     /// we don't re-suggest on every subsequent prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name_suggested: Option<bool>,
+    /// Model alias or full id last chosen for this session, replayed as
+    /// `claude --model <model>` when the terminal spawns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

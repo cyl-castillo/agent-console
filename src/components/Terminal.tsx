@@ -7,6 +7,15 @@ import "@xterm/xterm/css/xterm.css";
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useThemeStore } from "../stores/themeStore";
+import { isValidModel } from "../stores/modelStore";
+
+/// Detail for the `ac:term-input` window event: write `data` into the PTY of
+/// the session whose id matches. Used by the StatusBar model pill to send
+/// `/model <alias>` into a live Claude session without leaking PTY ids.
+export interface TermInputDetail {
+  sessionId: string;
+  data: string;
+}
 
 const TERM_THEMES = {
   dark:  { background: "#0d0f12", foreground: "#d9dde3", cursor: "#6aa9ff" },
@@ -108,6 +117,12 @@ export function Terminal({ session, visible }: Props) {
           label = "claude";
           note = session.initialScrollback ? "starting fresh (no session id)" : "starting";
         }
+        // Pin the chosen model. Validated to be shell-safe before interpolating
+        // into the command we write to the PTY (see isValidModel).
+        if (isValidModel(session.model)) {
+          cmd += ` --model ${session.model}`;
+          label += ` · ${session.model}`;
+        }
         const tid = termId;
         const launchCmd = cmd;
         const launchLabel = label;
@@ -174,6 +189,15 @@ export function Terminal({ session, visible }: Props) {
     const onClear = () => { term.clear(); };
     window.addEventListener("ac:clear-terminal", onClear);
 
+    // External input (e.g. the StatusBar model pill sending `/model <alias>`).
+    // Only act if the event targets this session and our PTY is live.
+    const onTermInput = (e: Event) => {
+      const detail = (e as CustomEvent<TermInputDetail>).detail;
+      if (!detail || detail.sessionId !== session.id || !termId) return;
+      ipc.termWrite(termId, detail.data).catch(() => {});
+    };
+    window.addEventListener("ac:term-input", onTermInput as EventListener);
+
     return () => {
       disposed = true;
       if (debounceTimer !== null) window.clearTimeout(debounceTimer);
@@ -182,6 +206,7 @@ export function Terminal({ session, visible }: Props) {
       unlistenExit?.();
       if (termId) ipc.termKill(termId).catch(() => {});
       window.removeEventListener("ac:clear-terminal", onClear);
+      window.removeEventListener("ac:term-input", onTermInput as EventListener);
       window.removeEventListener("focus", onFocus);
       term.dispose();
     };

@@ -93,6 +93,9 @@ export interface PersistedSession {
   scrollback: string;
   claudeSessionId?: string;
   nameSuggested?: boolean;
+  /// Model alias or full id last chosen for this session (passed as
+  /// `claude --model <model>` on launch). Undefined = account default.
+  model?: string;
 }
 
 export interface HooksStatus {

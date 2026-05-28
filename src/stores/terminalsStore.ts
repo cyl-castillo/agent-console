@@ -24,6 +24,9 @@ export interface TerminalSession {
   /// True after the very first auto-suggestion fires for this session. Keeps
   /// us from re-suggesting on every subsequent prompt.
   nameSuggested?: boolean;
+  /// Model alias or full id chosen for this session. Passed as
+  /// `claude --model <model>` on launch; undefined = account default.
+  model?: string;
 }
 
 interface TerminalsState {
@@ -34,7 +37,7 @@ interface TerminalsState {
   hydrate: (projectRoot: string) => Promise<void>;
   clear: () => void;
   /// Adds a new session (status "live"). Caller is responsible for spawning the PTY.
-  add: (cwd: string, name?: string) => string;
+  add: (cwd: string, name?: string, model?: string) => string;
   /// Marks a stopped session as live again so Terminal mounts and spawns.
   resume: (id: string) => void;
   setActive: (id: string) => void;
@@ -43,6 +46,8 @@ interface TerminalsState {
   markLive: (id: string) => void;
   /// Tag a terminal session with the Claude Code session id from the hook.
   setClaudeSessionId: (id: string, claudeId: string) => void;
+  /// Set (or clear, with undefined) the model for a session and persist it.
+  setModel: (id: string, model: string | undefined) => void;
   suggestName: (id: string, name: string) => void;
   acceptSuggestion: (id: string) => void;
   dismissSuggestion: (id: string) => void;
@@ -89,6 +94,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       liveScrollback: "",
       status: "stopped",
       claudeSessionId: p.claudeSessionId,
+      model: p.model,
     }));
     set({ projectRoot, sessions, activeId: null });
   },
@@ -97,7 +103,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     set({ projectRoot: null, sessions: [], activeId: null });
   },
 
-  add: (cwd, name) => {
+  add: (cwd, name, model) => {
     const id = genId();
     const { sessions } = get();
     const session: TerminalSession = {
@@ -108,6 +114,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       initialScrollback: "",
       liveScrollback: "",
       status: "live",
+      model,
     };
     set({ sessions: [...sessions, session], activeId: id });
     return id;
@@ -189,6 +196,16 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     get().persist();
   },
 
+  setModel: (id, model) => {
+    const { sessions } = get();
+    const target = sessions.find((s) => s.id === id);
+    if (!target || target.model === model) return;
+    set({
+      sessions: sessions.map((s) => (s.id === id ? { ...s, model } : s)),
+    });
+    get().persist();
+  },
+
   // Mutates in place — frequent calls (output streaming) should not trigger React re-renders.
   // We never depend on liveScrollback in selectors; it's only read at persist() time.
   appendOutput: (id, chunk) => {
@@ -227,6 +244,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         scrollback: trimmed,
         claudeSessionId: s.claudeSessionId,
         nameSuggested: s.nameSuggested,
+        model: s.model,
       };
     });
     try {

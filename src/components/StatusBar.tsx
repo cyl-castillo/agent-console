@@ -1,9 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useChangesStore } from "../stores/changesStore";
 import { useSessionStore } from "../stores/sessionStore";
-import { useTerminalsStore } from "../stores/terminalsStore";
+import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useUIStore } from "../stores/uiStore";
+import { useModelStore, MODEL_PRESETS, modelLabel } from "../stores/modelStore";
+import type { TermInputDetail } from "./Terminal";
 import type { WorkspaceContext } from "../types/domain";
 
 export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }) {
@@ -69,6 +71,7 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
           <span>{activeSession.name}</span>
         </button>
       )}
+      {activeSession && <ModelPill session={activeSession} projectRoot={project.root} />}
       <span className="sb-item sb-muted" title="Live PTY sessions">
         {liveCount} live
       </span>
@@ -85,5 +88,76 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
         <span className="sb-item sb-muted" title="Agent Console version">v{appVersion}</span>
       )}
     </footer>
+  );
+}
+
+/// Active-session model indicator + hot-switcher. Reflects the *last requested*
+/// model (we can't read Claude's actual loaded model). Picking a model updates
+/// the session (so a later resume relaunches with it) and, for a live session,
+/// sends `/model <alias>` into the PTY — best-effort: it only takes effect if
+/// Claude is idle at its prompt.
+function ModelPill({ session, projectRoot }: { session: TerminalSession; projectRoot: string }) {
+  const setModel = useTerminalsStore((s) => s.setModel);
+  const setDefaultFor = useModelStore((s) => s.setDefaultFor);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const pick = (model: string) => {
+    setOpen(false);
+    if (session.model === model) return;
+    setModel(session.id, model);
+    setDefaultFor(projectRoot, model);
+    if (session.status === "live") {
+      const detail: TermInputDetail = { sessionId: session.id, data: `/model ${model}\r` };
+      window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
+    }
+  };
+
+  const live = session.status === "live";
+  return (
+    <div className="model-pill-wrap" ref={wrapRef}>
+      <button
+        className="sb-item sb-clickable"
+        onClick={() => setOpen((v) => !v)}
+        title={
+          live
+            ? "Switch model — sends /model to Claude (works when it's idle at the prompt)"
+            : "Model used when this session resumes"
+        }
+      >
+        <span className="model-pill-glyph">◆</span>
+        <span>{modelLabel(session.model)}</span>
+      </button>
+      {open && (
+        <div className="model-menu" role="menu">
+          <div className="model-menu-head">{live ? "Switch model" : "Model on resume"}</div>
+          {MODEL_PRESETS.map((p) => (
+            <button
+              key={p.model}
+              className={`model-menu-item ${session.model === p.model ? "current" : ""}`}
+              onClick={() => pick(p.model)}
+            >
+              <span className="model-menu-icon">{p.icon}</span>
+              <span className="model-menu-intent">{p.intent}</span>
+              <span className="model-menu-model">{p.label}</span>
+            </button>
+          ))}
+          {live && (
+            <div className="model-menu-note">
+              Sends <code>/model</code> to the terminal — only takes effect if Claude is idle.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
