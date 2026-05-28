@@ -44,7 +44,6 @@ export default function App() {
   const clearChanges = useChangesStore((s) => s.clear);
   const clearPreview = usePreviewStore((s) => s.clear);
   const refreshSkills = useSkillsStore((s) => s.refresh);
-  const branch = useChangesStore((s) => s.status?.branch ?? null);
   const terminalSessions = useTerminalsStore((s) => s.sessions);
   const activeTerminalId = useTerminalsStore((s) => s.activeId);
   const hydrateTerminals = useTerminalsStore((s) => s.hydrate);
@@ -192,25 +191,6 @@ export default function App() {
             <span className="tb-project-name">{project.name}</span>
           </button>
 
-          <div className="tb-pills">
-            {project.language && (
-              <span className="tb-pill tb-pill-lang" title="Language">{project.language}</span>
-            )}
-            {project.framework && (
-              <span className="tb-pill" title="Framework">{project.framework}</span>
-            )}
-            {branch && (
-              <span className="tb-pill tb-pill-branch" title="Git branch">
-                <span className="tb-pill-icon">⎇</span>{branch}
-              </span>
-            )}
-            {workspace?.fileCount ? (
-              <span className="tb-pill tb-pill-files" title="Tracked files">
-                {workspace.fileCount} files
-              </span>
-            ) : null}
-          </div>
-
           <span className="spacer" />
 
           <button
@@ -304,7 +284,7 @@ export default function App() {
             </div>
           )}
         </aside>
-        <StatusBar />
+        <StatusBar workspace={workspace} />
       </div>
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showGettingStarted && (

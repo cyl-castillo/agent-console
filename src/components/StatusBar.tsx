@@ -4,8 +4,9 @@ import { useChangesStore } from "../stores/changesStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useUIStore } from "../stores/uiStore";
+import type { WorkspaceContext } from "../types/domain";
 
-export function StatusBar() {
+export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }) {
   const project = useSessionStore((s) => s.project);
   const status = useChangesStore((s) => s.status);
   const branches = useChangesStore((s) => s.branches);
@@ -74,6 +75,12 @@ export function StatusBar() {
       {project.language && (
         <span className="sb-item sb-muted" title="Language">{project.language}</span>
       )}
+      {project.framework && (
+        <span className="sb-item sb-muted" title="Framework">{project.framework}</span>
+      )}
+      {workspace?.fileCount ? (
+        <span className="sb-item sb-muted" title="Tracked files">{workspace.fileCount} files</span>
+      ) : null}
       {appVersion && (
         <span className="sb-item sb-muted" title="Agent Console version">v{appVersion}</span>
       )}
