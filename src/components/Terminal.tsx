@@ -130,14 +130,22 @@ export function Terminal({ session, visible }: Props) {
       });
     })();
 
-    // Coalesce fit() calls into the next animation frame and skip while the
-    // host has no real size (hidden tab). Without this, conpty's redraw on
-    // each resize loops back through ResizeObserver and the terminal flickers.
+    // Refit only when the host's outer size actually changed. Without the
+    // dimension guard, conpty (Windows) loops: each resize triggers Claude to
+    // redraw its UI, the redraw nudges xterm's inner DOM by sub-pixel amounts,
+    // ResizeObserver fires again, fit() recomputes a slightly different
+    // cols/rows, conpty resizes again, repeat — visible as the Claude banner
+    // jumping/redrawing constantly.
     let rafPending = false;
+    let lastW = 0;
+    let lastH = 0;
     const ro = new ResizeObserver(() => {
       if (rafPending) return;
       const rect = host.getBoundingClientRect();
       if (rect.width < 8 || rect.height < 8) return;
+      // Ignore tiny fluctuations (rounding / sub-pixel layout shifts).
+      if (Math.abs(rect.width - lastW) < 2 && Math.abs(rect.height - lastH) < 2) return;
+      lastW = rect.width; lastH = rect.height;
       rafPending = true;
       requestAnimationFrame(() => {
         rafPending = false;
