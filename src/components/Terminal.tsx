@@ -7,17 +7,6 @@ import "@xterm/xterm/css/xterm.css";
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 
-// Heuristic: does this scrollback look like a Claude Code session? We pick
-// strings that only appear when claude is actually running a conversation
-// (model name, token counter, interrupt hint) rather than the bare word
-// "claude" which can show up in unrelated code/output.
-// No word boundaries: scrollback contains ANSI escape sequences (ending in
-// "m") immediately before these markers, which breaks `\b` matching.
-const CLAUDE_MARKERS = /(Opus|Sonnet|Haiku|Tokens used|esc to interrupt|Auto-update|claude-code)/;
-function looksLikeClaudeSession(scrollback: string): boolean {
-  return CLAUDE_MARKERS.test(scrollback);
-}
-
 interface Props {
   session: TerminalSession;
   visible: boolean;
@@ -95,39 +84,34 @@ export function Terminal({ session, visible }: Props) {
         return;
       }
 
-      // Auto-resume claude when this terminal was previously running it.
-      // Prefer the captured session id (precise); fall back to `--continue`
-      // when the scrollback shows claude markers but no id was captured
-      // (older sessions, or hook missed the prompt).
-      // For brand-new terminals (no scrollback) just launch `claude` fresh,
-      // so opening a session drops straight into Claude without typing.
+      // Auto-launch claude. Only do precise --resume when this terminal has a
+      // captured claudeSessionId (from the UserPromptSubmit hook). Never use
+      // `claude --continue` as a fallback: it picks the LAST claude session
+      // globally, so multiple stopped terminals would all converge on the
+      // same conversation. When the id is missing we just start `claude`
+      // fresh — the user can run `/resume` inside claude to pick one.
       if (termId) {
-        let cmd: string | null = null;
-        let label = "claude";
-        if (session.initialScrollback) {
-          if (session.claudeSessionId) {
-            cmd = `claude --resume ${session.claudeSessionId}`;
-            label = `claude (${session.claudeSessionId.slice(0, 8)}…)`;
-          } else if (looksLikeClaudeSession(session.initialScrollback)) {
-            cmd = "claude --continue";
-            label = "last claude conversation";
-          }
+        let cmd: string;
+        let label: string;
+        let note: string;
+        if (session.claudeSessionId) {
+          cmd = `claude --resume ${session.claudeSessionId}`;
+          label = `claude (${session.claudeSessionId.slice(0, 8)}…)`;
+          note = "auto-resuming";
         } else {
-          // TODO: when a default-model setting exists, append `--model <id>`.
           cmd = "claude";
           label = "claude";
+          note = session.initialScrollback ? "starting fresh (no session id)" : "starting";
         }
-        if (cmd) {
-          const tid = termId;
-          const launchCmd = cmd;
-          const launchLabel = label;
-          const note = session.initialScrollback ? "auto-resuming" : "starting";
-          setTimeout(() => {
-            if (disposed) return;
-            term.write(`\x1b[90m── ${note} ${launchLabel} ──\x1b[0m\r\n`);
-            ipc.termWrite(tid, `${launchCmd}\r`).catch(() => {});
-          }, 600);
-        }
+        const tid = termId;
+        const launchCmd = cmd;
+        const launchLabel = label;
+        const launchNote = note;
+        setTimeout(() => {
+          if (disposed) return;
+          term.write(`\x1b[90m── ${launchNote} ${launchLabel} ──\x1b[0m\r\n`);
+          ipc.termWrite(tid, `${launchCmd}\r`).catch(() => {});
+        }, 600);
       }
 
       term.onData((data) => {
