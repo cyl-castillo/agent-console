@@ -192,3 +192,20 @@ export interface HookUserPromptEvent {
   skill?: string;
   sessionId?: string;
 }
+
+export type FeedbackCategory = "bug" | "feature" | "ux" | "other";
+export type FeedbackSeverity = "low" | "medium" | "high";
+
+export interface FeedbackInput {
+  title: string;
+  description: string;
+  category: FeedbackCategory;
+  severity: FeedbackSeverity;
+}
+
+export interface FeedbackContext {
+  appVersion: string;
+  os: string;
+  projectName: string | null;
+  branch: string | null;
+}

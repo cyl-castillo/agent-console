@@ -5,9 +5,10 @@ import { usePermissionsStore } from "../stores/permissionsStore";
 import { useAdvisorStore } from "../stores/advisorStore";
 import { useVaultStore } from "../stores/vaultStore";
 import { useContextStore } from "../stores/contextStore";
+import { useFeedbackStore } from "../stores/feedbackStore";
 import { parseRaw, classify } from "../permissions/rules";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "feedback";
 
 export function WorkbenchTabs({
   active,
@@ -25,6 +26,7 @@ export function WorkbenchTabs({
   const advisorAnalyzing = useAdvisorStore((s) => s.status === "analyzing");
   const vaultCount = useVaultStore((s) => s.entries.length);
   const memoriesCount = useContextStore((s) => s.memories.length);
+  const feedbackEnabled = useFeedbackStore((s) => s.devEnabled === true);
 
   const flagged = useMemo(() => {
     if (!permsRules) return 0;
@@ -40,62 +42,83 @@ export function WorkbenchTabs({
   }, [permsRules]);
 
   return (
-    <div className="workbench-tabs">
-      <TabButton
+    <div className="workbench-strip">
+      <StripButton
+        icon="🧩"
         label="Skills"
+        title="Skills"
         count={skillsCount}
         active={active === "skills"}
         onClick={() => onChange("skills")}
       />
-      <TabButton
-        label="Permissions"
+      <StripButton
+        icon="🔑"
+        label="Perms"
+        title="Permissions"
         count={permsCount}
         flagged={flagged}
         active={active === "permissions"}
         onClick={() => onChange("permissions")}
       />
-      <TabButton
-        label={advisorAnalyzing ? "Advisor…" : "Advisor"}
+      <StripButton
+        icon="🧠"
+        label={advisorAnalyzing ? "…" : "Advisor"}
+        title={advisorAnalyzing ? "Advisor (analyzing)" : "Advisor"}
         count={advisorPending}
         active={active === "advisor"}
         onClick={() => onChange("advisor")}
       />
-      <TabButton
+      <StripButton
+        icon="🔐"
         label="Vault"
+        title="Vault"
         count={vaultCount}
         active={active === "vault"}
         onClick={() => onChange("vault")}
       />
-      <TabButton
+      <StripButton
+        icon="📄"
         label="Context"
+        title="Context"
         count={memoriesCount}
         active={active === "context"}
         onClick={() => onChange("context")}
       />
+      {feedbackEnabled && (
+        <StripButton
+          icon="💬"
+          label="Feedback"
+          title="Feedback (dev only)"
+          active={active === "feedback"}
+          onClick={() => onChange("feedback")}
+        />
+      )}
     </div>
   );
 }
 
-function TabButton({ label, count, flagged, active, onClick }: {
+function StripButton({ icon, label, title, count, flagged, active, onClick }: {
+  icon: string;
   label: string;
+  title: string;
   count?: number;
   flagged?: number;
   active: boolean;
   onClick: () => void;
 }) {
+  const tooltip = flagged
+    ? `${title} — ${flagged} rule${flagged === 1 ? "" : "s"} need review`
+    : title;
   return (
     <button
-      className={`wb-tab ${active ? "active" : ""}`}
+      className={`wb-strip-btn ${active ? "active" : ""}`}
       onClick={onClick}
-      title={flagged ? `${flagged} rule${flagged === 1 ? "" : "s"} need review` : undefined}
+      title={tooltip}
     >
-      <span className="wb-tab-label">{label}</span>
-      {count !== undefined && count > 0 && <span className="wb-tab-count">{count}</span>}
-      {flagged !== undefined && flagged > 0 && (
-        <span className="wb-tab-flag" title={`${flagged} broad/dangerous allow rule${flagged === 1 ? "" : "s"}`}>
-          {flagged}
-        </span>
-      )}
+      <span className="wb-strip-icon">{icon}</span>
+      <span className="wb-strip-label">{label}</span>
+      {count !== undefined && count > 0 && <span className="wb-strip-count">{count}</span>}
+      {flagged !== undefined && flagged > 0 && <span className="wb-strip-flag">{flagged}</span>}
     </button>
   );
 }

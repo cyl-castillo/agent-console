@@ -3485,3 +3485,156 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   font-family: inherit; font-size: 10px;
   margin: 0 2px;
 }
+
+/* ===== Feedback panel ===== */
+.feedback-panel {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+}
+.feedback-header h3 { margin: 0 0 4px 0; font-size: 14px; }
+.feedback-help { margin: 0; font-size: 12px; color: var(--muted, #8a93a0); }
+.feedback-label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--muted, #8a93a0);
+}
+.feedback-row { display: flex; gap: 10px; }
+.feedback-row .feedback-label { flex: 1; }
+.feedback-input {
+  background: var(--bg-elev, #1c1f24);
+  color: var(--text, #e7eaee);
+  border: 1px solid var(--border, #2a2f37);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.feedback-input:focus { outline: 1px solid #60a5fa; }
+.feedback-textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, monospace; }
+.feedback-context {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border, #2a2f37);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px; color: var(--muted, #8a93a0);
+}
+.feedback-context-title { font-weight: 600; margin-bottom: 4px; color: var(--text, #e7eaee); }
+.feedback-context ul { margin: 0; padding-left: 14px; }
+.feedback-actions { display: flex; gap: 8px; }
+.feedback-submit {
+  background: #2563eb; color: white; border: 0;
+  padding: 7px 14px; border-radius: 4px; cursor: pointer;
+  font-size: 13px;
+}
+.feedback-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+.feedback-reset {
+  background: transparent; color: var(--muted, #8a93a0);
+  border: 1px solid var(--border, #2a2f37);
+  padding: 7px 12px; border-radius: 4px; cursor: pointer;
+}
+.feedback-success {
+  background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.4);
+  color: #86efac; padding: 8px 10px; border-radius: 4px; font-size: 12px;
+  word-break: break-all;
+}
+.feedback-success a { color: #86efac; text-decoration: underline; }
+.feedback-error {
+  background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.4);
+  color: #fca5a5; padding: 8px 10px; border-radius: 4px; font-size: 12px;
+  word-break: break-word;
+}
+
+/* ===== Workbench vertical strip (VS Code activity bar style) ===== */
+.workbench-layout {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  min-height: 0;
+}
+.workbench-strip {
+  display: flex;
+  flex-direction: column;
+  width: 64px;
+  flex-shrink: 0;
+  background: var(--bg-elev-1, #1c1f24);
+  border-right: 1px solid var(--border, #2a2f37);
+  padding: 6px 0;
+  gap: 2px;
+  overflow-y: auto;
+}
+.workbench-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.wb-strip-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: transparent;
+  border: 0;
+  padding: 8px 4px;
+  color: var(--text-dim, #8a93a0);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  width: 100%;
+}
+.wb-strip-btn:hover { color: var(--text, #e7eaee); background: rgba(255,255,255,0.04); }
+.wb-strip-btn.active {
+  color: var(--accent, #60a5fa);
+  border-left-color: var(--accent, #60a5fa);
+  background: rgba(96, 165, 250, 0.08);
+}
+.wb-strip-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+.wb-strip-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  line-height: 1;
+}
+.wb-strip-count {
+  position: absolute;
+  top: 4px; right: 6px;
+  background: rgba(255,255,255,0.12);
+  color: var(--text, #e7eaee);
+  border-radius: 8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.wb-strip-btn.active .wb-strip-count {
+  background: var(--accent-soft, rgba(96,165,250,0.25));
+  color: var(--accent, #60a5fa);
+}
+.wb-strip-flag {
+  position: absolute;
+  top: 4px; left: 6px;
+  background: rgba(251, 191, 36, 0.85);
+  color: #1c1f24;
+  border-radius: 8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}

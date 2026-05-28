@@ -18,6 +18,8 @@ import { PermissionsPanel } from "./components/PermissionsPanel";
 import { AdvisorPanel } from "./components/AdvisorPanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { ContextPanel } from "./components/ContextPanel";
+import { FeedbackPanel } from "./components/FeedbackPanel";
+import { useFeedbackStore } from "./stores/feedbackStore";
 import { WorkbenchTabs } from "./components/WorkbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
@@ -53,7 +55,8 @@ export default function App() {
   const [showGettingStarted, setShowGettingStarted] = useState(false);
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
-  const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions" | "advisor" | "vault" | "context">("skills");
+  const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions" | "advisor" | "vault" | "context" | "feedback">("skills");
+  const initFeedback = useFeedbackStore((s) => s.init);
   const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
   const reloadPaletteIndex = usePaletteStore((s) => s.reloadIndex);
@@ -97,6 +100,8 @@ export default function App() {
   useEffect(() => {
     checkForUpdates({ silentIfNone: true });
   }, [checkForUpdates]);
+
+  useEffect(() => { void initFeedback(); }, [initFeedback]);
 
   // First-time auto-open of the Getting Started guide.
   useEffect(() => {
@@ -282,14 +287,17 @@ export default function App() {
           {tab === "changes" ? (
             <FileInspector />
           ) : (
-            <>
+            <div className="workbench-layout">
               <WorkbenchTabs active={workbenchTab} onChange={setWorkbenchTab} />
-              {workbenchTab === "skills" && <SkillsPanel />}
-              {workbenchTab === "permissions" && <PermissionsPanel />}
-              {workbenchTab === "advisor" && <AdvisorPanel />}
-              {workbenchTab === "vault" && <VaultPanel />}
-              {workbenchTab === "context" && <ContextPanel />}
-            </>
+              <div className="workbench-content">
+                {workbenchTab === "skills" && <SkillsPanel />}
+                {workbenchTab === "permissions" && <PermissionsPanel />}
+                {workbenchTab === "advisor" && <AdvisorPanel />}
+                {workbenchTab === "vault" && <VaultPanel />}
+                {workbenchTab === "context" && <ContextPanel />}
+                {workbenchTab === "feedback" && <FeedbackPanel />}
+              </div>
+            </div>
           )}
         </aside>
       </div>

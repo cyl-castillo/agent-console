@@ -6,6 +6,7 @@ import type {
   AdvisorAnalysisResult,
   BranchInfo,
   ContextFileStat, ContextStatus,
+  FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   MemoryEntry, PermissionsSnapshot,
   PersistedSession, Project, RecentProject, Skill, StoredRule, VaultEntryView,
@@ -104,6 +105,11 @@ export const ipc = {
     invoke<void>("vault_delete", { scope, key }),
   vaultGetValue: (scope: "project" | "global", key: string) =>
     invoke<string>("vault_get_value", { scope, key }),
+
+  feedbackDevEnabled: () => invoke<boolean>("feedback_dev_enabled"),
+  feedbackContext: () => invoke<FeedbackContext>("feedback_context"),
+  feedbackSubmit: (input: FeedbackInput) =>
+    invoke<string>("feedback_submit", { input }),
 
   advisorAnalyze: () => invoke<AdvisorAnalysisResult>("advisor_analyze"),
   advisorCreateSkill: (
