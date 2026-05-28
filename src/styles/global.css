@@ -1,4 +1,4 @@
-/* Minimal dark theme. Mono-first, terminal-feel. */
+/* Minimal theme. Mono-first, terminal-feel. Dark default, light opt-in. */
 
 :root {
   --bg: #0d0f12;
@@ -17,6 +17,22 @@
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
   color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-elev-1: #f5f7fa;
+  --bg-elev-2: #edf1f6;
+  --border: #d8dde5;
+  --text: #1a1d23;
+  --text-dim: #5b626d;
+  --text-faint: #9ba3af;
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.10);
+  --danger: #dc2626;
+  --ok: #16a34a;
+
+  color-scheme: light;
 }
 
 * {
@@ -1377,12 +1393,16 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .about-links a:hover { color: var(--accent); border-color: var(--accent); }
 
 .topbar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   padding: 2px 8px;
   color: var(--text-faint);
   font-size: 14px;
   cursor: pointer;
+  line-height: 1;
 }
 .topbar-icon:hover { color: var(--accent); background: transparent; border: none; }
 
@@ -3704,3 +3724,25 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 
 /* Muted side section (e.g. Changes when not a git repo). */
 .side-section.muted .side-section-header .title { color: var(--text-faint); }
+
+/* ===== Light theme surface tweaks =====
+   Catches the most visible spots where dark-only rgba(255,255,255,...)
+   was used. Full audit pending; this covers nav/hover/badge surfaces. */
+:root[data-theme="light"] .wb-strip-btn:hover { background: rgba(0,0,0,0.04); }
+:root[data-theme="light"] .wb-strip-btn.active { background: rgba(37, 99, 235, 0.08); }
+:root[data-theme="light"] .wb-strip-count {
+  background: rgba(0,0,0,0.08);
+  color: var(--text);
+}
+:root[data-theme="light"] .sb-clickable:hover { background: rgba(0,0,0,0.05); }
+:root[data-theme="light"] .palette-row.selected { background: rgba(37, 99, 235, 0.10); }
+:root[data-theme="light"] .palette {
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.18);
+}
+:root[data-theme="light"] .palette-backdrop { background: rgba(15, 23, 42, 0.25); }
+:root[data-theme="light"] .palette-footer kbd {
+  background: rgba(0,0,0,0.06);
+  border-color: rgba(0,0,0,0.10);
+  color: var(--text);
+}
+:root[data-theme="light"] .feedback-context { background: rgba(0,0,0,0.03); }

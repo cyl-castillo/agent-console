@@ -29,6 +29,8 @@ import { OnboardingBanner } from "./components/OnboardingBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { CommandPalette } from "./components/CommandPalette";
 import { StatusBar } from "./components/StatusBar";
+import { useThemeStore } from "./stores/themeStore";
+import { Icon } from "./components/Icon";
 import { usePaletteStore } from "./stores/paletteStore";
 import { useOnboardingStore } from "./stores/onboardingStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -57,6 +59,8 @@ export default function App() {
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
   const [workbenchTab, setWorkbenchTab] = useState<"skills" | "permissions" | "advisor" | "vault" | "context" | "feedback">("skills");
   const initFeedback = useFeedbackStore((s) => s.init);
+  const theme = useThemeStore((s) => s.theme);
+  const toggleTheme = useThemeStore((s) => s.toggle);
   const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
   const reloadPaletteIndex = usePaletteStore((s) => s.reloadIndex);
@@ -193,6 +197,13 @@ export default function App() {
 
           <span className="spacer" />
 
+          <button
+            className="topbar-icon"
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+          >
+            <Icon name={theme === "dark" ? "sun" : "moon"} size={14} />
+          </button>
           <button
             className="topbar-icon"
             onClick={() => setShowGettingStarted(true)}
