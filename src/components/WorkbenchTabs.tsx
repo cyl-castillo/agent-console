@@ -7,6 +7,7 @@ import { useVaultStore } from "../stores/vaultStore";
 import { useContextStore } from "../stores/contextStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
 import { parseRaw, classify } from "../permissions/rules";
+import { Icon, type IconName } from "./Icon";
 
 export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "feedback";
 
@@ -44,7 +45,7 @@ export function WorkbenchTabs({
   return (
     <div className="workbench-strip">
       <StripButton
-        icon="🧩"
+        icon="puzzle"
         label="Skills"
         title="Skills"
         count={skillsCount}
@@ -52,7 +53,7 @@ export function WorkbenchTabs({
         onClick={() => onChange("skills")}
       />
       <StripButton
-        icon="🔑"
+        icon="key"
         label="Perms"
         title="Permissions"
         count={permsCount}
@@ -61,7 +62,7 @@ export function WorkbenchTabs({
         onClick={() => onChange("permissions")}
       />
       <StripButton
-        icon="🧠"
+        icon="lightbulb"
         label={advisorAnalyzing ? "…" : "Advisor"}
         title={advisorAnalyzing ? "Advisor (analyzing)" : "Advisor"}
         count={advisorPending}
@@ -69,7 +70,7 @@ export function WorkbenchTabs({
         onClick={() => onChange("advisor")}
       />
       <StripButton
-        icon="🔐"
+        icon="lock"
         label="Vault"
         title="Vault"
         count={vaultCount}
@@ -77,7 +78,7 @@ export function WorkbenchTabs({
         onClick={() => onChange("vault")}
       />
       <StripButton
-        icon="📄"
+        icon="file-text"
         label="Context"
         title="Context"
         count={memoriesCount}
@@ -86,7 +87,7 @@ export function WorkbenchTabs({
       />
       {feedbackEnabled && (
         <StripButton
-          icon="💬"
+          icon="message-square"
           label="Feedback"
           title="Feedback (dev only)"
           active={active === "feedback"}
@@ -98,7 +99,7 @@ export function WorkbenchTabs({
 }
 
 function StripButton({ icon, label, title, count, flagged, active, onClick }: {
-  icon: string;
+  icon: IconName;
   label: string;
   title: string;
   count?: number;
@@ -115,7 +116,7 @@ function StripButton({ icon, label, title, count, flagged, active, onClick }: {
       onClick={onClick}
       title={tooltip}
     >
-      <span className="wb-strip-icon">{icon}</span>
+      <span className="wb-strip-icon"><Icon name={icon} size={18} /></span>
       <span className="wb-strip-label">{label}</span>
       {count !== undefined && count > 0 && <span className="wb-strip-count">{count}</span>}
       {flagged !== undefined && flagged > 0 && <span className="wb-strip-flag">{flagged}</span>}

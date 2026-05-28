@@ -238,22 +238,25 @@ export default function App() {
               onClick={() => setTab("terminal")}
               title="Ctrl+1"
             >
-              Terminal
+              <span>Terminal</span>
+              <span className="tab-shortcut">Ctrl 1</span>
             </button>
             <button
               className={`tab ${tab === "changes" ? "active" : ""}`}
               onClick={() => setTab("changes")}
               title="Ctrl+2"
             >
-              Changes
+              <span>Changes</span>
               {changesCount > 0 && <span className="tab-badge">{changesCount}</span>}
+              <span className="tab-shortcut">Ctrl 2</span>
             </button>
             <button
               className={`tab ${tab === "preview" ? "active" : ""}`}
               onClick={() => setTab("preview")}
               title="Ctrl+3"
             >
-              Preview
+              <span>Preview</span>
+              <span className="tab-shortcut">Ctrl 3</span>
             </button>
           </div>
           <div className="tab-pane" style={{ display: tab === "terminal" ? "flex" : "none" }}>

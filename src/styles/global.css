@@ -293,14 +293,17 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   border-bottom: 1px solid var(--border);
 }
 .tab {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--text-faint);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
-  padding: 8px 10px;
+  padding: 8px 12px 9px;
   cursor: pointer;
   border-radius: 0;
 }
@@ -309,17 +312,29 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   color: var(--text);
   border-bottom-color: var(--accent);
 }
-.tab-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 6px;
+.tab-shortcut {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0.3px;
+  opacity: 0.7;
+}
+.tab.active .tab-shortcut { color: var(--text-dim); opacity: 1; }
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
   color: var(--bg);
   background: var(--accent);
   border-radius: 8px;
   letter-spacing: 0;
   text-transform: none;
+  line-height: 1;
 }
 .tab-pane {
   flex: 1;
@@ -3593,9 +3608,13 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   background: rgba(96, 165, 250, 0.08);
 }
 .wb-strip-icon {
-  font-size: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
+  opacity: 0.9;
 }
+.wb-strip-btn.active .wb-strip-icon { opacity: 1; }
 .wb-strip-label {
   font-size: 10px;
   font-weight: 500;
