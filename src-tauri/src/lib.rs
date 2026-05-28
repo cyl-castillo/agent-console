@@ -79,6 +79,8 @@ pub fn run() {
             commands::feedback::feedback_dev_enabled,
             commands::feedback::feedback_context,
             commands::feedback::feedback_submit,
+            commands::plugins::plugins_list_installed,
+            commands::plugins::plugins_marketplace,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

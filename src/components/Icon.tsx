@@ -9,7 +9,8 @@ export type IconName =
   | "file-text"
   | "message-square"
   | "sun"
-  | "moon";
+  | "moon"
+  | "plug";
 
 interface Props {
   name: IconName;
@@ -90,4 +91,14 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   // Lucide: moon
   moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
+  // Lucide: plug-zap
+  plug: (
+    <>
+      <path d="M6 3v6" /><path d="M10 3v6" />
+      <path d="M14 12v4a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2v-4" />
+      <path d="M4 12h12" />
+      <path d="M10 18v3" />
+      <path d="m20 7-3 5h4l-3 5" />
+    </>
+  ),
 };

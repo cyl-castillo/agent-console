@@ -6,10 +6,11 @@ import { useAdvisorStore } from "../stores/advisorStore";
 import { useVaultStore } from "../stores/vaultStore";
 import { useContextStore } from "../stores/contextStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
+import { usePluginsStore } from "../stores/pluginsStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "feedback";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "plugins" | "feedback";
 
 export function WorkbenchTabs({
   active,
@@ -27,6 +28,7 @@ export function WorkbenchTabs({
   const advisorAnalyzing = useAdvisorStore((s) => s.status === "analyzing");
   const vaultCount = useVaultStore((s) => s.entries.length);
   const memoriesCount = useContextStore((s) => s.memories.length);
+  const pluginsCount = usePluginsStore((s) => s.installed.length);
   const feedbackEnabled = useFeedbackStore((s) => s.devEnabled === true);
 
   const flagged = useMemo(() => {
@@ -84,6 +86,14 @@ export function WorkbenchTabs({
         count={memoriesCount}
         active={active === "context"}
         onClick={() => onChange("context")}
+      />
+      <StripButton
+        icon="plug"
+        label="Plugins"
+        title="Plugins"
+        count={pluginsCount}
+        active={active === "plugins"}
+        onClick={() => onChange("plugins")}
       />
       {feedbackEnabled && (
         <StripButton

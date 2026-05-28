@@ -19,6 +19,7 @@ import { AdvisorPanel } from "./components/AdvisorPanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { ContextPanel } from "./components/ContextPanel";
 import { FeedbackPanel } from "./components/FeedbackPanel";
+import { PluginsPanel } from "./components/PluginsPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
 import { WorkbenchTabs } from "./components/WorkbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
@@ -57,7 +58,7 @@ export default function App() {
   const [showGettingStarted, setShowGettingStarted] = useState(false);
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
-  type WbTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "feedback";
+  type WbTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "plugins" | "feedback";
   const [workbenchTab, setWorkbenchTabState] = useState<WbTab>("skills");
   const setWorkbenchTab = (t: WbTab) => {
     setWorkbenchTabState(t);
@@ -142,7 +143,7 @@ export default function App() {
     try {
       const saved = localStorage.getItem(`agent-console:workbench-tab:${project.root}`);
       if (saved === "skills" || saved === "permissions" || saved === "advisor"
-          || saved === "vault" || saved === "context" || saved === "feedback") {
+          || saved === "vault" || saved === "context" || saved === "plugins" || saved === "feedback") {
         setWorkbenchTabState(saved);
       }
     } catch { /* ignore */ }
@@ -305,6 +306,7 @@ export default function App() {
                 {workbenchTab === "advisor" && <AdvisorPanel />}
                 {workbenchTab === "vault" && <VaultPanel />}
                 {workbenchTab === "context" && <ContextPanel />}
+                {workbenchTab === "plugins" && <PluginsPanel />}
                 {workbenchTab === "feedback" && <FeedbackPanel />}
               </div>
             </div>

@@ -7,6 +7,7 @@ pub mod memory_service;
 pub mod hooks_service;
 pub mod palette_service;
 pub mod permissions_service;
+pub mod plugins_service;
 pub mod project_manager;
 pub mod projects_service;
 pub mod sessions_service;

@@ -210,3 +210,27 @@ export interface FeedbackContext {
   projectName: string | null;
   branch: string | null;
 }
+
+export interface InstalledPlugin {
+  name: string;
+  slug: string;
+  version: string | null;
+  description: string | null;
+  path: string;
+}
+
+export interface MarketplacePlugin {
+  name: string;
+  slug: string;
+  description: string;
+  author: string | null;
+  repoUrl: string | null;
+  tags: string[];
+}
+
+export interface MarketplaceSnapshot {
+  source: string;
+  fetchedAtMs: number;
+  isFallback: boolean;
+  plugins: MarketplacePlugin[];
+}
