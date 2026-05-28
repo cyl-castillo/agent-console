@@ -41,8 +41,10 @@
 
 html, body, #root {
   height: 100%;
+  width: 100%;
   margin: 0;
   padding: 0;
+  overflow: hidden;
 }
 
 body {
@@ -77,8 +79,8 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
     "topbar topbar topbar"
     "left   center right"
     "status status status";
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
 }
 
 .topbar {
@@ -1874,6 +1876,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   padding: 8px 4px 4px 8px;
   background: #0d0f12;
 }
+:root[data-theme="light"] .terminal-host { background: #fbfcfd; }
 .terminal-host .xterm {
   height: 100%;
 }

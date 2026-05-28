@@ -135,40 +135,54 @@ export function Terminal({ session, visible }: Props) {
       });
     })();
 
-    // Refit only when the host's outer size actually changed. Without the
-    // dimension guard, conpty (Windows) loops: each resize triggers Claude to
-    // redraw its UI, the redraw nudges xterm's inner DOM by sub-pixel amounts,
-    // ResizeObserver fires again, fit() recomputes a slightly different
-    // cols/rows, conpty resizes again, repeat — visible as the Claude banner
-    // jumping/redrawing constantly.
-    let rafPending = false;
+    // Refit conservatively. ResizeObserver fires for any sub-pixel layout
+    // change (window blur/focus, compositor redraws, Claude UI redraws). To
+    // avoid jumping:
+    //   1. ignore changes smaller than 4px,
+    //   2. debounce to coalesce rapid drags into one fit at the end,
+    //   3. skip while the window isn't focused (we'll catch up on focus).
+    // Conservative resize handling. ResizeObserver fires for any sub-pixel
+    // layout change. To keep Claude's TUI from redrawing visibly while the
+    // user drags the window:
+    //   - ignore tiny deltas (<16px ≈ 2 char cols),
+    //   - require 800ms of quiet before calling fit(), so a drag only
+    //     reflows the terminal once the user stops,
+    //   - skip while the window has no focus, and refit on focus return.
+    let debounceTimer: number | null = null;
     let lastW = 0;
     let lastH = 0;
+    const scheduleFit = () => {
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
+        if (disposed) return;
+        try { fit.fit(); } catch { /* host not mounted yet */ }
+      }, 800);
+    };
     const ro = new ResizeObserver(() => {
-      if (rafPending) return;
       const rect = host.getBoundingClientRect();
       if (rect.width < 8 || rect.height < 8) return;
-      // Ignore tiny fluctuations (rounding / sub-pixel layout shifts).
-      if (Math.abs(rect.width - lastW) < 2 && Math.abs(rect.height - lastH) < 2) return;
+      if (!document.hasFocus()) return;
+      if (Math.abs(rect.width - lastW) < 16 && Math.abs(rect.height - lastH) < 16) return;
       lastW = rect.width; lastH = rect.height;
-      rafPending = true;
-      requestAnimationFrame(() => {
-        rafPending = false;
-        try { fit.fit(); } catch { /* host not mounted yet */ }
-      });
+      scheduleFit();
     });
     ro.observe(host);
+    const onFocus = () => scheduleFit();
+    window.addEventListener("focus", onFocus);
 
     const onClear = () => { term.clear(); };
     window.addEventListener("ac:clear-terminal", onClear);
 
     return () => {
       disposed = true;
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
       ro.disconnect();
       unlistenOutput?.();
       unlistenExit?.();
       if (termId) ipc.termKill(termId).catch(() => {});
       window.removeEventListener("ac:clear-terminal", onClear);
+      window.removeEventListener("focus", onFocus);
       term.dispose();
     };
     // session.id is stable; we deliberately don't re-run on cwd/name changes.
