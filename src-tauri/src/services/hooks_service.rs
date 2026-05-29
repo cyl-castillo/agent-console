@@ -110,6 +110,43 @@ impl HooksRuntime {
         Ok(self.status())
     }
 
+    /// Auto-install the lightweight UserPromptSubmit observer on first run, so
+    /// the features that depend on it (session-name suggestions, resume binding,
+    /// activity stream, auto-snapshots) work out of the box — not only after the
+    /// user finds and flips the integration toggle. This was the gap behind
+    /// "the name recommender only works on my machine": on a clean install the
+    /// hook was never registered.
+    ///
+    /// Guarded by a one-time marker so a deliberate `uninstall()` sticks across
+    /// restarts (we never re-add it). The PreToolUse permission bridge is NOT
+    /// auto-installed — it changes how Claude runs and stays opt-in. Snapshots
+    /// are safe to enable by default: they're written to a private ref via
+    /// write-tree/commit-tree and never touch HEAD, the index, or the worktree.
+    pub fn ensure_autoinstalled(&self) -> AppResult<()> {
+        let marker = self.script_path.with_file_name(".userprompt-autoinstalled");
+        if marker.exists() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = if settings_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
+        } else {
+            json!({})
+        };
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
+        fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap())?;
+        // Best-effort marker: if it fails we'd re-run the idempotent upsert next
+        // launch, which is harmless.
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
     /// Remove our hook entries from settings.json. Other hooks/settings untouched.
     pub fn uninstall(&self) -> AppResult<HooksStatus> {
         let settings_path = settings_path();

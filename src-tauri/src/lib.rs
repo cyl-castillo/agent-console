@@ -19,6 +19,12 @@ pub fn run() {
             // hook events arriving from any terminal session are observed.
             let state = app.state::<AppState>();
             state.hooks.start_watcher(app.handle().clone());
+            // Register the lightweight UserPromptSubmit observer on first run so
+            // session-name suggestions / resume binding / activity / snapshots
+            // work without the user having to flip the integration toggle.
+            if let Err(e) = state.hooks.ensure_autoinstalled() {
+                eprintln!("hooks: auto-install failed: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
