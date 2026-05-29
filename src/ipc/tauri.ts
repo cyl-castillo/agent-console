@@ -22,7 +22,8 @@ export const ipc = {
   readFileText: (path: string) => invoke<FileContent>("read_file_text", { path }),
   workspaceContext: () => invoke<WorkspaceContext>("workspace_context"),
 
-  termSpawn: (cwd: string) => invoke<string>("term_spawn", { cwd }),
+  termSpawn: (cwd: string, termKey?: string) =>
+    invoke<string>("term_spawn", { cwd, termKey: termKey ?? null }),
   termWrite: (id: string, data: string) =>
     invoke<void>("term_write", { id, data }),
   termResize: (id: string, cols: number, rows: number) =>

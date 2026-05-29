@@ -195,6 +195,9 @@ export interface HookUserPromptEvent {
   prompt: string;
   skill?: string;
   sessionId?: string;
+  /// Frontend terminal-session id the prompt came from (from AGENT_CONSOLE_TERM_ID).
+  /// When present, the claude session id is bound to exactly this terminal.
+  termId?: string;
 }
 
 export type FeedbackCategory = "bug" | "feature" | "ux" | "other";

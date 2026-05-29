@@ -115,24 +115,28 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     set((s) => ({ recent: [entry, ...s.recent].slice(0, MAX_RECENT) }));
     useOnboardingStore.getState().markPromptedClaude();
 
-    // Associate the Claude session id with whatever terminal is active when the
-    // prompt fires. This is best-effort: there's no field in the hook payload
-    // pointing back to a specific PTY, so we assume the active terminal is the
-    // one running claude.
+    // Associate the Claude session id with the terminal that emitted the prompt.
+    // The hook tags each prompt with the PTY's terminal-session id (termId, from
+    // AGENT_CONSOLE_TERM_ID), so we can bind deterministically — even when several
+    // claude sessions run at once. We only fall back to the active terminal when
+    // termId is missing (e.g. a claude launched before this build's hook change).
     if (e.sessionId) {
-      const { activeId } = useTerminalsStore.getState();
-      if (activeId) {
-        useTerminalsStore.getState().setClaudeSessionId(activeId, e.sessionId);
+      const { activeId, sessions } = useTerminalsStore.getState();
+      const targetId = (e.termId && sessions.some((s) => s.id === e.termId))
+        ? e.termId
+        : activeId;
+      if (targetId) {
+        useTerminalsStore.getState().setClaudeSessionId(targetId, e.sessionId);
         // Offer a meaningful rename derived from the first prompt — only if
         // this is still the first prompt (the session had no claudeSessionId
         // before we just set it).
-        const target = useTerminalsStore.getState().sessions.find((s) => s.id === activeId);
+        const target = useTerminalsStore.getState().sessions.find((s) => s.id === targetId);
         const hadNoPriorClaude = !!target && target.claudeSessionId === e.sessionId
           && !target.suggestedName; // not yet suggested
         if (hadNoPriorClaude) {
           const label = deriveSessionLabel(e.prompt);
           if (label && label !== target.name) {
-            useTerminalsStore.getState().suggestName(activeId, label);
+            useTerminalsStore.getState().suggestName(targetId, label);
           }
         }
       }

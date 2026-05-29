@@ -86,7 +86,7 @@ export function Terminal({ session, visible }: Props) {
       });
 
       try {
-        termId = await ipc.termSpawn(session.cwd);
+        termId = await ipc.termSpawn(session.cwd, session.id);
         if (disposed) {
           await ipc.termKill(termId);
           return;

@@ -28,6 +28,13 @@ process.stdin.on("end", () => {
   const sid = input.session_id ?? input.sessionId;
   if (typeof sid === "string" && sid.length > 0) event.sessionId = sid;
 
+  // The PTY that launched this claude tags itself via AGENT_CONSOLE_TERM_ID.
+  // Carrying it back lets the UI bind the claude session id to the exact
+  // terminal that emitted the prompt — instead of guessing "whatever is
+  // active" (which misattributes when several claude sessions run at once).
+  const termId = process.env.AGENT_CONSOLE_TERM_ID;
+  if (typeof termId === "string" && termId.length > 0) event.termId = termId;
+
   // Detect a leading slash command — likely a skill or custom command invocation.
   if (event.prompt.startsWith("/")) {
     const m = event.prompt.match(/^\/([\w.-]+)/);
