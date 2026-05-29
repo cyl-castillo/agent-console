@@ -10,7 +10,8 @@ export type IconName =
   | "message-square"
   | "sun"
   | "moon"
-  | "plug";
+  | "plug"
+  | "server";
 
 interface Props {
   name: IconName;
@@ -99,6 +100,15 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M4 12h12" />
       <path d="M10 18v3" />
       <path d="m20 7-3 5h4l-3 5" />
+    </>
+  ),
+  // Lucide: server
+  server: (
+    <>
+      <rect width="20" height="8" x="2" y="2" rx="2" ry="2" />
+      <rect width="20" height="8" x="2" y="14" rx="2" ry="2" />
+      <path d="M6 6h.01" />
+      <path d="M6 18h.01" />
     </>
   ),
 };

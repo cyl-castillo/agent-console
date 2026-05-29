@@ -8,7 +8,7 @@ import type {
   ContextFileStat, ContextStatus,
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
-  InstalledPlugin, AvailableSnapshot,
+  InstalledPlugin, AvailableSnapshot, McpServer, McpAddInput,
   MemoryEntry, PermissionsSnapshot,
   PersistedSession, Project, RecentProject, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
@@ -111,6 +111,11 @@ export const ipc = {
   pluginsListAvailable: () => invoke<AvailableSnapshot>("plugins_list_available"),
   pluginsInstall: (installId: string, scope?: "user" | "project" | "local") =>
     invoke<string>("plugins_install", { installId, scope: scope ?? null }),
+
+  mcpList: () => invoke<McpServer[]>("mcp_list"),
+  mcpAdd: (input: McpAddInput) => invoke<string>("mcp_add", { input }),
+  mcpRemove: (name: string, scope: string) =>
+    invoke<string>("mcp_remove", { name, scope }),
 
   feedbackDevEnabled: () => invoke<boolean>("feedback_dev_enabled"),
   feedbackContext: () => invoke<FeedbackContext>("feedback_context"),

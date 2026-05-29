@@ -7,10 +7,11 @@ import { useVaultStore } from "../stores/vaultStore";
 import { useContextStore } from "../stores/contextStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
 import { usePluginsStore } from "../stores/pluginsStore";
+import { useMcpStore } from "../stores/mcpStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "plugins" | "feedback";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "plugins" | "mcp" | "feedback";
 
 export function WorkbenchTabs({
   active,
@@ -29,6 +30,7 @@ export function WorkbenchTabs({
   const vaultCount = useVaultStore((s) => s.entries.length);
   const memoriesCount = useContextStore((s) => s.memories.length);
   const pluginsCount = usePluginsStore((s) => s.installed.length);
+  const mcpCount = useMcpStore((s) => s.servers.length);
   const feedbackEnabled = useFeedbackStore((s) => s.devEnabled === true);
 
   const flagged = useMemo(() => {
@@ -94,6 +96,14 @@ export function WorkbenchTabs({
         count={pluginsCount}
         active={active === "plugins"}
         onClick={() => onChange("plugins")}
+      />
+      <StripButton
+        icon="server"
+        label="MCP"
+        title="MCP servers"
+        count={mcpCount}
+        active={active === "mcp"}
+        onClick={() => onChange("mcp")}
       />
       {feedbackEnabled && (
         <StripButton

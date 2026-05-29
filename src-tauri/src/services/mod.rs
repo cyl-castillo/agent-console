@@ -3,6 +3,7 @@ pub mod context_service;
 pub mod feedback_service;
 pub mod git_service;
 pub mod git_watcher;
+pub mod mcp_service;
 pub mod memory_service;
 pub mod hooks_service;
 pub mod palette_service;

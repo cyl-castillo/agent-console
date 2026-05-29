@@ -241,3 +241,24 @@ export interface AvailableSnapshot {
   marketplaces: string[];
   plugins: MarketplacePlugin[];
 }
+
+export interface McpServer {
+  name: string;
+  scope: string | null;       // local | user | project
+  transport: string | null;   // stdio | http | sse
+  command: string | null;
+  args: string | null;
+  url: string | null;
+  env: string[];
+  status: string;             // connected | failed | pending | unknown
+  connected: boolean;
+}
+
+export interface McpAddInput {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  scope: "local" | "user" | "project";
+  commandOrUrl: string;
+  env: string[];
+  headers: string[];
+}

@@ -4076,6 +4076,81 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 @keyframes ac-spin { to { transform: rotate(360deg); } }
 
+/* --- MCP servers panel --- */
+.mcp-list { list-style: none; margin: 0; padding: 0; }
+.mcp-row { border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.05)); }
+.mcp-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 4px;
+  cursor: pointer;
+}
+.mcp-row-head:hover { background: rgba(127,127,127,0.06); }
+.mcp-row-head .caret { color: var(--text-faint); font-size: 9px; width: 10px; }
+.mcp-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+.mcp-status-connected { background: #4ade80; box-shadow: 0 0 4px rgba(74,222,128,0.6); }
+.mcp-status-failed { background: #ff6b6b; }
+.mcp-status-pending { background: #f5c451; }
+.mcp-row-text { flex: 1; min-width: 0; }
+.mcp-name { font-size: 12.5px; color: var(--text); }
+.mcp-target {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mcp-badge {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+.mcp-row-body { padding: 4px 4px 10px 22px; }
+.mcp-detail {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 2px 10px;
+  margin: 0 0 8px;
+  font-size: 11.5px;
+}
+.mcp-detail dt { color: var(--text-faint); }
+.mcp-detail dd { margin: 0; color: var(--text); word-break: break-word; }
+.mcp-mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 10.5px; white-space: pre-wrap; }
+.mcp-row-actions { display: flex; justify-content: flex-end; }
+.mcp-remove { color: #ff8585 !important; }
+
+/* MCP add form */
+.mcp-add { background: rgba(127,127,127,0.05); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+.mcp-field-row { display: flex; gap: 8px; }
+.mcp-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; flex: 1; }
+.mcp-field-sm { flex: 0 0 96px; }
+.mcp-field > span { font-size: 10.5px; color: var(--text-faint); }
+.mcp-field select, .mcp-textarea {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 7px;
+}
+.mcp-textarea {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  resize: vertical;
+}
+.mcp-add-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 4px; }
+
 /* Advisor "working" state: prominent spinner + elapsed time. */
 .wb-working { display: flex; gap: 12px; align-items: flex-start; padding: 6px 2px; }
 .wb-spinner {

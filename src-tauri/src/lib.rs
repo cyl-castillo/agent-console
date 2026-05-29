@@ -82,6 +82,9 @@ pub fn run() {
             commands::plugins::plugins_list_installed,
             commands::plugins::plugins_list_available,
             commands::plugins::plugins_install,
+            commands::mcp::mcp_list,
+            commands::mcp::mcp_add,
+            commands::mcp::mcp_remove,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
