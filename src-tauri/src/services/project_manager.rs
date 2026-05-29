@@ -67,20 +67,30 @@ fn build_node(path: &Path, depth: usize) -> AppResult<FileNode> {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| path.display().to_string());
     let is_dir = path.is_dir();
+    build_node_known(path.to_path_buf(), name, is_dir, depth)
+}
 
+/// Build a node when the caller already knows `name` and `is_dir`, so we don't
+/// re-`stat()` the path. On Windows every `stat`/`read_dir` is intercepted by
+/// Defender, so the previous double-stat (one in the loop, one on recursion)
+/// roughly doubled the cost of the project-open tree read.
+fn build_node_known(path: PathBuf, name: String, is_dir: bool, depth: usize) -> AppResult<FileNode> {
     let children = if is_dir && depth > 0 {
         let mut entries: Vec<FileNode> = Vec::new();
-        let read = std::fs::read_dir(path)?;
+        let read = std::fs::read_dir(&path)?;
         for entry in read.flatten() {
             let entry_path = entry.path();
             let entry_name = entry.file_name().to_string_lossy().to_string();
+            // One stat per child (follows symlinks, as before); the result is
+            // threaded into the recursive call so it isn't computed twice.
+            let child_is_dir = entry_path.is_dir();
 
             // Skip ignored directories.
-            if entry_path.is_dir() && IGNORED_DIRS.contains(&entry_name.as_str()) {
+            if child_is_dir && IGNORED_DIRS.contains(&entry_name.as_str()) {
                 continue;
             }
 
-            entries.push(build_node(&entry_path, depth - 1)?);
+            entries.push(build_node_known(entry_path, entry_name, child_is_dir, depth - 1)?);
         }
         // Dirs first, then alphabetic.
         entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
@@ -89,19 +99,12 @@ fn build_node(path: &Path, depth: usize) -> AppResult<FileNode> {
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
         Some(entries)
-    } else if is_dir {
-        // Mark as expandable but unloaded.
-        None
     } else {
+        // Either a file, or an unloaded (expandable) directory at depth 0.
         None
     };
 
-    Ok(FileNode {
-        name,
-        path: path.to_path_buf(),
-        is_dir,
-        children,
-    })
+    Ok(FileNode { name, path, is_dir, children })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

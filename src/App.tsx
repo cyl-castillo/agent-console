@@ -72,7 +72,6 @@ export default function App() {
   const toggleTheme = useThemeStore((s) => s.toggle);
   const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
-  const reloadPaletteIndex = usePaletteStore((s) => s.reloadIndex);
   const resetPaletteForProject = usePaletteStore((s) => s.resetForProject);
 
   useKeyboardShortcuts({ setTab });
@@ -139,7 +138,9 @@ export default function App() {
     refreshChanges();
     refreshSkills();
     resetPaletteForProject(project.root);
-    void reloadPaletteIndex();
+    // Palette file index is built lazily on first palette open (see
+    // paletteStore.openPalette) — not eagerly here, to keep the full-tree
+    // walk off the project-open path.
     // Restore last workbench tab for this project, if any.
     try {
       const saved = localStorage.getItem(`agent-console:workbench-tab:${project.root}`);
@@ -157,7 +158,7 @@ export default function App() {
         addTerminal(project.root);
       }
     })();
-  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal, reloadPaletteIndex, resetPaletteForProject]);
+  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal, resetPaletteForProject]);
 
   // Persist sessions on tab close / app unload.
   useEffect(() => {

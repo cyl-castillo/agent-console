@@ -160,6 +160,13 @@ export const usePaletteStore = create<PaletteState>((set, get) => ({
 
   openPalette: () => {
     set({ open: true, query: "", selectedIndex: 0, pendingBranchSwitch: null });
+    // Build the file index lazily, on first palette open, instead of eagerly on
+    // project open. The index is a full-tree walk; doing it here keeps it off
+    // the project-open critical path (a real win on Windows, where every
+    // stat/readdir is intercepted by Defender). The palette shows an
+    // "Indexing files…" state while it loads.
+    const root = useSessionStore.getState().project?.root;
+    if (root) void get().ensureIndex(root);
     // Lazy-load branches if not yet loaded (cheap, sync UI).
     const cs = useChangesStore.getState();
     if (cs.branches.length === 0 && !cs.branchesLoading) {
