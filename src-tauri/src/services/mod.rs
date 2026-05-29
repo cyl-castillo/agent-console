@@ -1,4 +1,5 @@
 pub mod advisor_service;
+pub mod claude_cli;
 pub mod context_service;
 pub mod feedback_service;
 pub mod git_service;

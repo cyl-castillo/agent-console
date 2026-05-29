@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -45,20 +45,10 @@ pub struct AvailableSnapshot {
     pub plugins: Vec<MarketplacePlugin>,
 }
 
-/// Build a `claude` command with stdio piped and, on Windows, no console window.
+/// Build a `claude` command via the shared resolver (so a GUI launch without a
+/// login-shell PATH still finds the binary). stdio + Windows no-window set there.
 fn claude_command(args: &[&str]) -> Command {
-    let mut cmd = Command::new("claude");
-    cmd.args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    cmd
+    crate::services::claude_cli::command(args)
 }
 
 /// Run `claude <args>` and return stdout on success, or a useful error.

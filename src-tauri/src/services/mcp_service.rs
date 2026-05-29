@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -46,18 +46,9 @@ pub struct McpAddInput {
 }
 
 fn claude_command(args: &[&str]) -> Command {
-    let mut cmd = Command::new("claude");
-    cmd.args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    cmd
+    // Delegates to the shared resolver so a GUI launch (no login-shell PATH)
+    // still finds the `claude` binary. stdio + Windows no-window set there.
+    crate::services::claude_cli::command(args)
 }
 
 fn run(args: &[&str], cwd: Option<&str>) -> AppResult<String> {

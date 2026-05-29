@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
@@ -34,25 +34,18 @@ pub fn analyze(project_root: &Path) -> AppResult<AnalysisResult> {
     let context = gather_context(project_root)?;
     let prompt = build_prompt(&context);
 
-    let mut cmd = Command::new("claude");
-    cmd.arg("-p")
-        .arg(&prompt)
-        .arg("--permission-mode")
-        .arg("plan")
-        .arg("--output-format")
-        .arg("text")
-        .current_dir(project_root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // On Windows, spawning a console subprocess from a GUI app flashes a black
-    // console window. CREATE_NO_WINDOW suppresses it. No-op elsewhere.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    // Resolve `claude` via the shared resolver — a GUI launch doesn't inherit
+    // the login-shell PATH, so the bare name would fail to spawn. stdio + the
+    // Windows no-window flag are set inside claude_cli::command.
+    let mut cmd = crate::services::claude_cli::command(&[
+        "-p",
+        &prompt,
+        "--permission-mode",
+        "plan",
+        "--output-format",
+        "text",
+    ]);
+    cmd.current_dir(project_root);
     let output = cmd
         .output()
         .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
