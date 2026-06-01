@@ -105,6 +105,16 @@ macOS and Windows builds use the same command; bundle output varies (`.dmg` / `.
 |---|---|
 | `Ctrl+1` | Switch to Terminal tab |
 | `Ctrl+2` | Switch to Changes tab |
+| `Ctrl+3` | Switch to Preview tab |
+| `Ctrl+B` | Toggle workspace sidebar |
+| `Ctrl+P` | Open command palette |
+| `Ctrl+/` | Show keyboard shortcuts |
+| `Ctrl+T` | New session |
+| `Ctrl+Tab` | Next live session |
+| `Ctrl+Shift+Tab` | Previous live session |
+| `Ctrl+]` | Next live session |
+| `Ctrl+[` | Previous live session |
+| `Ctrl+W` | Close active session |
 | `Ctrl+K` | Focus the chat input |
 | `Ctrl+L` | Clear the terminal (only when not focused inside terminal — the shell still gets `Ctrl+L` natively there) |
 | `Ctrl+R` | Refresh git changes |

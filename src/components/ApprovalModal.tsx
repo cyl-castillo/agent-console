@@ -39,11 +39,20 @@ export function ApprovalModal() {
   useEffect(() => {
     if (!req) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) decide(req.id, "ask", "user dismissed");
+      if (busy) return;
+      if (e.key === "Escape") {
+        decide(req.id, "ask", "user dismissed");
+      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !showAlways) {
+        // Ctrl/Cmd+Enter mirrors the "Approve once" button. Disabled in the
+        // "Always…" panel, where saving a rule may be gated behind typing.
+        e.preventDefault();
+        setBusy(true);
+        void decide(req.id, "allow", "approved once");
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [req, busy, decide]);
+  }, [req, busy, showAlways, decide]);
 
   const suggestions: RuleSuggestion[] = useMemo(
     () => (req ? suggestRules(req, scope) : []),

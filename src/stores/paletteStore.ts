@@ -4,7 +4,11 @@ import { ipc } from "../ipc/tauri";
 import { useChangesStore } from "./changesStore";
 import { usePreviewStore } from "./previewStore";
 import { useSessionStore } from "./sessionStore";
+import { useSkillsStore } from "./skillsStore";
 import { useTerminalsStore } from "./terminalsStore";
+import { useThemeStore } from "./themeStore";
+import { useToastStore } from "./toastStore";
+import { useUpdaterStore } from "./updaterStore";
 
 export type PaletteItemKind = "file" | "action" | "session" | "branch";
 
@@ -72,11 +76,60 @@ const ACTIONS: PaletteAction[] = [
     run: () => emit("ac:open-tab", "preview"),
   },
   {
+    id: "nav.skills",
+    label: "Open Skills",
+    hint: "Workbench → Skills",
+    keywords: ["skills", "prompts"],
+    run: () => emit("ac:open-workbench-tab", "skills"),
+  },
+  {
+    id: "nav.permissions",
+    label: "Open Permissions",
+    hint: "Workbench → Permissions",
+    keywords: ["perms", "rules", "allow", "deny"],
+    run: () => emit("ac:open-workbench-tab", "permissions"),
+  },
+  {
+    id: "nav.advisor",
+    label: "Open Advisor",
+    hint: "Workbench → Advisor",
+    keywords: ["recommend", "analyze"],
+    run: () => emit("ac:open-workbench-tab", "advisor"),
+  },
+  {
+    id: "nav.vault",
+    label: "Open Vault",
+    hint: "Workbench → Vault",
+    keywords: ["secrets", "private"],
+    run: () => emit("ac:open-workbench-tab", "vault"),
+  },
+  {
     id: "nav.context",
     label: "Open Context (CLAUDE.md & memories)",
     hint: "Workbench → Context",
     keywords: ["claude", "md", "memory"],
     run: () => emit("ac:open-workbench-tab", "context"),
+  },
+  {
+    id: "nav.plugins",
+    label: "Open Plugins",
+    hint: "Workbench → Plugins",
+    keywords: ["plugin", "marketplace"],
+    run: () => emit("ac:open-workbench-tab", "plugins"),
+  },
+  {
+    id: "nav.mcp",
+    label: "Open MCP Servers",
+    hint: "Workbench → MCP",
+    keywords: ["server", "connector", "tools"],
+    run: () => emit("ac:open-workbench-tab", "mcp"),
+  },
+  {
+    id: "nav.feedback",
+    label: "Open Feedback",
+    hint: "Workbench → Feedback",
+    keywords: ["dev", "report"],
+    run: () => emit("ac:open-workbench-tab", "feedback"),
   },
   {
     id: "git.commit",
@@ -94,6 +147,74 @@ const ACTIONS: PaletteAction[] = [
     hint: "Re-runs git status (safe)",
     keywords: ["reload", "sync"],
     run: () => { void useChangesStore.getState().refresh(); },
+  },
+  {
+    id: "session.new",
+    label: "New Session",
+    hint: "Start a new live agent terminal",
+    keywords: ["terminal", "shell", "agent"],
+    run: () => emit("ac:new-session", null),
+  },
+  {
+    id: "session.close",
+    label: "Close Active Session",
+    hint: "Stops and removes the active terminal session",
+    keywords: ["terminal", "kill", "remove"],
+    available: () => !!useTerminalsStore.getState().activeId,
+    run: async () => {
+      const st = useTerminalsStore.getState();
+      const active = st.sessions.find((s) => s.id === st.activeId);
+      if (!active) return;
+      if (active.status === "live" && !confirm(`Close session "${active.name}"? Process will be killed.`)) return;
+      await st.close(active.id);
+    },
+  },
+  {
+    id: "ui.toggle_sidebar",
+    label: "Toggle Workspace Sidebar",
+    hint: "Show or hide Sessions, Changes, and Files",
+    keywords: ["left", "workspace"],
+    run: () => emit("ac:toggle-sidebar", null),
+  },
+  {
+    id: "ui.toggle_theme",
+    label: "Toggle Theme",
+    hint: "Switch between dark and light themes",
+    keywords: ["dark", "light"],
+    run: () => useThemeStore.getState().toggle(),
+  },
+  {
+    id: "project.copy_path",
+    label: "Copy Project Path",
+    hint: "Copy the current project root to clipboard",
+    keywords: ["cwd", "folder", "root"],
+    available: () => !!useSessionStore.getState().project,
+    run: () => emit("ac:copy-project-path", null),
+  },
+  {
+    id: "app.check_updates",
+    label: "Check for Updates",
+    hint: "Run the in-app update check",
+    keywords: ["version", "upgrade"],
+    run: async () => {
+      await useUpdaterStore.getState().check({ silentIfNone: false });
+      const phase = useUpdaterStore.getState().phase;
+      if (phase === "uptodate") useToastStore.getState().show("Agent Console is up to date", "success");
+    },
+  },
+  {
+    id: "snapshot.restore_latest",
+    label: "Restore Latest Snapshot",
+    hint: "Restore to before the latest captured turn",
+    keywords: ["undo", "rollback", "restore"],
+    available: () => useSkillsStore.getState().recent.some((e) => !!e.snapshotCommitSha),
+    run: async () => {
+      const event = useSkillsStore.getState().recent.find((e) => !!e.snapshotCommitSha);
+      if (!event?.snapshotCommitSha) return;
+      if (!confirm("Restore to before the latest turn? Uncommitted changes will be lost.")) return;
+      await useSkillsStore.getState().restoreSnapshot(event.snapshotCommitSha);
+      useToastStore.getState().show("Snapshot restored", "success");
+    },
   },
   {
     id: "help.getting_started",

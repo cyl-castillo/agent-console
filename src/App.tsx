@@ -31,11 +31,14 @@ import { OnboardingBanner } from "./components/OnboardingBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { CommandPalette } from "./components/CommandPalette";
 import { StatusBar } from "./components/StatusBar";
+import { ShortcutsModal } from "./components/ShortcutsModal";
+import { Toasts } from "./components/Toasts";
 import { useThemeStore } from "./stores/themeStore";
 import { Icon } from "./components/Icon";
 import { usePaletteStore } from "./stores/paletteStore";
 import { useOnboardingStore } from "./stores/onboardingStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useToastStore } from "./stores/toastStore";
 import { ipc } from "./ipc/tauri";
 import type { WorkspaceContext } from "./types/domain";
 
@@ -57,6 +60,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showGettingStarted, setShowGettingStarted] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
   type WbTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "plugins" | "mcp" | "feedback";
@@ -73,6 +77,21 @@ export default function App() {
   const [leftOpen, setLeftOpen] = useState(false);
   const checkForUpdates = useUpdaterStore((s) => s.check);
   const resetPaletteForProject = usePaletteStore((s) => s.resetForProject);
+  const showToast = useToastStore((s) => s.show);
+
+  const newSession = () => {
+    if (!project) return;
+    addTerminal(project.root);
+    setTab("terminal");
+    void persistTerminals();
+  };
+
+  const copyProjectPath = () => {
+    if (!project) return;
+    navigator.clipboard?.writeText(project.root)
+      .then(() => showToast("Project path copied", "success"))
+      .catch(() => showToast("Could not copy project path", "error"));
+  };
 
   useKeyboardShortcuts({ setTab });
 
@@ -84,20 +103,32 @@ export default function App() {
     };
     const onOpenWb = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d === "skills" || d === "permissions" || d === "advisor" || d === "vault" || d === "context") {
+      if (d === "skills" || d === "permissions" || d === "advisor" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "feedback") {
         setWorkbenchTab(d);
       }
     };
     const onGettingStarted = () => setShowGettingStarted(true);
+    const onShortcuts = () => setShowShortcuts(true);
+    const onToggleSidebar = () => setLeftOpen((v) => !v);
+    const onNewSession = () => newSession();
+    const onCopyProjectPath = () => copyProjectPath();
     window.addEventListener("ac:open-tab", onOpenTab);
     window.addEventListener("ac:open-workbench-tab", onOpenWb);
     window.addEventListener("ac:open-getting-started", onGettingStarted);
+    window.addEventListener("ac:open-shortcuts", onShortcuts);
+    window.addEventListener("ac:toggle-sidebar", onToggleSidebar);
+    window.addEventListener("ac:new-session", onNewSession);
+    window.addEventListener("ac:copy-project-path", onCopyProjectPath);
     return () => {
       window.removeEventListener("ac:open-tab", onOpenTab);
       window.removeEventListener("ac:open-workbench-tab", onOpenWb);
       window.removeEventListener("ac:open-getting-started", onGettingStarted);
+      window.removeEventListener("ac:open-shortcuts", onShortcuts);
+      window.removeEventListener("ac:toggle-sidebar", onToggleSidebar);
+      window.removeEventListener("ac:new-session", onNewSession);
+      window.removeEventListener("ac:copy-project-path", onCopyProjectPath);
     };
-  }, [setTab]);
+  }, [project, setTab, addTerminal, persistTerminals, showToast]);
 
   useEffect(() => {
     let offSkills: (() => void) | null = null;
@@ -190,7 +221,9 @@ export default function App() {
             onJumpToTab={setWorkbenchTab}
           />
         )}
+        {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
         <UpdateBanner />
+        <Toasts />
       </>
     );
   }
@@ -211,7 +244,7 @@ export default function App() {
 
           <button
             className="tb-project"
-            onClick={() => { navigator.clipboard?.writeText(project.root).catch(() => {}); }}
+            onClick={copyProjectPath}
             title={`${project.root}\n(click to copy path)`}
           >
             <span className="tb-project-name">{project.name}</span>
@@ -226,6 +259,11 @@ export default function App() {
           >
             <Icon name={theme === "dark" ? "sun" : "moon"} size={14} />
           </button>
+          <button
+            className="topbar-icon"
+            onClick={() => setShowShortcuts(true)}
+            title="Keyboard shortcuts (Ctrl+/)"
+          >⌘</button>
           <button
             className="topbar-icon"
             onClick={() => setShowGettingStarted(true)}
@@ -275,10 +313,12 @@ export default function App() {
           </div>
           <div className="tab-pane" style={{ display: tab === "terminal" ? "flex" : "none" }}>
             {liveTerminals.length === 0 ? (
-              <div className="placeholder" style={{ padding: 16 }}>
-                No hay sesiones activas. Abrí el sidebar (botón <strong>Workspace</strong>)
-                y dale <strong>+ new</strong> en Sessions. Cada terminal nueva
-                auto-ejecuta <code>claude</code>.
+              <div className="terminal-empty">
+                <div>
+                  <div className="terminal-empty-title">No active sessions</div>
+                  <div className="terminal-empty-copy">Each new session starts in this project and launches its agent automatically.</div>
+                </div>
+                <button className="primary" onClick={newSession}>+ New session</button>
               </div>
             ) : (
               <div className="terminals-stack">
@@ -328,10 +368,12 @@ export default function App() {
           onJumpToTab={(t) => { setWorkbenchTab(t); }}
         />
       )}
+      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
       <OnboardingBanner onOpen={() => setShowGettingStarted(true)} />
       <UpdateBanner />
       <ApprovalModal />
       <CommandPalette />
+      <Toasts />
     </>
   );
 }
