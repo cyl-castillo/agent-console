@@ -4030,6 +4030,12 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .sb-dot-live { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.6); }
 .sb-dot-stopped { background: var(--text-faint); }
 
+/* Context-usage indicator. Tabular numerals so the percentage doesn't jitter
+   as it ticks; amber once the context is ≥80% full. */
+.usage-pill { font-variant-numeric: tabular-nums; cursor: default; }
+.usage-glyph { opacity: 0.7; }
+.usage-warn { color: #fbbf24; }
+
 /* Muted side section (e.g. Changes when not a git repo). */
 .side-section.muted .side-section-header .title { color: var(--text-faint); }
 

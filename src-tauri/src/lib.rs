@@ -67,6 +67,7 @@ pub fn run() {
             commands::permissions::permissions_remove,
             commands::sessions::sessions_list,
             commands::sessions::sessions_save,
+            commands::usage::session_usage,
             commands::advisor::advisor_analyze,
             commands::advisor::advisor_create_skill,
             commands::vault::vault_list,

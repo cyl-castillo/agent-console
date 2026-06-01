@@ -10,7 +10,7 @@ import type {
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, McpServer, McpAddInput,
   MemoryEntry, PermissionsSnapshot,
-  PersistedSession, Project, RecentProject, Skill, StoredRule, VaultEntryView,
+  PersistedSession, Project, RecentProject, SessionUsage, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
 } from "../types/domain";
 
@@ -82,6 +82,8 @@ export const ipc = {
     invoke<PersistedSession[]>("sessions_list", { projectRoot }),
   sessionsSave: (projectRoot: string, sessions: PersistedSession[]) =>
     invoke<void>("sessions_save", { projectRoot, sessions }),
+  sessionUsage: (sessionId: string, projectRoot: string) =>
+    invoke<SessionUsage | null>("session_usage", { sessionId, projectRoot }),
 
   contextStatus: () => invoke<ContextStatus>("context_status"),
   contextReadMd: (scope: "project" | "global") =>

@@ -267,3 +267,15 @@ export interface McpAddInput {
   env: string[];
   headers: string[];
 }
+
+/// Aggregated token usage for a Claude session, read from its transcript.
+/// `contextTokens` is the latest turn's input+cache footprint (how full the
+/// model context is); the totals are cumulative across the session.
+export interface SessionUsage {
+  contextTokens: number;
+  inputTotal: number;
+  outputTotal: number;
+  cacheReadTotal: number;
+  cacheCreationTotal: number;
+  contextWindow: number;
+}

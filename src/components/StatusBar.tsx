@@ -6,8 +6,9 @@ import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStor
 import { useUIStore } from "../stores/uiStore";
 import { useModelStore, modelLabel } from "../stores/modelStore";
 import { profileFor } from "../agents/profiles";
+import { ipc } from "../ipc/tauri";
 import type { TermInputDetail } from "./Terminal";
-import type { WorkspaceContext } from "../types/domain";
+import type { SessionUsage, WorkspaceContext } from "../types/domain";
 
 export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }) {
   const project = useSessionStore((s) => s.project);
@@ -73,6 +74,13 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
         </button>
       )}
       {activeSession && <ModelPill session={activeSession} projectRoot={project.root} />}
+      {activeSession?.claudeSessionId && (
+        <UsagePill
+          sessionId={activeSession.claudeSessionId}
+          projectRoot={project.root}
+          live={activeSession.status === "live"}
+        />
+      )}
       <span className="sb-item sb-muted" title="Live PTY sessions">
         {liveCount} live
       </span>
@@ -170,4 +178,51 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
       )}
     </div>
   );
+}
+
+/// Context-usage indicator for the active Claude session. Reads the session
+/// transcript via `session_usage` and shows how full the model context is
+/// (`contextTokens / contextWindow`). Polls while the session is live so it
+/// tracks the agent's progress; the totals live in the tooltip. Turns amber
+/// past 80% as a hint to `/compact`.
+function UsagePill({ sessionId, projectRoot, live }: { sessionId: string; projectRoot: string; live: boolean }) {
+  const [usage, setUsage] = useState<SessionUsage | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      ipc.sessionUsage(sessionId, projectRoot)
+        .then((u) => { if (!cancelled) setUsage(u); })
+        .catch(() => { /* transcript not ready / unreadable — keep last value */ });
+    };
+    load();
+    // Only poll while the agent can still be producing tokens.
+    const t = live ? window.setInterval(load, 5000) : null;
+    return () => { cancelled = true; if (t) window.clearInterval(t); };
+  }, [sessionId, projectRoot, live]);
+
+  if (!usage || usage.contextTokens <= 0) return null;
+
+  const pct = Math.round((usage.contextTokens / usage.contextWindow) * 100);
+  const warn = pct >= 80;
+  const tip =
+    `Context window: ${fmtTokens(usage.contextTokens)} / ${fmtTokens(usage.contextWindow)} (${pct}%)\n` +
+    `Input (cumulative): ${fmtTokens(usage.inputTotal)}\n` +
+    `Output (cumulative): ${fmtTokens(usage.outputTotal)}\n` +
+    `Cache read: ${fmtTokens(usage.cacheReadTotal)}\n` +
+    `Cache write: ${fmtTokens(usage.cacheCreationTotal)}`;
+
+  return (
+    <span className={`sb-item sb-muted usage-pill ${warn ? "usage-warn" : ""}`} title={tip}>
+      <span className="usage-glyph">⌁</span>
+      <span>{fmtTokens(usage.contextTokens)} ({pct}%)</span>
+    </span>
+  );
+}
+
+/// Compact token count: 1234 → "1.2k", 84000 → "84k", 512 → "512".
+function fmtTokens(n: number): string {
+  if (n < 1000) return String(n);
+  const k = n / 1000;
+  return `${k >= 10 ? Math.round(k) : k.toFixed(1)}k`;
 }
