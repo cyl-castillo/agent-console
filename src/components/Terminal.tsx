@@ -7,7 +7,7 @@ import "@xterm/xterm/css/xterm.css";
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useThemeStore } from "../stores/themeStore";
-import { isValidModel } from "../stores/modelStore";
+import { profileFor } from "../agents/profiles";
 
 /// Detail for the `ac:term-input` window event: write `data` into the PTY of
 /// the session whose id matches. Used by the StatusBar model pill to send
@@ -98,35 +98,19 @@ export function Terminal({ session, visible }: Props) {
         return;
       }
 
-      // Auto-launch claude. Only do precise --resume when this terminal has a
-      // captured claudeSessionId (from the UserPromptSubmit hook). Never use
-      // `claude --continue` as a fallback: it picks the LAST claude session
-      // globally, so multiple stopped terminals would all converge on the
-      // same conversation. When the id is missing we just start `claude`
-      // fresh — the user can run `/resume` inside claude to pick one.
+      // Auto-launch the session's agent. The profile owns how the command is
+      // built (resume strategy, model/tuning encoding) and validates that any
+      // interpolated model value is shell-safe before it reaches the PTY. We
+      // type the command as text into the login-shell PTY, which resolves the
+      // bare binary (`claude`/`codex`) from the user's PATH.
       if (termId) {
-        let cmd: string;
-        let label: string;
-        let note: string;
-        if (session.claudeSessionId) {
-          cmd = `claude --resume ${session.claudeSessionId}`;
-          label = `claude (${session.claudeSessionId.slice(0, 8)}…)`;
-          note = "auto-resuming";
-        } else {
-          cmd = "claude";
-          label = "claude";
-          note = session.initialScrollback ? "starting fresh (no session id)" : "starting";
-        }
-        // Pin the chosen model. Validated to be shell-safe before interpolating
-        // into the command we write to the PTY (see isValidModel).
-        if (isValidModel(session.model)) {
-          cmd += ` --model ${session.model}`;
-          label += ` · ${session.model}`;
-        }
+        const { cmd: launchCmd, label: launchLabel, note: launchNote } =
+          profileFor(session.agent).buildLaunch({
+            agentSessionId: session.claudeSessionId,
+            model: session.model,
+            hasScrollback: Boolean(session.initialScrollback),
+          });
         const tid = termId;
-        const launchCmd = cmd;
-        const launchLabel = label;
-        const launchNote = note;
         setTimeout(() => {
           if (disposed) return;
           term.write(`\x1b[90m── ${launchNote} ${launchLabel} ──\x1b[0m\r\n`);

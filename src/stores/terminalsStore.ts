@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { ipc } from "../ipc/tauri";
 import type { PersistedSession } from "../types/domain";
+import { asAgentKind, type AgentKind } from "../agents/profiles";
 
 const MAX_SCROLLBACK = 50_000;
 
@@ -15,8 +16,12 @@ export interface TerminalSession {
   liveScrollback: string;
   /// "stopped" = not spawned yet (from disk); "live" = PTY currently running.
   status: "live" | "stopped";
+  /// Which coding agent this terminal launches. Undefined = Claude (the default
+  /// and the only option for sessions created before agent selection existed).
+  agent?: AgentKind;
   /// Claude Code session id captured from the UserPromptSubmit hook. When set,
   /// resuming this terminal auto-runs `claude --resume <id>` after spawn.
+  /// Codex sessions never populate this (no hook to capture it).
   claudeSessionId?: string;
   /// Derived from the first user prompt; offered inline as a rename suggestion.
   /// Cleared once accepted, dismissed, or when the user renames manually.
@@ -37,7 +42,7 @@ interface TerminalsState {
   hydrate: (projectRoot: string) => Promise<void>;
   clear: () => void;
   /// Adds a new session (status "live"). Caller is responsible for spawning the PTY.
-  add: (cwd: string, name?: string, model?: string) => string;
+  add: (cwd: string, name?: string, model?: string, agent?: AgentKind) => string;
   /// Marks a stopped session as live again so Terminal mounts and spawns.
   resume: (id: string) => void;
   setActive: (id: string) => void;
@@ -93,6 +98,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       initialScrollback: p.scrollback,
       liveScrollback: "",
       status: "stopped",
+      agent: asAgentKind(p.agent),
       claudeSessionId: p.claudeSessionId,
       model: p.model,
     }));
@@ -103,7 +109,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     set({ projectRoot: null, sessions: [], activeId: null });
   },
 
-  add: (cwd, name, model) => {
+  add: (cwd, name, model, agent) => {
     const id = genId();
     const { sessions } = get();
     const session: TerminalSession = {
@@ -114,6 +120,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       initialScrollback: "",
       liveScrollback: "",
       status: "live",
+      agent,
       model,
     };
     set({ sessions: [...sessions, session], activeId: id });
@@ -242,6 +249,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         cwd: s.cwd,
         createdAtMs: s.createdAtMs,
         scrollback: trimmed,
+        agent: s.agent,
         claudeSessionId: s.claudeSessionId,
         nameSuggested: s.nameSuggested,
         model: s.model,

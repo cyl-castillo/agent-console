@@ -1959,6 +1959,32 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   padding: 4px 8px 8px;
   border-bottom: 1px solid var(--border);
 }
+.agent-chooser-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0 6px;
+}
+.agent-chooser-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 8px;
+  cursor: pointer;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.agent-chooser-tab:hover { background: var(--accent-soft); color: var(--text); }
+.agent-chooser-tab.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-soft);
+}
+.agent-chooser-tab-icon { font-size: 13px; }
 .model-chooser-item {
   display: flex;
   align-items: center;
@@ -2002,6 +2028,15 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .model-chooser-link:hover { color: var(--accent); }
 .model-chooser-custom { padding: 6px 0 0; }
+
+/* Per-session agent badge (glyph before the model badge). */
+.session-agent {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 16px;
+}
+.session-row.active .session-agent { color: var(--accent); }
 
 /* Per-session model badge. */
 .session-model {

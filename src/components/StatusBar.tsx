@@ -4,7 +4,8 @@ import { useChangesStore } from "../stores/changesStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useUIStore } from "../stores/uiStore";
-import { useModelStore, MODEL_PRESETS, modelLabel } from "../stores/modelStore";
+import { useModelStore, modelLabel } from "../stores/modelStore";
+import { profileFor } from "../agents/profiles";
 import type { TermInputDetail } from "./Terminal";
 import type { WorkspaceContext } from "../types/domain";
 
@@ -92,15 +93,18 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
 }
 
 /// Active-session model indicator + hot-switcher. Reflects the *last requested*
-/// model (we can't read Claude's actual loaded model). Picking a model updates
-/// the session (so a later resume relaunches with it) and, for a live session,
-/// sends `/model <alias>` into the PTY — best-effort: it only takes effect if
-/// Claude is idle at its prompt.
+/// model/tuning (we can't read the agent's actually-loaded value). Picking a
+/// value updates the session (so a later resume relaunches with it) and, for a
+/// live session whose agent supports it (Claude via `/model`), pushes the change
+/// into the PTY — best-effort: it only takes effect if the agent is idle at its
+/// prompt. Agents without a live switch (Codex) only apply the choice on resume.
 function ModelPill({ session, projectRoot }: { session: TerminalSession; projectRoot: string }) {
   const setModel = useTerminalsStore((s) => s.setModel);
   const setDefaultFor = useModelStore((s) => s.setDefaultFor);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  const profile = profileFor(session.agent);
 
   useEffect(() => {
     if (!open) return;
@@ -115,45 +119,51 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
     setOpen(false);
     if (session.model === model) return;
     setModel(session.id, model);
-    setDefaultFor(projectRoot, model);
-    if (session.status === "live") {
-      const detail: TermInputDetail = { sessionId: session.id, data: `/model ${model}\r` };
+    setDefaultFor(projectRoot, profile.kind, model);
+    if (session.status === "live" && profile.supportsLiveModelSwitch && profile.liveModelSwitchInput) {
+      const detail: TermInputDetail = { sessionId: session.id, data: profile.liveModelSwitchInput(model) };
       window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
     }
   };
 
   const live = session.status === "live";
+  const canLiveSwitch = live && profile.supportsLiveModelSwitch;
   return (
     <div className="model-pill-wrap" ref={wrapRef}>
       <button
         className="sb-item sb-clickable"
         onClick={() => setOpen((v) => !v)}
         title={
-          live
-            ? "Switch model — sends /model to Claude (works when it's idle at the prompt)"
+          canLiveSwitch
+            ? `Switch model — sends /model to ${profile.label} (works when it's idle at the prompt)`
             : "Model used when this session resumes"
         }
       >
-        <span className="model-pill-glyph">◆</span>
-        <span>{modelLabel(session.model)}</span>
+        <span className="model-pill-glyph">{profile.icon}</span>
+        <span>{modelLabel(session.model, profile.kind)}</span>
       </button>
       {open && (
         <div className="model-menu" role="menu">
-          <div className="model-menu-head">{live ? "Switch model" : "Model on resume"}</div>
-          {MODEL_PRESETS.map((p) => (
+          <div className="model-menu-head">{canLiveSwitch ? "Switch model" : "Model on resume"}</div>
+          {profile.models.map((p) => (
             <button
-              key={p.model}
-              className={`model-menu-item ${session.model === p.model ? "current" : ""}`}
-              onClick={() => pick(p.model)}
+              key={p.value}
+              className={`model-menu-item ${session.model === p.value ? "current" : ""}`}
+              onClick={() => pick(p.value)}
             >
               <span className="model-menu-icon">{p.icon}</span>
               <span className="model-menu-intent">{p.intent}</span>
               <span className="model-menu-model">{p.label}</span>
             </button>
           ))}
-          {live && (
+          {canLiveSwitch && (
             <div className="model-menu-note">
-              Sends <code>/model</code> to the terminal — only takes effect if Claude is idle.
+              Sends <code>/model</code> to the terminal — only takes effect if {profile.label} is idle.
+            </div>
+          )}
+          {live && !profile.supportsLiveModelSwitch && (
+            <div className="model-menu-note">
+              Applies the next time this session is resumed.
             </div>
           )}
         </div>

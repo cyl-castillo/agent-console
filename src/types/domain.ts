@@ -91,10 +91,12 @@ export interface PersistedSession {
   cwd: string;
   createdAtMs: number;
   scrollback: string;
+  /// Which agent this session launches ("claude" | "codex"). Undefined = Claude.
+  agent?: string;
   claudeSessionId?: string;
   nameSuggested?: boolean;
-  /// Model alias or full id last chosen for this session (passed as
-  /// `claude --model <model>` on launch). Undefined = account default.
+  /// Model alias / tuning value last chosen for this session, encoded by the
+  /// agent profile on launch. Undefined = account/config default.
   model?: string;
 }
 
