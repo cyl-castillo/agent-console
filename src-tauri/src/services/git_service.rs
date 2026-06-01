@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::process::Command;
+use crate::services::proc;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +43,7 @@ pub fn status(repo: &Path) -> AppResult<GitStatus> {
     }
 
     // Cheap repo detection.
-    let inside = Command::new("git")
+    let inside = proc::command("git")
         .args(["rev-parse", "--is-inside-work-tree"])
         .current_dir(repo)
         .output()?;
@@ -51,7 +51,7 @@ pub fn status(repo: &Path) -> AppResult<GitStatus> {
         return Ok(GitStatus { is_repo: false, branch: None, changes: Vec::new() });
     }
 
-    let branch_out = Command::new("git")
+    let branch_out = proc::command("git")
         .args(["branch", "--show-current"])
         .current_dir(repo)
         .output()?;
@@ -62,7 +62,7 @@ pub fn status(repo: &Path) -> AppResult<GitStatus> {
         None
     };
 
-    let status_out = Command::new("git")
+    let status_out = proc::command("git")
         .args(["status", "--porcelain=v1", "-uall", "--no-renames"])
         .current_dir(repo)
         .output()?;
@@ -90,7 +90,7 @@ pub fn status(repo: &Path) -> AppResult<GitStatus> {
 /// untracked files (whose content is not yet tracked by git).
 pub fn diff_file(repo: &Path, file: &str) -> AppResult<String> {
     // Untracked? Show full file content as additions.
-    let ls = Command::new("git")
+    let ls = proc::command("git")
         .args(["ls-files", "--error-unmatch", "--", file])
         .current_dir(repo)
         .output()?;
@@ -111,7 +111,7 @@ pub fn diff_file(repo: &Path, file: &str) -> AppResult<String> {
     }
 
     // Tracked: combine staged + unstaged so we show the full delta vs HEAD.
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args(["diff", "--no-color", "HEAD", "--", file])
         .current_dir(repo)
         .output()?;
@@ -124,7 +124,7 @@ pub fn diff_file(repo: &Path, file: &str) -> AppResult<String> {
 
 /// `git add -- file`. Works for modifications, additions, deletions, and untracked files.
 pub fn stage_file(repo: &Path, file: &str) -> AppResult<()> {
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args(["add", "--", file])
         .current_dir(repo)
         .output()?;
@@ -139,7 +139,7 @@ pub fn stage_file(repo: &Path, file: &str) -> AppResult<()> {
 /// Falls back to `git reset HEAD -- file` for older git versions or for files
 /// staged in an initial commit (no HEAD yet).
 pub fn unstage_file(repo: &Path, file: &str) -> AppResult<()> {
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args(["restore", "--staged", "--", file])
         .current_dir(repo)
         .output()?;
@@ -147,7 +147,7 @@ pub fn unstage_file(repo: &Path, file: &str) -> AppResult<()> {
         return Ok(());
     }
     // Initial commit / no HEAD yet: `git rm --cached` removes from index without touching disk.
-    let fallback = Command::new("git")
+    let fallback = proc::command("git")
         .args(["rm", "--cached", "--quiet", "--", file])
         .current_dir(repo)
         .output()?;
@@ -163,7 +163,7 @@ pub fn commit(repo: &Path, message: &str) -> AppResult<String> {
     if message.trim().is_empty() {
         return Err(AppError::InvalidArgument("commit message is empty".into()));
     }
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args(["commit", "-m", message])
         .current_dir(repo)
         .output()?;
@@ -172,7 +172,7 @@ pub fn commit(repo: &Path, message: &str) -> AppResult<String> {
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         return Err(AppError::Other(format!("git commit failed: {msg}{stdout}")));
     }
-    let sha_out = Command::new("git")
+    let sha_out = proc::command("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(repo)
         .output()?;
@@ -186,7 +186,7 @@ pub fn file_log(repo: &Path, file: &str, limit: u32) -> AppResult<Vec<GitCommitI
     // Separator unlikely to appear in subjects/author names.
     const SEP: &str = "\u{1f}";
     let format = format!("%H{SEP}%h{SEP}%s{SEP}%an{SEP}%at");
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args([
             "log",
             &format!("-n{limit}"),
@@ -237,7 +237,7 @@ pub fn branches(repo: &Path) -> AppResult<Vec<BranchInfo>> {
     let format = format!(
         "%(HEAD){SEP}%(refname:short){SEP}%(upstream:short){SEP}%(committerdate:unix){SEP}%(contents:subject)"
     );
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args([
             "for-each-ref",
             "--sort=-committerdate",
@@ -275,7 +275,7 @@ pub fn branches(repo: &Path) -> AppResult<Vec<BranchInfo>> {
 }
 
 fn ahead_behind(repo: &Path, branch: &str, upstream: &str) -> AppResult<(u32, u32)> {
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args([
             "rev-list",
             "--left-right",
@@ -295,7 +295,7 @@ fn ahead_behind(repo: &Path, branch: &str, upstream: &str) -> AppResult<(u32, u3
 /// `git checkout <name>`. Fails loudly if the working tree has conflicting
 /// uncommitted changes — that's git's natural protection.
 pub fn checkout_branch(repo: &Path, name: &str) -> AppResult<()> {
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args(["checkout", name])
         .current_dir(repo)
         .output()?;
@@ -311,7 +311,7 @@ pub fn checkout_branch(repo: &Path, name: &str) -> AppResult<()> {
 pub fn recent_messages(repo: &Path, limit: u32) -> AppResult<Vec<String>> {
     const SEP: &str = "\u{1e}";
     let format = format!("%B{SEP}");
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args([
             "log",
             &format!("-n{limit}"),
@@ -334,7 +334,7 @@ pub fn recent_messages(repo: &Path, limit: u32) -> AppResult<Vec<String>> {
 /// Full commit message (subject + body) of HEAD. Empty string if there is no
 /// HEAD yet (fresh repo).
 pub fn head_message(repo: &Path) -> AppResult<String> {
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args(["log", "-1", "--pretty=%B"])
         .current_dir(repo)
         .output()?;
@@ -350,7 +350,7 @@ pub fn amend_commit(repo: &Path, message: &str) -> AppResult<String> {
     if message.trim().is_empty() {
         return Err(AppError::InvalidArgument("commit message is empty".into()));
     }
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args(["commit", "--amend", "-m", message])
         .current_dir(repo)
         .output()?;
@@ -359,7 +359,7 @@ pub fn amend_commit(repo: &Path, message: &str) -> AppResult<String> {
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
         return Err(AppError::Other(format!("git commit --amend failed: {msg}{stdout}")));
     }
-    let sha_out = Command::new("git")
+    let sha_out = proc::command("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(repo)
         .output()?;
@@ -369,13 +369,13 @@ pub fn amend_commit(repo: &Path, message: &str) -> AppResult<String> {
 /// Revert a single change. Tracked files: `git checkout HEAD -- file`.
 /// Untracked files: delete from disk.
 pub fn revert_file(repo: &Path, file: &str) -> AppResult<()> {
-    let ls = Command::new("git")
+    let ls = proc::command("git")
         .args(["ls-files", "--error-unmatch", "--", file])
         .current_dir(repo)
         .output()?;
 
     if ls.status.success() {
-        let out = Command::new("git")
+        let out = proc::command("git")
             .args(["checkout", "HEAD", "--", file])
             .current_dir(repo)
             .output()?;

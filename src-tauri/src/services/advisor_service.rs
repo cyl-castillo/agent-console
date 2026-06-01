@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use crate::services::proc;
 
 use serde::{Deserialize, Serialize};
 
@@ -198,7 +198,7 @@ fn list_existing_skills(root: &Path) -> String {
 }
 
 fn git_log_recent(root: &Path) -> String {
-    let Ok(out) = Command::new("git")
+    let Ok(out) = proc::command("git")
         .args(["log", "--oneline", "-30"])
         .current_dir(root)
         .output()

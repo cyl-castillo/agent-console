@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::process::Command;
+use crate::services::proc;
 
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +42,7 @@ pub fn context(project_root: Option<&Path>, project_name: Option<&str>) -> Feedb
 }
 
 fn git_branch(root: &Path) -> Option<String> {
-    let out = Command::new("git")
+    let out = proc::command("git")
         .args(["-C"])
         .arg(root)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -72,7 +72,7 @@ pub fn submit(input: FeedbackInput, ctx: &FeedbackContext) -> AppResult<String> 
     let full_title = format!("[{cat}][{sev}] {title}");
     let body = format_body(desc, ctx, &cat, &sev);
 
-    let out = Command::new("gh")
+    let out = proc::command("gh")
         .args(["issue", "create", "--repo", REPO, "--label", FEEDBACK_LABEL])
         .arg("--title").arg(&full_title)
         .arg("--body").arg(&body)
