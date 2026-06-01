@@ -40,6 +40,11 @@ jobs:
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
+        # Never fail the release over caching. The save runs in a post-job step
+        # after artifacts are already built/uploaded, and tar/zstd on Windows
+        # occasionally errors there — a cosmetic red ❌ on an otherwise-complete
+        # release. continue-on-error covers both the main and post steps.
+        continue-on-error: true
         with:
           workspaces: './src-tauri -> target'
 
