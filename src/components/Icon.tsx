@@ -11,7 +11,8 @@ export type IconName =
   | "sun"
   | "moon"
   | "plug"
-  | "server";
+  | "server"
+  | "panel-right";
 
 interface Props {
   name: IconName;
@@ -109,6 +110,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <rect width="20" height="8" x="2" y="14" rx="2" ry="2" />
       <path d="M6 6h.01" />
       <path d="M6 18h.01" />
+    </>
+  ),
+  // Lucide: panel-right
+  "panel-right": (
+    <>
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <path d="M15 3v18" />
     </>
   ),
 };

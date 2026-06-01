@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 
 import { useSessionStore } from "./stores/sessionStore";
 import { attachGitWatcherListener, useChangesStore } from "./stores/changesStore";
@@ -41,6 +41,22 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useToastStore } from "./stores/toastStore";
 import { ipc } from "./ipc/tauri";
 import type { WorkspaceContext } from "./types/domain";
+
+const PANEL_W_KEY = "agent-console:panel-width:";
+const DEFAULT_W = { left: 240, right: 320 } as const;
+
+function loadPanelWidth(side: "left" | "right"): number {
+  try {
+    const v = Number(localStorage.getItem(PANEL_W_KEY + side));
+    return Number.isFinite(v) && v > 0 ? v : DEFAULT_W[side];
+  } catch { return DEFAULT_W[side]; }
+}
+function savePanelWidth(side: "left" | "right", w: number) {
+  try { localStorage.setItem(PANEL_W_KEY + side, String(w)); } catch { /* ignore */ }
+}
+function clampW(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(v)));
+}
 
 export default function App() {
   const { project, closeProject } = useSessionStore();
@@ -93,6 +109,57 @@ export default function App() {
       .catch(() => showToast("Could not copy project path", "error"));
   };
 
+  // --- Resizable sidebars ---------------------------------------------------
+  const [rightOpen, setRightOpen] = useState(true);
+  const [leftW, setLeftW] = useState<number>(() => loadPanelWidth("left"));
+  const [rightW, setRightW] = useState<number>(() => loadPanelWidth("right"));
+  const appRef = useRef<HTMLDivElement>(null);
+  const dragSide = useRef<null | "left" | "right">(null);
+  const pendingW = useRef<number | null>(null);
+
+  const startResize = (side: "left" | "right") => (e: ReactPointerEvent) => {
+    e.preventDefault();
+    dragSide.current = side;
+    pendingW.current = null;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+  };
+  const onResizeMove = (e: ReactPointerEvent) => {
+    const side = dragSide.current;
+    const app = appRef.current;
+    if (!side || !app) return;
+    const rect = app.getBoundingClientRect();
+    const cap = Math.round(rect.width * 0.45); // keep the center usable
+    let w: number;
+    if (side === "left") {
+      w = clampW(e.clientX - rect.left, 180, Math.min(480, cap));
+      app.style.setProperty("--left-w", `${w}px`);
+    } else {
+      w = clampW(rect.right - e.clientX, 240, Math.min(600, cap));
+      app.style.setProperty("--right-w", `${w}px`);
+    }
+    pendingW.current = w; // committed to React state on pointer-up
+  };
+  const endResize = (e: ReactPointerEvent) => {
+    const side = dragSide.current;
+    if (!side) return;
+    const el = e.currentTarget as HTMLElement;
+    el.classList.remove("dragging");
+    el.releasePointerCapture?.(e.pointerId);
+    dragSide.current = null;
+    const w = pendingW.current;
+    pendingW.current = null;
+    if (w == null) return;
+    if (side === "left") { setLeftW(w); savePanelWidth("left", w); }
+    else { setRightW(w); savePanelWidth("right", w); }
+  };
+  const resetResize = (side: "left" | "right") => () => {
+    const w = DEFAULT_W[side];
+    if (side === "left") setLeftW(w); else setRightW(w);
+    savePanelWidth(side, w);
+  };
+
   useKeyboardShortcuts({ setTab });
 
   // Listen for palette-triggered navigation events.
@@ -110,6 +177,7 @@ export default function App() {
     const onGettingStarted = () => setShowGettingStarted(true);
     const onShortcuts = () => setShowShortcuts(true);
     const onToggleSidebar = () => setLeftOpen((v) => !v);
+    const onToggleRight = () => setRightOpen((v) => !v);
     const onNewSession = () => newSession();
     const onCopyProjectPath = () => copyProjectPath();
     window.addEventListener("ac:open-tab", onOpenTab);
@@ -117,6 +185,7 @@ export default function App() {
     window.addEventListener("ac:open-getting-started", onGettingStarted);
     window.addEventListener("ac:open-shortcuts", onShortcuts);
     window.addEventListener("ac:toggle-sidebar", onToggleSidebar);
+    window.addEventListener("ac:toggle-right-panel", onToggleRight);
     window.addEventListener("ac:new-session", onNewSession);
     window.addEventListener("ac:copy-project-path", onCopyProjectPath);
     return () => {
@@ -125,6 +194,7 @@ export default function App() {
       window.removeEventListener("ac:open-getting-started", onGettingStarted);
       window.removeEventListener("ac:open-shortcuts", onShortcuts);
       window.removeEventListener("ac:toggle-sidebar", onToggleSidebar);
+      window.removeEventListener("ac:toggle-right-panel", onToggleRight);
       window.removeEventListener("ac:new-session", onNewSession);
       window.removeEventListener("ac:copy-project-path", onCopyProjectPath);
     };
@@ -230,7 +300,11 @@ export default function App() {
 
   return (
     <>
-      <div className={`app ${leftOpen ? "" : "left-collapsed"}`}>
+      <div
+        ref={appRef}
+        className={`app ${leftOpen ? "" : "left-collapsed"} ${rightOpen ? "" : "right-collapsed"}`}
+        style={{ "--left-w": `${leftW}px`, "--right-w": `${rightW}px` } as CSSProperties}
+      >
         <div className="topbar">
           <button
             className={`sidebar-toggle ${leftOpen ? "open" : ""}`}
@@ -252,6 +326,13 @@ export default function App() {
 
           <span className="spacer" />
 
+          <button
+            className={`topbar-icon ${rightOpen ? "on" : ""}`}
+            onClick={() => setRightOpen((v) => !v)}
+            title={rightOpen ? "Hide side panel (Ctrl+J)" : "Show side panel (Ctrl+J)"}
+          >
+            <Icon name="panel-right" size={14} />
+          </button>
           <button
             className="topbar-icon"
             onClick={toggleTheme}
@@ -360,6 +441,27 @@ export default function App() {
           )}
         </aside>
         <StatusBar workspace={workspace} />
+
+        {leftOpen && (
+          <div
+            className="resize-handle left"
+            onPointerDown={startResize("left")}
+            onPointerMove={onResizeMove}
+            onPointerUp={endResize}
+            onDoubleClick={resetResize("left")}
+            title="Drag to resize · double-click to reset"
+          />
+        )}
+        {rightOpen && (
+          <div
+            className="resize-handle right"
+            onPointerDown={startResize("right")}
+            onPointerMove={onResizeMove}
+            onPointerUp={endResize}
+            onDoubleClick={resetResize("right")}
+            title="Drag to resize · double-click to reset"
+          />
+        )}
       </div>
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showGettingStarted && (

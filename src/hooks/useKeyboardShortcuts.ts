@@ -78,6 +78,13 @@ export function useKeyboardShortcuts({ setTab }: Args) {
           window.dispatchEvent(new CustomEvent("ac:toggle-sidebar"));
           e.preventDefault();
           break;
+        case "j":
+        case "J":
+          // Ctrl+J is line-feed (LF) inside the terminal — leave it to the PTY.
+          if (inTerminal) return;
+          window.dispatchEvent(new CustomEvent("ac:toggle-right-panel"));
+          e.preventDefault();
+          break;
         case "t":
         case "T":
           // Ctrl+T is readline transpose-chars inside the terminal — don't steal it.

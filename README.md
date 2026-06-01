@@ -107,6 +107,7 @@ macOS and Windows builds use the same command; bundle output varies (`.dmg` / `.
 | `Ctrl+2` | Switch to Changes tab |
 | `Ctrl+3` | Switch to Preview tab |
 | `Ctrl+B` | Toggle workspace sidebar |
+| `Ctrl+J` | Toggle side panel |
 | `Ctrl+P` | Open command palette |
 | `Ctrl+/` | Show keyboard shortcuts |
 | `Ctrl+T` | New session (passes through to the shell when focused inside the terminal) |

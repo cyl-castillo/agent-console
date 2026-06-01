@@ -73,7 +73,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 /* --- Layout --- */
 .app {
   display: grid;
-  grid-template-columns: 240px 1fr 320px;
+  grid-template-columns: var(--left-w, 240px) 1fr var(--right-w, 320px);
   grid-template-rows: 32px 1fr 22px;
   grid-template-areas:
     "topbar topbar topbar"
@@ -81,6 +81,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
     "status status status";
   height: 100%;
   width: 100%;
+  position: relative;
 }
 
 .topbar {
@@ -173,14 +174,52 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .panel.left   { grid-area: left; }
 .app.left-collapsed {
-  grid-template-columns: 0 1fr 320px;
+  grid-template-columns: 0 1fr var(--right-w, 320px);
   grid-template-areas:
     "topbar topbar topbar"
     "center center right"
     "status status status";
 }
+.app.right-collapsed {
+  grid-template-columns: var(--left-w, 240px) 1fr 0;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "left   center center"
+    "status status status";
+}
+.app.left-collapsed.right-collapsed {
+  grid-template-columns: 0 1fr 0;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "center center center"
+    "status status status";
+}
 .panel.center { grid-area: center; background: var(--bg); border-right: 1px solid var(--border); }
 .panel.right  { grid-area: right; border-right: none; border-left: 1px solid var(--border); }
+
+/* Drag handles live in the grid gutters — positioned over the layout, not
+   inside the overflow-hidden sidebars — straddling each column boundary. */
+.resize-handle {
+  position: absolute;
+  top: 32px;            /* below the topbar row */
+  bottom: 22px;         /* above the status row */
+  width: 8px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.resize-handle.left  { left:  calc(var(--left-w, 240px)  - 4px); }
+.resize-handle.right { right: calc(var(--right-w, 320px) - 4px); }
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+.resize-handle:hover::after,
+.resize-handle.dragging::after { background: var(--accent); }
 
 .panel-header {
   font-size: 11px;
@@ -1420,6 +1459,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   line-height: 1;
 }
 .topbar-icon:hover { color: var(--accent); background: transparent; border: none; }
+.topbar-icon.on { color: var(--text); }
 
 /* --- Preview tab --- */
 .preview {

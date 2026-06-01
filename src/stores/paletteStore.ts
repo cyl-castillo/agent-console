@@ -177,6 +177,13 @@ const ACTIONS: PaletteAction[] = [
     run: () => emit("ac:toggle-sidebar", null),
   },
   {
+    id: "ui.toggle_right_panel",
+    label: "Toggle Side Panel",
+    hint: "Show or hide the right panel (Ctrl+J)",
+    keywords: ["right", "inspector", "workbench", "skills"],
+    run: () => emit("ac:toggle-right-panel", null),
+  },
+  {
     id: "ui.toggle_theme",
     label: "Toggle Theme",
     hint: "Switch between dark and light themes",
