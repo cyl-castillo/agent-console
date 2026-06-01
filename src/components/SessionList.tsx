@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useUIStore } from "../stores/uiStore";
-import { useModelStore, MODEL_PRESETS, isValidModel, modelLabel } from "../stores/modelStore";
+import { useModelStore, isValidModel, modelLabel } from "../stores/modelStore";
+import { AGENT_PROFILES, profileFor, DEFAULT_AGENT, type AgentKind } from "../agents/profiles";
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -34,19 +35,22 @@ export function SessionList() {
   const dismissSuggestion = useTerminalsStore((s) => s.dismissSuggestion);
   const project = useSessionStore((s) => s.project);
   const setTab = useUIStore((s) => s.setTab);
-  const defaultFor = useModelStore((s) => s.defaultFor);
   const setDefaultFor = useModelStore((s) => s.setDefaultFor);
+  const defaultAgentFor = useModelStore((s) => s.defaultAgentFor);
+  const setDefaultAgentFor = useModelStore((s) => s.setDefaultAgentFor);
   const [choosing, setChoosing] = useState(false);
 
-  const lastModel = project ? defaultFor(project.root) : undefined;
+  const lastAgent = project ? defaultAgentFor(project.root) : undefined;
 
-  // Always go through the chooser so the model is an explicit, visible choice
-  // (no silent fall-back to a default). `undefined` model = account default.
-  const createSession = (model?: string) => {
+  // Always go through the chooser so the agent and model are explicit, visible
+  // choices (no silent fall-back to a default). `undefined` model = account
+  // default; agent defaults to Claude.
+  const createSession = (agent: AgentKind, model?: string) => {
     if (!project) return;
     const m = isValidModel(model) ? model : undefined;
-    add(project.root, undefined, m);
-    setDefaultFor(project.root, m);
+    add(project.root, undefined, m, agent);
+    setDefaultFor(project.root, agent, m);
+    setDefaultAgentFor(project.root, agent);
     setChoosing(false);
     setTab("terminal");
     persist();
@@ -72,12 +76,13 @@ export function SessionList() {
           className={`sessions-new ${choosing ? "open" : ""}`}
           onClick={() => setChoosing((v) => !v)}
           disabled={!project}
-          title="New session — pick a model"
+          title="New session — pick an agent and model"
         >+ new</button>
       </div>
-      {choosing && (
-        <ModelChooser
-          lastModel={lastModel}
+      {choosing && project && (
+        <AgentModelChooser
+          projectRoot={project.root}
+          lastAgent={lastAgent ?? DEFAULT_AGENT}
           onPick={createSession}
           onCancel={() => setChoosing(false)}
         />
@@ -107,44 +112,69 @@ export function SessionList() {
   );
 }
 
-/// Inline, in-flow model chooser shown under the "+ new" button. Rendered in
-/// the normal layout (not an absolutely-positioned popover) so it never gets
-/// clipped by the 240px sidebar's `overflow: hidden`. Picking creates the
-/// session right away; there is no silent default — the choice is explicit.
-function ModelChooser({ lastModel, onPick, onCancel }: {
-  lastModel?: string;
-  onPick: (model?: string) => void;
+/// Inline, in-flow agent + model chooser shown under the "+ new" button.
+/// Rendered in the normal layout (not an absolutely-positioned popover) so it
+/// never gets clipped by the 240px sidebar's `overflow: hidden`. First pick the
+/// agent, then a model/tuning preset for that agent; picking creates the session
+/// right away. There is no silent default — both choices are explicit. The model
+/// per-project default is remembered separately for each agent.
+function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
+  projectRoot: string;
+  lastAgent: AgentKind;
+  onPick: (agent: AgentKind, model?: string) => void;
   onCancel: () => void;
 }) {
+  const defaultFor = useModelStore((s) => s.defaultFor);
+  const [agent, setAgent] = useState<AgentKind>(lastAgent);
   const [showCustom, setShowCustom] = useState(false);
   const [custom, setCustom] = useState("");
 
+  const profile = profileFor(agent);
+  const lastModel = defaultFor(projectRoot, agent);
+
   const commitCustom = () => {
     const v = custom.trim();
-    if (isValidModel(v)) onPick(v);
+    if (isValidModel(v)) onPick(agent, v);
   };
 
   return (
-    <div className="model-chooser" role="listbox" aria-label="Choose a model">
-      {MODEL_PRESETS.map((p) => (
+    <div className="model-chooser" role="listbox" aria-label="Choose an agent and model">
+      {AGENT_PROFILES.length > 1 && (
+        <div className="agent-chooser-tabs" role="tablist" aria-label="Agent">
+          {AGENT_PROFILES.map((p) => (
+            <button
+              key={p.kind}
+              role="tab"
+              aria-selected={agent === p.kind}
+              className={`agent-chooser-tab ${agent === p.kind ? "active" : ""}`}
+              onClick={() => { setAgent(p.kind); setShowCustom(false); }}
+            >
+              <span className="agent-chooser-tab-icon">{p.icon}</span>
+              <span>{p.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {profile.models.map((p) => (
         <button
-          key={p.model}
-          className={`model-chooser-item ${lastModel === p.model ? "last" : ""}`}
-          onClick={() => onPick(p.model)}
-          autoFocus={lastModel === p.model}
+          key={p.value}
+          className={`model-chooser-item ${lastModel === p.value ? "last" : ""}`}
+          onClick={() => onPick(agent, p.value)}
+          autoFocus={lastModel === p.value}
         >
           <span className="model-chooser-icon">{p.icon}</span>
           <span className="model-chooser-text">
             <span className="model-chooser-intent">{p.intent}</span>
             <span className="model-chooser-model">{p.label}</span>
           </span>
-          {lastModel === p.model && <span className="model-chooser-last-dot" title="last used">●</span>}
+          {lastModel === p.value && <span className="model-chooser-last-dot" title="last used">●</span>}
         </button>
       ))}
 
       <div className="model-chooser-foot">
-        <button className="model-chooser-link" onClick={() => onPick(undefined)}>
-          Account default
+        <button className="model-chooser-link" onClick={() => onPick(agent, undefined)}>
+          {agent === "codex" ? "Config default" : "Account default"}
         </button>
         <span className="model-chooser-sep">·</span>
         <button className="model-chooser-link" onClick={() => setShowCustom((v) => !v)}>
@@ -159,7 +189,7 @@ function ModelChooser({ lastModel, onPick, onCancel }: {
           <input
             className="wb-search-input"
             autoFocus
-            placeholder="model id (e.g. claude-opus-4-8)"
+            placeholder={agent === "codex" ? "reasoning effort (e.g. xhigh)" : "model id (e.g. claude-opus-4-8)"}
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
             onKeyDown={(e) => {
@@ -221,9 +251,12 @@ function SessionRow({ session, active, onActivate, onClose, onRename, onAcceptSu
           onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
         >{session.name}</span>
       )}
+      <span className="session-agent" title={`Agent: ${profileFor(session.agent).label}`}>
+        {profileFor(session.agent).icon}
+      </span>
       {session.model && (
-        <span className="session-model" title={`Model: ${modelLabel(session.model)}`}>
-          {modelLabel(session.model)}
+        <span className="session-model" title={`${profileFor(session.agent).label} · ${modelLabel(session.model, session.agent)}`}>
+          {modelLabel(session.model, session.agent)}
         </span>
       )}
       <span className="session-meta">{meta}</span>
