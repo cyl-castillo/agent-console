@@ -966,6 +966,19 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 @keyframes caret-blink { 50% { opacity: 0; } }
 
+/* Section/panel collapse chevrons reuse `.caret`, but they are expand/collapse
+   affordances — not the text cursor — so they must not inherit the block
+   background or the blinking animation from the base `.caret` rule above. */
+.side-section-header .caret,
+.wb-advisor-head .caret,
+.wb-integration-header .caret,
+.ctx-section-head .caret,
+.ctx-memory-head .caret,
+.mcp-row-head .caret {
+  background: none;
+  animation: none;
+}
+
 .console-composer {
   border-top: 1px solid var(--border);
   padding: 6px 8px 4px;
