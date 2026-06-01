@@ -109,12 +109,12 @@ macOS and Windows builds use the same command; bundle output varies (`.dmg` / `.
 | `Ctrl+B` | Toggle workspace sidebar |
 | `Ctrl+P` | Open command palette |
 | `Ctrl+/` | Show keyboard shortcuts |
-| `Ctrl+T` | New session |
+| `Ctrl+T` | New session (passes through to the shell when focused inside the terminal) |
 | `Ctrl+Tab` | Next live session |
 | `Ctrl+Shift+Tab` | Previous live session |
-| `Ctrl+]` | Next live session |
-| `Ctrl+[` | Previous live session |
-| `Ctrl+W` | Close active session |
+| `Ctrl+]` | Next live session (passes through to the shell when focused inside the terminal) |
+| `Ctrl+[` | Previous live session (passes through as `Esc` when focused inside the terminal — e.g. vim) |
+| `Ctrl+W` | Close active session (passes through as delete-word when focused inside the terminal) |
 | `Ctrl+K` | Focus the chat input |
 | `Ctrl+L` | Clear the terminal (only when not focused inside terminal — the shell still gets `Ctrl+L` natively there) |
 | `Ctrl+R` | Refresh git changes |
