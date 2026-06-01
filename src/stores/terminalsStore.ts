@@ -38,6 +38,10 @@ interface TerminalsState {
   projectRoot: string | null;
   sessions: TerminalSession[];
   activeId: string | null;
+  /// True only after a successful hydrate for the current project. While false
+  /// (initial state, or after a failed load) persist() is blocked so a failed
+  /// read can never overwrite the saved history with an empty/partial list.
+  ready: boolean;
 
   hydrate: (projectRoot: string) => Promise<void>;
   clear: () => void;
@@ -81,13 +85,19 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   projectRoot: null,
   sessions: [],
   activeId: null,
+  ready: false,
 
   hydrate: async (projectRoot) => {
-    let persisted: PersistedSession[] = [];
+    let persisted: PersistedSession[];
     try {
       persisted = await ipc.sessionsList(projectRoot);
-    } catch {
-      persisted = [];
+    } catch (e) {
+      // Read failed (corrupt/unreadable file). Do NOT touch the saved history:
+      // leave ready=false so persist() is blocked and the app won't auto-spawn
+      // a session that would otherwise overwrite the file on the next save.
+      console.error("[sessions] hydrate failed; not overwriting saved history:", e);
+      set({ projectRoot, sessions: [], activeId: null, ready: false });
+      return;
     }
     const sessions: TerminalSession[] = persisted.map((p) => ({
       id: p.id,
@@ -102,11 +112,11 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       claudeSessionId: p.claudeSessionId,
       model: p.model,
     }));
-    set({ projectRoot, sessions, activeId: null });
+    set({ projectRoot, sessions, activeId: null, ready: true });
   },
 
   clear: () => {
-    set({ projectRoot: null, sessions: [], activeId: null });
+    set({ projectRoot: null, sessions: [], activeId: null, ready: false });
   },
 
   add: (cwd, name, model, agent) => {
@@ -235,8 +245,10 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   },
 
   persist: async () => {
-    const { projectRoot, sessions } = get();
-    if (!projectRoot) return;
+    const { projectRoot, sessions, ready } = get();
+    // Block until a successful hydrate: persisting while !ready could overwrite
+    // saved history that we failed to (or haven't yet) read back.
+    if (!projectRoot || !ready) return;
     const payload: PersistedSession[] = sessions.map((s) => {
       const scrollback = s.status === "live" ? s.liveScrollback : s.initialScrollback;
       const trimmed =

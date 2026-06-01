@@ -153,8 +153,11 @@ export default function App() {
     ipc.workspaceContext().then(setWorkspace).catch(() => setWorkspace(null));
     (async () => {
       await hydrateTerminals(project.root);
-      // Auto-spawn one live session if nothing was restored from disk.
-      if (useTerminalsStore.getState().sessions.length === 0) {
+      // Auto-spawn one live session only when the load SUCCEEDED and restored
+      // nothing. If hydrate failed (ready=false) we must not spawn — doing so
+      // would let the next persist overwrite history we simply couldn't read.
+      const st = useTerminalsStore.getState();
+      if (st.ready && st.sessions.length === 0) {
         addTerminal(project.root);
       }
     })();

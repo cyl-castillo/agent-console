@@ -6,7 +6,7 @@ use crate::state::AppState;
 
 #[tauri::command]
 pub fn sessions_list(project_root: String, state: State<'_, AppState>) -> AppResult<Vec<PersistedSession>> {
-    Ok(state.sessions.list(&project_root))
+    state.sessions.list(&project_root)
 }
 
 #[tauri::command]
