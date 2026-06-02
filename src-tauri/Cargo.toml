@@ -1,6 +1,6 @@
 [package]
 name = "agent-console"
-version = "0.23.3"
+version = "0.23.4"
 description = "Agent Console — minimalist AI-native console IDE"
 authors = ["Carlos Castillo"]
 edition = "2021"
