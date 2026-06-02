@@ -143,6 +143,10 @@ impl RoundtableService {
             return Err(AppError::InvalidArgument("topic is empty".into()));
         }
 
+        // Garbage-collect any roundtable worktrees orphaned by a prior run that
+        // crashed or was closed without applying/discarding a winner.
+        cleanup_stale_worktrees(&repo);
+
         let n = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
         let id = format!("rt-{}-{}", std::process::id(), n);
 
@@ -234,6 +238,14 @@ impl RoundtableService {
         // Safety net: snapshot the real working tree before mutating it.
         let snap = snapshot_service::create(&control.repo, &format!("roundtable-apply-{id}-{side}"))?;
         apply_patch(&control.repo, &patch)?;
+
+        // Applying a winner ends the debate — tear down both worktrees and drop
+        // the run so they don't leak in temp. Only after a *successful* apply,
+        // so a failed patch leaves everything inspectable for a retry.
+        self.runs.lock().unwrap().remove(id);
+        control.stopped.store(true, Ordering::SeqCst);
+        teardown(&control);
+
         Ok(snap.map(|s| s.commit_sha))
     }
 
@@ -713,6 +725,38 @@ fn remove_worktree(repo: &Path, path: &Path) {
         .args(["worktree", "remove", "--force", &path.to_string_lossy()])
         .current_dir(repo)
         .output();
+}
+
+/// Remove any registered worktree whose path is under an
+/// `agent-console-roundtable` directory — leftovers from a run that didn't tear
+/// down cleanly. Best-effort.
+fn cleanup_stale_worktrees(repo: &Path) {
+    let Ok(out) = proc::command("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo)
+        .output()
+    else {
+        return;
+    };
+    if !out.status.success() {
+        return;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut removed = false;
+    for line in text.lines() {
+        if let Some(p) = line.strip_prefix("worktree ") {
+            if p.contains("agent-console-roundtable") {
+                remove_worktree(repo, Path::new(p));
+                removed = true;
+            }
+        }
+    }
+    if removed {
+        let _ = proc::command("git")
+            .args(["worktree", "prune"])
+            .current_dir(repo)
+            .output();
+    }
 }
 
 fn teardown(control: &RunControl) {
