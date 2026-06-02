@@ -4516,10 +4516,10 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .rt-thinking { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 12px; padding: 4px 2px; }
 
 .rt-banner {
-  margin-top: 8px; padding: 6px 9px; border-radius: 6px;
-  background: rgba(255, 106, 106, 0.10); border: 1px solid var(--danger);
-  color: var(--danger); font-size: 11px;
+  margin-top: 8px; padding: 6px 9px; border-radius: 6px; font-size: 11px;
 }
+.rt-banner-error { background: rgba(255, 106, 106, 0.10); border: 1px solid var(--danger); color: var(--danger); }
+.rt-banner-info { background: var(--accent-soft); border: 1px solid var(--border); color: var(--text-dim); }
 
 /* moderator input */
 .rt-moderator { display: flex; gap: 6px; margin-top: 8px; }

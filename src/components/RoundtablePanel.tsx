@@ -254,7 +254,11 @@ function DebateView() {
         )}
       </div>
 
-      {message && <div className="rt-banner">{message}</div>}
+      {message && (
+        <div className={`rt-banner ${phase === "error" ? "rt-banner-error" : "rt-banner-info"}`}>
+          {message}
+        </div>
+      )}
 
       {diffSide && <DiffOverlay />}
 

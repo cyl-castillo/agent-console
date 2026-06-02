@@ -570,17 +570,16 @@ fn run_turn(
     })
 }
 
-/// Sum every token field present under a stream-json `usage` object.
+/// Real new tokens processed in a turn, for the budget. We deliberately exclude
+/// `cache_read_input_tokens`: every resumed turn re-reads the whole cached
+/// prompt, so cache reads are huge (tens of thousands per turn) yet near-free —
+/// counting them inflates the total ~10-20x and trips the budget after a couple
+/// of rounds. input + output + cache_creation reflects actual consumption.
 fn sum_usage(u: &Value) -> u64 {
-    [
-        "input_tokens",
-        "output_tokens",
-        "cache_read_input_tokens",
-        "cache_creation_input_tokens",
-    ]
-    .iter()
-    .filter_map(|k| u.get(*k).and_then(Value::as_u64))
-    .sum()
+    ["input_tokens", "output_tokens", "cache_creation_input_tokens"]
+        .iter()
+        .filter_map(|k| u.get(*k).and_then(Value::as_u64))
+        .sum()
 }
 
 /// A compact one-line summary of a tool call's input for the activity feed.
