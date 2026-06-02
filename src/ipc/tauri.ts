@@ -10,7 +10,9 @@ import type {
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, McpServer, McpAddInput,
   MemoryEntry, PermissionsSnapshot,
-  PersistedSession, Project, RecentProject, SessionUsage, Skill, StoredRule, VaultEntryView,
+  PersistedSession, Project, RecentProject,
+  RoundtableConfig,
+  SessionUsage, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
 } from "../types/domain";
 
@@ -132,6 +134,19 @@ export const ipc = {
     skillMdContent: string,
   ) =>
     invoke<string>("advisor_create_skill", { scope, name, skillMdContent }),
+
+  roundtableStart: (config: RoundtableConfig) =>
+    invoke<string>("roundtable_start", { config }),
+  roundtablePause: (id: string) => invoke<void>("roundtable_pause", { id }),
+  roundtableResume: (id: string) => invoke<void>("roundtable_resume", { id }),
+  roundtableInject: (id: string, message: string) =>
+    invoke<void>("roundtable_inject", { id, message }),
+  roundtableStop: (id: string) => invoke<void>("roundtable_stop", { id }),
+  roundtableSideDiff: (id: string, side: string) =>
+    invoke<string>("roundtable_side_diff", { id, side }),
+  roundtableApply: (id: string, side: string) =>
+    invoke<string | null>("roundtable_apply", { id, side }),
+  roundtableDiscard: (id: string) => invoke<void>("roundtable_discard", { id }),
 };
 
 export async function pickFolder(): Promise<string | null> {

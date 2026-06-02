@@ -9,6 +9,7 @@ pub mod permissions;
 pub mod plugins;
 pub mod project;
 pub mod projects;
+pub mod roundtable;
 pub mod sessions;
 pub mod skills;
 pub mod snapshot;

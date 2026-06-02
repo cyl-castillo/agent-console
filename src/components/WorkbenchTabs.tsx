@@ -8,10 +8,11 @@ import { useContextStore } from "../stores/contextStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
 import { usePluginsStore } from "../stores/pluginsStore";
 import { useMcpStore } from "../stores/mcpStore";
+import { useRoundtableStore } from "../stores/roundtableStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "plugins" | "mcp" | "feedback";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "roundtable" | "vault" | "context" | "plugins" | "mcp" | "feedback";
 
 export function WorkbenchTabs({
   active,
@@ -32,6 +33,9 @@ export function WorkbenchTabs({
   const pluginsCount = usePluginsStore((s) => s.installed.length);
   const mcpCount = useMcpStore((s) => s.servers.length);
   const feedbackEnabled = useFeedbackStore((s) => s.devEnabled === true);
+  const rtActive = useRoundtableStore(
+    (s) => s.phase === "running" || s.phase === "paused",
+  );
 
   const flagged = useMemo(() => {
     if (!permsRules) return 0;
@@ -72,6 +76,13 @@ export function WorkbenchTabs({
         count={advisorPending}
         active={active === "advisor"}
         onClick={() => onChange("advisor")}
+      />
+      <StripButton
+        icon="users"
+        label={rtActive ? "Debate…" : "Debate"}
+        title={rtActive ? "Roundtable (running)" : "Roundtable — two agents debate"}
+        active={active === "roundtable"}
+        onClick={() => onChange("roundtable")}
       />
       <StripButton
         icon="lock"

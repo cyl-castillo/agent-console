@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use crate::services::git_watcher::GitWatcher;
 use crate::services::hooks_service::HooksRuntime;
 use crate::services::project_manager::Project;
+use crate::services::roundtable_service::RoundtableService;
 use crate::services::sessions_service::SessionsService;
 use crate::services::terminal_runner::TerminalRegistry;
 
@@ -12,6 +13,7 @@ pub struct AppState {
     pub hooks: HooksRuntime,
     pub sessions: SessionsService,
     pub git_watcher: GitWatcher,
+    pub roundtable: RoundtableService,
 }
 
 impl AppState {
@@ -24,6 +26,7 @@ impl AppState {
             hooks,
             sessions: SessionsService::new(),
             git_watcher: GitWatcher::new(),
+            roundtable: RoundtableService::new(),
         }
     }
 }

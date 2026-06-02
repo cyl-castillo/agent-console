@@ -279,3 +279,68 @@ export interface SessionUsage {
   cacheCreationTotal: number;
   contextWindow: number;
 }
+
+// ----- Roundtable: two agents debate, each in its own git worktree -----
+
+export interface RoundtableParticipant {
+  /// "a" | "b".
+  side: string;
+  /// Display name in the transcript column header.
+  name: string;
+  /// Model alias fed to `claude --model`.
+  model: string;
+  /// Optional stance/role framing.
+  persona: string;
+}
+
+export interface RoundtableConfig {
+  topic: string;
+  participantA: RoundtableParticipant;
+  participantB: RoundtableParticipant;
+  /// One round = a turn for A then a turn for B.
+  maxRounds: number;
+  /// Cumulative token ceiling across both agents. 0 = unlimited.
+  tokenBudget: number;
+  /// true => agents may run Bash (`--dangerously-skip-permissions`);
+  /// false => file edits only (`--permission-mode acceptEdits`). Safe either
+  /// way — each agent is sandboxed to a throwaway worktree.
+  fullTools: boolean;
+}
+
+/// One agent turn, emitted over `roundtable://turn`.
+export interface RoundtableTurn {
+  id: string;
+  side: string;
+  round: number;
+  name: string;
+  model: string;
+  text: string;
+  /// `git diff --stat` of this side's worktree vs HEAD.
+  diffStat: string;
+  totalTokens: number;
+  costUsd: number;
+}
+
+/// A live activity line within a turn, emitted over `roundtable://activity`
+/// as the agent works (so the panel streams what it's doing in real time).
+export interface RoundtableActivity {
+  id: string;
+  side: string;
+  round: number;
+  /// "thinking" | "tool" | "text"
+  kind: string;
+  /// For "tool": the tool name. Empty otherwise.
+  label: string;
+  /// For "tool": short arg summary. For "thinking"/"text": the content.
+  text: string;
+}
+
+/// Lifecycle transition, emitted over `roundtable://status`.
+export interface RoundtableStatus {
+  id: string;
+  /// "running" | "paused" | "done" | "stopped" | "error"
+  status: string;
+  round: number;
+  totalTokens: number;
+  message: string | null;
+}

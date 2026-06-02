@@ -92,6 +92,14 @@ pub fn run() {
             commands::mcp::mcp_list,
             commands::mcp::mcp_add,
             commands::mcp::mcp_remove,
+            commands::roundtable::roundtable_start,
+            commands::roundtable::roundtable_pause,
+            commands::roundtable::roundtable_resume,
+            commands::roundtable::roundtable_inject,
+            commands::roundtable::roundtable_stop,
+            commands::roundtable::roundtable_side_diff,
+            commands::roundtable::roundtable_apply,
+            commands::roundtable::roundtable_discard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

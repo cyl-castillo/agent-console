@@ -16,13 +16,14 @@ import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { PermissionsPanel } from "./components/PermissionsPanel";
 import { AdvisorPanel } from "./components/AdvisorPanel";
+import { RoundtablePanel } from "./components/RoundtablePanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { ContextPanel } from "./components/ContextPanel";
 import { FeedbackPanel } from "./components/FeedbackPanel";
 import { PluginsPanel } from "./components/PluginsPanel";
 import { McpPanel } from "./components/McpPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
-import { WorkbenchTabs } from "./components/WorkbenchTabs";
+import { WorkbenchTabs, type WorkbenchTab } from "./components/WorkbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
@@ -79,7 +80,7 @@ export default function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
-  type WbTab = "skills" | "permissions" | "advisor" | "vault" | "context" | "plugins" | "mcp" | "feedback";
+  type WbTab = WorkbenchTab;
   const [workbenchTab, setWorkbenchTabState] = useState<WbTab>("skills");
   const setWorkbenchTab = (t: WbTab) => {
     setWorkbenchTabState(t);
@@ -246,8 +247,8 @@ export default function App() {
     try {
       const saved = localStorage.getItem(`agent-console:workbench-tab:${project.root}`);
       if (saved === "skills" || saved === "permissions" || saved === "advisor"
-          || saved === "vault" || saved === "context" || saved === "plugins"
-          || saved === "mcp" || saved === "feedback") {
+          || saved === "roundtable" || saved === "vault" || saved === "context"
+          || saved === "plugins" || saved === "mcp" || saved === "feedback") {
         setWorkbenchTabState(saved);
       }
     } catch { /* ignore */ }
@@ -431,6 +432,7 @@ export default function App() {
                 {workbenchTab === "skills" && <SkillsPanel />}
                 {workbenchTab === "permissions" && <PermissionsPanel />}
                 {workbenchTab === "advisor" && <AdvisorPanel />}
+                {workbenchTab === "roundtable" && <RoundtablePanel />}
                 {workbenchTab === "vault" && <VaultPanel />}
                 {workbenchTab === "context" && <ContextPanel />}
                 {workbenchTab === "plugins" && <PluginsPanel />}
