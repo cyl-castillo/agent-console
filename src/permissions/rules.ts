@@ -28,6 +28,53 @@ const BROAD_GLOBAL_BASH_PREFIXES = new Set([
   "git", "npm", "pnpm", "yarn", "cargo", "make", "docker", "kubectl",
 ]);
 
+// Live-command risk assessment: separate from HARD_DENY_ALLOW_PATTERNS, which
+// classifies *allow rule patterns* for the permission gate. These classify
+// *actual commands* for the single-approval badge. The two lists answer
+// different questions and will legitimately diverge (e.g. `git push --force`
+// must stay approvable as a rule, but still warrants a caution badge per-run).
+// Keyboard-blocking tier: commands where the badge alone is insufficient because
+// their effect is unknowable at a glance (curl|bash downloads arbitrary code) or
+// directly targets hardware (block device writes). NOT placed here: rm -rf ./local,
+// git push --force, reset --hard — those are predictable in effect and common
+// enough that blocking the keyboard creates rubber-stamp-via-mouse behavior.
+const DANGEROUS_COMMAND_PATTERNS: Array<{ re: RegExp; reason: string }> = [
+  { re: /curl[^|#\n]*\|\s*(ba)?sh/i, reason: "downloads and executes remote code" },
+  { re: /wget[^|#\n]*\|\s*(ba)?sh/i, reason: "downloads and executes remote code" },
+  { re: />\s*\/dev\/(sda|hda|nvme|disk)\d*/i, reason: "raw block device write" },
+  { re: /\bdd\s+if=/i, reason: "raw block device write" },
+];
+
+// Badge-only tier: amber chip, Ctrl+Enter still works. Broad enough to cover
+// the common irreversible actions in agent sessions without adding mouse-click
+// overhead to every build cycle.
+const CAUTION_COMMAND_PATTERNS: Array<{ re: RegExp; reason: string }> = [
+  { re: /\brm\s+-[a-z]*[rf]/i, reason: "recursive or force-delete" },
+  { re: /\bgit\s+push\b.*?(--force|-f)\b/i, reason: "force-push rewrites remote history" },
+  { re: /\bgit\s+push\b/i, reason: "pushes to remote" },
+  { re: /\bgit\s+reset\s+--hard\b/i, reason: "discards uncommitted changes" },
+  { re: /\bgit\s+rebase\b/i, reason: "rewrites commit history" },
+  { re: /\bgit\s+clean\s+-[a-z]*f/i, reason: "removes untracked files" },
+  { re: /\bsudo\b/i, reason: "elevated privileges" },
+  { re: /\bchmod\b/i, reason: "changes file permissions" },
+  { re: /\bapt(-get)?\s+(install|remove|purge)\b/i, reason: "modifies system packages" },
+  { re: /\bnpm\s+(install|uninstall)\s+-g\b/i, reason: "modifies global packages" },
+  { re: /\bpip\s+install\b/i, reason: "installs Python package" },
+  { re: /\byarn\s+global\b/i, reason: "modifies global packages" },
+  { re: /\bdocker\s+(rm|rmi|system\s+prune)\b/i, reason: "destroys containers or images" },
+  { re: /\bkubectl\s+(delete|drain)\b/i, reason: "removes Kubernetes resources" },
+];
+
+export function assessCommand(cmd: string): { level: "dangerous" | "caution"; reason: string } | null {
+  for (const p of DANGEROUS_COMMAND_PATTERNS) {
+    if (p.re.test(cmd)) return { level: "dangerous", reason: p.reason };
+  }
+  for (const p of CAUTION_COMMAND_PATTERNS) {
+    if (p.re.test(cmd)) return { level: "caution", reason: p.reason };
+  }
+  return null;
+}
+
 export function buildRaw(tool: string, pattern: string | null): string {
   return pattern === null ? tool : `${tool}(${pattern})`;
 }

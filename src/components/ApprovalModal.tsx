@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useApprovalStore } from "../stores/approvalStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
-import { suggestRules, classify, buildRaw, isHardDenyAllow } from "../permissions/rules";
+import { suggestRules, classify, buildRaw, isHardDenyAllow, assessCommand } from "../permissions/rules";
 import type { RuleSuggestion, Scope } from "../permissions/types";
 import type { ApprovalRequest } from "../types/domain";
 
@@ -20,8 +20,78 @@ function describe(req: ApprovalRequest): { primary: string; secondary?: string }
   return { primary: JSON.stringify(inp).slice(0, 200), secondary: req.tool };
 }
 
+// --- Edit/Write diff preview ---
+
+interface DiffLine {
+  type: "add" | "del" | "ctx";
+  text: string;
+}
+
+function editPreview(req: ApprovalRequest): DiffLine[] | null {
+  const inp = req.input ?? {};
+  const tool = req.tool;
+
+  if (tool === "Edit" || tool === "StrReplace") {
+    const oldStr = typeof inp.old_string === "string" ? inp.old_string : null;
+    const newStr = typeof inp.new_string === "string" ? inp.new_string : null;
+    if (!oldStr && !newStr) return null;
+    const lines: DiffLine[] = [];
+    if (oldStr) oldStr.split("\n").forEach((l) => lines.push({ type: "del", text: l }));
+    if (newStr) newStr.split("\n").forEach((l) => lines.push({ type: "add", text: l }));
+    return lines;
+  }
+
+  if (tool === "Write") {
+    const content = typeof inp.content === "string" ? inp.content : null;
+    if (!content) return null;
+    return content.split("\n").map((l) => ({ type: "add" as const, text: l }));
+  }
+
+  if (tool === "MultiEdit") {
+    const edits = Array.isArray(inp.edits)
+      ? (inp.edits as Array<{ old_string?: string; new_string?: string }>)
+      : [];
+    const lines: DiffLine[] = [];
+    edits.forEach((edit, i) => {
+      if (i > 0) lines.push({ type: "ctx", text: "···" });
+      if (edit.old_string) edit.old_string.split("\n").forEach((l) => lines.push({ type: "del", text: l }));
+      if (edit.new_string) edit.new_string.split("\n").forEach((l) => lines.push({ type: "add", text: l }));
+    });
+    return lines.length > 0 ? lines : null;
+  }
+
+  return null;
+}
+
+function DiffPreview({ lines }: { lines: DiffLine[] }) {
+  const LIMIT = 50;
+  const capped = lines.length > LIMIT;
+  const visible = capped ? lines.slice(0, LIMIT) : lines;
+  const adds = lines.filter((l) => l.type === "add").length;
+  const dels = lines.filter((l) => l.type === "del").length;
+
+  return (
+    <div className="approval-diff">
+      <div className="approval-diff-stat">
+        {adds > 0 && <span className="diff-stat-add">+{adds}</span>}
+        {dels > 0 && <span className="diff-stat-del">-{dels}</span>}
+      </div>
+      <pre className="approval-diff-body">
+        {visible.map((line, i) => (
+          <div key={i} className={`diff-${line.type}`}>
+            {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
+            {line.text}
+          </div>
+        ))}
+        {capped && <div className="diff-ctx">  … {lines.length - LIMIT} more lines</div>}
+      </pre>
+    </div>
+  );
+}
+
 export function ApprovalModal() {
-  const req = useApprovalStore((s) => s.queue[0] ?? null);
+  const queue = useApprovalStore((s) => s.queue);
+  const req = queue[0] ?? null;
   const decide = useApprovalStore((s) => s.decide);
   const addRule = usePermissionsStore((s) => s.add);
 
@@ -29,7 +99,13 @@ export function ApprovalModal() {
   const [scope, setScope] = useState<Scope>("project");
   const [busy, setBusy] = useState(false);
 
-  // Reset transient UI when the active request changes.
+  // Hoisted before the early-return guard so the keyboard handler can reference it.
+  const cmdAssessment = useMemo(() => {
+    if (!req || req.tool !== "Bash") return null;
+    const cmd = typeof req.input?.command === "string" ? req.input.command : "";
+    return assessCommand(cmd);
+  }, [req]);
+
   useEffect(() => {
     setShowAlways(false);
     setScope("project");
@@ -43,8 +119,9 @@ export function ApprovalModal() {
       if (e.key === "Escape") {
         decide(req.id, "ask", "user dismissed");
       } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !showAlways) {
-        // Ctrl/Cmd+Enter mirrors the "Approve once" button. Disabled in the
-        // "Always…" panel, where saving a rule may be gated behind typing.
+        // Block the fast-approval shortcut when the command is dangerous — a
+        // deliberate click is required so muscle memory can't bypass the badge.
+        if (cmdAssessment?.level === "dangerous") return;
         e.preventDefault();
         setBusy(true);
         void decide(req.id, "allow", "approved once");
@@ -52,7 +129,7 @@ export function ApprovalModal() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [req, busy, showAlways, decide]);
+  }, [req, busy, showAlways, decide, cmdAssessment]);
 
   const suggestions: RuleSuggestion[] = useMemo(
     () => (req ? suggestRules(req, scope) : []),
@@ -61,6 +138,7 @@ export function ApprovalModal() {
 
   if (!req) return null;
   const { primary, secondary } = describe(req);
+  const diffLines = editPreview(req);
 
   return (
     <div className="modal-backdrop">
@@ -68,10 +146,25 @@ export function ApprovalModal() {
         <div className="approval-head">
           <span className={`approval-tool tool-${req.tool.toLowerCase()}`}>{req.tool}</span>
           <span className="approval-cwd" title={req.cwd}>{shortenPath(req.cwd)}</span>
+          {queue.length > 1 && (
+            <span className="approval-queue-depth">{queue.length} queued</span>
+          )}
         </div>
 
         <pre className="approval-primary">{primary}</pre>
-        {secondary && <div className="approval-secondary">{secondary}</div>}
+
+        {cmdAssessment && (
+          <div className="approval-bash-risk">
+            <span className={`risk risk-${cmdAssessment.level === "dangerous" ? "dangerous" : "broad"}`}>
+              {cmdAssessment.level}
+            </span>
+            <span className="approval-risk-hint">{cmdAssessment.reason}</span>
+          </div>
+        )}
+
+        {diffLines && <DiffPreview lines={diffLines} />}
+
+        {secondary && !diffLines && <div className="approval-secondary">{secondary}</div>}
 
         {!showAlways ? (
           <div className="approval-actions">
@@ -92,6 +185,7 @@ export function ApprovalModal() {
             <button
               className="btn-approve"
               disabled={busy}
+              title={cmdAssessment?.level === "dangerous" ? "Click required — keyboard shortcut disabled for dangerous commands" : "Ctrl+Enter"}
               onClick={async () => { setBusy(true); await decide(req.id, "allow", "approved once"); }}
             >
               Approve once
@@ -137,12 +231,10 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
 
   const selected = suggestions[selectedIdx];
 
-  // Switch suggestion if scope change pushes it into a new risk class.
   useEffect(() => { setConfirmText(""); }, [selectedIdx, scope, denyMode]);
 
   if (!selected) return <div className="placeholder">No suggestions.</div>;
 
-  // Recompute effect-specific classification (deny mode flips to deny).
   const effect: "allow" | "deny" = denyMode ? "deny" : "allow";
   const live = { ...selected.rule, scope, effect, raw: buildRaw(selected.rule.tool, selected.rule.pattern) };
   const { risk, reason } = classify(live);
