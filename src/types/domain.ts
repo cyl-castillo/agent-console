@@ -287,7 +287,10 @@ export interface RoundtableParticipant {
   side: string;
   /// Display name in the transcript column header.
   name: string;
-  /// Model alias fed to `claude --model`.
+  /// Which CLI backs this participant. Omitted = "claude" (backend default).
+  engine?: "claude" | "codex";
+  /// Claude: model alias ("opus"|"sonnet"). Codex: reasoning effort
+  /// ("low"|"medium"|"high").
   model: string;
   /// Optional stance/role framing.
   persona: string;

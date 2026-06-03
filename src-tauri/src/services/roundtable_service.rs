@@ -18,11 +18,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 
 use crate::error::{AppError, AppResult};
-use crate::services::{claude_cli, proc, snapshot_service};
+use crate::services::engine_runner::{self, Engine, RunCtx};
+use crate::services::{proc, snapshot_service};
 
 /// A debate participant. `model` is fed to `claude --model` and must be
 /// shell/arg-safe (validated before launch).
@@ -33,7 +33,11 @@ pub struct Participant {
     pub side: String,
     /// Display name shown in the transcript column header (e.g. "Opus").
     pub name: String,
-    /// Model alias passed to `claude --model` ("opus" | "sonnet" | "haiku").
+    /// Which CLI backs this participant. Defaults to Claude for older payloads.
+    #[serde(default)]
+    pub engine: Engine,
+    /// Claude: model alias ("opus" | "sonnet" | "haiku"). Codex: reasoning
+    /// effort ("low" | "medium" | "high"). Validated shell-safe before launch.
     pub model: String,
     /// Optional extra framing for this participant's stance/role.
     pub persona: String,
@@ -324,23 +328,24 @@ async fn drive(app: AppHandle, id: String, config: RoundtableConfig, control: Ar
 
             let wt = worktree.clone();
             let model = participant.model.clone();
+            let engine = participant.engine;
             let full_tools = config.full_tools;
             let resume_clone = resume.clone();
             let app_t = app.clone();
             let id_t = id.clone();
             let side_t = side.to_string();
             let turn = tokio::task::spawn_blocking(move || {
-                run_turn(
-                    &app_t,
-                    &id_t,
-                    &side_t,
-                    round,
-                    &wt,
-                    &model,
+                let on_activity = |kind: &str, label: &str, text: &str| {
+                    emit_activity(&app_t, &id_t, &side_t, round, kind, label, text);
+                };
+                let ctx = RunCtx {
+                    cwd: &wt,
+                    model: &model,
                     full_tools,
-                    &prompt,
-                    resume_clone.as_deref(),
-                )
+                    prompt: &prompt,
+                    resume: resume_clone.as_deref(),
+                };
+                engine_runner::runner_for(engine).run(&ctx, &on_activity)
             })
             .await;
 
@@ -431,13 +436,6 @@ fn opponent_part<'a>(config: &'a RoundtableConfig, side: &str) -> &'a Participan
     }
 }
 
-struct TurnOutput {
-    text: String,
-    session_id: Option<String>,
-    tokens: u64,
-    cost_usd: f64,
-}
-
 /// A live activity line within a turn, emitted over `roundtable://activity` as
 /// it happens — so the panel shows what the agent is doing (reading, editing,
 /// running commands, reasoning) in real time instead of a mute spinner.
@@ -453,204 +451,6 @@ struct RoundtableActivity {
     label: String,
     /// For "tool": a short arg summary. For "thinking"/"text": the content.
     text: String,
-}
-
-/// One headless `claude -p` turn inside `worktree`. Uses
-/// `--output-format stream-json --verbose` and reads the event stream line by
-/// line, emitting each tool call / reasoning / text block to the UI as it
-/// arrives. Returns the final assistant text plus the session id (to resume
-/// next round) and usage.
-#[allow(clippy::too_many_arguments)]
-fn run_turn(
-    app: &AppHandle,
-    id: &str,
-    side: &str,
-    round: u32,
-    worktree: &Path,
-    model: &str,
-    full_tools: bool,
-    prompt: &str,
-    resume: Option<&str>,
-) -> AppResult<TurnOutput> {
-    use std::io::{BufRead, BufReader, Read};
-
-    let mut args: Vec<String> = vec![
-        "-p".into(),
-        prompt.into(),
-        "--output-format".into(),
-        "stream-json".into(),
-        "--verbose".into(),
-        // Stream token deltas, not just whole messages. Without this the stream
-        // is silent for the entire duration of a message being generated — so a
-        // healthy 40s reasoning burst and a hung process look identical (both:
-        // no events). Deltas make "is it alive?" answerable: tokens flowing =
-        // alive, real silence = stuck. The frontend store is already built to
-        // coalesce these deltas back into one growing block.
-        "--include-partial-messages".into(),
-        "--model".into(),
-        model.into(),
-    ];
-    if full_tools {
-        args.push("--dangerously-skip-permissions".into());
-    } else {
-        args.push("--permission-mode".into());
-        args.push("acceptEdits".into());
-    }
-    if let Some(r) = resume {
-        args.push("--resume".into());
-        args.push(r.into());
-    }
-
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut cmd = claude_cli::command(&arg_refs);
-    cmd.current_dir(worktree);
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| AppError::Other("claude produced no stdout pipe".into()))?;
-    // Drain stderr on its own thread so a chatty stderr can't fill its pipe
-    // buffer and deadlock the child.
-    let stderr = child.stderr.take();
-    let err_handle = stderr.map(|mut e| {
-        std::thread::spawn(move || {
-            let mut s = String::new();
-            let _ = e.read_to_string(&mut s);
-            s
-        })
-    });
-
-    let mut final_text = String::new();
-    let mut session_id: Option<String> = None;
-    let mut tokens: u64 = 0;
-    let mut cost_usd: f64 = 0.0;
-
-    let reader = BufReader::new(stdout);
-    for line in reader.lines() {
-        let Ok(line) = line else { break };
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(v) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        match v.get("type").and_then(Value::as_str) {
-            Some("system") => {
-                if v.get("subtype").and_then(Value::as_str) == Some("init") && session_id.is_none() {
-                    session_id = v.get("session_id").and_then(Value::as_str).map(str::to_string);
-                }
-            }
-            Some("assistant") => {
-                if let Some(content) = v.pointer("/message/content").and_then(Value::as_array) {
-                    for block in content {
-                        match block.get("type").and_then(Value::as_str) {
-                            Some("thinking") => {
-                                if let Some(t) = block.get("thinking").and_then(Value::as_str) {
-                                    emit_activity(app, id, side, round, "thinking", "", &truncate(t, 280));
-                                }
-                            }
-                            Some("tool_use") => {
-                                let name = block.get("name").and_then(Value::as_str).unwrap_or("tool");
-                                let detail = summarize_tool_input(name, block.get("input"));
-                                emit_activity(app, id, side, round, "tool", name, &detail);
-                            }
-                            // Final response text now streams token-by-token via
-                            // the `stream_event` arm below; emitting the whole
-                            // block here too would duplicate it (the store would
-                            // coalesce deltas, then append the full copy).
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            // Token deltas from `--include-partial-messages`: the live pulse of
-            // the turn. Each text fragment is emitted as it is generated, so the
-            // feed fills in real time and the staleness clock measures genuine
-            // silence (a real hang) rather than the normal gap between whole
-            // messages.
-            Some("stream_event") => {
-                let ev = v.get("event");
-                let is_text_delta = ev
-                    .and_then(|e| e.get("type"))
-                    .and_then(Value::as_str)
-                    == Some("content_block_delta")
-                    && ev
-                        .and_then(|e| e.pointer("/delta/type"))
-                        .and_then(Value::as_str)
-                        == Some("text_delta");
-                if is_text_delta {
-                    if let Some(t) = ev.and_then(|e| e.pointer("/delta/text")).and_then(Value::as_str) {
-                        if !t.is_empty() {
-                            emit_activity(app, id, side, round, "text", "", t);
-                        }
-                    }
-                }
-            }
-            Some("result") => {
-                final_text = v.get("result").and_then(Value::as_str).unwrap_or("").to_string();
-                if let Some(sid) = v.get("session_id").and_then(Value::as_str) {
-                    session_id = Some(sid.to_string());
-                }
-                cost_usd = v.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0);
-                tokens = v.get("usage").map(sum_usage).unwrap_or(0);
-            }
-            _ => {}
-        }
-    }
-
-    let status = child.wait()?;
-    let err = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
-    if !status.success() {
-        return Err(AppError::Other(format!(
-            "claude exited with status {}: {}",
-            status,
-            truncate(err.trim(), 600)
-        )));
-    }
-    Ok(TurnOutput {
-        text: final_text,
-        session_id,
-        tokens,
-        cost_usd,
-    })
-}
-
-/// Real new tokens processed in a turn, for the budget. We deliberately exclude
-/// `cache_read_input_tokens`: every resumed turn re-reads the whole cached
-/// prompt, so cache reads are huge (tens of thousands per turn) yet near-free —
-/// counting them inflates the total ~10-20x and trips the budget after a couple
-/// of rounds. input + output + cache_creation reflects actual consumption.
-fn sum_usage(u: &Value) -> u64 {
-    ["input_tokens", "output_tokens", "cache_creation_input_tokens"]
-        .iter()
-        .filter_map(|k| u.get(*k).and_then(Value::as_u64))
-        .sum()
-}
-
-/// A compact one-line summary of a tool call's input for the activity feed.
-fn summarize_tool_input(name: &str, input: Option<&Value>) -> String {
-    let Some(input) = input else { return String::new() };
-    let pick = |key: &str| input.get(key).and_then(Value::as_str).map(str::to_string);
-    let raw = match name {
-        "Read" | "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => pick("file_path")
-            .or_else(|| pick("path"))
-            .or_else(|| pick("notebook_path")),
-        "Bash" => pick("command"),
-        "Grep" => pick("pattern"),
-        "Glob" => pick("pattern"),
-        "WebFetch" => pick("url"),
-        "WebSearch" => pick("query"),
-        _ => None,
-    };
-    match raw {
-        Some(s) => truncate(s.trim(), 120),
-        // Fall back to a compact JSON of the input for unknown tools.
-        None => truncate(input.to_string().trim_matches(&['{', '}'][..]), 100),
-    }
 }
 
 fn emit_activity(app: &AppHandle, id: &str, side: &str, round: u32, kind: &str, label: &str, text: &str) {
