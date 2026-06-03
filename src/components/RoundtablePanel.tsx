@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useRoundtableStore } from "../stores/roundtableStore";
 import { AGENT_PROFILES } from "../agents/profiles";
@@ -191,14 +191,32 @@ function DebateView() {
   const diffSide = useRoundtableStore((s) => s.diffSide);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Stick to the bottom only while the user is already there. The moment they
+  // scroll up to read an earlier turn, stop yanking them back on every stream
+  // chunk — that auto-scroll hijack made the live feed unreadable.
+  const stickRef = useRef(true);
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
   useEffect(() => {
+    if (!stickRef.current) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [turns.length, activities.length]);
 
   // Activities whose turn hasn't completed yet = the in-flight turn's live feed.
   const completedKeys = new Set(turns.map((t) => `${t.side}-${t.round}`));
   const live = activities.filter((a) => !completedKeys.has(`${a.side}-${a.round}`));
-  const liveSide = live.length ? live[live.length - 1].side : null;
+  // Whose turn is live: once activity streams in, trust it; before then, infer
+  // from turn order (a round is A then B — see roundtable_service.rs), so an
+  // even number of completed turns means A is up next, odd means B. Defaulting
+  // to "a" mislabeled every B-opening turn as A until the first token arrived.
+  const liveSide = live.length
+    ? live[live.length - 1].side
+    : turns.length % 2 === 0
+      ? "a"
+      : "b";
 
   return (
     <section className="rt-debate">
@@ -226,7 +244,15 @@ function DebateView() {
 
       <div className="rt-topic-banner" title={draft.topic}>{draft.topic}</div>
 
-      <div className="rt-transcript" ref={scrollRef}>
+      <div className="rt-roster">
+        <RosterChip side="a" name={draft.nameA} model={draft.modelA}
+          active={phase === "running" && liveSide === "a"} />
+        <span className="rt-roster-vs">vs</span>
+        <RosterChip side="b" name={draft.nameB} model={draft.modelB}
+          active={phase === "running" && liveSide === "b"} />
+      </div>
+
+      <div className="rt-transcript" ref={scrollRef} onScroll={onScroll}>
         {turns.map((t, i) => (
           <TurnBubble
             key={i}
@@ -243,7 +269,7 @@ function DebateView() {
                 {liveSide === "b" ? draft.nameB : draft.nameA}
               </span>
               <span className="spacer" />
-              <span className="rt-thinking-inline"><span className="wb-spinner" /> working…</span>
+              <LiveStatus live={live} />
             </div>
             {live.length > 0 ? (
               <ActivityFeed items={live} showText />
@@ -264,8 +290,65 @@ function DebateView() {
 
       <Moderator />
 
-      {(phase === "done" || phase === "stopped") && <WinnerBar />}
+      {(phase === "done" || phase === "stopped" || phase === "error") && <WinnerBar />}
     </section>
+  );
+}
+
+// "Lo que están haciendo": the live turn's header. Answers three things a
+// moderator actually asks — WHAT is it doing right now (current action), HOW
+// LONG has this turn run (elapsed), and crucially IS IT STILL MOVING. The last
+// one can't come from elapsed time: a long Bash/test run emits no activity
+// while it executes (see roundtable_service.rs — only assistant blocks stream),
+// so elapsed climbs whether the agent is working or hung. The gap since the
+// last activity is the signal that distinguishes them.
+const STALE_AFTER_MS = 15_000;
+
+function LiveStatus({ live }: { live: RoundtableActivity[] }) {
+  const liveStartedAt = useRoundtableStore((s) => s.liveStartedAt);
+  const lastActivityAt = useRoundtableStore((s) => s.lastActivityAt);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const elapsed = liveStartedAt ? now - liveStartedAt : 0;
+  // No activity yet this turn → measure quiet time from the turn start.
+  const quietSince = lastActivityAt ?? liveStartedAt ?? now;
+  const stale = now - quietSince > STALE_AFTER_MS;
+
+  const last = live[live.length - 1];
+  let action = "starting turn…";
+  if (last?.kind === "tool") action = last.text ? `${last.label} — ${last.text}` : last.label;
+  else if (last?.kind === "thinking") action = "thinking…";
+  else if (last?.kind === "text") action = "writing response…";
+
+  return (
+    <span className="rt-livestatus" title={action}>
+      <span className="wb-spinner" />
+      <span className="rt-livestatus-action">{action}</span>
+      <span className={`rt-elapsed ${stale ? "rt-elapsed-stale" : ""}`}>
+        {stale ? `quiet ${fmtDur(now - quietSince)}` : fmtDur(elapsed)}
+      </span>
+    </span>
+  );
+}
+
+function fmtDur(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+}
+
+function RosterChip({ side, name, model, active }: { side: string; name: string; model: string; active: boolean }) {
+  return (
+    <div className={`rt-roster-chip rt-side-${side} ${active ? "rt-roster-active" : ""}`}>
+      <span className="rt-dot" />
+      <span className="rt-roster-name">{name}</span>
+      <span className="rt-roster-model">{model}</span>
+      {active && <span className="rt-roster-turn"><span className="wb-spinner" /> turn</span>}
+    </div>
   );
 }
 
@@ -383,6 +466,7 @@ function WinnerBar() {
   const appliedSide = useRoundtableStore((s) => s.appliedSide);
   const appliedSnapshot = useRoundtableStore((s) => s.appliedSnapshot);
   const draft = useRoundtableStore((s) => s.draft);
+  const phase = useRoundtableStore((s) => s.phase);
 
   if (appliedSide) {
     return (
@@ -399,7 +483,11 @@ function WinnerBar() {
 
   return (
     <div className="rt-winner">
-      <span>pick a side to keep:</span>
+      <span>
+        {phase === "error"
+          ? "debate errored mid-run — both worktrees survived, you can still keep either side:"
+          : "pick a side to keep:"}
+      </span>
       <button className="rt-pick rt-side-a" onClick={() => openDiff("a")}>review {draft.nameA}</button>
       <button className="rt-pick rt-side-a" onClick={() => apply("a")}>apply A</button>
       <button className="rt-pick rt-side-b" onClick={() => openDiff("b")}>review {draft.nameB}</button>

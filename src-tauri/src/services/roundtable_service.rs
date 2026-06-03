@@ -278,6 +278,11 @@ async fn drive(app: AppHandle, id: String, config: RoundtableConfig, control: Ar
     emit_status(&app, &id, "running", 0, 0, None);
 
     let mut total_tokens: u64 = 0;
+    // Set once we've emitted a terminal status from inside the loop (error or
+    // budget-reached). Without this, an error `break 'outer` fell through to the
+    // tail emit below and overwrote "error" with "done" — reporting success for
+    // a failed run while the error banner still showed. Contradictory state.
+    let mut terminal_emitted = false;
     // Each side keeps its own claude session (resumed by id) so it retains
     // memory of its own reasoning across rounds.
     let mut resume_a: Option<String> = None;
@@ -343,6 +348,7 @@ async fn drive(app: AppHandle, id: String, config: RoundtableConfig, control: Ar
                 Ok(Ok(o)) => o,
                 Ok(Err(e)) => {
                     emit_status(&app, &id, "error", round, total_tokens, Some(e.to_string()));
+                    terminal_emitted = true;
                     break 'outer;
                 }
                 Err(e) => {
@@ -354,6 +360,7 @@ async fn drive(app: AppHandle, id: String, config: RoundtableConfig, control: Ar
                         total_tokens,
                         Some(format!("turn task panicked: {e}")),
                     );
+                    terminal_emitted = true;
                     break 'outer;
                 }
             };
@@ -397,6 +404,7 @@ async fn drive(app: AppHandle, id: String, config: RoundtableConfig, control: Ar
                     total_tokens,
                     Some("token budget reached".into()),
                 );
+                terminal_emitted = true;
                 break 'outer;
             }
         }
@@ -410,7 +418,9 @@ async fn drive(app: AppHandle, id: String, config: RoundtableConfig, control: Ar
     // Worktrees stay alive until the moderator applies a winner or discards, so
     // do NOT tear down here — the diffs must remain inspectable. We only flip
     // status. `discard` performs teardown.
-    emit_status(&app, &id, final_status, 0, total_tokens, None);
+    if !terminal_emitted {
+        emit_status(&app, &id, final_status, 0, total_tokens, None);
+    }
 }
 
 fn opponent_part<'a>(config: &'a RoundtableConfig, side: &str) -> &'a Participant {
@@ -470,6 +480,13 @@ fn run_turn(
         "--output-format".into(),
         "stream-json".into(),
         "--verbose".into(),
+        // Stream token deltas, not just whole messages. Without this the stream
+        // is silent for the entire duration of a message being generated — so a
+        // healthy 40s reasoning burst and a hung process look identical (both:
+        // no events). Deltas make "is it alive?" answerable: tokens flowing =
+        // alive, real silence = stuck. The frontend store is already built to
+        // coalesce these deltas back into one growing block.
+        "--include-partial-messages".into(),
         "--model".into(),
         model.into(),
     ];
@@ -541,14 +558,34 @@ fn run_turn(
                                 let detail = summarize_tool_input(name, block.get("input"));
                                 emit_activity(app, id, side, round, "tool", name, &detail);
                             }
-                            Some("text") => {
-                                if let Some(t) = block.get("text").and_then(Value::as_str) {
-                                    if !t.trim().is_empty() {
-                                        emit_activity(app, id, side, round, "text", "", t);
-                                    }
-                                }
-                            }
+                            // Final response text now streams token-by-token via
+                            // the `stream_event` arm below; emitting the whole
+                            // block here too would duplicate it (the store would
+                            // coalesce deltas, then append the full copy).
                             _ => {}
+                        }
+                    }
+                }
+            }
+            // Token deltas from `--include-partial-messages`: the live pulse of
+            // the turn. Each text fragment is emitted as it is generated, so the
+            // feed fills in real time and the staleness clock measures genuine
+            // silence (a real hang) rather than the normal gap between whole
+            // messages.
+            Some("stream_event") => {
+                let ev = v.get("event");
+                let is_text_delta = ev
+                    .and_then(|e| e.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("content_block_delta")
+                    && ev
+                        .and_then(|e| e.pointer("/delta/type"))
+                        .and_then(Value::as_str)
+                        == Some("text_delta");
+                if is_text_delta {
+                    if let Some(t) = ev.and_then(|e| e.pointer("/delta/text")).and_then(Value::as_str) {
+                        if !t.is_empty() {
+                            emit_activity(app, id, side, round, "text", "", t);
                         }
                     }
                 }

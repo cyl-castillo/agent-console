@@ -50,6 +50,14 @@ interface RoundtableState {
   activities: RoundtableActivity[];
 
   injectDraft: string;
+  /// Wall-clock (ms) the current live turn began — set at run start and at each
+  /// turn boundary. Drives the per-turn elapsed clock.
+  liveStartedAt: number | null;
+  /// Wall-clock (ms) of the most recent activity event. The gap between now and
+  /// this is the real "is it still moving?" signal: a long-running tool (Bash
+  /// `npm test`) emits NO activity while it runs, so elapsed alone can't tell
+  /// progress from a hang — staleness can.
+  lastActivityAt: number | null;
   /// Which side's full diff is open in the viewer (null = none).
   diffSide: string | null;
   diff: string;
@@ -90,6 +98,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   activities: [],
 
   injectDraft: "",
+  liveStartedAt: null,
+  lastActivityAt: null,
   diffSide: null,
   diff: "",
   diffLoading: false,
@@ -116,9 +126,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
           last.round === a.round
         ) {
           const merged = { ...last, text: `${last.text}${a.text}` };
-          return { activities: [...s.activities.slice(0, -1), merged] };
+          return { activities: [...s.activities.slice(0, -1), merged], lastActivityAt: Date.now() };
         }
-        return { activities: [...s.activities, a] };
+        return { activities: [...s.activities, a], lastActivityAt: Date.now() };
       });
     });
     unlistenTurn = await listen<RoundtableTurn>("roundtable://turn", (e) => {
@@ -129,6 +139,10 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
         totalTokens: t.totalTokens,
         round: t.round,
         approxCostUsd: s.approxCostUsd + (t.costUsd || 0),
+        // A turn just finished → the next one begins now. Reset the per-turn
+        // clock and clear staleness so the new turn starts "fresh".
+        liveStartedAt: Date.now(),
+        lastActivityAt: null,
       }));
     });
     unlistenStatus = await listen<RoundtableStatus>("roundtable://status", (e) => {
@@ -174,6 +188,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       diffSide: null,
       diff: "",
       phase: "running",
+      liveStartedAt: Date.now(),
+      lastActivityAt: null,
     });
     try {
       const id = await ipc.roundtableStart(config);
@@ -273,6 +289,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       turns: [],
       activities: [],
       injectDraft: "",
+      liveStartedAt: null,
+      lastActivityAt: null,
       diffSide: null,
       diff: "",
       appliedSnapshot: null,
