@@ -27,6 +27,47 @@ interface DiffLine {
   text: string;
 }
 
+// LCS-based line diff so unchanged lines render as context instead of being
+// counted as a delete+add pair. Keeps the +N/-N stat honest: editing one line
+// inside a 20-line block shows +1/-1, not +20/-20.
+function diffLines(oldStr: string, newStr: string): DiffLine[] {
+  // Pure insertion / deletion: skip the LCS and the spurious empty-line pair
+  // that "".split("\n") would otherwise introduce.
+  if (oldStr === "") return newStr === "" ? [] : newStr.split("\n").map((l) => ({ type: "add", text: l }));
+  if (newStr === "") return oldStr.split("\n").map((l) => ({ type: "del", text: l }));
+  const a = oldStr.split("\n");
+  const b = newStr.split("\n");
+  const n = a.length;
+  const m = b.length;
+
+  // LCS length table.
+  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+
+  const lines: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      lines.push({ type: "ctx", text: a[i] });
+      i++; j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      lines.push({ type: "del", text: a[i] });
+      i++;
+    } else {
+      lines.push({ type: "add", text: b[j] });
+      j++;
+    }
+  }
+  while (i < n) lines.push({ type: "del", text: a[i++] });
+  while (j < m) lines.push({ type: "add", text: b[j++] });
+  return lines;
+}
+
 function editPreview(req: ApprovalRequest): DiffLine[] | null {
   const inp = req.input ?? {};
   const tool = req.tool;
@@ -35,10 +76,7 @@ function editPreview(req: ApprovalRequest): DiffLine[] | null {
     const oldStr = typeof inp.old_string === "string" ? inp.old_string : null;
     const newStr = typeof inp.new_string === "string" ? inp.new_string : null;
     if (!oldStr && !newStr) return null;
-    const lines: DiffLine[] = [];
-    if (oldStr) oldStr.split("\n").forEach((l) => lines.push({ type: "del", text: l }));
-    if (newStr) newStr.split("\n").forEach((l) => lines.push({ type: "add", text: l }));
-    return lines;
+    return diffLines(oldStr ?? "", newStr ?? "");
   }
 
   if (tool === "Write") {
@@ -54,8 +92,7 @@ function editPreview(req: ApprovalRequest): DiffLine[] | null {
     const lines: DiffLine[] = [];
     edits.forEach((edit, i) => {
       if (i > 0) lines.push({ type: "ctx", text: "···" });
-      if (edit.old_string) edit.old_string.split("\n").forEach((l) => lines.push({ type: "del", text: l }));
-      if (edit.new_string) edit.new_string.split("\n").forEach((l) => lines.push({ type: "add", text: l }));
+      lines.push(...diffLines(edit.old_string ?? "", edit.new_string ?? ""));
     });
     return lines.length > 0 ? lines : null;
   }
@@ -155,7 +192,7 @@ export function ApprovalModal() {
 
         {cmdAssessment && (
           <div className="approval-bash-risk">
-            <span className={`risk risk-${cmdAssessment.level === "dangerous" ? "dangerous" : "broad"}`}>
+            <span className={`risk risk-${cmdAssessment.level}`}>
               {cmdAssessment.level}
             </span>
             <span className="approval-risk-hint">{cmdAssessment.reason}</span>

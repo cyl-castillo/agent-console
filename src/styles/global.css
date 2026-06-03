@@ -2488,6 +2488,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .risk-safe      { background: rgba(108, 209, 108, 0.12); color: var(--ok); }
 .risk-moderate  { background: rgba(106, 169, 255, 0.12); color: var(--accent); }
 .risk-broad     { background: rgba(255, 180, 80, 0.14); color: #ffb450; }
+.risk-caution   { background: rgba(255, 180, 80, 0.14); color: #ffb450; }
 .risk-dangerous { background: rgba(255, 106, 106, 0.16); color: var(--danger); }
 
 .approval-blocked {
@@ -4518,6 +4519,25 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* persistent roster: who's debating + whose turn it is, always visible */
+.rt-roster { display: flex; align-items: center; gap: 10px; margin: 6px 0 8px; }
+.rt-roster-vs { font-size: 10px; color: var(--text-faint); text-transform: uppercase; }
+.rt-roster-chip {
+  display: flex; align-items: center; gap: 6px; flex: 1;
+  padding: 5px 9px; border-radius: 6px; font-size: 11px;
+  border: 1px solid var(--border); background: var(--bg-soft, transparent);
+  opacity: 0.6; transition: opacity 0.2s, border-color 0.2s;
+}
+.rt-roster-chip.rt-side-b { flex-direction: row-reverse; }
+.rt-roster-active { opacity: 1; border-color: var(--rt-color, var(--accent)); }
+.rt-roster-name { font-weight: 600; color: var(--text); }
+.rt-roster-model { color: var(--text-faint); font-family: var(--font-mono); font-size: 10px; }
+.rt-roster-turn {
+  display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
+  color: var(--rt-color, var(--accent)); font-size: 10px; text-transform: uppercase;
+}
+.rt-roster-chip.rt-side-b .rt-roster-turn { margin-left: 0; margin-right: auto; }
+
 .rt-transcript { flex: 1; overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding-right: 2px; }
 
 .rt-turn {
@@ -4593,6 +4613,19 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 /* roundtable live activity feed (console-style) */
 .rt-turn.rt-live { border-style: dashed; opacity: 0.95; }
 .rt-thinking-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+
+/* live turn status: current action + elapsed/quiet timer */
+.rt-livestatus { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-dim); min-width: 0; max-width: 60%; }
+.rt-livestatus-action {
+  font-family: var(--font-mono); color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.rt-elapsed {
+  flex: none; font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-faint); padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.rt-elapsed-stale { color: #fbbf24; border-color: #fbbf24; }
 .rt-activity-empty { font-size: 11px; color: var(--text-faint); padding: 2px 0; }
 
 .rt-activity { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
