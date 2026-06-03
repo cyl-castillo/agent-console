@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useRoundtableStore } from "../stores/roundtableStore";
-import { AGENT_PROFILES } from "../agents/profiles";
+import { AGENT_PROFILES, profileFor, type AgentKind } from "../agents/profiles";
 import { MarkdownText } from "./MarkdownText";
 import { DiffViewer } from "./DiffViewer";
 import type { RoundtableActivity, RoundtableTurn } from "../types/domain";
-
-const CLAUDE_MODELS = AGENT_PROFILES.find((p) => p.kind === "claude")!.models;
 
 export function RoundtablePanel() {
   const phase = useRoundtableStore((s) => s.phase);
@@ -139,8 +137,18 @@ function ParticipantFields({ side }: { side: "A" | "B" }) {
   const setDraft = useRoundtableStore((s) => s.setDraft);
   const isA = side === "A";
   const name = isA ? draft.nameA : draft.nameB;
+  const engine = isA ? draft.engineA : draft.engineB;
   const model = isA ? draft.modelA : draft.modelB;
   const persona = isA ? draft.personaA : draft.personaB;
+  const models = profileFor(engine).models;
+
+  // Claude and Codex expose different "model" values (aliases vs effort levels),
+  // so switching engine resets the model to the new engine's first preset —
+  // otherwise we'd send e.g. `opus` to codex as a reasoning effort.
+  const setEngine = (next: AgentKind) => {
+    const firstModel = profileFor(next).models[0]?.value ?? "";
+    setDraft(isA ? { engineA: next, modelA: firstModel } : { engineB: next, modelB: firstModel });
+  };
 
   return (
     <div className={`rt-participant rt-side-${side.toLowerCase()}`}>
@@ -155,12 +163,20 @@ function ParticipantFields({ side }: { side: "A" | "B" }) {
         />
       </label>
       <label className="rt-field rt-field-sm">
-        <span>model</span>
+        <span>engine</span>
+        <select value={engine} onChange={(e) => setEngine(e.target.value as AgentKind)}>
+          {AGENT_PROFILES.map((p) => (
+            <option key={p.kind} value={p.kind}>{p.icon} {p.label}</option>
+          ))}
+        </select>
+      </label>
+      <label className="rt-field rt-field-sm">
+        <span>{engine === "codex" ? "effort" : "model"}</span>
         <select
           value={model}
           onChange={(e) => setDraft(isA ? { modelA: e.target.value } : { modelB: e.target.value })}
         >
-          {CLAUDE_MODELS.map((m) => (
+          {models.map((m) => (
             <option key={m.value} value={m.value}>{m.label} · {m.intent}</option>
           ))}
         </select>

@@ -15,9 +15,11 @@ export type RtPhase = "config" | "running" | "paused" | "done" | "stopped" | "er
 export interface RtDraft {
   topic: string;
   nameA: string;
+  engineA: "claude" | "codex";
   modelA: string;
   personaA: string;
   nameB: string;
+  engineB: "claude" | "codex";
   modelB: string;
   personaB: string;
   maxRounds: number;
@@ -28,9 +30,11 @@ export interface RtDraft {
 const DEFAULT_DRAFT: RtDraft = {
   topic: "",
   nameA: "Opus",
+  engineA: "claude",
   modelA: "opus",
   personaA: "",
   nameB: "Sonnet",
+  engineB: "claude",
   modelB: "sonnet",
   personaB: "",
   maxRounds: 4,
@@ -170,8 +174,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     await get().initListeners();
     const config: RoundtableConfig = {
       topic: d.topic.trim(),
-      participantA: { side: "a", name: d.nameA || "A", model: d.modelA, persona: d.personaA },
-      participantB: { side: "b", name: d.nameB || "B", model: d.modelB, persona: d.personaB },
+      participantA: { side: "a", name: d.nameA || "A", engine: d.engineA, model: d.modelA, persona: d.personaA },
+      participantB: { side: "b", name: d.nameB || "B", engine: d.engineB, model: d.modelB, persona: d.personaB },
       maxRounds: Math.max(1, Math.min(20, d.maxRounds)),
       tokenBudget: Math.max(0, d.tokenBudget),
       fullTools: d.fullTools,
