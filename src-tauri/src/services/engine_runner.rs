@@ -36,17 +36,33 @@ pub enum Engine {
     Codex,
 }
 
+/// How much the agent is allowed to do during a turn. Maps to each CLI's
+/// permission/sandbox flags. `AcceptEdits`/`Full` are wired through both
+/// adapters but unused while the room is conversation-only (read-only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ToolPolicy {
+    /// Read & reason only — no edits, no shell. The conversational-room default:
+    /// Claude runs with no permission flag (headless auto-denies edits), Codex
+    /// with `-s read-only`.
+    ReadOnly,
+    /// File edits allowed, no arbitrary shell (Claude `acceptEdits` / Codex
+    /// `-s workspace-write`).
+    AcceptEdits,
+    /// Everything, including shell (Claude `--dangerously-skip-permissions` /
+    /// Codex `--dangerously-bypass-approvals-and-sandbox`).
+    Full,
+}
+
 /// Everything a single headless turn needs, independent of engine.
 pub struct RunCtx<'a> {
-    /// Working directory the turn runs in (a worktree today; a shared dir later).
+    /// Working directory the turn runs in.
     pub cwd: &'a Path,
     /// Claude: model alias (`opus`/`sonnet`). Codex: reasoning effort
     /// (`low`/`medium`/`high`). Validated shell-safe before reaching here.
     pub model: &'a str,
-    /// true  => the agent may run shell commands (Claude `--dangerously-skip-
-    /// permissions` / Codex `--dangerously-bypass-approvals-and-sandbox`).
-    /// false => file edits only (Claude `acceptEdits` / Codex `workspace-write`).
-    pub full_tools: bool,
+    /// What the agent may do this turn.
+    pub tools: ToolPolicy,
     pub prompt: &'a str,
     /// Resume id from a prior turn of the SAME participant, to retain its memory.
     pub resume: Option<&'a str>,
@@ -99,11 +115,16 @@ impl EngineRunner for ClaudeRunner {
             "--model".into(),
             ctx.model.into(),
         ];
-        if ctx.full_tools {
-            args.push("--dangerously-skip-permissions".into());
-        } else {
-            args.push("--permission-mode".into());
-            args.push("acceptEdits".into());
+        match ctx.tools {
+            // No flag: headless `claude -p` allows read-style tools without
+            // approval and auto-denies edits/shell (it can't prompt) — exactly
+            // read-only.
+            ToolPolicy::ReadOnly => {}
+            ToolPolicy::AcceptEdits => {
+                args.push("--permission-mode".into());
+                args.push("acceptEdits".into());
+            }
+            ToolPolicy::Full => args.push("--dangerously-skip-permissions".into()),
         }
         if let Some(r) = ctx.resume {
             args.push("--resume".into());
@@ -227,14 +248,20 @@ impl EngineRunner for CodexRunner {
         args.push("--skip-git-repo-check".into());
         args.push("-c".into());
         args.push(effort);
-        if ctx.full_tools {
-            // Mirror Claude's skip-permissions: actually execute commands instead
-            // of auto-denying them (exec can't answer an interactive approval).
-            args.push("--dangerously-bypass-approvals-and-sandbox".into());
-        } else if ctx.resume.is_none() {
-            // Sandbox is only settable on a fresh exec; on resume it is inherited.
-            args.push("-s".into());
-            args.push("workspace-write".into());
+        match ctx.tools {
+            // Full bypass mirrors Claude's skip-permissions: actually execute
+            // commands instead of auto-denying them. Accepted on resume too.
+            ToolPolicy::Full => args.push("--dangerously-bypass-approvals-and-sandbox".into()),
+            // Sandbox (-s) is only settable on a fresh exec; on resume it is
+            // inherited from the session, so we omit it there.
+            policy if ctx.resume.is_none() => {
+                args.push("-s".into());
+                args.push(match policy {
+                    ToolPolicy::ReadOnly => "read-only".into(),
+                    _ => "workspace-write".into(),
+                });
+            }
+            _ => {}
         }
         args.push(ctx.prompt.into());
 
@@ -455,7 +482,7 @@ mod tests {
         let ctx = RunCtx {
             cwd: &dir,
             model: "low",
-            full_tools: false,
+            tools: ToolPolicy::ReadOnly,
             prompt: "Reply with exactly: PONG. Nothing else.",
             resume: None,
         };

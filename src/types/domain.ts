@@ -280,56 +280,54 @@ export interface SessionUsage {
   contextWindow: number;
 }
 
-// ----- Roundtable: two agents debate, each in its own git worktree -----
+// ----- Agent Room: N agents + the human converse about a problem (read-only) -----
 
 export interface RoundtableParticipant {
-  /// "a" | "b".
-  side: string;
-  /// Display name in the transcript column header.
+  /// Stable key ("p1", "p2", …).
+  id: string;
+  /// Display name on this participant's messages.
   name: string;
   /// Which CLI backs this participant. Omitted = "claude" (backend default).
   engine?: "claude" | "codex";
   /// Claude: model alias ("opus"|"sonnet"). Codex: reasoning effort
   /// ("low"|"medium"|"high").
   model: string;
-  /// Optional stance/role framing.
-  persona: string;
+  /// Optional role/lens framing ("the skeptic", "the implementer", …).
+  role: string;
 }
 
 export interface RoundtableConfig {
-  topic: string;
-  participantA: RoundtableParticipant;
-  participantB: RoundtableParticipant;
-  /// One round = a turn for A then a turn for B.
-  maxRounds: number;
-  /// Cumulative token ceiling across both agents. 0 = unlimited.
+  /// The problem the room is working on.
+  problem: string;
+  /// Two or more agents; round-robin order is list order.
+  participants: RoundtableParticipant[];
+  /// Total AI turns across the conversation. Hard stop.
+  maxTurns: number;
+  /// Cumulative token ceiling across all agents. 0 = unlimited.
   tokenBudget: number;
-  /// true => agents may run Bash (`--dangerously-skip-permissions`);
-  /// false => file edits only (`--permission-mode acceptEdits`). Safe either
-  /// way — each agent is sandboxed to a throwaway worktree.
-  fullTools: boolean;
 }
 
-/// One agent turn, emitted over `roundtable://turn`.
+/// One message (agent turn or human injection), emitted over `roundtable://turn`.
 export interface RoundtableTurn {
   id: string;
-  side: string;
-  round: number;
-  name: string;
+  authorId: string;
+  authorName: string;
+  /// null for the human.
+  engine: "claude" | "codex" | null;
   model: string;
   text: string;
-  /// `git diff --stat` of this side's worktree vs HEAD.
-  diffStat: string;
+  turn: number;
+  isHuman: boolean;
   totalTokens: number;
   costUsd: number;
 }
 
 /// A live activity line within a turn, emitted over `roundtable://activity`
-/// as the agent works (so the panel streams what it's doing in real time).
+/// as the agent works (so the feed streams what it's doing in real time).
 export interface RoundtableActivity {
   id: string;
-  side: string;
-  round: number;
+  authorId: string;
+  turn: number;
   /// "thinking" | "tool" | "text"
   kind: string;
   /// For "tool": the tool name. Empty otherwise.
@@ -343,7 +341,7 @@ export interface RoundtableStatus {
   id: string;
   /// "running" | "paused" | "done" | "stopped" | "error"
   status: string;
-  round: number;
+  turn: number;
   totalTokens: number;
   message: string | null;
 }

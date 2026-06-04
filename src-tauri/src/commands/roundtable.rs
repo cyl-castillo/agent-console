@@ -32,27 +32,18 @@ pub fn roundtable_resume(state: State<'_, AppState>, id: String) -> AppResult<()
 }
 
 #[tauri::command]
-pub fn roundtable_inject(state: State<'_, AppState>, id: String, message: String) -> AppResult<()> {
-    state.roundtable.inject(&id, message)
+pub fn roundtable_inject(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    message: String,
+) -> AppResult<()> {
+    state.roundtable.inject(&app, &id, message)
 }
 
 #[tauri::command]
 pub fn roundtable_stop(state: State<'_, AppState>, id: String) -> AppResult<()> {
     state.roundtable.stop(&id)
-}
-
-#[tauri::command]
-pub fn roundtable_side_diff(state: State<'_, AppState>, id: String, side: String) -> AppResult<String> {
-    state.roundtable.side_diff(&id, &side)
-}
-
-#[tauri::command]
-pub fn roundtable_apply(
-    state: State<'_, AppState>,
-    id: String,
-    side: String,
-) -> AppResult<Option<String>> {
-    state.roundtable.apply(&id, &side)
 }
 
 #[tauri::command]

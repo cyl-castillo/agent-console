@@ -142,10 +142,6 @@ export const ipc = {
   roundtableInject: (id: string, message: string) =>
     invoke<void>("roundtable_inject", { id, message }),
   roundtableStop: (id: string) => invoke<void>("roundtable_stop", { id }),
-  roundtableSideDiff: (id: string, side: string) =>
-    invoke<string>("roundtable_side_diff", { id, side }),
-  roundtableApply: (id: string, side: string) =>
-    invoke<string | null>("roundtable_apply", { id, side }),
   roundtableDiscard: (id: string) => invoke<void>("roundtable_discard", { id }),
 };
 

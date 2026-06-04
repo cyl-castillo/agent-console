@@ -1,19 +1,19 @@
-//! Agent Roundtable — two coding agents debate a topic, each in its own git
-//! worktree, each able to back its argument with real code changes. The app is
-//! the conductor: it runs one headless `claude -p` turn per side per round,
-//! feeds each agent its opponent's last message, and emits events the UI renders
-//! as a two-column transcript with live diffs. The human moderates: pause,
-//! inject a steer, stop, and finally pick a winning side to apply onto the real
-//! working tree (snapshot taken first).
+//! Agent Room — N agents (Claude and/or Codex) plus the human hold one shared
+//! conversation about a problem. The app is the conductor: it runs one headless
+//! turn per participant in round-robin, feeds each agent the shared transcript
+//! since it last spoke, and emits events the UI renders as a single group-chat
+//! feed. The human is a first-class participant: their messages are injected
+//! into the same transcript and every agent sees them on its next turn.
 //!
-//! Isolation is the whole safety story for "both agents have tools": each side
-//! operates in a detached worktree under the system temp dir, branched off HEAD.
-//! Nothing they do touches the user's working tree until the moderator applies a
-//! winner — and that goes through a snapshot first.
+//! Conversation-first and read-only: agents may READ the open project to ground
+//! their reasoning but cannot edit it (Claude headless auto-denies edits, Codex
+//! runs `-s read-only`). There is no isolation to manage, no winner to pick, no
+//! diff to apply — the outcome is the conversation itself. Each agent keeps its
+//! own resumed session so it retains its private reasoning across turns.
 
-use std::collections::{HashMap, VecDeque};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,60 +21,75 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::error::{AppError, AppResult};
-use crate::services::engine_runner::{self, Engine, RunCtx};
-use crate::services::{proc, snapshot_service};
+use crate::services::engine_runner::{self, Engine, RunCtx, ToolPolicy};
 
-/// A debate participant. `model` is fed to `claude --model` and must be
-/// shell/arg-safe (validated before launch).
+/// One conversation participant. Either an AI agent or, for the special id
+/// `"human"`, the user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Participant {
-    /// "a" | "b".
-    pub side: String,
-    /// Display name shown in the transcript column header (e.g. "Opus").
+    /// Stable key used to thread the participant's resumed session and to dedupe
+    /// its own messages out of its prompt ("p1", "p2", …).
+    pub id: String,
+    /// Display name shown on the participant's messages (e.g. "Opus", "Codex").
     pub name: String,
-    /// Which CLI backs this participant. Defaults to Claude for older payloads.
+    /// Which CLI backs this participant.
     #[serde(default)]
     pub engine: Engine,
-    /// Claude: model alias ("opus" | "sonnet" | "haiku"). Codex: reasoning
-    /// effort ("low" | "medium" | "high"). Validated shell-safe before launch.
+    /// Claude: model alias ("opus" | "sonnet"). Codex: reasoning effort
+    /// ("low" | "medium" | "high"). Validated shell-safe before launch.
     pub model: String,
-    /// Optional extra framing for this participant's stance/role.
-    pub persona: String,
+    /// Optional role/lens framing for this participant ("the skeptic", "the
+    /// implementer", …). Empty = a neutral collaborator.
+    #[serde(default)]
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoundtableConfig {
-    /// The problem the two agents debate.
-    pub topic: String,
-    pub participant_a: Participant,
-    pub participant_b: Participant,
-    /// One round = a turn for A then a turn for B. Hard stop.
-    pub max_rounds: u32,
-    /// Cumulative token ceiling across both agents. 0 = no limit.
+    /// The problem the room is working on.
+    pub problem: String,
+    /// Two or more agents. Round-robin order is list order.
+    pub participants: Vec<Participant>,
+    /// Total AI turns across the whole conversation. Hard stop.
+    pub max_turns: u32,
+    /// Cumulative token ceiling across all agents. 0 = no limit.
     pub token_budget: u64,
-    /// true  => `--dangerously-skip-permissions` (agents may run Bash too);
-    /// false => `--permission-mode acceptEdits` (file edits only, no shell).
-    /// Safe either way: each agent is sandboxed to a throwaway worktree.
-    pub full_tools: bool,
 }
 
-/// Emitted once per agent turn over `roundtable://turn`.
+/// One message in the shared transcript — from an agent or the human.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Message {
+    pub author_id: String,
+    pub author_name: String,
+    /// None for the human.
+    pub engine: Option<Engine>,
+    pub model: String,
+    pub text: String,
+    /// The AI turn number this message belongs to (human messages share the
+    /// number of the turn they precede).
+    pub turn: u32,
+}
+
+/// Emitted once per message (agent turn or human injection) over
+/// `roundtable://turn`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoundtableTurn {
     pub id: String,
-    pub side: String,
-    pub round: u32,
-    pub name: String,
+    pub author_id: String,
+    pub author_name: String,
+    pub engine: Option<Engine>,
     pub model: String,
     pub text: String,
-    /// `git diff --stat` of this side's worktree vs HEAD, for an at-a-glance
-    /// "what code did this argument touch".
-    pub diff_stat: String,
-    /// Cumulative tokens spent across the whole debate after this turn.
+    pub turn: u32,
+    /// True for the human's own messages.
+    pub is_human: bool,
+    /// Cumulative tokens across the conversation after this message.
     pub total_tokens: u64,
+    /// Dollar cost reported by this turn (0 for Codex and for the human).
     pub cost_usd: f64,
 }
 
@@ -83,25 +98,40 @@ pub struct RoundtableTurn {
 #[serde(rename_all = "camelCase")]
 pub struct RoundtableStatus {
     pub id: String,
-    /// "running" | "paused" | "awaiting" | "done" | "stopped" | "error"
+    /// "running" | "paused" | "done" | "stopped" | "error"
     pub status: String,
-    pub round: u32,
+    pub turn: u32,
     pub total_tokens: u64,
     pub message: Option<String>,
 }
 
-/// Live control surface for one running debate. Flags are checked between turns,
-/// so pause/stop take effect at the next turn boundary (a turn in flight is not
-/// interrupted).
+/// A live activity line within a turn, emitted over `roundtable://activity` as
+/// it happens — so the feed shows what an agent is doing (reading, reasoning,
+/// streaming text) in real time instead of a mute spinner.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RoundtableActivity {
+    id: String,
+    /// Participant id this activity belongs to.
+    author_id: String,
+    turn: u32,
+    /// "thinking" | "tool" | "text"
+    kind: String,
+    label: String,
+    text: String,
+}
+
+/// Live control surface for one running room. Flags are checked between turns,
+/// so pause/stop take effect at the next turn boundary.
 struct RunControl {
     paused: AtomicBool,
     stopped: AtomicBool,
-    /// Moderator messages injected into the conversation, consumed before the
-    /// next turn.
-    inbox: Mutex<VecDeque<String>>,
-    worktree_a: PathBuf,
-    worktree_b: PathBuf,
-    repo: PathBuf,
+    /// The AI turn currently in flight (or just finished); human messages are
+    /// stamped with it so they sort sensibly in the feed.
+    turn_no: AtomicU32,
+    /// The single shared conversation. Both the driver (agent turns) and
+    /// `inject` (human turns) append here.
+    transcript: Mutex<Vec<Message>>,
 }
 
 pub struct RoundtableService {
@@ -123,7 +153,8 @@ impl RoundtableService {
         }
     }
 
-    /// Set up worktrees and spawn the driver task. Returns the run id.
+    /// Validate, register the run, and spawn the driver. `repo` is the open
+    /// project the agents may read (cwd, read-only).
     pub fn start(
         &self,
         app: AppHandle,
@@ -133,53 +164,37 @@ impl RoundtableService {
         if !repo.is_dir() {
             return Err(AppError::NotADirectory(repo.display().to_string()));
         }
-        // Worktrees branch off HEAD, so the repo needs at least one commit.
-        if !has_head(&repo) {
-            return Err(AppError::Other(
-                "the repository needs at least one commit before a roundtable can start".into(),
+        if config.problem.trim().is_empty() {
+            return Err(AppError::InvalidArgument("problem is empty".into()));
+        }
+        if config.participants.len() < 2 {
+            return Err(AppError::InvalidArgument(
+                "a room needs at least two participants".into(),
             ));
         }
-        if !is_safe_model(&config.participant_a.model) || !is_safe_model(&config.participant_b.model)
-        {
-            return Err(AppError::InvalidArgument("invalid model value".into()));
+        for p in &config.participants {
+            if !is_safe_model(&p.model) {
+                return Err(AppError::InvalidArgument(format!(
+                    "invalid model value for {}",
+                    p.name
+                )));
+            }
         }
-        if config.topic.trim().is_empty() {
-            return Err(AppError::InvalidArgument("topic is empty".into()));
-        }
-
-        // Garbage-collect any roundtable worktrees orphaned by a prior run that
-        // crashed or was closed without applying/discarding a winner.
-        cleanup_stale_worktrees(&repo);
 
         let n = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
         let id = format!("rt-{}-{}", std::process::id(), n);
 
-        let base = std::env::temp_dir()
-            .join("agent-console-roundtable")
-            .join(&id);
-        let worktree_a = base.join("a");
-        let worktree_b = base.join("b");
-        std::fs::create_dir_all(&base)?;
-        add_worktree(&repo, &worktree_a)?;
-        if let Err(e) = add_worktree(&repo, &worktree_b) {
-            // Roll back the first worktree so a failed start leaves nothing behind.
-            remove_worktree(&repo, &worktree_a);
-            return Err(e);
-        }
-
         let control = Arc::new(RunControl {
             paused: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
-            inbox: Mutex::new(VecDeque::new()),
-            worktree_a: worktree_a.clone(),
-            worktree_b: worktree_b.clone(),
-            repo: repo.clone(),
+            turn_no: AtomicU32::new(0),
+            transcript: Mutex::new(Vec::new()),
         });
         self.runs.lock().unwrap().insert(id.clone(), control.clone());
 
         let driver_id = id.clone();
         tauri::async_runtime::spawn(async move {
-            drive(app, driver_id, config, control).await;
+            drive(app, driver_id, repo, config, control).await;
         });
 
         Ok(id)
@@ -193,73 +208,53 @@ impl RoundtableService {
         self.with_run(id, |c| c.paused.store(false, Ordering::SeqCst))
     }
 
-    pub fn inject(&self, id: &str, message: String) -> AppResult<()> {
-        self.with_run(id, |c| c.inbox.lock().unwrap().push_back(message))
+    /// Post a human message into the shared transcript. It appears in the feed
+    /// immediately and every agent sees it on its next turn.
+    pub fn inject(&self, app: &AppHandle, id: &str, message: String) -> AppResult<()> {
+        let text = message.trim().to_string();
+        if text.is_empty() {
+            return Ok(());
+        }
+        let control = self
+            .runs
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
+        let turn = control.turn_no.load(Ordering::SeqCst);
+        let msg = Message {
+            author_id: "human".into(),
+            author_name: "You".into(),
+            engine: None,
+            model: String::new(),
+            text,
+            turn,
+        };
+        let total_tokens = {
+            let mut t = control.transcript.lock().unwrap();
+            t.push(msg.clone());
+            // tokens are unchanged by a human message; report the running total
+            // so the UI's cumulative counter stays monotonic.
+            0
+        };
+        emit_turn(app, id, &msg, true, total_tokens, 0.0);
+        Ok(())
     }
 
-    /// Signal stop and tear down worktrees. The driver also tears down on exit;
-    /// this handles stop-before-next-turn and the user closing the panel.
+    /// Signal stop. The driver exits at the next turn boundary; the run record is
+    /// kept so the finished transcript stays inspectable until `discard`.
     pub fn stop(&self, id: &str) -> AppResult<()> {
-        let control = self.runs.lock().unwrap().get(id).cloned();
-        if let Some(c) = control {
+        if let Some(c) = self.runs.lock().unwrap().get(id).cloned() {
             c.stopped.store(true, Ordering::SeqCst);
         }
         Ok(())
     }
 
-    /// Current staged diff of one side's worktree vs HEAD (full unified diff).
-    pub fn side_diff(&self, id: &str, side: &str) -> AppResult<String> {
-        let control = self
-            .runs
-            .lock()
-            .unwrap()
-            .get(id)
-            .cloned()
-            .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
-        let wt = side_worktree(&control, side)?;
-        Ok(worktree_diff(&wt))
-    }
-
-    /// Apply one side's changes onto the real working tree. Takes a snapshot of
-    /// the real tree first (so the moderator can undo), then patches it. Returns
-    /// the snapshot commit sha if one was taken.
-    pub fn apply(&self, id: &str, side: &str) -> AppResult<Option<String>> {
-        let control = self
-            .runs
-            .lock()
-            .unwrap()
-            .get(id)
-            .cloned()
-            .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
-        let wt = side_worktree(&control, side)?;
-        let patch = worktree_diff(&wt);
-        if patch.trim().is_empty() {
-            return Err(AppError::Other(
-                "that side made no code changes to apply".into(),
-            ));
-        }
-
-        // Safety net: snapshot the real working tree before mutating it.
-        let snap = snapshot_service::create(&control.repo, &format!("roundtable-apply-{id}-{side}"))?;
-        apply_patch(&control.repo, &patch)?;
-
-        // Applying a winner ends the debate — tear down both worktrees and drop
-        // the run so they don't leak in temp. Only after a *successful* apply,
-        // so a failed patch leaves everything inspectable for a retry.
-        self.runs.lock().unwrap().remove(id);
-        control.stopped.store(true, Ordering::SeqCst);
-        teardown(&control);
-
-        Ok(snap.map(|s| s.commit_sha))
-    }
-
-    /// Stop (if running) and remove worktrees. Idempotent. Called when the user
-    /// dismisses a finished debate.
+    /// Drop a finished room. Idempotent.
     pub fn discard(&self, id: &str) -> AppResult<()> {
-        let control = self.runs.lock().unwrap().remove(id);
-        if let Some(c) = control {
+        if let Some(c) = self.runs.lock().unwrap().remove(id) {
             c.stopped.store(true, Ordering::SeqCst);
-            teardown(&c);
         }
         Ok(())
     }
@@ -277,189 +272,172 @@ impl RoundtableService {
     }
 }
 
-/// The orchestration loop: A then B, round after round, until a hard stop.
-async fn drive(app: AppHandle, id: String, config: RoundtableConfig, control: Arc<RunControl>) {
+/// The orchestration loop: round-robin over participants until `max_turns`, a
+/// token budget, or a stop.
+async fn drive(
+    app: AppHandle,
+    id: String,
+    repo: PathBuf,
+    config: RoundtableConfig,
+    control: Arc<RunControl>,
+) {
     emit_status(&app, &id, "running", 0, 0, None);
 
+    let participants = config.participants;
+    let n = participants.len();
     let mut total_tokens: u64 = 0;
-    // Set once we've emitted a terminal status from inside the loop (error or
-    // budget-reached). Without this, an error `break 'outer` fell through to the
-    // tail emit below and overwrote "error" with "done" — reporting success for
-    // a failed run while the error banner still showed. Contradictory state.
     let mut terminal_emitted = false;
-    // Each side keeps its own claude session (resumed by id) so it retains
-    // memory of its own reasoning across rounds.
-    let mut resume_a: Option<String> = None;
-    let mut resume_b: Option<String> = None;
-    let mut last_a: Option<String> = None;
-    let mut last_b: Option<String> = None;
+    // Per-participant resumed session id (retains its own reasoning) and the
+    // transcript index it has already seen (so each prompt carries only what is
+    // new since that participant last spoke).
+    let mut resume: HashMap<String, String> = HashMap::new();
+    let mut last_seen: HashMap<String, usize> = HashMap::new();
 
-    'outer: for round in 1..=config.max_rounds {
-        for side in ["a", "b"] {
-            if control.stopped.load(Ordering::SeqCst) {
-                break 'outer;
-            }
-            // Honor pause at the turn boundary.
-            while control.paused.load(Ordering::SeqCst) && !control.stopped.load(Ordering::SeqCst) {
-                emit_status(&app, &id, "paused", round, total_tokens, None);
-                tokio::time::sleep(Duration::from_millis(400)).await;
-            }
-            if control.stopped.load(Ordering::SeqCst) {
-                break 'outer;
-            }
-            emit_status(&app, &id, "running", round, total_tokens, None);
+    'outer: for turn in 1..=config.max_turns {
+        let participant = &participants[((turn - 1) as usize) % n];
+        control.turn_no.store(turn, Ordering::SeqCst);
 
-            let (participant, worktree, resume, opponent_last) = if side == "a" {
-                (&config.participant_a, &control.worktree_a, &resume_a, last_b.clone())
-            } else {
-                (&config.participant_b, &control.worktree_b, &resume_b, last_a.clone())
+        if control.stopped.load(Ordering::SeqCst) {
+            break 'outer;
+        }
+        while control.paused.load(Ordering::SeqCst) && !control.stopped.load(Ordering::SeqCst) {
+            emit_status(&app, &id, "paused", turn, total_tokens, None);
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        if control.stopped.load(Ordering::SeqCst) {
+            break 'outer;
+        }
+        emit_status(&app, &id, "running", turn, total_tokens, None);
+
+        // Snapshot the transcript and take everything this participant has not
+        // seen yet, minus its own messages (it remembers those via its session).
+        let (delta, seen_to): (Vec<Message>, usize) = {
+            let t = control.transcript.lock().unwrap();
+            let start = *last_seen.get(&participant.id).unwrap_or(&0);
+            let delta = t[start..]
+                .iter()
+                .filter(|m| m.author_id != participant.id)
+                .cloned()
+                .collect();
+            (delta, t.len())
+        };
+
+        let prompt = build_room_prompt(&config.problem, participant, &participants, &delta, turn, config.max_turns);
+
+        let cwd = repo.clone();
+        let model = participant.model.clone();
+        let engine = participant.engine;
+        let resume_id = resume.get(&participant.id).cloned();
+        let app_t = app.clone();
+        let id_t = id.clone();
+        let author_t = participant.id.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
+            let on_activity = |kind: &str, label: &str, text: &str| {
+                emit_activity(&app_t, &id_t, &author_t, turn, kind, label, text);
             };
-
-            let moderator_notes: Vec<String> = control.inbox.lock().unwrap().drain(..).collect();
-            let prompt = build_turn_prompt(
-                &config.topic,
-                participant,
-                opponent_part(&config, side),
-                opponent_last.as_deref(),
-                &moderator_notes,
-                round,
-                config.max_rounds,
-            );
-
-            let wt = worktree.clone();
-            let model = participant.model.clone();
-            let engine = participant.engine;
-            let full_tools = config.full_tools;
-            let resume_clone = resume.clone();
-            let app_t = app.clone();
-            let id_t = id.clone();
-            let side_t = side.to_string();
-            let turn = tokio::task::spawn_blocking(move || {
-                let on_activity = |kind: &str, label: &str, text: &str| {
-                    emit_activity(&app_t, &id_t, &side_t, round, kind, label, text);
-                };
-                let ctx = RunCtx {
-                    cwd: &wt,
-                    model: &model,
-                    full_tools,
-                    prompt: &prompt,
-                    resume: resume_clone.as_deref(),
-                };
-                engine_runner::runner_for(engine).run(&ctx, &on_activity)
-            })
-            .await;
-
-            let outcome = match turn {
-                Ok(Ok(o)) => o,
-                Ok(Err(e)) => {
-                    emit_status(&app, &id, "error", round, total_tokens, Some(e.to_string()));
-                    terminal_emitted = true;
-                    break 'outer;
-                }
-                Err(e) => {
-                    emit_status(
-                        &app,
-                        &id,
-                        "error",
-                        round,
-                        total_tokens,
-                        Some(format!("turn task panicked: {e}")),
-                    );
-                    terminal_emitted = true;
-                    break 'outer;
-                }
+            let ctx = RunCtx {
+                cwd: &cwd,
+                model: &model,
+                tools: ToolPolicy::ReadOnly,
+                prompt: &prompt,
+                resume: resume_id.as_deref(),
             };
+            engine_runner::runner_for(engine).run(&ctx, &on_activity)
+        })
+        .await;
 
-            total_tokens = total_tokens.saturating_add(outcome.tokens);
-            if let Some(sid) = outcome.session_id.clone() {
-                if side == "a" {
-                    resume_a = Some(sid);
-                } else {
-                    resume_b = Some(sid);
-                }
-            }
-            if side == "a" {
-                last_a = Some(outcome.text.clone());
-            } else {
-                last_b = Some(outcome.text.clone());
-            }
-
-            let diff_stat = worktree_diff_stat(worktree);
-            let _ = app.emit(
-                "roundtable://turn",
-                RoundtableTurn {
-                    id: id.clone(),
-                    side: side.to_string(),
-                    round,
-                    name: participant.name.clone(),
-                    model: participant.model.clone(),
-                    text: outcome.text,
-                    diff_stat,
-                    total_tokens,
-                    cost_usd: outcome.cost_usd,
-                },
-            );
-
-            if config.token_budget > 0 && total_tokens >= config.token_budget {
-                emit_status(
-                    &app,
-                    &id,
-                    "done",
-                    round,
-                    total_tokens,
-                    Some("token budget reached".into()),
-                );
+        let outcome = match outcome {
+            Ok(Ok(o)) => o,
+            Ok(Err(e)) => {
+                emit_status(&app, &id, "error", turn, total_tokens, Some(e.to_string()));
                 terminal_emitted = true;
                 break 'outer;
             }
+            Err(e) => {
+                emit_status(&app, &id, "error", turn, total_tokens, Some(format!("turn task panicked: {e}")));
+                terminal_emitted = true;
+                break 'outer;
+            }
+        };
+
+        total_tokens = total_tokens.saturating_add(outcome.tokens);
+        if let Some(sid) = outcome.session_id {
+            resume.insert(participant.id.clone(), sid);
+        }
+
+        // Append this turn to the shared transcript and advance this
+        // participant's seen marker past its own message.
+        let msg = Message {
+            author_id: participant.id.clone(),
+            author_name: participant.name.clone(),
+            engine: Some(participant.engine),
+            model: participant.model.clone(),
+            text: outcome.text,
+            turn,
+        };
+        control.transcript.lock().unwrap().push(msg.clone());
+        // Advance only to what we had read (seen_to), NOT the current length:
+        // anything the human injected while this turn ran sits past seen_to and
+        // must surface on our next turn. Our own message is excluded by the
+        // author_id filter, so it never replays.
+        last_seen.insert(participant.id.clone(), seen_to);
+        emit_turn(&app, &id, &msg, false, total_tokens, outcome.cost_usd);
+
+        if config.token_budget > 0 && total_tokens >= config.token_budget {
+            emit_status(&app, &id, "done", turn, total_tokens, Some("token budget reached".into()));
+            terminal_emitted = true;
+            break 'outer;
         }
     }
 
-    let final_status = if control.stopped.load(Ordering::SeqCst) {
-        "stopped"
-    } else {
-        "done"
-    };
-    // Worktrees stay alive until the moderator applies a winner or discards, so
-    // do NOT tear down here — the diffs must remain inspectable. We only flip
-    // status. `discard` performs teardown.
     if !terminal_emitted {
-        emit_status(&app, &id, final_status, 0, total_tokens, None);
+        let final_status = if control.stopped.load(Ordering::SeqCst) {
+            "stopped"
+        } else {
+            "done"
+        };
+        emit_status(&app, &id, final_status, control.turn_no.load(Ordering::SeqCst), total_tokens, None);
     }
 }
 
-fn opponent_part<'a>(config: &'a RoundtableConfig, side: &str) -> &'a Participant {
-    if side == "a" {
-        &config.participant_b
-    } else {
-        &config.participant_a
-    }
+fn emit_status(app: &AppHandle, id: &str, status: &str, turn: u32, total_tokens: u64, message: Option<String>) {
+    let _ = app.emit(
+        "roundtable://status",
+        RoundtableStatus {
+            id: id.to_string(),
+            status: status.to_string(),
+            turn,
+            total_tokens,
+            message,
+        },
+    );
 }
 
-/// A live activity line within a turn, emitted over `roundtable://activity` as
-/// it happens — so the panel shows what the agent is doing (reading, editing,
-/// running commands, reasoning) in real time instead of a mute spinner.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RoundtableActivity {
-    id: String,
-    side: String,
-    round: u32,
-    /// "thinking" | "tool" | "text"
-    kind: String,
-    /// For "tool": the tool name. Empty otherwise.
-    label: String,
-    /// For "tool": a short arg summary. For "thinking"/"text": the content.
-    text: String,
+fn emit_turn(app: &AppHandle, id: &str, msg: &Message, is_human: bool, total_tokens: u64, cost_usd: f64) {
+    let _ = app.emit(
+        "roundtable://turn",
+        RoundtableTurn {
+            id: id.to_string(),
+            author_id: msg.author_id.clone(),
+            author_name: msg.author_name.clone(),
+            engine: msg.engine,
+            model: msg.model.clone(),
+            text: msg.text.clone(),
+            turn: msg.turn,
+            is_human,
+            total_tokens,
+            cost_usd,
+        },
+    );
 }
 
-fn emit_activity(app: &AppHandle, id: &str, side: &str, round: u32, kind: &str, label: &str, text: &str) {
+fn emit_activity(app: &AppHandle, id: &str, author_id: &str, turn: u32, kind: &str, label: &str, text: &str) {
     let _ = app.emit(
         "roundtable://activity",
         RoundtableActivity {
             id: id.to_string(),
-            side: side.to_string(),
-            round,
+            author_id: author_id.to_string(),
+            turn,
             kind: kind.to_string(),
             label: label.to_string(),
             text: text.to_string(),
@@ -467,231 +445,67 @@ fn emit_activity(app: &AppHandle, id: &str, side: &str, round: u32, kind: &str, 
     );
 }
 
-/// Adversarial debate framing. Each agent argues its position AND may edit code
-/// in its own (isolated) worktree to demonstrate it.
-fn build_turn_prompt(
-    topic: &str,
+/// Collaborative-room framing: each agent continues a shared conversation with
+/// its colleagues (and the human) toward a solution — not a debate to win.
+fn build_room_prompt(
+    problem: &str,
     me: &Participant,
-    opponent: &Participant,
-    opponent_last: Option<&str>,
-    moderator_notes: &[String],
-    round: u32,
-    max_rounds: u32,
+    all: &[Participant],
+    delta: &[Message],
+    turn: u32,
+    max_turns: u32,
 ) -> String {
-    let persona = if me.persona.trim().is_empty() {
+    let role = if me.role.trim().is_empty() {
         String::new()
     } else {
-        format!("\nYour assigned stance/role: {}\n", me.persona.trim())
+        format!("\nYour role in this room: {}\n", me.role.trim())
     };
 
-    let opponent_block = match opponent_last {
-        Some(text) if !text.trim().is_empty() => format!(
-            "Your opponent ({name}) just argued:\n\"\"\"\n{body}\n\"\"\"\n\nEngage with their points directly — concede what is right, refute what is weak, and strengthen your own position.",
-            name = opponent.name,
-            body = truncate(text, 6000),
-        ),
-        _ => "You speak first. Open with your strongest position and, if useful, a concrete code change in this working tree to demonstrate it.".to_string(),
-    };
+    let others = all
+        .iter()
+        .filter(|p| p.id != me.id)
+        .map(|p| format!("{} ({})", p.name, p.model))
+        .collect::<Vec<_>>()
+        .join(", ");
 
-    let mod_block = if moderator_notes.is_empty() {
-        String::new()
+    let convo = if delta.is_empty() {
+        "No one has spoken yet. Open the discussion: frame how you see the problem and propose a first direction.".to_string()
     } else {
-        format!(
-            "\nThe human moderator interjects (treat as high-priority guidance):\n{}\n",
-            moderator_notes
-                .iter()
-                .map(|m| format!("- {}", m.trim()))
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
+        let body = delta
+            .iter()
+            .map(|m| format!("{}:\n{}", m.author_name, engine_runner::truncate(&m.text, 4000)))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        format!("New since you last spoke (your colleagues and the human):\n\"\"\"\n{body}\n\"\"\"")
     };
 
     format!(
-        r#"You are **{name}** ({model}), one of two engineers in a structured debate about a real codebase. This working directory is YOUR PRIVATE git worktree — edits here are isolated and will not affect anyone else, so feel free to prototype concrete changes to back your argument. The human will later pick one side's changes to keep.
-{persona}
-The question under debate:
+        r#"You are **{name}** ({model}), one of several collaborators ({others}) plus a human, working together in a shared conversation to solve a real problem. You may READ the open project to ground your reasoning, but you cannot edit files — this is a discussion, not an implementation task.
+{role}
+The problem:
 """
-{topic}
+{problem}
 """
 
-This is round {round} of {max_rounds}.
+This is turn {turn} of {max_turns}.
 
-{opponent_block}
-{mod_block}
-Rules of engagement:
-- Be rigorous and adversarial, not agreeable. Your job is to find the strongest correct answer, not to be polite.
-- Ground claims in the actual code: read files, and where it sharpens your point, make real edits in this worktree.
-- Be concise. Lead with your position, then the reasoning, then (if any) what you changed and why.
-- If you genuinely think your opponent is right, say so and refine the shared conclusion rather than manufacturing disagreement."#,
+{convo}
+
+How to contribute:
+- Build on what others said. Add what's missing, sharpen what's vague, and say clearly when you disagree and why — but aim to converge on the best answer together, not to win.
+- Treat the human's messages as high-priority steering.
+- Ground claims in the actual code where relevant: read files before asserting how things work.
+- Be concise and substantive. One strong contribution per turn beats a wall of text.
+- If you believe the room has reached a good answer, say so and summarize it rather than manufacturing more discussion."#,
         name = me.name,
         model = me.model,
-        persona = persona,
-        topic = topic.trim(),
-        round = round,
-        max_rounds = max_rounds,
-        opponent_block = opponent_block,
-        mod_block = mod_block,
+        others = others,
+        role = role,
+        problem = problem.trim(),
+        turn = turn,
+        max_turns = max_turns,
+        convo = convo,
     )
-}
-
-// ----- git worktree plumbing -----
-
-fn has_head(repo: &Path) -> bool {
-    proc::command("git")
-        .args(["rev-parse", "--verify", "HEAD"])
-        .current_dir(repo)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-fn add_worktree(repo: &Path, path: &Path) -> AppResult<()> {
-    let out = proc::command("git")
-        .args(["worktree", "add", "--detach", &path.to_string_lossy(), "HEAD"])
-        .current_dir(repo)
-        .output()?;
-    if !out.status.success() {
-        let msg = String::from_utf8_lossy(&out.stderr).to_string();
-        return Err(AppError::Other(format!("git worktree add: {msg}")));
-    }
-    Ok(())
-}
-
-fn remove_worktree(repo: &Path, path: &Path) {
-    let _ = proc::command("git")
-        .args(["worktree", "remove", "--force", &path.to_string_lossy()])
-        .current_dir(repo)
-        .output();
-}
-
-/// Remove any registered worktree whose path is under an
-/// `agent-console-roundtable` directory — leftovers from a run that didn't tear
-/// down cleanly. Best-effort.
-fn cleanup_stale_worktrees(repo: &Path) {
-    let Ok(out) = proc::command("git")
-        .args(["worktree", "list", "--porcelain"])
-        .current_dir(repo)
-        .output()
-    else {
-        return;
-    };
-    if !out.status.success() {
-        return;
-    }
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut removed = false;
-    for line in text.lines() {
-        if let Some(p) = line.strip_prefix("worktree ") {
-            if p.contains("agent-console-roundtable") {
-                remove_worktree(repo, Path::new(p));
-                removed = true;
-            }
-        }
-    }
-    if removed {
-        let _ = proc::command("git")
-            .args(["worktree", "prune"])
-            .current_dir(repo)
-            .output();
-    }
-}
-
-fn teardown(control: &RunControl) {
-    remove_worktree(&control.repo, &control.worktree_a);
-    remove_worktree(&control.repo, &control.worktree_b);
-    let _ = proc::command("git")
-        .args(["worktree", "prune"])
-        .current_dir(&control.repo)
-        .output();
-    // Best-effort cleanup of the temp parent.
-    if let Some(parent) = control.worktree_a.parent() {
-        let _ = std::fs::remove_dir_all(parent);
-    }
-}
-
-fn side_worktree(control: &RunControl, side: &str) -> AppResult<PathBuf> {
-    match side {
-        "a" => Ok(control.worktree_a.clone()),
-        "b" => Ok(control.worktree_b.clone()),
-        other => Err(AppError::InvalidArgument(format!("unknown side {other}"))),
-    }
-}
-
-/// Full unified diff of a worktree vs HEAD, including untracked files. Staging
-/// everything first is harmless — the worktree is throwaway.
-fn worktree_diff(wt: &Path) -> String {
-    let _ = proc::command("git")
-        .args(["add", "-A"])
-        .current_dir(wt)
-        .output();
-    proc::command("git")
-        .args(["diff", "--cached", "--no-color", "HEAD"])
-        .current_dir(wt)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-        .unwrap_or_default()
-}
-
-fn worktree_diff_stat(wt: &Path) -> String {
-    let _ = proc::command("git")
-        .args(["add", "-A"])
-        .current_dir(wt)
-        .output();
-    proc::command("git")
-        .args(["diff", "--cached", "--stat", "HEAD"])
-        .current_dir(wt)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
-/// Apply a unified patch onto the real repo's working tree. `--3way` lets it
-/// fall back to a merge when context drifted; `--whitespace=nowarn` keeps it
-/// quiet. The patch is fed on stdin.
-fn apply_patch(repo: &Path, patch: &str) -> AppResult<()> {
-    use std::io::Write;
-    use std::process::Stdio;
-
-    let mut child = proc::command("git")
-        .args(["apply", "--3way", "--whitespace=nowarn"])
-        .current_dir(repo)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(patch.as_bytes())?;
-    }
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        let msg = String::from_utf8_lossy(&out.stderr).to_string();
-        return Err(AppError::Other(format!("git apply failed: {msg}")));
-    }
-    Ok(())
-}
-
-fn emit_status(
-    app: &AppHandle,
-    id: &str,
-    status: &str,
-    round: u32,
-    total_tokens: u64,
-    message: Option<String>,
-) {
-    let _ = app.emit(
-        "roundtable://status",
-        RoundtableStatus {
-            id: id.to_string(),
-            status: status.to_string(),
-            round,
-            total_tokens,
-            message,
-        },
-    );
 }
 
 fn is_safe_model(model: &str) -> bool {
@@ -700,15 +514,4 @@ fn is_safe_model(model: &str) -> bool {
         && model
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut cut = max;
-    while !s.is_char_boundary(cut) && cut > 0 {
-        cut -= 1;
-    }
-    format!("{}…", &s[..cut])
 }

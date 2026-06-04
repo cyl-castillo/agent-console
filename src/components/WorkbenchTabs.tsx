@@ -79,8 +79,8 @@ export function WorkbenchTabs({
       />
       <StripButton
         icon="users"
-        label={rtActive ? "Debate…" : "Debate"}
-        title={rtActive ? "Roundtable (running)" : "Roundtable — two agents debate"}
+        label={rtActive ? "Room…" : "Room"}
+        title={rtActive ? "Room (running)" : "Agent Room — you + N agents converse on a problem"}
         active={active === "roundtable"}
         onClick={() => onChange("roundtable")}
       />

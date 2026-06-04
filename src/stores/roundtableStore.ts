@@ -2,87 +2,80 @@ import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
+import { profileFor } from "../agents/profiles";
 import type {
   RoundtableActivity,
   RoundtableConfig,
+  RoundtableParticipant,
   RoundtableStatus,
   RoundtableTurn,
 } from "../types/domain";
 
 export type RtPhase = "config" | "running" | "paused" | "done" | "stopped" | "error";
 
-/// Draft of the debate setup, edited in the config form before launch.
+/// A roster entry edited in the config form before launch.
+export interface RtParticipantDraft {
+  id: string;
+  name: string;
+  engine: "claude" | "codex";
+  model: string;
+  role: string;
+}
+
+/// Draft of the room setup, edited in the config form before launch.
 export interface RtDraft {
-  topic: string;
-  nameA: string;
-  engineA: "claude" | "codex";
-  modelA: string;
-  personaA: string;
-  nameB: string;
-  engineB: "claude" | "codex";
-  modelB: string;
-  personaB: string;
-  maxRounds: number;
+  problem: string;
+  participants: RtParticipantDraft[];
+  maxTurns: number;
   tokenBudget: number;
-  fullTools: boolean;
 }
 
 const DEFAULT_DRAFT: RtDraft = {
-  topic: "",
-  nameA: "Opus",
-  engineA: "claude",
-  modelA: "opus",
-  personaA: "",
-  nameB: "Sonnet",
-  engineB: "claude",
-  modelB: "sonnet",
-  personaB: "",
-  maxRounds: 4,
+  problem: "",
+  participants: [
+    { id: "p1", name: "Opus", engine: "claude", model: "opus", role: "" },
+    { id: "p2", name: "Codex", engine: "codex", model: "medium", role: "" },
+  ],
+  maxTurns: 6,
   tokenBudget: 400_000,
-  fullTools: false,
 };
 
 interface RoundtableState {
   runId: string | null;
   phase: RtPhase;
-  round: number;
+  turn: number;
   totalTokens: number;
   approxCostUsd: number;
   message: string | null;
+  /// The shared conversation, in order (agent turns + human messages).
   turns: RoundtableTurn[];
-  /// Live activity lines (tool calls, reasoning, text) keyed by side+round.
+  /// Live activity lines (reasoning, tool calls, streamed text) keyed by
+  /// authorId+turn.
   activities: RoundtableActivity[];
 
   injectDraft: string;
-  /// Wall-clock (ms) the current live turn began — set at run start and at each
-  /// turn boundary. Drives the per-turn elapsed clock.
+  /// Wall-clock (ms) the current live AI turn began. Drives the per-turn clock.
   liveStartedAt: number | null;
-  /// Wall-clock (ms) of the most recent activity event. The gap between now and
-  /// this is the real "is it still moving?" signal: a long-running tool (Bash
-  /// `npm test`) emits NO activity while it runs, so elapsed alone can't tell
-  /// progress from a hang — staleness can.
+  /// Wall-clock (ms) of the most recent activity event — the staleness signal.
   lastActivityAt: number | null;
-  /// Which side's full diff is open in the viewer (null = none).
-  diffSide: string | null;
-  diff: string;
-  diffLoading: boolean;
-  /// Snapshot sha taken before the last apply (for the "undo" hint).
-  appliedSnapshot: string | null;
-  appliedSide: string | null;
 
   draft: RtDraft;
+  /// The participants actually launched (ids reindexed p1..pN). Display uses
+  /// this, not `draft`, so editing the roster mid-config never desyncs the
+  /// running feed's names/colors from the backend's author ids.
+  roster: RoundtableParticipant[];
 
   initListeners: () => Promise<void>;
   setDraft: (patch: Partial<RtDraft>) => void;
+  addParticipant: () => void;
+  removeParticipant: (id: string) => void;
+  updateParticipant: (id: string, patch: Partial<RtParticipantDraft>) => void;
   start: () => Promise<void>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   setInjectDraft: (v: string) => void;
   inject: () => Promise<void>;
   stop: () => Promise<void>;
-  openDiff: (side: string) => Promise<void>;
-  closeDiff: () => void;
-  apply: (side: string) => Promise<void>;
   reset: () => Promise<void>;
 }
 
@@ -90,11 +83,12 @@ let listenersBound = false;
 let unlistenTurn: UnlistenFn | null = null;
 let unlistenStatus: UnlistenFn | null = null;
 let unlistenActivity: UnlistenFn | null = null;
+let pidCounter = 2;
 
 export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   runId: null,
   phase: "config",
-  round: 0,
+  turn: 0,
   totalTokens: 0,
   approxCostUsd: 0,
   message: null,
@@ -104,13 +98,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   injectDraft: "",
   liveStartedAt: null,
   lastActivityAt: null,
-  diffSide: null,
-  diff: "",
-  diffLoading: false,
-  appliedSnapshot: null,
-  appliedSide: null,
 
-  draft: { ...DEFAULT_DRAFT },
+  draft: { ...DEFAULT_DRAFT, participants: DEFAULT_DRAFT.participants.map((p) => ({ ...p })) },
+  roster: [],
 
   initListeners: async () => {
     if (listenersBound) return;
@@ -118,7 +108,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     unlistenActivity = await listen<RoundtableActivity>("roundtable://activity", (e) => {
       const a = e.payload;
       if (a.id !== get().runId) return;
-      // Coalesce consecutive "text" chunks from the same side+round so the
+      // Coalesce consecutive "text" chunks from the same author+turn so a
       // streamed answer reads as one growing block rather than many lines.
       set((s) => {
         const last = s.activities[s.activities.length - 1];
@@ -126,8 +116,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
           a.kind === "text" &&
           last &&
           last.kind === "text" &&
-          last.side === a.side &&
-          last.round === a.round
+          last.authorId === a.authorId &&
+          last.turn === a.turn
         ) {
           const merged = { ...last, text: `${last.text}${a.text}` };
           return { activities: [...s.activities.slice(0, -1), merged], lastActivityAt: Date.now() };
@@ -138,16 +128,22 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     unlistenTurn = await listen<RoundtableTurn>("roundtable://turn", (e) => {
       const t = e.payload;
       if (t.id !== get().runId) return;
-      set((s) => ({
-        turns: [...s.turns, t],
-        totalTokens: t.totalTokens,
-        round: t.round,
-        approxCostUsd: s.approxCostUsd + (t.costUsd || 0),
-        // A turn just finished → the next one begins now. Reset the per-turn
-        // clock and clear staleness so the new turn starts "fresh".
-        liveStartedAt: Date.now(),
-        lastActivityAt: null,
-      }));
+      set((s) => {
+        // Human injections don't advance token totals or the per-turn clock —
+        // they just join the feed. (Backend sends totalTokens=0 for them.)
+        if (t.isHuman) {
+          return { turns: [...s.turns, t] };
+        }
+        return {
+          turns: [...s.turns, t],
+          totalTokens: t.totalTokens,
+          turn: t.turn,
+          approxCostUsd: s.approxCostUsd + (t.costUsd || 0),
+          // A turn finished → the next begins now. Reset the per-turn clock.
+          liveStartedAt: Date.now(),
+          lastActivityAt: null,
+        };
+      });
     });
     unlistenStatus = await listen<RoundtableStatus>("roundtable://status", (e) => {
       const st = e.payload;
@@ -156,8 +152,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       const phase = known.includes(st.status as RtPhase) ? (st.status as RtPhase) : get().phase;
       set({
         phase,
-        round: st.round || get().round,
-        totalTokens: st.totalTokens,
+        turn: st.turn || get().turn,
+        totalTokens: st.totalTokens || get().totalTokens,
         message: st.message ?? get().message,
       });
     });
@@ -165,20 +161,49 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
 
   setDraft: (patch) => set((s) => ({ draft: { ...s.draft, ...patch } })),
 
+  addParticipant: () =>
+    set((s) => {
+      pidCounter += 1;
+      const id = `p${pidCounter}`;
+      const next: RtParticipantDraft = { id, name: `Agent ${s.draft.participants.length + 1}`, engine: "claude", model: "sonnet", role: "" };
+      return { draft: { ...s.draft, participants: [...s.draft.participants, next] } };
+    }),
+
+  removeParticipant: (id) =>
+    set((s) => {
+      // A room needs at least two voices.
+      if (s.draft.participants.length <= 2) return s;
+      return { draft: { ...s.draft, participants: s.draft.participants.filter((p) => p.id !== id) } };
+    }),
+
+  updateParticipant: (id, patch) =>
+    set((s) => ({
+      draft: {
+        ...s.draft,
+        participants: s.draft.participants.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+      },
+    })),
+
   start: async () => {
     const d = get().draft;
-    if (!d.topic.trim()) {
-      set({ message: "Describe the question to debate first." });
+    if (!d.problem.trim()) {
+      set({ message: "Describe the problem the room should work on first." });
       return;
     }
     await get().initListeners();
+    // Reindex ids p1.. so removals/reorders never leave gaps the backend keys on.
+    const participants: RoundtableParticipant[] = d.participants.map((p, i) => ({
+      id: `p${i + 1}`,
+      name: p.name || `Agent ${i + 1}`,
+      engine: p.engine,
+      model: p.model,
+      role: p.role,
+    }));
     const config: RoundtableConfig = {
-      topic: d.topic.trim(),
-      participantA: { side: "a", name: d.nameA || "A", engine: d.engineA, model: d.modelA, persona: d.personaA },
-      participantB: { side: "b", name: d.nameB || "B", engine: d.engineB, model: d.modelB, persona: d.personaB },
-      maxRounds: Math.max(1, Math.min(20, d.maxRounds)),
+      problem: d.problem.trim(),
+      participants,
+      maxTurns: Math.max(1, Math.min(60, d.maxTurns)),
       tokenBudget: Math.max(0, d.tokenBudget),
-      fullTools: d.fullTools,
     };
     set({
       turns: [],
@@ -186,11 +211,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       message: null,
       totalTokens: 0,
       approxCostUsd: 0,
-      round: 0,
-      appliedSnapshot: null,
-      appliedSide: null,
-      diffSide: null,
-      diff: "",
+      turn: 0,
+      roster: participants,
       phase: "running",
       liveStartedAt: Date.now(),
       lastActivityAt: null,
@@ -249,31 +271,6 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     }
   },
 
-  openDiff: async (side) => {
-    const id = get().runId;
-    if (!id) return;
-    set({ diffSide: side, diffLoading: true, diff: "" });
-    try {
-      const diff = await ipc.roundtableSideDiff(id, side);
-      set({ diff, diffLoading: false });
-    } catch (err) {
-      set({ diffLoading: false, diff: "", message: err instanceof Error ? err.message : String(err) });
-    }
-  },
-
-  closeDiff: () => set({ diffSide: null, diff: "" }),
-
-  apply: async (side) => {
-    const id = get().runId;
-    if (!id) return;
-    try {
-      const snap = await ipc.roundtableApply(id, side);
-      set({ appliedSnapshot: snap, appliedSide: side, message: null });
-    } catch (err) {
-      set({ message: err instanceof Error ? err.message : String(err) });
-    }
-  },
-
   reset: async () => {
     const id = get().runId;
     if (id) {
@@ -286,7 +283,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     set({
       runId: null,
       phase: "config",
-      round: 0,
+      turn: 0,
       totalTokens: 0,
       approxCostUsd: 0,
       message: null,
@@ -295,13 +292,15 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       injectDraft: "",
       liveStartedAt: null,
       lastActivityAt: null,
-      diffSide: null,
-      diff: "",
-      appliedSnapshot: null,
-      appliedSide: null,
+      roster: [],
     });
   },
 }));
+
+/// Models for an engine — used by the config form's model picker.
+export function modelsFor(engine: "claude" | "codex") {
+  return profileFor(engine).models;
+}
 
 export function teardownRoundtableListeners() {
   unlistenTurn?.();

@@ -97,8 +97,6 @@ pub fn run() {
             commands::roundtable::roundtable_resume,
             commands::roundtable::roundtable_inject,
             commands::roundtable::roundtable_stop,
-            commands::roundtable::roundtable_side_diff,
-            commands::roundtable::roundtable_apply,
             commands::roundtable::roundtable_discard,
         ])
         .run(tauri::generate_context!())

@@ -4467,10 +4467,30 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .rt-participants { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
 .rt-participant {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
   padding: 8px 10px 10px;
   background: rgba(0, 0, 0, 0.12);
 }
+
+/* roster config: a column of editable participant rows */
+.rt-roster-config { display: flex; flex-direction: column; gap: 8px; margin: 4px 0; }
+.rt-participant-grid { display: flex; align-items: flex-end; gap: 8px; margin-bottom: 6px; }
+.rt-participant-grid .rt-field { flex: 1; margin: 0; }
+.rt-remove-participant {
+  flex: 0 0 auto; width: 26px; height: 26px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: transparent; color: var(--text-faint); cursor: pointer;
+  font-size: 14px; line-height: 1;
+}
+.rt-remove-participant:hover { color: var(--danger); border-color: var(--danger); }
+.rt-add-participant {
+  align-self: flex-start;
+  border: 1px dashed var(--border); border-radius: 6px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  padding: 6px 12px; font-size: 11px;
+}
+.rt-add-participant:hover { color: var(--text); border-color: var(--accent); }
 .rt-participant-head {
   display: flex; align-items: center; gap: 6px;
   font-size: 11px; color: var(--text-dim); text-transform: lowercase;
@@ -4612,6 +4632,13 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 
 /* roundtable live activity feed (console-style) */
 .rt-turn.rt-live { border-style: dashed; opacity: 0.95; }
+/* the human's own messages: set apart from the agents' bubbles */
+.rt-turn.rt-msg-human {
+  background: var(--accent-soft);
+  border-color: var(--border);
+  align-self: stretch;
+}
+.rt-turn.rt-msg-human .rt-turn-name { color: var(--accent); }
 .rt-thinking-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
 
 /* live turn status: current action + elapsed/quiet timer */
