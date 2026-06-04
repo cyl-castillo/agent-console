@@ -42,6 +42,16 @@ pub fn roundtable_inject(
 }
 
 #[tauri::command]
+pub fn roundtable_continue(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    extra: u32,
+) -> AppResult<()> {
+    state.roundtable.continue_run(&app, &id, extra)
+}
+
+#[tauri::command]
 pub fn roundtable_stop(state: State<'_, AppState>, id: String) -> AppResult<()> {
     state.roundtable.stop(&id)
 }

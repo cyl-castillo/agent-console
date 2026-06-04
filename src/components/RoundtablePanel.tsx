@@ -185,11 +185,16 @@ function RoomView() {
   const activities = useRoundtableStore((s) => s.activities);
   const phase = useRoundtableStore((s) => s.phase);
   const turn = useRoundtableStore((s) => s.turn);
+  const targetTurns = useRoundtableStore((s) => s.targetTurns);
   const totalTokens = useRoundtableStore((s) => s.totalTokens);
   const approxCostUsd = useRoundtableStore((s) => s.approxCostUsd);
   const message = useRoundtableStore((s) => s.message);
   const draft = useRoundtableStore((s) => s.draft);
   const roster = useRoundtableStore((s) => s.roster);
+  // Streamed text is coalesced into the SAME activity object, so activities.length
+  // doesn't change mid-message — lastActivityAt does (every chunk), so it's the
+  // signal that keeps the feed pinned to the bottom while an answer streams in.
+  const lastActivityAt = useRoundtableStore((s) => s.lastActivityAt);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stick to the bottom only while the user is already there, so scrolling up to
@@ -198,12 +203,13 @@ function RoomView() {
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
   useEffect(() => {
     if (!stickRef.current) return;
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [turns.length, activities.length]);
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns.length, activities.length, lastActivityAt]);
 
   const n = Math.max(1, roster.length);
   // Activities whose AI turn hasn't completed yet = the in-flight turn's feed.
@@ -220,7 +226,7 @@ function RoomView() {
       <div className="rt-meta">
         <span className={`rt-phase rt-phase-${phase}`}>{phase}</span>
         <span className="rt-meta-sep">·</span>
-        <span>turn {turn}/{draft.maxTurns}</span>
+        <span>turn {turn}/{targetTurns || draft.maxTurns}</span>
         <span className="rt-meta-sep">·</span>
         <span>{formatTokens(totalTokens)} tok</span>
         {draft.tokenBudget > 0 && (
@@ -416,22 +422,43 @@ function HumanInput() {
   const injectDraft = useRoundtableStore((s) => s.injectDraft);
   const setInjectDraft = useRoundtableStore((s) => s.setInjectDraft);
   const inject = useRoundtableStore((s) => s.inject);
+  const continueRoom = useRoundtableStore((s) => s.continueRoom);
 
+  // Hidden only on a hard end. "awaiting" (turn limit reached) keeps the input
+  // so the human can steer and continue the conversation.
   if (phase === "done" || phase === "stopped" || phase === "error") return null;
+
+  const awaiting = phase === "awaiting";
+  // When the room is waiting on us, sending a message also restarts it; while
+  // it's live, a message just joins the next turn.
+  const send = async () => {
+    if (!injectDraft.trim()) return;
+    await inject();
+    if (awaiting) void continueRoom();
+  };
 
   return (
     <div className="rt-moderator">
       <input
-        placeholder="Join the conversation — your message is seen by everyone on their next turn…"
+        placeholder={
+          awaiting
+            ? "Add a message and the room continues — or just hit Continue…"
+            : "Join the conversation — your message is seen by everyone on their next turn…"
+        }
         value={injectDraft}
         onChange={(e) => setInjectDraft(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && injectDraft.trim()) void inject();
+          if (e.key === "Enter" && injectDraft.trim()) void send();
         }}
       />
-      <button className="wb-cta wb-cta-sm" onClick={() => void inject()} disabled={!injectDraft.trim()}>
+      <button className="wb-cta wb-cta-sm" onClick={() => void send()} disabled={!injectDraft.trim()}>
         Send
       </button>
+      {awaiting && (
+        <button className="wb-cta wb-cta-sm rt-continue" onClick={() => void continueRoom()}>
+          Continue ▸
+        </button>
+      )}
     </div>
   );
 }

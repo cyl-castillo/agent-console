@@ -121,17 +121,36 @@ struct RoundtableActivity {
     text: String,
 }
 
-/// Live control surface for one running room. Flags are checked between turns,
-/// so pause/stop take effect at the next turn boundary.
+/// Live control surface for one room. Holds all state that must survive a driver
+/// loop exiting, so the conversation can be continued: when the turn target is
+/// reached the loop stops (status "awaiting") but the run stays alive, and
+/// `continue_run` raises the target and respawns the driver from here.
 struct RunControl {
     paused: AtomicBool,
     stopped: AtomicBool,
-    /// The AI turn currently in flight (or just finished); human messages are
-    /// stamped with it so they sort sensibly in the feed.
+    /// Whether a driver loop is currently active (guards against double-spawn).
+    driving: AtomicBool,
+    /// Last completed AI turn; human messages are stamped with it so they sort
+    /// sensibly in the feed.
     turn_no: AtomicU32,
-    /// The single shared conversation. Both the driver (agent turns) and
-    /// `inject` (human turns) append here.
+    /// The driver runs until `turn_no` reaches this. Raised by `continue_run`.
+    target_turns: AtomicU32,
+    /// Cumulative tokens across the whole conversation (persists across continues).
+    total_tokens: AtomicU64,
+    /// 0 = no limit. A hard end (status "done"), unlike the soft turn target.
+    token_budget: u64,
+    /// The single shared conversation. The driver (agent turns) and `inject`
+    /// (human turns) both append here.
     transcript: Mutex<Vec<Message>>,
+    /// Per-participant resumed session id (retains its reasoning across turns
+    /// and across continues).
+    resume: Mutex<HashMap<String, String>>,
+    /// Per-participant transcript index already folded into its prompt.
+    last_seen: Mutex<HashMap<String, usize>>,
+    participants: Vec<Participant>,
+    problem: String,
+    /// The open project the agents may read (cwd, read-only).
+    repo: PathBuf,
 }
 
 pub struct RoundtableService {
@@ -187,17 +206,60 @@ impl RoundtableService {
         let control = Arc::new(RunControl {
             paused: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
+            driving: AtomicBool::new(true),
             turn_no: AtomicU32::new(0),
+            target_turns: AtomicU32::new(config.max_turns),
+            total_tokens: AtomicU64::new(0),
+            token_budget: config.token_budget,
             transcript: Mutex::new(Vec::new()),
+            resume: Mutex::new(HashMap::new()),
+            last_seen: Mutex::new(HashMap::new()),
+            participants: config.participants,
+            problem: config.problem,
+            repo,
         });
         self.runs.lock().unwrap().insert(id.clone(), control.clone());
 
         let driver_id = id.clone();
         tauri::async_runtime::spawn(async move {
-            drive(app, driver_id, repo, config, control).await;
+            drive(app, driver_id, control).await;
         });
 
         Ok(id)
+    }
+
+    /// Run `extra` more turns, continuing the same conversation (transcript and
+    /// per-agent sessions intact). Used after the room reaches its turn target
+    /// and the human wants it to keep going. Idempotent if a driver is already
+    /// active (just raises the target).
+    pub fn continue_run(&self, app: &AppHandle, id: &str, extra: u32) -> AppResult<()> {
+        let control = self
+            .runs
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
+        let extra = extra.clamp(1, 60);
+        // Extend from wherever we are now.
+        let base = control.turn_no.load(Ordering::SeqCst);
+        let new_target = (base + extra).max(control.target_turns.load(Ordering::SeqCst));
+        control.target_turns.store(new_target, Ordering::SeqCst);
+        control.paused.store(false, Ordering::SeqCst);
+        // Spawn a fresh driver only if none is running. The CAS makes that race
+        // free: whoever flips driving false->true owns the new loop.
+        if control
+            .driving
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            let app = app.clone();
+            let id = id.to_string();
+            tauri::async_runtime::spawn(async move {
+                drive(app, id, control).await;
+            });
+        }
+        Ok(())
     }
 
     pub fn pause(&self, id: &str) -> AppResult<()> {
@@ -272,48 +334,53 @@ impl RoundtableService {
     }
 }
 
-/// The orchestration loop: round-robin over participants until `max_turns`, a
-/// token budget, or a stop.
-async fn drive(
-    app: AppHandle,
-    id: String,
-    repo: PathBuf,
-    config: RoundtableConfig,
-    control: Arc<RunControl>,
-) {
-    emit_status(&app, &id, "running", 0, 0, None);
+/// One terminal state of a driver loop. Carries how the loop ended so the tail
+/// can emit the right status after `driving` is cleared.
+enum DriveEnd {
+    /// Reached the turn target — the conversation pauses for the human, who can
+    /// continue it. The run stays alive.
+    Awaiting,
+    /// Token budget hit — a hard end.
+    DoneBudget,
+    /// Human stopped it.
+    Stopped,
+    /// A turn failed; the loop already emitted the error status.
+    Errored,
+}
 
-    let participants = config.participants;
-    let n = participants.len();
-    let mut total_tokens: u64 = 0;
-    let mut terminal_emitted = false;
-    // Per-participant resumed session id (retains its own reasoning) and the
-    // transcript index it has already seen (so each prompt carries only what is
-    // new since that participant last spoke).
-    let mut resume: HashMap<String, String> = HashMap::new();
-    let mut last_seen: HashMap<String, usize> = HashMap::new();
+/// The orchestration loop: round-robin over participants until the turn target,
+/// a token budget, or a stop. All state lives in `control`, so the loop can exit
+/// at the target and a later `continue_run` resumes exactly where it left off.
+async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
+    let n = control.participants.len();
+    let mut total_tokens = control.total_tokens.load(Ordering::SeqCst);
+    emit_status(&app, &id, "running", control.turn_no.load(Ordering::SeqCst), total_tokens, None);
 
-    'outer: for turn in 1..=config.max_turns {
-        let participant = &participants[((turn - 1) as usize) % n];
-        control.turn_no.store(turn, Ordering::SeqCst);
-
+    let end = loop {
+        let turn = control.turn_no.load(Ordering::SeqCst) + 1;
+        if turn > control.target_turns.load(Ordering::SeqCst) {
+            break DriveEnd::Awaiting;
+        }
         if control.stopped.load(Ordering::SeqCst) {
-            break 'outer;
+            break DriveEnd::Stopped;
         }
         while control.paused.load(Ordering::SeqCst) && !control.stopped.load(Ordering::SeqCst) {
             emit_status(&app, &id, "paused", turn, total_tokens, None);
             tokio::time::sleep(Duration::from_millis(400)).await;
         }
         if control.stopped.load(Ordering::SeqCst) {
-            break 'outer;
+            break DriveEnd::Stopped;
         }
+        control.turn_no.store(turn, Ordering::SeqCst);
         emit_status(&app, &id, "running", turn, total_tokens, None);
+
+        let participant = control.participants[((turn - 1) as usize) % n].clone();
 
         // Snapshot the transcript and take everything this participant has not
         // seen yet, minus its own messages (it remembers those via its session).
         let (delta, seen_to): (Vec<Message>, usize) = {
             let t = control.transcript.lock().unwrap();
-            let start = *last_seen.get(&participant.id).unwrap_or(&0);
+            let start = *control.last_seen.lock().unwrap().get(&participant.id).unwrap_or(&0);
             let delta = t[start..]
                 .iter()
                 .filter(|m| m.author_id != participant.id)
@@ -322,12 +389,13 @@ async fn drive(
             (delta, t.len())
         };
 
-        let prompt = build_room_prompt(&config.problem, participant, &participants, &delta, turn, config.max_turns);
+        let target = control.target_turns.load(Ordering::SeqCst);
+        let prompt = build_room_prompt(&control.problem, &participant, &control.participants, &delta, turn, target);
 
-        let cwd = repo.clone();
+        let cwd = control.repo.clone();
         let model = participant.model.clone();
         let engine = participant.engine;
-        let resume_id = resume.get(&participant.id).cloned();
+        let resume_id = control.resume.lock().unwrap().get(&participant.id).cloned();
         let app_t = app.clone();
         let id_t = id.clone();
         let author_t = participant.id.clone();
@@ -350,23 +418,20 @@ async fn drive(
             Ok(Ok(o)) => o,
             Ok(Err(e)) => {
                 emit_status(&app, &id, "error", turn, total_tokens, Some(e.to_string()));
-                terminal_emitted = true;
-                break 'outer;
+                break DriveEnd::Errored;
             }
             Err(e) => {
                 emit_status(&app, &id, "error", turn, total_tokens, Some(format!("turn task panicked: {e}")));
-                terminal_emitted = true;
-                break 'outer;
+                break DriveEnd::Errored;
             }
         };
 
         total_tokens = total_tokens.saturating_add(outcome.tokens);
+        control.total_tokens.store(total_tokens, Ordering::SeqCst);
         if let Some(sid) = outcome.session_id {
-            resume.insert(participant.id.clone(), sid);
+            control.resume.lock().unwrap().insert(participant.id.clone(), sid);
         }
 
-        // Append this turn to the shared transcript and advance this
-        // participant's seen marker past its own message.
         let msg = Message {
             author_id: participant.id.clone(),
             author_name: participant.name.clone(),
@@ -380,23 +445,33 @@ async fn drive(
         // anything the human injected while this turn ran sits past seen_to and
         // must surface on our next turn. Our own message is excluded by the
         // author_id filter, so it never replays.
-        last_seen.insert(participant.id.clone(), seen_to);
+        control.last_seen.lock().unwrap().insert(participant.id.clone(), seen_to);
         emit_turn(&app, &id, &msg, false, total_tokens, outcome.cost_usd);
 
-        if config.token_budget > 0 && total_tokens >= config.token_budget {
-            emit_status(&app, &id, "done", turn, total_tokens, Some("token budget reached".into()));
-            terminal_emitted = true;
-            break 'outer;
+        if control.token_budget > 0 && total_tokens >= control.token_budget {
+            break DriveEnd::DoneBudget;
         }
-    }
+    };
 
-    if !terminal_emitted {
-        let final_status = if control.stopped.load(Ordering::SeqCst) {
-            "stopped"
-        } else {
-            "done"
-        };
-        emit_status(&app, &id, final_status, control.turn_no.load(Ordering::SeqCst), total_tokens, None);
+    // Release the driver slot BEFORE the terminal status, so a `continue_run`
+    // racing the status can re-acquire and respawn cleanly.
+    control.driving.store(false, Ordering::SeqCst);
+    let turn = control.turn_no.load(Ordering::SeqCst);
+    match end {
+        DriveEnd::Awaiting => {
+            // If a `continue_run` re-acquired the driver (driving flipped back to
+            // true via its CAS) in the window since we released it, a fresh loop
+            // is already running — don't paint a stale "awaiting" over it.
+            if !control.driving.load(Ordering::SeqCst) {
+                emit_status(&app, &id, "awaiting", turn, total_tokens, Some("reached the turn limit — add a message or continue".into()));
+            }
+        }
+        DriveEnd::DoneBudget => {
+            emit_status(&app, &id, "done", turn, total_tokens, Some("token budget reached".into()))
+        }
+        DriveEnd::Stopped => emit_status(&app, &id, "stopped", turn, total_tokens, None),
+        // Error status already emitted inside the loop.
+        DriveEnd::Errored => {}
     }
 }
 

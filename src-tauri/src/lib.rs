@@ -96,6 +96,7 @@ pub fn run() {
             commands::roundtable::roundtable_pause,
             commands::roundtable::roundtable_resume,
             commands::roundtable::roundtable_inject,
+            commands::roundtable::roundtable_continue,
             commands::roundtable::roundtable_stop,
             commands::roundtable::roundtable_discard,
         ])

@@ -11,7 +11,7 @@ import type {
   RoundtableTurn,
 } from "../types/domain";
 
-export type RtPhase = "config" | "running" | "paused" | "done" | "stopped" | "error";
+export type RtPhase = "config" | "running" | "paused" | "awaiting" | "done" | "stopped" | "error";
 
 /// A roster entry edited in the config form before launch.
 export interface RtParticipantDraft {
@@ -44,6 +44,8 @@ interface RoundtableState {
   runId: string | null;
   phase: RtPhase;
   turn: number;
+  /// The current turn target (grows with each Continue) — the "/N" in the meta.
+  targetTurns: number;
   totalTokens: number;
   approxCostUsd: number;
   message: string | null;
@@ -75,6 +77,7 @@ interface RoundtableState {
   resume: () => Promise<void>;
   setInjectDraft: (v: string) => void;
   inject: () => Promise<void>;
+  continueRoom: () => Promise<void>;
   stop: () => Promise<void>;
   reset: () => Promise<void>;
 }
@@ -89,6 +92,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   runId: null,
   phase: "config",
   turn: 0,
+  targetTurns: 0,
   totalTokens: 0,
   approxCostUsd: 0,
   message: null,
@@ -148,7 +152,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     unlistenStatus = await listen<RoundtableStatus>("roundtable://status", (e) => {
       const st = e.payload;
       if (st.id !== get().runId) return;
-      const known: RtPhase[] = ["running", "paused", "done", "stopped", "error"];
+      const known: RtPhase[] = ["running", "paused", "awaiting", "done", "stopped", "error"];
       const phase = known.includes(st.status as RtPhase) ? (st.status as RtPhase) : get().phase;
       set({
         phase,
@@ -212,6 +216,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       totalTokens: 0,
       approxCostUsd: 0,
       turn: 0,
+      targetTurns: config.maxTurns,
       roster: participants,
       phase: "running",
       liveStartedAt: Date.now(),
@@ -261,6 +266,25 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     }
   },
 
+  /// Run another round (one turn per participant), continuing the same
+  /// conversation. Used from the "awaiting" state to keep it going.
+  continueRoom: async () => {
+    const id = get().runId;
+    if (!id) return;
+    const extra = Math.max(1, get().roster.length);
+    set((s) => ({
+      phase: "running",
+      targetTurns: s.targetTurns + extra,
+      liveStartedAt: Date.now(),
+      lastActivityAt: null,
+    }));
+    try {
+      await ipc.roundtableContinue(id, extra);
+    } catch (err) {
+      set({ message: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
   stop: async () => {
     const id = get().runId;
     if (!id) return;
@@ -284,6 +308,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       runId: null,
       phase: "config",
       turn: 0,
+      targetTurns: 0,
       totalTokens: 0,
       approxCostUsd: 0,
       message: null,

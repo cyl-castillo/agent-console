@@ -141,6 +141,8 @@ export const ipc = {
   roundtableResume: (id: string) => invoke<void>("roundtable_resume", { id }),
   roundtableInject: (id: string, message: string) =>
     invoke<void>("roundtable_inject", { id, message }),
+  roundtableContinue: (id: string, extra: number) =>
+    invoke<void>("roundtable_continue", { id, extra }),
   roundtableStop: (id: string) => invoke<void>("roundtable_stop", { id }),
   roundtableDiscard: (id: string) => invoke<void>("roundtable_discard", { id }),
 };

@@ -4521,6 +4521,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .rt-phase { text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
 .rt-phase-running { color: var(--accent); }
 .rt-phase-paused  { color: #fbbf24; }
+.rt-phase-awaiting { color: #fbbf24; }
 .rt-phase-done    { color: var(--ok); }
 .rt-phase-stopped { color: var(--text-faint); }
 .rt-phase-error   { color: var(--danger); }
@@ -4599,6 +4600,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   border-radius: 6px; color: var(--text); font-size: 12px; padding: 7px 9px;
 }
 .rt-moderator input:focus { outline: none; border-color: var(--accent); }
+.rt-continue { white-space: nowrap; }
 
 /* winner / apply bar */
 .rt-winner {
