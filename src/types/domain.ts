@@ -374,6 +374,9 @@ export interface PersistedRoom {
   /// Per-participant opaque engine resume references (not used until Fase B).
   resume: Record<string, string>;
   lastSeen: Record<string, number>;
+  /// True if this was a working room (agents edited a room/<id> branch) — drives
+  /// whether the reopened room can Share/Sync. Defaults false for older rooms.
+  allowEdits: boolean;
   totalTokens: number;
   updatedAtMs: number;
 }

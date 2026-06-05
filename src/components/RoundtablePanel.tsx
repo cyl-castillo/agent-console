@@ -224,6 +224,7 @@ function RoomView() {
   const activities = useRoundtableStore((s) => s.activities);
   const phase = useRoundtableStore((s) => s.phase);
   const readOnly = useRoundtableStore((s) => s.readOnly);
+  const workingRoom = useRoundtableStore((s) => s.workingRoom);
   const problem = useRoundtableStore((s) => s.problem);
   const turn = useRoundtableStore((s) => s.turn);
   const targetTurns = useRoundtableStore((s) => s.targetTurns);
@@ -339,7 +340,7 @@ function RoomView() {
         )}
       </div>
 
-      {!readOnly && draft.allowEdits && <CoworkBar />}
+      {!readOnly && workingRoom && <CoworkBar />}
 
       {message && (
         <div className={`rt-banner ${phase === "error" ? "rt-banner-error" : "rt-banner-info"}`}>

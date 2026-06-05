@@ -72,6 +72,11 @@ interface RoundtableState {
   activities: RoundtableActivity[];
 
   injectDraft: string;
+  /// True when the displayed room is a working room (agents edit a room/<id>
+  /// branch) — drives the cowork bar. Tracked separately from `draft.allowEdits`
+  /// (the config form) so it's correct for a reopened room too: set from the
+  /// launched config on start and from the persisted flag on open.
+  workingRoom: boolean;
   /// Cowork (share/sync with human colleagues over the git remote). `busy` marks
   /// an in-flight share/sync so the buttons disable; `result` holds the last
   /// outcome to show inline (PR link on share, conflicts on sync).
@@ -137,6 +142,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   activities: [],
 
   injectDraft: "",
+  workingRoom: false,
   coworkBusy: null,
   coworkResult: null,
   liveStartedAt: null,
@@ -254,6 +260,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       activities: [],
       message: null,
       readOnly: false,
+      workingRoom: config.allowEdits,
       problem: config.problem,
       totalTokens: 0,
       approxCostUsd: 0,
@@ -395,6 +402,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       turns: [],
       activities: [],
       injectDraft: "",
+      workingRoom: false,
       coworkBusy: null,
       coworkResult: null,
       liveStartedAt: null,
@@ -438,6 +446,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       set({
         runId: room.id,
         readOnly: true,
+        workingRoom: room.allowEdits,
         phase: "done",
         problem: room.problem,
         roster: room.participants,

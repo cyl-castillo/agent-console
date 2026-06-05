@@ -175,6 +175,11 @@ struct RunControl {
     /// for the human to review and merge. Consumed by the review/merge UI (W2).
     #[allow(dead_code)]
     branch: Option<String>,
+    /// Whether this is a working room (agents edit on a `room/<id>` branch).
+    /// Carried explicitly — and persisted — so it survives a Fase B resume, where
+    /// the `branch`/`worktree` handles come back `None` but the branch still lives
+    /// in the repo (so Share stays available; see `share`/`branch_exists`).
+    allow_edits: bool,
     /// Shared disk store for crash-safe autosave of this room (see `autosave`).
     rooms: Arc<RoomsStore>,
     /// One-time room banner emitted when the driver starts — e.g. editing was
@@ -199,6 +204,7 @@ impl RunControl {
             transcript,
             resume,
             last_seen,
+            allow_edits: self.allow_edits,
             total_tokens: self.total_tokens.load(Ordering::SeqCst),
             updated_at_ms: now_ms(),
         }
@@ -243,6 +249,10 @@ pub struct PersistedRoom {
     pub resume: HashMap<String, String>,
     #[serde(default)]
     pub last_seen: HashMap<String, usize>,
+    /// Whether this was a working room (agents edited a `room/<id>` branch).
+    /// `serde(default)` → rooms saved before this field load as conversation rooms.
+    #[serde(default)]
+    pub allow_edits: bool,
     #[serde(default)]
     pub total_tokens: u64,
     /// millis since epoch of the last write — drives sidebar ordering and retention.
@@ -566,6 +576,9 @@ impl RoundtableService {
             workspace,
             tools,
             worktree,
+            // True only if a working room actually stood up its branch — a config
+            // that asked to edit but degraded to read-only (no git repo) is not one.
+            allow_edits: branch.is_some(),
             branch,
             rooms: self.rooms.clone(),
             notice,
@@ -639,6 +652,10 @@ impl RoundtableService {
             tools: ToolPolicy::ReadOnly,
             worktree: None,
             branch: None,
+            // The branch handle is gone until W3 reattaches the worktree, but the
+            // room WAS a working room iff it was persisted as one — carry that so
+            // Share (which works by branch name) stays reachable from the UI.
+            allow_edits: room.allow_edits,
             repo,
             rooms: self.rooms.clone(),
             notice: None,
@@ -1632,6 +1649,7 @@ mod tests {
             transcript: vec![message("p1", 1), message("human", 1)],
             resume: HashMap::from([("p1".to_string(), "resume-token-p1".to_string())]),
             last_seen: HashMap::from([("p1".to_string(), 2usize)]),
+            allow_edits: false,
             total_tokens: 4242,
             updated_at_ms,
         }
@@ -1664,6 +1682,16 @@ mod tests {
         assert_eq!(full.resume.get("p1").map(String::as_str), Some("resume-token-p1"));
         assert_eq!(full.last_seen.get("p1"), Some(&2usize));
         assert_eq!(full.total_tokens, 4242);
+        assert!(!full.allow_edits, "a conversation room round-trips as allow_edits=false");
+
+        // A working room's allow_edits survives the round trip — this is what lets
+        // a reopened working room still offer Share for review.
+        store
+            .save_room(&PersistedRoom { allow_edits: true, ..room("w", "editing room", 150) }, p1)
+            .unwrap();
+        let w = store.get("/proj/one", "w").unwrap().expect("room w exists");
+        assert!(w.allow_edits, "a working room round-trips as allow_edits=true");
+        store.delete_room("/proj/one", "w").unwrap();
         // Summary derives its fields from the room.
         let sum = store.summaries("/proj/one").unwrap();
         assert_eq!(sum.len(), 1);
