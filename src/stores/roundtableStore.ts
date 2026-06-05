@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
+import { useChangesStore } from "./changesStore";
 import { profileFor } from "../agents/profiles";
 import type {
   RoomSummary,
@@ -248,19 +249,24 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       model: p.model,
       role: p.role,
     }));
+    // Honest working-room flag: editing needs a git repo to branch + review
+    // against. Match the config toggle's own `!noRepo` guard (RoundtablePanel)
+    // and the backend's `allow_edits = branch.is_some()`, so we never light up
+    // the CoworkBar (Share) on a room that silently degraded to read-only.
+    const allowEdits = d.allowEdits && useChangesStore.getState().status?.isRepo !== false;
     const config: RoundtableConfig = {
       problem: d.problem.trim(),
       participants,
       maxTurns: Math.max(1, Math.min(60, d.maxTurns)),
       tokenBudget: Math.max(0, d.tokenBudget),
-      allowEdits: d.allowEdits,
+      allowEdits,
     };
     set({
       turns: [],
       activities: [],
       message: null,
       readOnly: false,
-      workingRoom: config.allowEdits,
+      workingRoom: allowEdits,
       problem: config.problem,
       totalTokens: 0,
       approxCostUsd: 0,
