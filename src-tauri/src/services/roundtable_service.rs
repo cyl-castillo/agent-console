@@ -12,7 +12,8 @@
 //! own resumed session so it retains its private reasoning across turns.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -59,7 +60,7 @@ pub struct RoundtableConfig {
 }
 
 /// One message in the shared transcript — from an agent or the human.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     pub author_id: String,
@@ -151,11 +152,252 @@ struct RunControl {
     problem: String,
     /// The open project the agents may read (cwd, read-only).
     repo: PathBuf,
+    /// Shared disk store for crash-safe autosave of this room (see `autosave`).
+    rooms: Arc<RoomsStore>,
+}
+
+impl RunControl {
+    /// Snapshot the live room into its on-disk form. Each inner `Mutex` is held
+    /// only long enough to clone, so the caller can write to disk without holding
+    /// any of this room's locks (and never serializes while a turn is mutating).
+    fn snapshot(&self, id: &str) -> PersistedRoom {
+        let transcript = self.transcript.lock().unwrap().clone();
+        let resume = self.resume.lock().unwrap().clone();
+        let last_seen = self.last_seen.lock().unwrap().clone();
+        PersistedRoom {
+            version: ROOM_SCHEMA_VERSION,
+            id: id.to_string(),
+            problem: self.problem.clone(),
+            participants: self.participants.clone(),
+            transcript,
+            resume,
+            last_seen,
+            total_tokens: self.total_tokens.load(Ordering::SeqCst),
+            updated_at_ms: now_ms(),
+        }
+    }
+}
+
+/// Persist the room's current state to `rooms.json` (best-effort). Snapshots
+/// under the room's inner locks, releases them, then writes outside all of them.
+/// A failed write is logged, not propagated — a turn must not die because the
+/// disk hiccuped; the next `transcript.push` will try again.
+fn autosave(control: &RunControl, id: &str) {
+    let room = control.snapshot(id);
+    if let Err(e) = control.rooms.save_room(&room, &control.repo) {
+        eprintln!("roundtable: failed to persist room {id}: {e}");
+    }
+}
+
+/// Bump when the on-disk shape changes incompatibly so loaders can migrate.
+const ROOM_SCHEMA_VERSION: u32 = 1;
+/// Keep at most this many rooms per project; the oldest are pruned on write.
+const MAX_ROOMS_PER_PROJECT: usize = 50;
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// On-disk form of a room: everything needed to re-hydrate the sidebar entry and
+/// (Fase B) reconstruct a `RunControl`. `resume` holds the engines' opaque resume
+/// references, which are session handles, not secrets — safe to persist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedRoom {
+    pub version: u32,
+    pub id: String,
+    pub problem: String,
+    pub participants: Vec<Participant>,
+    pub transcript: Vec<Message>,
+    #[serde(default)]
+    pub resume: HashMap<String, String>,
+    #[serde(default)]
+    pub last_seen: HashMap<String, usize>,
+    #[serde(default)]
+    pub total_tokens: u64,
+    /// millis since epoch of the last write — drives sidebar ordering and retention.
+    pub updated_at_ms: u64,
+}
+
+/// Lightweight sidebar entry — everything the room list shows without paying to
+/// serialize every room's full transcript on each refresh. Full state is fetched
+/// per-room via [`RoomsStore::get`] only when one is opened.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomSummary {
+    pub id: String,
+    pub problem: String,
+    pub participant_names: Vec<String>,
+    pub message_count: usize,
+    /// Highest turn number reached in the transcript (0 if empty).
+    pub last_turn: u32,
+    pub total_tokens: u64,
+    pub updated_at_ms: u64,
+}
+
+impl RoomSummary {
+    fn of(room: &PersistedRoom) -> Self {
+        Self {
+            id: room.id.clone(),
+            problem: room.problem.clone(),
+            participant_names: room.participants.iter().map(|p| p.name.clone()).collect(),
+            message_count: room.transcript.len(),
+            last_turn: room.transcript.iter().map(|m| m.turn).max().unwrap_or(0),
+            total_tokens: room.total_tokens,
+            updated_at_ms: room.updated_at_ms,
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct RoomsFile {
+    #[serde(default)]
+    by_project: HashMap<String, Vec<PersistedRoom>>,
+}
+
+/// Crash-safe, per-project JSON store for rooms — the same atomic write + `.bak`
+/// recovery discipline as `SessionsService`. One instance is shared (via `Arc`)
+/// by the service and every live `RunControl`; its `lock` serializes disk writes
+/// across rooms autosaving concurrently.
+pub struct RoomsStore {
+    lock: Mutex<()>,
+}
+
+impl Default for RoomsStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RoomsStore {
+    pub fn new() -> Self {
+        Self { lock: Mutex::new(()) }
+    }
+
+    fn dir() -> AppResult<PathBuf> {
+        let dir = dirs::data_local_dir()
+            .ok_or_else(|| AppError::Other("no data_local dir".into()))?
+            .join("agent-console");
+        fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    fn path() -> AppResult<PathBuf> {
+        Ok(Self::dir()?.join("rooms.json"))
+    }
+
+    fn bak_path() -> AppResult<PathBuf> {
+        Ok(Self::dir()?.join("rooms.json.bak"))
+    }
+
+    fn tmp_path() -> AppResult<PathBuf> {
+        Ok(Self::dir()?.join("rooms.json.tmp"))
+    }
+
+    /// Load the rooms file. A missing/empty file is a legitimate empty state; a
+    /// read or parse failure on an EXISTING file is an error so a blind save can
+    /// never clobber unreadable history. On a parse failure we first try `.bak`.
+    fn load_file() -> AppResult<RoomsFile> {
+        let path = Self::path()?;
+        if !path.exists() {
+            return Ok(RoomsFile::default());
+        }
+        let txt = fs::read_to_string(&path)
+            .map_err(|e| AppError::Other(format!("read rooms.json: {e}")))?;
+        if txt.trim().is_empty() {
+            return Ok(RoomsFile::default());
+        }
+        match serde_json::from_str::<RoomsFile>(&txt) {
+            Ok(file) => Ok(file),
+            Err(e) => {
+                if let Ok(bak) = Self::bak_path() {
+                    if let Ok(btxt) = fs::read_to_string(&bak) {
+                        if let Ok(file) = serde_json::from_str::<RoomsFile>(&btxt) {
+                            return Ok(file);
+                        }
+                    }
+                }
+                Err(AppError::Other(format!("parse rooms.json: {e}")))
+            }
+        }
+    }
+
+    /// Write atomically: serialize to a temp file, back up the current good file,
+    /// then rename the temp over the target. A crash mid-write can only damage
+    /// the temp file, never the live rooms.json.
+    fn write_file(file: &RoomsFile) -> AppResult<()> {
+        let path = Self::path()?;
+        let json = serde_json::to_string_pretty(file)
+            .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
+        let tmp = Self::tmp_path()?;
+        fs::write(&tmp, json.as_bytes())?;
+        if path.exists() {
+            if let Ok(bak) = Self::bak_path() {
+                let _ = fs::copy(&path, &bak);
+            }
+        }
+        fs::rename(&tmp, &path)?;
+        Ok(())
+    }
+
+    /// Upsert one room under its project, prune to the most-recent
+    /// `MAX_ROOMS_PER_PROJECT`, and write atomically.
+    pub fn save_room(&self, room: &PersistedRoom, project_root: &Path) -> AppResult<()> {
+        let _g = self.lock.lock().unwrap();
+        let mut file = Self::load_file()?;
+        let key = project_root.display().to_string();
+        let list = file.by_project.entry(key).or_default();
+        match list.iter_mut().find(|r| r.id == room.id) {
+            Some(existing) => *existing = room.clone(),
+            None => list.push(room.clone()),
+        }
+        if list.len() > MAX_ROOMS_PER_PROJECT {
+            list.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+            list.truncate(MAX_ROOMS_PER_PROJECT);
+        }
+        Self::write_file(&file)
+    }
+
+    /// All persisted rooms for a project, most-recently-updated first.
+    fn load_sorted(project_root: &str) -> AppResult<Vec<PersistedRoom>> {
+        let file = Self::load_file()?;
+        let mut rooms = file.by_project.get(project_root).cloned().unwrap_or_default();
+        rooms.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+        Ok(rooms)
+    }
+
+    /// Lightweight summaries for the sidebar, most-recently-updated first.
+    pub fn summaries(&self, project_root: &str) -> AppResult<Vec<RoomSummary>> {
+        let _g = self.lock.lock().unwrap();
+        Ok(Self::load_sorted(project_root)?.iter().map(RoomSummary::of).collect())
+    }
+
+    /// The full persisted state of one room, for read-only re-hydration.
+    pub fn get(&self, project_root: &str, room_id: &str) -> AppResult<Option<PersistedRoom>> {
+        let _g = self.lock.lock().unwrap();
+        Ok(Self::load_sorted(project_root)?.into_iter().find(|r| r.id == room_id))
+    }
+
+    /// Drop one room from a project's history. Idempotent.
+    pub fn delete_room(&self, project_root: &str, room_id: &str) -> AppResult<()> {
+        let _g = self.lock.lock().unwrap();
+        let mut file = Self::load_file()?;
+        if let Some(list) = file.by_project.get_mut(project_root) {
+            list.retain(|r| r.id != room_id);
+            if list.is_empty() {
+                file.by_project.remove(project_root);
+            }
+        }
+        Self::write_file(&file)
+    }
 }
 
 pub struct RoundtableService {
     runs: Mutex<HashMap<String, Arc<RunControl>>>,
-    counter: AtomicU64,
+    rooms: Arc<RoomsStore>,
 }
 
 impl Default for RoundtableService {
@@ -168,8 +410,14 @@ impl RoundtableService {
     pub fn new() -> Self {
         Self {
             runs: Mutex::new(HashMap::new()),
-            counter: AtomicU64::new(0),
+            rooms: Arc::new(RoomsStore::new()),
         }
+    }
+
+    /// The shared rooms store, for the IPC commands that list/open/delete
+    /// persisted rooms (the live `runs` map only holds rooms from this session).
+    pub fn rooms(&self) -> Arc<RoomsStore> {
+        self.rooms.clone()
     }
 
     /// Validate, register the run, and spawn the driver. `repo` is the open
@@ -200,8 +448,15 @@ impl RoundtableService {
             }
         }
 
-        let n = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
-        let id = format!("rt-{}-{}", std::process::id(), n);
+        // Stable room id: a millis timestamp (survives restarts and sorts the
+        // sidebar chronologically) plus a uuid suffix for collision-freedom. The
+        // old `rt-{pid}-{n}` reset its counter on every launch and embedded a pid
+        // that does not survive a restart — unusable as a persisted identity.
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let id = format!("r-{}-{}", ts, &uuid::Uuid::new_v4().simple().to_string()[..8]);
 
         let control = Arc::new(RunControl {
             paused: AtomicBool::new(false),
@@ -217,6 +472,7 @@ impl RoundtableService {
             participants: config.participants,
             problem: config.problem,
             repo,
+            rooms: self.rooms.clone(),
         });
         self.runs.lock().unwrap().insert(id.clone(), control.clone());
 
@@ -300,6 +556,7 @@ impl RoundtableService {
             // so the UI's cumulative counter stays monotonic.
             0
         };
+        autosave(&control, id);
         emit_turn(app, id, &msg, true, total_tokens, 0.0);
         Ok(())
     }
@@ -446,6 +703,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         // must surface on our next turn. Our own message is excluded by the
         // author_id filter, so it never replays.
         control.last_seen.lock().unwrap().insert(participant.id.clone(), seen_to);
+        autosave(&control, &id);
         emit_turn(&app, &id, &msg, false, total_tokens, outcome.cost_usd);
 
         if control.token_budget > 0 && total_tokens >= control.token_budget {
@@ -589,4 +847,124 @@ fn is_safe_model(model: &str) -> bool {
         && model
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn participant(id: &str) -> Participant {
+        Participant {
+            id: id.into(),
+            name: format!("P-{id}"),
+            engine: Engine::default(),
+            model: "opus".into(),
+            role: String::new(),
+        }
+    }
+
+    fn message(author: &str, turn: u32) -> Message {
+        Message {
+            author_id: author.into(),
+            author_name: author.into(),
+            engine: Some(Engine::default()),
+            model: "opus".into(),
+            text: format!("msg from {author} on turn {turn}"),
+            turn,
+        }
+    }
+
+    fn room(id: &str, problem: &str, updated_at_ms: u64) -> PersistedRoom {
+        PersistedRoom {
+            version: ROOM_SCHEMA_VERSION,
+            id: id.into(),
+            problem: problem.into(),
+            participants: vec![participant("p1"), participant("p2")],
+            transcript: vec![message("p1", 1), message("human", 1)],
+            resume: HashMap::from([("p1".to_string(), "resume-token-p1".to_string())]),
+            last_seen: HashMap::from([("p1".to_string(), 2usize)]),
+            total_tokens: 4242,
+            updated_at_ms,
+        }
+    }
+
+    /// One test fn on purpose: it mutates the process-global `XDG_DATA_HOME`, so
+    /// it must not race a sibling test. Exercises the real load/save code in an
+    /// isolated data dir (dirs::data_local_dir respects XDG_DATA_HOME on Linux)
+    /// so the user's real rooms.json is never touched.
+    #[test]
+    fn rooms_persistence_is_crash_safe() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let base = std::env::temp_dir().join(format!("agent-console-rooms-test-{nanos}"));
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let store = RoomsStore::new();
+        let p1 = Path::new("/proj/one");
+
+        // Empty state: no file yet.
+        assert!(store.summaries("/proj/one").unwrap().is_empty());
+
+        // Round trip: save A, read the full room back with every field intact.
+        store.save_room(&room("a", "problem A", 100), p1).unwrap();
+        let full = store.get("/proj/one", "a").unwrap().expect("room a exists");
+        assert_eq!(full.id, "a");
+        assert_eq!(full.problem, "problem A");
+        assert_eq!(full.version, ROOM_SCHEMA_VERSION);
+        assert_eq!(full.transcript.len(), 2);
+        assert_eq!(full.transcript[0].text, "msg from p1 on turn 1");
+        assert_eq!(full.resume.get("p1").map(String::as_str), Some("resume-token-p1"));
+        assert_eq!(full.last_seen.get("p1"), Some(&2usize));
+        assert_eq!(full.total_tokens, 4242);
+        // Summary derives its fields from the room.
+        let sum = store.summaries("/proj/one").unwrap();
+        assert_eq!(sum.len(), 1);
+        assert_eq!(sum[0].id, "a");
+        assert_eq!(sum[0].problem, "problem A");
+        assert_eq!(sum[0].message_count, 2);
+        assert_eq!(sum[0].last_turn, 1);
+        assert_eq!(sum[0].participant_names, vec!["P-p1", "P-p2"]);
+
+        // Add B (distinct id), then upsert A in place — count stays 2, A updates.
+        store.save_room(&room("b", "problem B", 200), p1).unwrap();
+        store.save_room(&room("a", "problem A v2", 300), p1).unwrap();
+        let sum = store.summaries("/proj/one").unwrap();
+        assert_eq!(sum.len(), 2, "upsert must not duplicate an existing id");
+        // Sorted most-recently-updated first: A (300) before B (200).
+        assert_eq!(sum[0].id, "a");
+        assert_eq!(sum[0].problem, "problem A v2");
+        assert_eq!(sum[1].id, "b");
+        // A missing id resolves to None.
+        assert!(store.get("/proj/one", "nope").unwrap().is_none());
+
+        // Cross-project isolation: a different project is untouched.
+        let p2 = Path::new("/proj/two");
+        assert!(store.summaries("/proj/two").unwrap().is_empty());
+
+        // Retention: 51 rooms in p2 prune to the most-recent 50; the oldest drops.
+        for i in 0..=MAX_ROOMS_PER_PROJECT {
+            store
+                .save_room(&room(&format!("r{i}"), "x", i as u64), p2)
+                .unwrap();
+        }
+        let kept = store.summaries("/proj/two").unwrap();
+        assert_eq!(kept.len(), MAX_ROOMS_PER_PROJECT);
+        assert!(!kept.iter().any(|r| r.id == "r0"), "oldest room must be pruned");
+
+        // Delete: remove B from p1, then A — emptying p1 drops the project key.
+        store.delete_room("/proj/one", "b").unwrap();
+        assert_eq!(store.summaries("/proj/one").unwrap().len(), 1);
+        store.delete_room("/proj/one", "a").unwrap();
+        assert!(store.summaries("/proj/one").unwrap().is_empty());
+        store.delete_room("/proj/one", "a").unwrap(); // idempotent
+
+        // Crash safety: corrupting the live file falls back to the `.bak` (which
+        // holds the prior good full state — p2 still has its 50 rooms).
+        let main = base.join("agent-console").join("rooms.json");
+        fs::write(&main, b"{ this is not valid json ]").unwrap();
+        let recovered = store.summaries("/proj/two").unwrap();
+        assert_eq!(recovered.len(), MAX_ROOMS_PER_PROJECT, "must recover p2 from .bak");
+
+        let _ = fs::remove_dir_all(&base);
+    }
 }

@@ -1,8 +1,21 @@
 use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
-use crate::services::roundtable_service::RoundtableConfig;
+use crate::services::roundtable_service::{PersistedRoom, RoomSummary, RoundtableConfig};
 use crate::state::AppState;
+
+/// The open project's root, or an error if none is open. Persisted rooms are
+/// keyed by it, exactly as `roundtable_start` keys the live run.
+fn project_root(state: &State<'_, AppState>) -> AppResult<String> {
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .project
+        .as_ref()
+        .map(|p| p.root.display().to_string())
+        .ok_or_else(|| AppError::Other("no project open".into()))
+}
 
 #[tauri::command]
 pub fn roundtable_start(
@@ -59,4 +72,28 @@ pub fn roundtable_stop(state: State<'_, AppState>, id: String) -> AppResult<()> 
 #[tauri::command]
 pub fn roundtable_discard(state: State<'_, AppState>, id: String) -> AppResult<()> {
     state.roundtable.discard(&id)
+}
+
+/// Persisted rooms for the open project (lightweight, for the sidebar list).
+#[tauri::command]
+pub fn roundtable_list_rooms(state: State<'_, AppState>) -> AppResult<Vec<RoomSummary>> {
+    let root = project_root(&state)?;
+    state.roundtable.rooms().summaries(&root)
+}
+
+/// Full saved state of one room, for read-only re-hydration.
+#[tauri::command]
+pub fn roundtable_get_room(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<Option<PersistedRoom>> {
+    let root = project_root(&state)?;
+    state.roundtable.rooms().get(&root, &id)
+}
+
+/// Drop a saved room from this project's history. Idempotent.
+#[tauri::command]
+pub fn roundtable_delete_room(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let root = project_root(&state)?;
+    state.roundtable.rooms().delete_room(&root, &id)
 }
