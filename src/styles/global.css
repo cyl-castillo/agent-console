@@ -4610,6 +4610,21 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .rt-toggle-hint { font-size: 11px; color: var(--text-dim); }
 .rt-editing { color: var(--accent); }
 
+/* cowork bar: share/sync the room with human colleagues over the git remote.
+   Inline (no popover) to respect the clipped 240px sidebar. */
+.rt-cowork { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.rt-cowork-actions { display: flex; align-items: center; gap: 6px; }
+.rt-cowork-label {
+  font-size: 11px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rt-cowork .rt-banner { display: flex; align-items: center; gap: 6px; }
+.rt-cowork-dismiss {
+  margin-left: auto; background: transparent; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 14px; line-height: 1; padding: 0 2px;
+}
+.rt-cowork-dismiss:hover { color: var(--text); }
+
 /* winner / apply bar */
 .rt-winner {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

@@ -339,6 +339,8 @@ function RoomView() {
         )}
       </div>
 
+      {!readOnly && draft.allowEdits && <CoworkBar />}
+
       {message && (
         <div className={`rt-banner ${phase === "error" ? "rt-banner-error" : "rt-banner-info"}`}>
           {message}
@@ -347,6 +349,59 @@ function RoomView() {
 
       {readOnly ? <SavedRoomFooter /> : <HumanInput />}
     </section>
+  );
+}
+
+/// Cowork with human colleagues over the git remote — the inbound/outbound
+/// bridge. Inline (no popover) to respect the 240px sidebar clipping. Only shown
+/// for a live working room (it edits a room/… branch). "Share" pushes the branch
+/// + transcript and surfaces the MR/PR link; "Sync" pulls a colleague's commits
+/// into the worktree and reports any conflicts.
+function CoworkBar() {
+  const share = useRoundtableStore((s) => s.share);
+  const sync = useRoundtableStore((s) => s.sync);
+  const busy = useRoundtableStore((s) => s.coworkBusy);
+  const result = useRoundtableStore((s) => s.coworkResult);
+  const clear = useRoundtableStore((s) => s.clearCowork);
+
+  return (
+    <div className="rt-cowork">
+      <div className="rt-cowork-actions">
+        <span className="rt-cowork-label" title="Connect with colleagues working on the same problem, over your git remote">
+          cowork
+        </span>
+        <span className="spacer" />
+        <button
+          className="wb-cta wb-cta-sm"
+          onClick={() => void share()}
+          disabled={!!busy}
+          title="Push this room's branch (with its transcript) to the remote and get an MR/PR link"
+        >
+          {busy === "share" ? "Sharing…" : "Share / open MR ▸"}
+        </button>
+        <button
+          className="wb-cta wb-cta-sm"
+          onClick={() => void sync()}
+          disabled={!!busy}
+          title="Fetch a colleague's commits from the remote room branch and merge them into the worktree"
+        >
+          {busy === "sync" ? "Syncing…" : "⭳ Sync colleague work"}
+        </button>
+      </div>
+
+      {result && (
+        <div className={`rt-banner ${result.kind === "sync" && result.conflicts.length ? "rt-banner-error" : "rt-banner-info"}`}>
+          <span>{result.message}</span>
+          {result.kind === "share" && result.prUrl && (
+            <>
+              {" "}
+              <a href={result.prUrl} target="_blank" rel="noreferrer">Open MR/PR ↗</a>
+            </>
+          )}
+          <button className="rt-cowork-dismiss" onClick={clear} title="Dismiss">×</button>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -11,7 +11,7 @@ import type {
   InstalledPlugin, AvailableSnapshot, McpServer, McpAddInput,
   MemoryEntry, PermissionsSnapshot,
   PersistedRoom, PersistedSession, Project, RecentProject,
-  RoomSummary, RoundtableConfig,
+  RoomSummary, RoundtableConfig, ShareResult, SyncResult,
   SessionUsage, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
 } from "../types/domain";
@@ -145,6 +145,9 @@ export const ipc = {
     invoke<void>("roundtable_continue", { id, extra }),
   roundtableStop: (id: string) => invoke<void>("roundtable_stop", { id }),
   roundtableDiscard: (id: string) => invoke<void>("roundtable_discard", { id }),
+  roundtableShare: (id: string) =>
+    invoke<ShareResult>("roundtable_share", { id }),
+  roundtableSync: (id: string) => invoke<SyncResult>("roundtable_sync", { id }),
   roundtableListRooms: () => invoke<RoomSummary[]>("roundtable_list_rooms"),
   roundtableGetRoom: (id: string) =>
     invoke<PersistedRoom | null>("roundtable_get_room", { id }),
