@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 
 import { SessionList } from "./SessionList";
+import { RoomsList } from "./RoomsList";
 import { ChangesList } from "./ChangesList";
 import { FileTree } from "./FileTree";
 import { useSessionStore } from "../stores/sessionStore";
 import { useChangesStore } from "../stores/changesStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
+import { useRoundtableStore } from "../stores/roundtableStore";
 
-type SectionId = "sessions" | "changes" | "files";
+type SectionId = "sessions" | "rooms" | "changes" | "files";
 
 type CollapsedMap = Record<SectionId, boolean>;
-const DEFAULT_COLLAPSED: CollapsedMap = { sessions: false, changes: false, files: true };
+const DEFAULT_COLLAPSED: CollapsedMap = { sessions: false, rooms: false, changes: false, files: true };
 
 const KEY_PREFIX = "agent-console:sidebar-collapsed:";
 
@@ -31,13 +33,14 @@ function saveCollapsed(projectRoot: string | undefined, v: CollapsedMap) {
   try { localStorage.setItem(KEY_PREFIX + projectRoot, JSON.stringify(v)); } catch { /* ignore */ }
 }
 
-export function LeftSidebar() {
+export function LeftSidebar({ onOpenRoom }: { onOpenRoom: (id: string) => void }) {
   const tree = useSessionStore((s) => s.tree);
   const projectRoot = useSessionStore((s) => s.project?.root);
   const status = useChangesStore((s) => s.status);
   const changesCount = status?.changes.length ?? 0;
   const isRepo = status?.isRepo ?? false;
   const sessionsCount = useTerminalsStore((s) => s.sessions.length);
+  const roomsCount = useRoundtableStore((s) => s.rooms.length);
 
   const [collapsed, setCollapsed] = useState<CollapsedMap>(() => loadCollapsed(projectRoot));
 
@@ -69,6 +72,16 @@ export function LeftSidebar() {
         onToggle={toggle}
       >
         <SessionList />
+      </Section>
+
+      <Section
+        id="rooms"
+        title="Rooms"
+        badge={roomsCount > 0 ? roomsCount : undefined}
+        collapsed={collapsed.rooms}
+        onToggle={toggle}
+      >
+        <RoomsList onOpenRoom={onOpenRoom} />
       </Section>
 
       <Section

@@ -10,8 +10,8 @@ import type {
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, McpServer, McpAddInput,
   MemoryEntry, PermissionsSnapshot,
-  PersistedSession, Project, RecentProject,
-  RoundtableConfig,
+  PersistedRoom, PersistedSession, Project, RecentProject,
+  RoomSummary, RoundtableConfig,
   SessionUsage, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
 } from "../types/domain";
@@ -145,6 +145,11 @@ export const ipc = {
     invoke<void>("roundtable_continue", { id, extra }),
   roundtableStop: (id: string) => invoke<void>("roundtable_stop", { id }),
   roundtableDiscard: (id: string) => invoke<void>("roundtable_discard", { id }),
+  roundtableListRooms: () => invoke<RoomSummary[]>("roundtable_list_rooms"),
+  roundtableGetRoom: (id: string) =>
+    invoke<PersistedRoom | null>("roundtable_get_room", { id }),
+  roundtableDeleteRoom: (id: string) =>
+    invoke<void>("roundtable_delete_room", { id }),
 };
 
 export async function pickFolder(): Promise<string | null> {

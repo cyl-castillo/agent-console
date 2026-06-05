@@ -39,12 +39,21 @@ export function RoundtablePanel() {
 
 function RunControls() {
   const phase = useRoundtableStore((s) => s.phase);
+  const readOnly = useRoundtableStore((s) => s.readOnly);
   const pause = useRoundtableStore((s) => s.pause);
   const resume = useRoundtableStore((s) => s.resume);
   const stop = useRoundtableStore((s) => s.stop);
   const reset = useRoundtableStore((s) => s.reset);
 
   if (phase === "config") return null;
+
+  // Viewing a saved room: the only action is to close the viewer (keeps it on disk).
+  if (readOnly) {
+    return (
+      <button className="workbench-action" onClick={reset} title="Close (keeps the saved room)">×</button>
+    );
+  }
+
   const finished = phase === "done" || phase === "stopped" || phase === "error";
 
   return (
@@ -184,6 +193,8 @@ function RoomView() {
   const turns = useRoundtableStore((s) => s.turns);
   const activities = useRoundtableStore((s) => s.activities);
   const phase = useRoundtableStore((s) => s.phase);
+  const readOnly = useRoundtableStore((s) => s.readOnly);
+  const problem = useRoundtableStore((s) => s.problem);
   const turn = useRoundtableStore((s) => s.turn);
   const targetTurns = useRoundtableStore((s) => s.targetTurns);
   const totalTokens = useRoundtableStore((s) => s.totalTokens);
@@ -224,12 +235,14 @@ function RoomView() {
   return (
     <section className="rt-debate">
       <div className="rt-meta">
-        <span className={`rt-phase rt-phase-${phase}`}>{phase}</span>
+        <span className={`rt-phase rt-phase-${readOnly ? "done" : phase}`}>
+          {readOnly ? "saved · read-only" : phase}
+        </span>
         <span className="rt-meta-sep">·</span>
         <span>turn {turn}/{targetTurns || draft.maxTurns}</span>
         <span className="rt-meta-sep">·</span>
         <span>{formatTokens(totalTokens)} tok</span>
-        {draft.tokenBudget > 0 && (
+        {!readOnly && draft.tokenBudget > 0 && (
           <span className="rt-budget">
             <span
               className="rt-budget-fill"
@@ -247,7 +260,7 @@ function RoomView() {
         )}
       </div>
 
-      <div className="rt-topic-banner" title={draft.problem}>{draft.problem}</div>
+      <div className="rt-topic-banner" title={problem}>{problem}</div>
 
       <div className="rt-roster">
         {roster.map((p) => (

@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ipc } from "../ipc/tauri";
 import { profileFor } from "../agents/profiles";
 import type {
+  RoomSummary,
   RoundtableActivity,
   RoundtableConfig,
   RoundtableParticipant,
@@ -43,6 +44,15 @@ const DEFAULT_DRAFT: RtDraft = {
 interface RoundtableState {
   runId: string | null;
   phase: RtPhase;
+  /// True when viewing a saved room re-hydrated from disk: the feed is frozen,
+  /// no controls act on a live run, and reset/close never discards from disk.
+  readOnly: boolean;
+  /// The problem the displayed room is working on (live run or saved view).
+  /// Kept separate from `draft.problem` so opening a saved room never clobbers
+  /// an in-progress config draft.
+  problem: string;
+  /// Saved rooms for the open project, newest first — the sidebar list.
+  rooms: RoomSummary[];
   turn: number;
   /// The current turn target (grows with each Continue) — the "/N" in the meta.
   targetTurns: number;
@@ -80,6 +90,9 @@ interface RoundtableState {
   continueRoom: () => Promise<void>;
   stop: () => Promise<void>;
   reset: () => Promise<void>;
+  loadRooms: () => Promise<void>;
+  openRoom: (id: string) => Promise<void>;
+  deleteSavedRoom: (id: string) => Promise<void>;
 }
 
 let listenersBound = false;
@@ -91,6 +104,9 @@ let pidCounter = 2;
 export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   runId: null,
   phase: "config",
+  readOnly: false,
+  problem: "",
+  rooms: [],
   turn: 0,
   targetTurns: 0,
   totalTokens: 0,
@@ -213,6 +229,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       turns: [],
       activities: [],
       message: null,
+      readOnly: false,
+      problem: config.problem,
       totalTokens: 0,
       approxCostUsd: 0,
       turn: 0,
@@ -296,10 +314,12 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   },
 
   reset: async () => {
-    const id = get().runId;
-    if (id) {
+    const { runId, readOnly } = get();
+    // A saved room being viewed lives only on disk — closing it must NOT discard
+    // it. Only a live run's in-memory record is dropped via the backend.
+    if (runId && !readOnly) {
       try {
-        await ipc.roundtableDiscard(id);
+        await ipc.roundtableDiscard(runId);
       } catch {
         /* best effort */
       }
@@ -307,6 +327,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     set({
       runId: null,
       phase: "config",
+      readOnly: false,
+      problem: "",
       turn: 0,
       targetTurns: 0,
       totalTokens: 0,
@@ -319,6 +341,72 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       lastActivityAt: null,
       roster: [],
     });
+  },
+
+  /// Refresh the saved-room list for the open project. Best-effort: with no
+  /// project open (or a read error) the list is simply empty.
+  loadRooms: async () => {
+    try {
+      set({ rooms: await ipc.roundtableListRooms() });
+    } catch {
+      set({ rooms: [] });
+    }
+  },
+
+  /// Open a saved room read-only: fetch its full transcript and re-hydrate the
+  /// feed frozen. Never resumes the engines — the conversation is just replayed.
+  openRoom: async (id) => {
+    try {
+      const room = await ipc.roundtableGetRoom(id);
+      if (!room) {
+        await get().loadRooms();
+        return;
+      }
+      const turns: RoundtableTurn[] = room.transcript.map((m, i) => ({
+        id: `${room.id}-${i}`,
+        authorId: m.authorId,
+        authorName: m.authorName,
+        engine: m.engine,
+        model: m.model,
+        text: m.text,
+        turn: m.turn,
+        isHuman: m.authorId === "human",
+        totalTokens: 0,
+        costUsd: 0,
+      }));
+      const lastTurn = room.transcript.reduce((mx, m) => Math.max(mx, m.turn), 0);
+      set({
+        runId: room.id,
+        readOnly: true,
+        phase: "done",
+        problem: room.problem,
+        roster: room.participants,
+        turns,
+        activities: [],
+        turn: lastTurn,
+        targetTurns: lastTurn,
+        totalTokens: room.totalTokens,
+        approxCostUsd: 0,
+        message: null,
+        injectDraft: "",
+        liveStartedAt: null,
+        lastActivityAt: null,
+      });
+    } catch (err) {
+      set({ message: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  /// Delete a saved room from disk. If it's the one currently being viewed, drop
+  /// back to the config form.
+  deleteSavedRoom: async (id) => {
+    try {
+      await ipc.roundtableDeleteRoom(id);
+    } catch (err) {
+      set({ message: err instanceof Error ? err.message : String(err) });
+    }
+    if (get().runId === id && get().readOnly) await get().reset();
+    await get().loadRooms();
   },
 }));
 

@@ -10,6 +10,7 @@ import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { LeftSidebar } from "./components/LeftSidebar";
+import { useRoundtableStore } from "./stores/roundtableStore";
 import { Terminal } from "./components/Terminal";
 import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
@@ -88,6 +89,9 @@ export default function App() {
       try { localStorage.setItem(`agent-console:workbench-tab:${project.root}`, t); } catch { /* ignore */ }
     }
   };
+  const openRoom = useRoundtableStore((s) => s.openRoom);
+  // Open a saved room read-only and surface the room tab so it's visible.
+  const onOpenRoom = (id: string) => { void openRoom(id); setWorkbenchTab("roundtable"); };
   const initFeedback = useFeedbackStore((s) => s.init);
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
@@ -363,7 +367,7 @@ export default function App() {
           >Close</button>
         </div>
 
-        {leftOpen && <LeftSidebar />}
+        {leftOpen && <LeftSidebar onOpenRoom={onOpenRoom} />}
 
         <main className="panel center">
           <div className="tabs">

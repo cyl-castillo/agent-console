@@ -345,3 +345,42 @@ export interface RoundtableStatus {
   totalTokens: number;
   message: string | null;
 }
+
+// ----- Persisted rooms: a finished/in-progress room recoverable as history -----
+
+/// One stored message in a room's transcript (agent turn or human injection).
+export interface PersistedMessage {
+  authorId: string;
+  authorName: string;
+  /// null for the human.
+  engine: "claude" | "codex" | null;
+  model: string;
+  text: string;
+  turn: number;
+}
+
+/// Full saved state of a room — fetched only when one is opened, for read-only
+/// re-hydration of the panel. Never auto-resumes the underlying engines.
+export interface PersistedRoom {
+  version: number;
+  id: string;
+  problem: string;
+  participants: RoundtableParticipant[];
+  transcript: PersistedMessage[];
+  /// Per-participant opaque engine resume references (not used until Fase B).
+  resume: Record<string, string>;
+  lastSeen: Record<string, number>;
+  totalTokens: number;
+  updatedAtMs: number;
+}
+
+/// Lightweight sidebar entry for a saved room (no transcript).
+export interface RoomSummary {
+  id: string;
+  problem: string;
+  participantNames: string[];
+  messageCount: number;
+  lastTurn: number;
+  totalTokens: number;
+  updatedAtMs: number;
+}
