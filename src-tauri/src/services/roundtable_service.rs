@@ -484,6 +484,65 @@ impl RoundtableService {
         Ok(id)
     }
 
+    /// Rebuild a live run from a persisted room (Fase B) so a saved conversation
+    /// can be continued. Reuses the persisted id, so the rebuilt run autosaves
+    /// back over the SAME `rooms.json` entry rather than forking a copy. Lands in
+    /// the "awaiting" state with NO driver spawned (turn target == last turn):
+    /// the human then adds a message and/or hits continue, which raises the
+    /// target and starts the driver exactly as for a room that hit its turn
+    /// limit. Best-effort — each agent's persisted resume id may have expired, in
+    /// which case its next turn simply starts a fresh engine session.
+    ///
+    /// Idempotent within a session: if the id is already live (restored or never
+    /// closed) the existing run is kept untouched.
+    pub fn restore(&self, repo: PathBuf, room: PersistedRoom) -> AppResult<String> {
+        if !repo.is_dir() {
+            return Err(AppError::NotADirectory(repo.display().to_string()));
+        }
+        if room.participants.len() < 2 {
+            return Err(AppError::InvalidArgument(
+                "a room needs at least two participants".into(),
+            ));
+        }
+        for p in &room.participants {
+            if !is_safe_model(&p.model) {
+                return Err(AppError::InvalidArgument(format!(
+                    "invalid model value for {}",
+                    p.name
+                )));
+            }
+        }
+
+        let id = room.id.clone();
+        if self.runs.lock().unwrap().contains_key(&id) {
+            return Ok(id);
+        }
+
+        // Resume where the saved transcript left off; `continue_run` raises the
+        // target above this to actually run more turns.
+        let last_turn = room.transcript.iter().map(|m| m.turn).max().unwrap_or(0);
+        let control = Arc::new(RunControl {
+            paused: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
+            driving: AtomicBool::new(false),
+            turn_no: AtomicU32::new(last_turn),
+            target_turns: AtomicU32::new(last_turn),
+            total_tokens: AtomicU64::new(room.total_tokens),
+            // The turn budget isn't persisted; a continued room runs unbounded by
+            // tokens (the soft turn target still gates each round).
+            token_budget: 0,
+            transcript: Mutex::new(room.transcript),
+            resume: Mutex::new(room.resume),
+            last_seen: Mutex::new(room.last_seen),
+            participants: room.participants,
+            problem: room.problem,
+            repo,
+            rooms: self.rooms.clone(),
+        });
+        self.runs.lock().unwrap().insert(id.clone(), control);
+        Ok(id)
+    }
+
     /// Run `extra` more turns, continuing the same conversation (transcript and
     /// per-agent sessions intact). Used after the room reaches its turn target
     /// and the human wants it to keep going. Idempotent if a driver is already
@@ -966,5 +1025,34 @@ mod tests {
         assert_eq!(recovered.len(), MAX_ROOMS_PER_PROJECT, "must recover p2 from .bak");
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    /// Fase B: rebuilding a live run from a persisted room. Pure in-memory (no
+    /// disk, no env), so it's independent of the persistence test above.
+    #[test]
+    fn restore_rebuilds_a_live_run() {
+        let svc = RoundtableService::new();
+        let repo = std::env::temp_dir(); // a real, existing directory
+
+        // Happy path: keeps the room's own id so it continues the same history.
+        let r = room("r-keep-id", "continue me", 1);
+        assert_eq!(svc.restore(repo.clone(), r.clone()).unwrap(), "r-keep-id");
+        // Idempotent: re-restoring a live id returns it, leaving the run intact.
+        assert_eq!(svc.restore(repo.clone(), r).unwrap(), "r-keep-id");
+
+        // Rejects a repo that isn't a directory.
+        assert!(svc
+            .restore(repo.join("nope-xyz-123"), room("r-a", "p", 1))
+            .is_err());
+
+        // Rejects fewer than two participants.
+        let mut solo = room("r-b", "p", 1);
+        solo.participants.truncate(1);
+        assert!(svc.restore(repo.clone(), solo).is_err());
+
+        // Rejects a shell-unsafe model value (defense in depth before a PTY).
+        let mut bad = room("r-c", "p", 1);
+        bad.participants[0].model = "opus; rm -rf /".into();
+        assert!(svc.restore(repo, bad).is_err());
     }
 }

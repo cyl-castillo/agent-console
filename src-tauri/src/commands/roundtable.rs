@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
@@ -96,4 +98,17 @@ pub fn roundtable_get_room(
 pub fn roundtable_delete_room(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let root = project_root(&state)?;
     state.roundtable.rooms().delete_room(&root, &id)
+}
+
+/// Rebuild a live run from a saved room so it can be continued (Fase B). Returns
+/// the (unchanged) room id, now registered as a live run in the "awaiting" state.
+#[tauri::command]
+pub fn roundtable_resume_room(state: State<'_, AppState>, id: String) -> AppResult<String> {
+    let root = project_root(&state)?;
+    let room: PersistedRoom = state
+        .roundtable
+        .rooms()
+        .get(&root, &id)?
+        .ok_or_else(|| AppError::NotFound(format!("saved room {id}")))?;
+    state.roundtable.restore(PathBuf::from(&root), room)
 }

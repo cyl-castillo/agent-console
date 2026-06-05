@@ -93,6 +93,7 @@ interface RoundtableState {
   loadRooms: () => Promise<void>;
   openRoom: (id: string) => Promise<void>;
   deleteSavedRoom: (id: string) => Promise<void>;
+  resumeRoom: () => Promise<void>;
 }
 
 let listenersBound = false;
@@ -407,6 +408,29 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     }
     if (get().runId === id && get().readOnly) await get().reset();
     await get().loadRooms();
+  },
+
+  /// Continue a saved room (Fase B): rebuild it as a live run on the backend and
+  /// leave the panel in the "awaiting" state — the human adds a message and/or
+  /// hits Continue to run more turns. The conversation, roster and token total
+  /// already loaded by openRoom are kept; only the read-only lock is lifted.
+  resumeRoom: async () => {
+    const id = get().runId;
+    if (!id || !get().readOnly) return;
+    try {
+      await get().initListeners();
+      await ipc.roundtableResumeRoom(id);
+      set({
+        readOnly: false,
+        phase: "awaiting",
+        message:
+          "Resumed from disk. Each agent's prior session may have expired — if so it starts fresh on its next turn.",
+        liveStartedAt: null,
+        lastActivityAt: null,
+      });
+    } catch (err) {
+      set({ readOnly: true, message: err instanceof Error ? err.message : String(err) });
+    }
   },
 }));
 

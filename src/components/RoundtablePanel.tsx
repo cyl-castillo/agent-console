@@ -307,8 +307,23 @@ function RoomView() {
         </div>
       )}
 
-      <HumanInput />
+      {readOnly ? <SavedRoomFooter /> : <HumanInput />}
     </section>
+  );
+}
+
+/// Footer for a saved room being viewed read-only: a single affordance to bring
+/// it back to life. Resuming flips the panel into the live "awaiting" state.
+function SavedRoomFooter() {
+  const resumeRoom = useRoundtableStore((s) => s.resumeRoom);
+  return (
+    <div className="rt-moderator">
+      <span className="rt-readonly-note">Saved room · read-only. Reading the engines' prior sessions isn't guaranteed.</span>
+      <span className="spacer" />
+      <button className="wb-cta wb-cta-sm rt-continue" onClick={() => void resumeRoom()}>
+        Continue conversation ▸
+      </button>
+    </div>
   );
 }
 

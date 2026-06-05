@@ -4601,6 +4601,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .rt-moderator input:focus { outline: none; border-color: var(--accent); }
 .rt-continue { white-space: nowrap; }
+.rt-readonly-note { align-self: center; font-size: 11px; color: var(--text-dim); }
 
 /* winner / apply bar */
 .rt-winner {

@@ -150,6 +150,8 @@ export const ipc = {
     invoke<PersistedRoom | null>("roundtable_get_room", { id }),
   roundtableDeleteRoom: (id: string) =>
     invoke<void>("roundtable_delete_room", { id }),
+  roundtableResumeRoom: (id: string) =>
+    invoke<string>("roundtable_resume_room", { id }),
 };
 
 export async function pickFolder(): Promise<string | null> {
