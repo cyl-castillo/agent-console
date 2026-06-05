@@ -23,6 +23,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::error::{AppError, AppResult};
 use crate::services::engine_runner::{self, Engine, RunCtx, ToolPolicy};
+use crate::services::proc;
 
 /// One conversation participant. Either an AI agent or, for the special id
 /// `"human"`, the user.
@@ -57,6 +58,12 @@ pub struct RoundtableConfig {
     pub max_turns: u32,
     /// Cumulative token ceiling across all agents. 0 = no limit.
     pub token_budget: u64,
+    /// "Working room": agents may edit the code in an isolated worktree
+    /// (`ToolPolicy::AcceptEdits`), each turn auto-committed on a `room/<id>`
+    /// branch the human reviews and merges. Off (default) = conversation-only,
+    /// read-only. Defaulted so existing/persisted configs still deserialize.
+    #[serde(default)]
+    pub allow_edits: bool,
 }
 
 /// One message in the shared transcript — from an agent or the human.
@@ -150,8 +157,22 @@ struct RunControl {
     last_seen: Mutex<HashMap<String, usize>>,
     participants: Vec<Participant>,
     problem: String,
-    /// The open project the agents may read (cwd, read-only).
+    /// The open project root. Agents read it (conversation rooms) and it's the
+    /// base a working room's worktree branches off.
     repo: PathBuf,
+    /// Where each turn actually runs: `repo` for a conversation room, the
+    /// isolated worktree for a working room.
+    workspace: PathBuf,
+    /// Permission level for every turn — `ReadOnly` or (working room) `AcceptEdits`.
+    /// Never `Full`.
+    tools: ToolPolicy,
+    /// `Some` for a working room: the checkout the agents edit. Torn down on
+    /// discard (the `branch` keeps the commits).
+    worktree: Option<PathBuf>,
+    /// `Some` for a working room: the `room/<id>` branch the turns commit onto,
+    /// for the human to review and merge. Consumed by the review/merge UI (W2).
+    #[allow(dead_code)]
+    branch: Option<String>,
     /// Shared disk store for crash-safe autosave of this room (see `autosave`).
     rooms: Arc<RoomsStore>,
 }
@@ -458,6 +479,19 @@ impl RoundtableService {
             .unwrap_or(0);
         let id = format!("r-{}-{}", ts, &uuid::Uuid::new_v4().simple().to_string()[..8]);
 
+        // Working room: stand up an isolated worktree branched off HEAD so agents
+        // edit there with `AcceptEdits` (never the user's real checkout), each
+        // turn committed onto `room/<id>` for the human to review and merge. A
+        // conversation room runs read-only in the project root itself.
+        let (workspace, worktree, branch, tools) = if config.allow_edits {
+            let branch = format!("room/{id}");
+            let wt = room_worktree_path(&id);
+            add_room_worktree(&repo, &wt, &branch)?;
+            (wt.clone(), Some(wt), Some(branch), ToolPolicy::AcceptEdits)
+        } else {
+            (repo.clone(), None, None, ToolPolicy::ReadOnly)
+        };
+
         let control = Arc::new(RunControl {
             paused: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
@@ -472,6 +506,10 @@ impl RoundtableService {
             participants: config.participants,
             problem: config.problem,
             repo,
+            workspace,
+            tools,
+            worktree,
+            branch,
             rooms: self.rooms.clone(),
         });
         self.runs.lock().unwrap().insert(id.clone(), control.clone());
@@ -536,6 +574,13 @@ impl RoundtableService {
             last_seen: Mutex::new(room.last_seen),
             participants: room.participants,
             problem: room.problem,
+            // A resumed room comes back conversation-only/read-only for now;
+            // reattaching a working room's worktree is a later phase (the
+            // `room/<id>` branch with its commits still lives in the repo).
+            workspace: repo.clone(),
+            tools: ToolPolicy::ReadOnly,
+            worktree: None,
+            branch: None,
             repo,
             rooms: self.rooms.clone(),
         });
@@ -629,10 +674,16 @@ impl RoundtableService {
         Ok(())
     }
 
-    /// Drop a finished room. Idempotent.
+    /// Drop a finished room. Idempotent. A working room's worktree CHECKOUT is
+    /// torn down here (no orphaned dirs left in temp), but its `room/<id>` branch
+    /// — and so every per-turn commit — stays in the repo for the human to merge
+    /// or delete later.
     pub fn discard(&self, id: &str) -> AppResult<()> {
         if let Some(c) = self.runs.lock().unwrap().remove(id) {
             c.stopped.store(true, Ordering::SeqCst);
+            if let Some(wt) = &c.worktree {
+                remove_room_worktree(&c.repo, wt);
+            }
         }
         Ok(())
     }
@@ -706,9 +757,12 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         };
 
         let target = control.target_turns.load(Ordering::SeqCst);
-        let prompt = build_room_prompt(&control.problem, &participant, &control.participants, &delta, turn, target);
+        let prompt = build_room_prompt(&control.problem, &participant, &control.participants, &delta, turn, target, control.worktree.is_some());
 
-        let cwd = control.repo.clone();
+        // Working room runs the turn in the isolated worktree with edits allowed;
+        // a conversation room runs read-only in the project root.
+        let cwd = control.workspace.clone();
+        let tools = control.tools;
         let model = participant.model.clone();
         let engine = participant.engine;
         let resume_id = control.resume.lock().unwrap().get(&participant.id).cloned();
@@ -722,7 +776,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             let ctx = RunCtx {
                 cwd: &cwd,
                 model: &model,
-                tools: ToolPolicy::ReadOnly,
+                tools,
                 prompt: &prompt,
                 resume: resume_id.as_deref(),
             };
@@ -763,6 +817,14 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         // author_id filter, so it never replays.
         control.last_seen.lock().unwrap().insert(participant.id.clone(), seen_to);
         autosave(&control, &id);
+        // Working room: checkpoint whatever this turn edited as one commit on the
+        // room branch, so the diff is inspectable per turn and the work survives
+        // even if the worktree dir is later cleared. Best-effort — a turn that
+        // touched nothing simply leaves no commit, and a git hiccup never kills
+        // the conversation.
+        if let Some(wt) = &control.worktree {
+            commit_worktree(wt, &format!("room {id} · t{turn} {}", participant.name));
+        }
         emit_turn(&app, &id, &msg, false, total_tokens, outcome.cost_usd);
 
         if control.token_budget > 0 && total_tokens >= control.token_budget {
@@ -846,6 +908,7 @@ fn build_room_prompt(
     delta: &[Message],
     turn: u32,
     max_turns: u32,
+    can_edit: bool,
 ) -> String {
     let role = if me.role.trim().is_empty() {
         String::new()
@@ -871,8 +934,26 @@ fn build_room_prompt(
         format!("New since you last spoke (your colleagues and the human):\n\"\"\"\n{body}\n\"\"\"")
     };
 
+    // Two modes: a read-only discussion, or a working room where edits are the
+    // deliverable. In the working room the agents share an isolated worktree
+    // (changes land on a branch the human reviews before merging), so the prompt
+    // tells them to actually implement — otherwise, even with edit permission,
+    // they default to merely discussing.
+    let mandate = if can_edit {
+        "one of several collaborators ({others}) plus a human, working together to solve a real problem **by editing the code**. You're in an isolated worktree: your file changes are committed to a separate branch and reviewed by the human before anything merges — so make concrete edits, don't just describe them."
+    } else {
+        "one of several collaborators ({others}) plus a human, working together in a shared conversation to solve a real problem. You may READ the open project to ground your reasoning, but you cannot edit files — this is a discussion, not an implementation task."
+    }
+    .replace("{others}", &others);
+
+    let edit_bullet = if can_edit {
+        "\n- Actually make the edits in the files — implement your part directly; the next collaborator builds on your committed changes. Keep each turn's change focused and coherent."
+    } else {
+        ""
+    };
+
     format!(
-        r#"You are **{name}** ({model}), one of several collaborators ({others}) plus a human, working together in a shared conversation to solve a real problem. You may READ the open project to ground your reasoning, but you cannot edit files — this is a discussion, not an implementation task.
+        r#"You are **{name}** ({model}), {mandate}
 {role}
 The problem:
 """
@@ -884,19 +965,20 @@ This is turn {turn} of {max_turns}.
 {convo}
 
 How to contribute:
-- Build on what others said. Add what's missing, sharpen what's vague, and say clearly when you disagree and why — but aim to converge on the best answer together, not to win.
+- Build on what others said. Add what's missing, sharpen what's vague, and say clearly when you disagree and why — but aim to converge on the best answer together, not to win.{edit_bullet}
 - Treat the human's messages as high-priority steering.
 - Ground claims in the actual code where relevant: read files before asserting how things work.
 - Be concise and substantive. One strong contribution per turn beats a wall of text.
 - If you believe the room has reached a good answer, say so and summarize it rather than manufacturing more discussion."#,
         name = me.name,
         model = me.model,
-        others = others,
+        mandate = mandate,
         role = role,
         problem = problem.trim(),
         turn = turn,
         max_turns = max_turns,
         convo = convo,
+        edit_bullet = edit_bullet,
     )
 }
 
@@ -906,6 +988,68 @@ fn is_safe_model(model: &str) -> bool {
         && model
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+// ----- Working-room worktrees (collaborative: one shared, isolated checkout) -----
+
+/// Where a working room's isolated checkout lives. The commits land on the
+/// `room/<id>` branch (in the repo's object store), so the work survives even if
+/// this temp dir is cleared.
+fn room_worktree_path(id: &str) -> PathBuf {
+    std::env::temp_dir().join("agent-console-rooms").join(id)
+}
+
+/// Create the working room's worktree on a fresh `room/<id>` branch off HEAD.
+/// Fails if the repo has no commits (a worktree must branch off something).
+fn add_room_worktree(repo: &Path, path: &Path, branch: &str) -> AppResult<()> {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let out = proc::command("git")
+        .args(["worktree", "add", "-b", branch, &path.to_string_lossy(), "HEAD"])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).to_string();
+        return Err(AppError::Other(format!(
+            "git worktree add (a working room needs a repo with at least one commit): {}",
+            msg.trim()
+        )));
+    }
+    Ok(())
+}
+
+/// Tear down a working room's checkout. Keeps the `room/<id>` branch (and its
+/// commits) — only the temp checkout is removed.
+fn remove_room_worktree(repo: &Path, path: &Path) {
+    let _ = proc::command("git")
+        .args(["worktree", "remove", "--force", &path.to_string_lossy()])
+        .current_dir(repo)
+        .output();
+    let _ = proc::command("git")
+        .args(["worktree", "prune"])
+        .current_dir(repo)
+        .output();
+}
+
+/// Checkpoint whatever the latest turn edited as one commit on the room branch.
+/// Best-effort and no-op when the turn changed nothing (no empty commits). Uses
+/// the user's own git identity (inherited from the repo/global config).
+fn commit_worktree(wt: &Path, message: &str) {
+    let _ = proc::command("git").args(["add", "-A"]).current_dir(wt).output();
+    // `git diff --cached --quiet` exits non-zero exactly when something is staged.
+    let staged = proc::command("git")
+        .args(["diff", "--cached", "--quiet"])
+        .current_dir(wt)
+        .output();
+    let has_changes = matches!(staged, Ok(o) if !o.status.success());
+    if !has_changes {
+        return;
+    }
+    let _ = proc::command("git")
+        .args(["commit", "--no-verify", "-m", message])
+        .current_dir(wt)
+        .output();
 }
 
 #[cfg(test)]
@@ -1054,5 +1198,52 @@ mod tests {
         let mut bad = room("r-c", "p", 1);
         bad.participants[0].model = "opus; rm -rf /".into();
         assert!(svc.restore(repo, bad).is_err());
+    }
+
+    /// W1: the working-room worktree mechanic against a real throwaway git repo —
+    /// create off HEAD, checkpoint an edit per turn, no-op turns add nothing, and
+    /// teardown keeps the branch. Hermetic (temp dir + temp repo, no env, no net).
+    #[test]
+    fn working_room_worktree_lifecycle() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let repo = std::env::temp_dir().join(format!("ac-wt-test-{nanos}"));
+        fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str], cwd: &Path| {
+            proc::command("git").args(args).current_dir(cwd).output().unwrap()
+        };
+        // Minimal repo with one commit — a worktree must branch off something.
+        git(&["init", "-q"], &repo);
+        git(&["config", "user.email", "t@t"], &repo);
+        git(&["config", "user.name", "T"], &repo);
+        fs::write(repo.join("seed.txt"), "seed").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+
+        let count = |branch: &str| -> usize {
+            let out = git(&["rev-list", "--count", branch], &repo);
+            String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
+        };
+
+        // Create the working-room worktree on a fresh branch off HEAD.
+        let wt = room_worktree_path(&format!("wt-{nanos}"));
+        add_room_worktree(&repo, &wt, "room/wt-test").unwrap();
+        assert!(wt.join("seed.txt").exists(), "worktree checks out HEAD");
+        assert_eq!(count("room/wt-test"), 1);
+
+        // An edited turn is checkpointed as exactly one commit.
+        fs::write(wt.join("agent.txt"), "edit").unwrap();
+        commit_worktree(&wt, "t1");
+        assert_eq!(count("room/wt-test"), 2, "an edited turn adds one commit");
+
+        // A turn that changed nothing leaves no empty commit.
+        commit_worktree(&wt, "t2-noop");
+        assert_eq!(count("room/wt-test"), 2, "a no-op turn adds no commit");
+
+        // Teardown removes the checkout but keeps the branch and its commits.
+        remove_room_worktree(&repo, &wt);
+        assert!(!wt.exists(), "checkout dir removed on teardown");
+        assert_eq!(count("room/wt-test"), 2, "branch + commits survive teardown");
+
+        let _ = fs::remove_dir_all(&repo);
     }
 }

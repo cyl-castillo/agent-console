@@ -4445,7 +4445,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .plugins-warn { color: #fbbf24; }
 .plugins-muted { color: var(--text-faint); }
 
-/* ===== Roundtable: two agents debate, each in its own worktree ===== */
+/* ===== Agent Room: N agents + the human share one conversation ===== */
 
 .workbench .rt-field { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
 .rt-field > span { font-size: 11px; color: var(--text-dim); text-transform: lowercase; }
@@ -4602,6 +4602,13 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .rt-moderator input:focus { outline: none; border-color: var(--accent); }
 .rt-continue { white-space: nowrap; }
 .rt-readonly-note { align-self: center; font-size: 11px; color: var(--text-dim); }
+
+.rt-toggle { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; cursor: pointer; }
+.rt-toggle input { margin-top: 2px; }
+.rt-toggle-text { display: flex; flex-direction: column; gap: 2px; }
+.rt-toggle-title { font-size: 12px; }
+.rt-toggle-hint { font-size: 11px; color: var(--text-dim); }
+.rt-editing { color: var(--accent); }
 
 /* winner / apply bar */
 .rt-winner {

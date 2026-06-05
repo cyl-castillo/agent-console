@@ -29,6 +29,8 @@ export interface RtDraft {
   participants: RtParticipantDraft[];
   maxTurns: number;
   tokenBudget: number;
+  /// Working room: let agents edit the code in an isolated worktree.
+  allowEdits: boolean;
 }
 
 const DEFAULT_DRAFT: RtDraft = {
@@ -39,6 +41,7 @@ const DEFAULT_DRAFT: RtDraft = {
   ],
   maxTurns: 6,
   tokenBudget: 400_000,
+  allowEdits: false,
 };
 
 interface RoundtableState {
@@ -225,6 +228,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       participants,
       maxTurns: Math.max(1, Math.min(60, d.maxTurns)),
       tokenBudget: Math.max(0, d.tokenBudget),
+      allowEdits: d.allowEdits,
     };
     set({
       turns: [],

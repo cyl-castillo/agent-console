@@ -305,6 +305,10 @@ export interface RoundtableConfig {
   maxTurns: number;
   /// Cumulative token ceiling across all agents. 0 = unlimited.
   tokenBudget: number;
+  /// Working room: agents may edit the code in an isolated worktree
+  /// (AcceptEdits), each turn auto-committed on a room/<id> branch for the human
+  /// to review and merge. Off = conversation-only, read-only.
+  allowEdits: boolean;
 }
 
 /// One message (agent turn or human injection), emitted over `roundtable://turn`.

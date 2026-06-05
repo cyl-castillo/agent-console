@@ -129,6 +129,22 @@ function ConfigForm() {
         </label>
       </div>
 
+      <label className="rt-toggle">
+        <input
+          type="checkbox"
+          checked={draft.allowEdits}
+          onChange={(e) => setDraft({ allowEdits: e.target.checked })}
+        />
+        <span className="rt-toggle-text">
+          <span className="rt-toggle-title">Let agents edit the code</span>
+          <span className="rt-toggle-hint">
+            {draft.allowEdits
+              ? "On — they work in an isolated worktree on a room/… branch; you review and merge. Your files stay untouched."
+              : "Off — conversation only, read-only."}
+          </span>
+        </span>
+      </label>
+
       {message && <p className="wb-hint" style={{ color: "#ff8585" }}>{message}</p>}
 
       <button className="wb-cta" onClick={start} disabled={!draft.problem.trim()}>
@@ -238,6 +254,14 @@ function RoomView() {
         <span className={`rt-phase rt-phase-${readOnly ? "done" : phase}`}>
           {readOnly ? "saved · read-only" : phase}
         </span>
+        {!readOnly && draft.allowEdits && (
+          <>
+            <span className="rt-meta-sep">·</span>
+            <span className="rt-editing" title="Agents edit in an isolated worktree on a room/… branch; review & merge when done">
+              ✎ editing
+            </span>
+          </>
+        )}
         <span className="rt-meta-sep">·</span>
         <span>turn {turn}/{targetTurns || draft.maxTurns}</span>
         <span className="rt-meta-sep">·</span>
