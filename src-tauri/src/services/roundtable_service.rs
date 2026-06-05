@@ -1456,7 +1456,18 @@ fn push_room_branch(repo: &Path, branch: &str) -> AppResult<ShareResult> {
         .output()?;
     if !push.status.success() {
         let err = String::from_utf8_lossy(&push.stderr);
-        return Err(AppError::Other(format!("git push failed: {}", err.trim())));
+        let err = err.trim();
+        // The common round-trip snag: a colleague pushed to `room/<id>` after our
+        // last sync, so this push is non-fast-forward. Point the human at Sync
+        // (which pulls their commits in cleanly) instead of a raw git error.
+        if err.contains("non-fast-forward") || err.contains("fetch first") || err.contains("rejected") {
+            return Err(AppError::Other(format!(
+                "push rejected — a colleague has pushed to {branch} since your last \
+                 sync. Click Sync to bring their work in, then Share again. \
+                 (git said: {err})"
+            )));
+        }
+        return Err(AppError::Other(format!("git push failed: {err}")));
     }
 
     let url = proc::command("git")
