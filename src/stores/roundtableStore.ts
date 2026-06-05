@@ -40,7 +40,10 @@ const DEFAULT_DRAFT: RtDraft = {
     { id: "p2", name: "Codex", engine: "codex", model: "medium", role: "" },
   ],
   maxTurns: 6,
-  tokenBudget: 400_000,
+  // A soft checkpoint, not a wall — when reached the room pauses and you can
+  // continue (the backend grants another window). Opus rooms burn through tokens
+  // fast, so start generous; cache reads are excluded from the count.
+  tokenBudget: 1_000_000,
   allowEdits: false,
 };
 

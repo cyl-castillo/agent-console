@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useRoundtableStore, modelsFor, type RtParticipantDraft } from "../stores/roundtableStore";
+import { useChangesStore } from "../stores/changesStore";
 import { AGENT_PROFILES } from "../agents/profiles";
 import { MarkdownText } from "./MarkdownText";
 import type { RoundtableActivity, RoundtableTurn } from "../types/domain";
@@ -79,6 +80,16 @@ function ConfigForm() {
   const start = useRoundtableStore((s) => s.start);
   const message = useRoundtableStore((s) => s.message);
 
+  // Agents can only edit inside a git worktree, so "let them edit" needs a repo.
+  // Reflect that up front: when the open folder isn't a git repo, disable the
+  // toggle instead of letting the room start and silently fall back to read-only.
+  const isRepo = useChangesStore((s) => s.status?.isRepo);
+  const refreshGit = useChangesStore((s) => s.refresh);
+  useEffect(() => {
+    if (isRepo === undefined) void refreshGit();
+  }, [isRepo, refreshGit]);
+  const noRepo = isRepo === false;
+
   return (
     <section className="wb-section">
       <p className="wb-hint">
@@ -129,16 +140,19 @@ function ConfigForm() {
         </label>
       </div>
 
-      <label className="rt-toggle">
+      <label className="rt-toggle" style={noRepo ? { opacity: 0.6 } : undefined}>
         <input
           type="checkbox"
-          checked={draft.allowEdits}
+          checked={draft.allowEdits && !noRepo}
+          disabled={noRepo}
           onChange={(e) => setDraft({ allowEdits: e.target.checked })}
         />
         <span className="rt-toggle-text">
           <span className="rt-toggle-title">Let agents edit the code</span>
           <span className="rt-toggle-hint">
-            {draft.allowEdits
+            {noRepo
+              ? "Unavailable — the open folder isn't a git repo. Editing needs a repo with at least one commit; conversation still works."
+              : draft.allowEdits
               ? "On — they work in an isolated worktree on a room/… branch; you review and merge. Your files stay untouched."
               : "Off — conversation only, read-only."}
           </span>

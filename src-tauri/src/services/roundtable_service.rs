@@ -145,8 +145,10 @@ struct RunControl {
     target_turns: AtomicU32,
     /// Cumulative tokens across the whole conversation (persists across continues).
     total_tokens: AtomicU64,
-    /// 0 = no limit. A hard end (status "done"), unlike the soft turn target.
-    token_budget: u64,
+    /// Cumulative token ceiling; 0 = no limit. A soft checkpoint, not a wall: when
+    /// reached the room pauses (status "awaiting") and `continue_run` raises it, so
+    /// the human can keep going. Atomic so continue can bump it at runtime.
+    token_budget: AtomicU64,
     /// The single shared conversation. The driver (agent turns) and `inject`
     /// (human turns) both append here.
     transcript: Mutex<Vec<Message>>,
@@ -175,6 +177,10 @@ struct RunControl {
     branch: Option<String>,
     /// Shared disk store for crash-safe autosave of this room (see `autosave`).
     rooms: Arc<RoomsStore>,
+    /// One-time room banner emitted when the driver starts — e.g. editing was
+    /// downgraded to read-only because the project isn't a git repo. `None` for
+    /// the normal case.
+    notice: Option<String>,
 }
 
 impl RunControl {
@@ -483,11 +489,24 @@ impl RoundtableService {
         // edit there with `AcceptEdits` (never the user's real checkout), each
         // turn committed onto `room/<id>` for the human to review and merge. A
         // conversation room runs read-only in the project root itself.
+        let mut notice: Option<String> = None;
         let (workspace, worktree, branch, tools) = if config.allow_edits {
             let branch = format!("room/{id}");
             let wt = room_worktree_path(&id);
-            add_room_worktree(&repo, &wt, &branch)?;
-            (wt.clone(), Some(wt), Some(branch), ToolPolicy::AcceptEdits)
+            match add_room_worktree(&repo, &wt, &branch) {
+                Ok(()) => (wt.clone(), Some(wt), Some(branch), ToolPolicy::AcceptEdits),
+                // No usable git repo (or no commits) — don't kill the room. Degrade
+                // to a read-only conversation so a non-git workspace (someone using
+                // the app only for Jira/GitLab/MCP) still works; the human just
+                // can't have agents edit without a repo to branch and review against.
+                Err(_) => {
+                    notice = Some(
+                        "Editing needs a git repo with at least one commit — running read-only."
+                            .into(),
+                    );
+                    (repo.clone(), None, None, ToolPolicy::ReadOnly)
+                }
+            }
         } else {
             (repo.clone(), None, None, ToolPolicy::ReadOnly)
         };
@@ -499,7 +518,7 @@ impl RoundtableService {
             turn_no: AtomicU32::new(0),
             target_turns: AtomicU32::new(config.max_turns),
             total_tokens: AtomicU64::new(0),
-            token_budget: config.token_budget,
+            token_budget: AtomicU64::new(config.token_budget),
             transcript: Mutex::new(Vec::new()),
             resume: Mutex::new(HashMap::new()),
             last_seen: Mutex::new(HashMap::new()),
@@ -511,6 +530,7 @@ impl RoundtableService {
             worktree,
             branch,
             rooms: self.rooms.clone(),
+            notice,
         });
         self.runs.lock().unwrap().insert(id.clone(), control.clone());
 
@@ -568,7 +588,7 @@ impl RoundtableService {
             total_tokens: AtomicU64::new(room.total_tokens),
             // The turn budget isn't persisted; a continued room runs unbounded by
             // tokens (the soft turn target still gates each round).
-            token_budget: 0,
+            token_budget: AtomicU64::new(0),
             transcript: Mutex::new(room.transcript),
             resume: Mutex::new(room.resume),
             last_seen: Mutex::new(room.last_seen),
@@ -583,6 +603,7 @@ impl RoundtableService {
             branch: None,
             repo,
             rooms: self.rooms.clone(),
+            notice: None,
         });
         self.runs.lock().unwrap().insert(id.clone(), control);
         Ok(id)
@@ -605,6 +626,15 @@ impl RoundtableService {
         let base = control.turn_no.load(Ordering::SeqCst);
         let new_target = (base + extra).max(control.target_turns.load(Ordering::SeqCst));
         control.target_turns.store(new_target, Ordering::SeqCst);
+        // If we're continuing past a token-budget checkpoint, grant another full
+        // window so the very next turn doesn't immediately re-trip it. Each
+        // continue adds one budget's worth of headroom — the safety rail stays, it
+        // never silently goes unlimited.
+        let budget = control.token_budget.load(Ordering::SeqCst);
+        let total = control.total_tokens.load(Ordering::SeqCst);
+        if budget > 0 && total >= budget {
+            control.token_budget.store(total.saturating_add(budget), Ordering::SeqCst);
+        }
         control.paused.store(false, Ordering::SeqCst);
         // Spawn a fresh driver only if none is running. The CAS makes that race
         // free: whoever flips driving false->true owns the new loop.
@@ -707,7 +737,9 @@ enum DriveEnd {
     /// Reached the turn target — the conversation pauses for the human, who can
     /// continue it. The run stays alive.
     Awaiting,
-    /// Token budget hit — a hard end.
+    /// Token budget hit — a soft checkpoint (pauses for the human, like the turn
+    /// target), not a hard end. The run stays alive and `continue_run` raises the
+    /// budget.
     DoneBudget,
     /// Human stopped it.
     Stopped,
@@ -721,7 +753,10 @@ enum DriveEnd {
 async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
     let n = control.participants.len();
     let mut total_tokens = control.total_tokens.load(Ordering::SeqCst);
-    emit_status(&app, &id, "running", control.turn_no.load(Ordering::SeqCst), total_tokens, None);
+    // Carry the one-time room notice (e.g. "running read-only") on the first status
+    // so it surfaces as the feed banner; later running emits pass None and the
+    // frontend keeps the last message.
+    emit_status(&app, &id, "running", control.turn_no.load(Ordering::SeqCst), total_tokens, control.notice.clone());
 
     let end = loop {
         let turn = control.turn_no.load(Ordering::SeqCst) + 1;
@@ -827,7 +862,8 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         }
         emit_turn(&app, &id, &msg, false, total_tokens, outcome.cost_usd);
 
-        if control.token_budget > 0 && total_tokens >= control.token_budget {
+        let budget = control.token_budget.load(Ordering::SeqCst);
+        if budget > 0 && total_tokens >= budget {
             break DriveEnd::DoneBudget;
         }
     };
@@ -846,7 +882,24 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             }
         }
         DriveEnd::DoneBudget => {
-            emit_status(&app, &id, "done", turn, total_tokens, Some("token budget reached".into()))
+            // A checkpoint, not a wall: land in "awaiting" (same as the turn limit)
+            // so the human can add a message and/or continue — `continue_run` then
+            // grants another budget window. Guard against painting over a continue
+            // that already re-acquired the driver in the release window.
+            if !control.driving.load(Ordering::SeqCst) {
+                let budget = control.token_budget.load(Ordering::SeqCst);
+                emit_status(
+                    &app,
+                    &id,
+                    "awaiting",
+                    turn,
+                    total_tokens,
+                    Some(format!(
+                        "hit the token budget (~{}k tokens) — add a message or continue",
+                        budget / 1000
+                    )),
+                );
+            }
         }
         DriveEnd::Stopped => emit_status(&app, &id, "stopped", turn, total_tokens, None),
         // Error status already emitted inside the loop.
@@ -1245,5 +1298,23 @@ mod tests {
         assert_eq!(count("room/wt-test"), 2, "branch + commits survive teardown");
 
         let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn worktree_creation_fails_without_a_git_repo() {
+        // A plain folder (no git, or a repo with no commits) can't host a worktree.
+        // `start` catches exactly this Err and degrades the room to read-only
+        // instead of failing — so opening a non-git workspace (Jira/GitLab/MCP
+        // only) still works, just without agent editing.
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let plain = std::env::temp_dir().join(format!("ac-norepo-test-{nanos}"));
+        fs::create_dir_all(&plain).unwrap();
+
+        let wt = room_worktree_path(&format!("norepo-{nanos}"));
+        let res = add_room_worktree(&plain, &wt, "room/norepo-test");
+        assert!(res.is_err(), "a non-git folder cannot host a working-room worktree");
+        assert!(!wt.exists(), "no stray checkout left behind on failure");
+
+        let _ = fs::remove_dir_all(&plain);
     }
 }
