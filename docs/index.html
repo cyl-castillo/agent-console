@@ -472,9 +472,14 @@
 
   <section>
     <div class="container">
-      <h2>What's in v0.1</h2>
+      <h2>What you get</h2>
       <ul class="features">
         <li>Open any local repo <span class="dim">— folder picker, recents list</span></li>
+        <li>Multi-agent rooms <span class="dim">— you + several AIs work one problem together</span></li>
+        <li>Roundtable <span class="dim">— two agents debate in twin worktrees; apply the winner's diff</span></li>
+        <li>Worktree-per-agent <span class="dim">— opt-in isolated worktree, auto-commit per turn</span></li>
+        <li>MCP servers <span class="dim">— manage and connect MCP tools from the workbench</span></li>
+        <li>Multiple engines <span class="dim">— Claude or Codex, per session</span></li>
         <li>Integrated PTY terminal <span class="dim">— colors, vim, htop</span></li>
         <li>Git diff viewer <span class="dim">— badges, revert per file, revert all</span></li>
         <li>Chat via <code>claude -p</code> <span class="dim">— stream-json bidirectional IO</span></li>
@@ -610,7 +615,7 @@ agent-console</pre>
     <div class="container">
       <h2>Why not VS Code?</h2>
       <p style="font-size: 15px; color: var(--text);">
-        Because VS Code is a great place to <em>read and write code</em>, not to <em>direct an agent</em>. Agent Console isn't a replacement — it's a parallel console. Keep your editor open in the next window; switch when you want to read deep. Use Agent Console for: <em>"fix this bug", "refactor this module", "run my tests and tell me what failed", "scaffold a new endpoint and make sure it lints"</em>.
+        Because VS Code is a great place to <em>read and write code</em>, not to <em>direct an agent</em>. Agent Console isn't a replacement — it's a parallel console. Keep your editor open in the next window; switch when you want to read deep. Use Agent Console for: <em>"fix this bug", "refactor this module", "run my tests and tell me what failed", "scaffold a new endpoint and make sure it lints"</em> — or put two agents on the same problem and keep the one whose diff you trust.
       </p>
     </div>
   </section>
@@ -619,8 +624,8 @@ agent-console</pre>
     <div class="container">
       <h2>Roadmap</h2>
       <ul class="features" style="grid-template-columns: 1fr;">
-        <li><strong>Near</strong> <span class="dim">— multi-terminal tabs, decision history, file viewer on tree click, watchdog on cost runaway</span></li>
-        <li><strong>Maybe</strong> <span class="dim">— multi-agent panes, worktree-per-agent, MCP server UI, GitHub issue/PR integration</span></li>
+        <li><strong>Near</strong> <span class="dim">— multi-terminal tabs, decision history, watchdog on cost runaway</span></li>
+        <li><strong>Maybe</strong> <span class="dim">— GitHub issue/PR integration</span></li>
         <li><strong>Never</strong> <span class="dim">— code editing UI, marketplace, cloud sync of conversations</span></li>
       </ul>
     </div>
