@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::roundtable_service::{
-    PersistedRoom, RoomSummary, RoundtableConfig, ShareResult,
+    PersistedRoom, RoomSummary, RoundtableConfig, ShareResult, SyncResult,
 };
 use crate::state::AppState;
 
@@ -83,6 +83,14 @@ pub fn roundtable_discard(state: State<'_, AppState>, id: String) -> AppResult<(
 #[tauri::command]
 pub fn roundtable_share(state: State<'_, AppState>, id: String) -> AppResult<ShareResult> {
     state.roundtable.share(&id)
+}
+
+/// Sync a colleague's commits into a live working room: fetch its `room/<id>`
+/// branch from the remote and merge them into the worktree so the next turn
+/// builds on top. The inbound mirror of `roundtable_share`.
+#[tauri::command]
+pub fn roundtable_sync(state: State<'_, AppState>, id: String) -> AppResult<SyncResult> {
+    state.roundtable.sync(&id)
 }
 
 /// Persisted rooms for the open project (lightweight, for the sidebar list).

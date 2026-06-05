@@ -296,6 +296,27 @@ pub struct ShareResult {
     pub message: String,
 }
 
+/// Outcome of syncing a colleague's commits *into* a live working room — the
+/// return path of cowork (the mirror of `ShareResult`). The merge is the
+/// contract; `conflicts` is non-empty exactly when the merge was aborted and
+/// needs human resolution.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResult {
+    /// The room branch that was synced (e.g. "room/r-…").
+    pub branch: String,
+    /// The remote it was fetched from (e.g. "origin").
+    pub remote: String,
+    /// How many of the colleague's commits were merged in (0 if already up to
+    /// date or if the merge was aborted on conflict).
+    pub merged_commits: usize,
+    /// Files that conflicted. Empty on a clean sync; non-empty means the merge
+    /// was aborted and the human must resolve these by hand.
+    pub conflicts: Vec<String>,
+    /// Human-readable summary the feed shows after a sync.
+    pub message: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct RoomsFile {
     #[serde(default)]
@@ -761,6 +782,36 @@ impl RoundtableService {
         push_room_branch(&control.repo, &branch)
     }
 
+    /// Pull a colleague's commits from the remote `room/<id>` branch into this
+    /// room's live worktree — the inbound half of cowork. Where `share` hands the
+    /// room out for review, `sync` brings reviewed/extended work back so the next
+    /// turn builds on top of it. Safe to call between turns; refuses on a dirty
+    /// worktree and aborts cleanly on conflict (see `pull_room_branch`).
+    pub fn sync(&self, id: &str) -> AppResult<SyncResult> {
+        let control = self
+            .runs
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
+        let branch = control.branch.clone().ok_or_else(|| {
+            AppError::Other(
+                "this is a conversation room (read-only) — only a working room \
+                 has a branch to sync"
+                    .into(),
+            )
+        })?;
+        let worktree = control.worktree.clone().ok_or_else(|| {
+            AppError::Other(
+                "this room has no live worktree to sync into (it may have been \
+                 closed) — reopen it as a working room first"
+                    .into(),
+            )
+        })?;
+        pull_room_branch(&control.repo, &worktree, &branch)
+    }
+
     fn with_run(&self, id: &str, f: impl FnOnce(&RunControl)) -> AppResult<()> {
         let control = self
             .runs
@@ -1150,17 +1201,15 @@ fn commit_worktree(wt: &Path, message: &str) {
 
 // ----- Sharing a working room with human collaborators (push + MR/PR link) -----
 
-/// Detect the team's remote, push the branch with upstream tracking, and derive
-/// a "create MR/PR" URL from the remote host. Best-effort URL — the push is what
-/// matters; an unrecognized host just yields `pr_url: None`.
-fn push_room_branch(repo: &Path, branch: &str) -> AppResult<ShareResult> {
-    // Pick a remote: prefer "origin" (the convention), else the first configured.
+/// Pick the team's remote: prefer "origin" (the convention), else the first
+/// configured. Shared by push (outbound) and sync (inbound).
+fn pick_remote(repo: &Path) -> AppResult<String> {
     let listed = proc::command("git")
         .args(["remote"])
         .current_dir(repo)
         .output()?;
     let listed = String::from_utf8_lossy(&listed.stdout);
-    let remote = listed
+    listed
         .lines()
         .map(str::trim)
         .find(|r| *r == "origin")
@@ -1172,7 +1221,143 @@ fn push_room_branch(repo: &Path, branch: &str) -> AppResult<ShareResult> {
                  so colleagues can fetch this room's branch"
                     .into(),
             )
-        })?;
+        })
+}
+
+/// Bring a colleague's commits *into* the live working room: fetch the remote
+/// `room/<id>` branch and merge it into the worktree the agents are editing. This
+/// is the return path of cowork — `share` pushes the room out, `sync` pulls a
+/// colleague's work back in so the next turn builds on top of it.
+///
+/// Safety: the agent loop auto-commits the worktree every turn, so it must NEVER
+/// run on a conflicted tree. On a merge conflict we abort cleanly and report the
+/// conflicting files for the human to resolve by hand — we never leave the shared
+/// checkout half-merged.
+fn pull_room_branch(repo: &Path, worktree: &Path, branch: &str) -> AppResult<SyncResult> {
+    let remote = pick_remote(repo)?;
+
+    // The worktree may hold uncommitted edits from a turn that's mid-flight (or
+    // that changed nothing and so wasn't committed). Merging onto a dirty tree is
+    // unsafe, so refuse rather than risk clobbering in-progress work.
+    let dirty = proc::command("git")
+        .args(["status", "--porcelain"])
+        .current_dir(worktree)
+        .output()?;
+    if !String::from_utf8_lossy(&dirty.stdout).trim().is_empty() {
+        return Err(AppError::Other(
+            "the room's worktree has uncommitted changes — let the current turn \
+             finish (it auto-commits), then sync again"
+                .into(),
+        ));
+    }
+
+    let fetch = proc::command("git")
+        .args(["fetch", &remote, branch])
+        .current_dir(worktree)
+        .output()?;
+    if !fetch.status.success() {
+        let err = String::from_utf8_lossy(&fetch.stderr);
+        // A branch that was never pushed isn't an error worth alarming about.
+        if err.contains("couldn't find remote ref") {
+            return Ok(SyncResult {
+                branch: branch.to_string(),
+                remote,
+                merged_commits: 0,
+                conflicts: Vec::new(),
+                message: format!(
+                    "Nothing to sync: {branch} isn't on the remote yet (share it first)."
+                ),
+            });
+        }
+        return Err(AppError::Other(format!("git fetch failed: {}", err.trim())));
+    }
+
+    // How many commits the colleague has that we don't (purely informational).
+    let behind = proc::command("git")
+        .args(["rev-list", "--count", "HEAD..FETCH_HEAD"])
+        .current_dir(worktree)
+        .output()?;
+    let behind: usize = String::from_utf8_lossy(&behind.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    if behind == 0 {
+        return Ok(SyncResult {
+            branch: branch.to_string(),
+            remote,
+            merged_commits: 0,
+            conflicts: Vec::new(),
+            message: format!("Already up to date with {remote}/{branch}."),
+        });
+    }
+
+    let merge = proc::command("git")
+        .args([
+            "merge",
+            "--no-edit",
+            "-m",
+            &format!("room sync: merge colleague work from {remote}/{branch}"),
+            "FETCH_HEAD",
+        ])
+        .current_dir(worktree)
+        .output()?;
+    if merge.status.success() {
+        return Ok(SyncResult {
+            branch: branch.to_string(),
+            remote,
+            merged_commits: behind,
+            conflicts: Vec::new(),
+            message: format!(
+                "Brought in {behind} commit(s) from {remote}/{branch}. The next turn builds on top."
+            ),
+        });
+    }
+
+    // Conflict (or other merge failure): capture the conflicting paths, then abort
+    // so the shared worktree returns to a clean, agent-safe state.
+    let conflicts: Vec<String> = proc::command("git")
+        .args(["diff", "--name-only", "--diff-filter=U"])
+        .current_dir(worktree)
+        .output()
+        .ok()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let _ = proc::command("git")
+        .args(["merge", "--abort"])
+        .current_dir(worktree)
+        .output();
+
+    if conflicts.is_empty() {
+        let err = String::from_utf8_lossy(&merge.stderr);
+        return Err(AppError::Other(format!("git merge failed: {}", err.trim())));
+    }
+    let list = conflicts.join(", ");
+    Ok(SyncResult {
+        branch: branch.to_string(),
+        remote,
+        merged_commits: 0,
+        conflicts,
+        message: format!(
+            "Colleague work on {branch} conflicts with this room in: {list}. \
+             Merge was aborted (worktree left clean). Resolve by hand: \
+             `git -C {wt} merge {remote}/{branch}`.",
+            wt = worktree.display()
+        ),
+    })
+}
+
+/// Detect the team's remote, push the branch with upstream tracking, and derive
+/// a "create MR/PR" URL from the remote host. Best-effort URL — the push is what
+/// matters; an unrecognized host just yields `pr_url: None`.
+fn push_room_branch(repo: &Path, branch: &str) -> AppResult<ShareResult> {
+    let remote = pick_remote(repo)?;
 
     let push = proc::command("git")
         .args(["push", "-u", &remote, branch])
@@ -1454,6 +1639,88 @@ mod tests {
         assert_eq!(count("room/wt-test"), 2, "branch + commits survive teardown");
 
         let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// The inbound half of cowork: a colleague's commits on the remote `room/…`
+    /// branch are fetched and merged into the live worktree, and a conflicting
+    /// change is reported and aborted cleanly (never left half-merged, because the
+    /// agent loop auto-commits the worktree). Hermetic: bare remote + temp clones.
+    #[test]
+    fn room_sync_pulls_colleague_commits_and_aborts_on_conflict() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let git = |args: &[&str], cwd: &Path| {
+            proc::command("git").args(args).current_dir(cwd).output().unwrap()
+        };
+        let tmp = std::env::temp_dir();
+
+        // A bare repo standing in for the team's shared remote.
+        let remote = tmp.join(format!("ac-sync-remote-{nanos}"));
+        fs::create_dir_all(&remote).unwrap();
+        git(&["init", "-q", "--bare"], &remote);
+        let remote_url = remote.to_string_lossy().to_string();
+
+        // The room's repo, with one seed commit and `origin` pointing at the remote.
+        let repo = tmp.join(format!("ac-sync-repo-{nanos}"));
+        fs::create_dir_all(&repo).unwrap();
+        git(&["init", "-q"], &repo);
+        git(&["config", "user.email", "t@t"], &repo);
+        git(&["config", "user.name", "T"], &repo);
+        fs::write(repo.join("seed.txt"), "seed\n").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+        git(&["remote", "add", "origin", &remote_url], &repo);
+
+        // The room's live worktree on a fresh branch, pushed to the remote.
+        let branch = "room/sync-test";
+        let wt = room_worktree_path(&format!("sync-{nanos}"));
+        add_room_worktree(&repo, &wt, branch).unwrap();
+        git(&["push", "-q", "-u", "origin", branch], &repo);
+
+        // A colleague clones, adds a non-conflicting file, and pushes.
+        let colab = tmp.join(format!("ac-sync-colab-{nanos}"));
+        git(&["clone", "-q", &remote_url, &colab.to_string_lossy()], &tmp);
+        git(&["config", "user.email", "c@c"], &colab);
+        git(&["config", "user.name", "C"], &colab);
+        git(&["checkout", "-q", branch], &colab);
+        fs::write(colab.join("colab.txt"), "from colleague\n").unwrap();
+        git(&["add", "-A"], &colab);
+        git(&["commit", "-qm", "colleague feature"], &colab);
+        git(&["push", "-q", "origin", branch], &colab);
+
+        // Sync brings the colleague's commit into the live worktree.
+        let res = pull_room_branch(&repo, &wt, branch).unwrap();
+        assert_eq!(res.merged_commits, 1, "one colleague commit merged in");
+        assert!(res.conflicts.is_empty(), "clean merge has no conflicts");
+        assert!(wt.join("colab.txt").exists(), "colleague's file landed in the worktree");
+
+        // A second sync with nothing new is a clean no-op.
+        let again = pull_room_branch(&repo, &wt, branch).unwrap();
+        assert_eq!(again.merged_commits, 0, "already up to date");
+
+        // Now both sides edit the same file → conflict. Room turn edits seed.txt…
+        fs::write(wt.join("seed.txt"), "room version\n").unwrap();
+        commit_worktree(&wt, "room turn edits seed");
+        // …colleague edits the same line and pushes.
+        fs::write(colab.join("seed.txt"), "colleague version\n").unwrap();
+        git(&["add", "-A"], &colab);
+        git(&["commit", "-qm", "colleague edits seed"], &colab);
+        git(&["push", "-q", "origin", branch], &colab);
+
+        let conflict = pull_room_branch(&repo, &wt, branch).unwrap();
+        assert_eq!(conflict.merged_commits, 0, "conflicting merge brings nothing in");
+        assert_eq!(conflict.conflicts, vec!["seed.txt".to_string()], "reports the conflicting file");
+        // The merge was aborted: the worktree is clean and keeps the room's version.
+        let status = git(&["status", "--porcelain"], &wt);
+        assert!(
+            String::from_utf8_lossy(&status.stdout).trim().is_empty(),
+            "worktree is clean after abort (safe for the next auto-committing turn)"
+        );
+        assert_eq!(fs::read_to_string(wt.join("seed.txt")).unwrap(), "room version\n");
+
+        remove_room_worktree(&repo, &wt);
+        let _ = fs::remove_dir_all(&repo);
+        let _ = fs::remove_dir_all(&remote);
+        let _ = fs::remove_dir_all(&colab);
     }
 
     #[test]

@@ -100,6 +100,7 @@ pub fn run() {
             commands::roundtable::roundtable_stop,
             commands::roundtable::roundtable_discard,
             commands::roundtable::roundtable_share,
+            commands::roundtable::roundtable_sync,
             commands::roundtable::roundtable_list_rooms,
             commands::roundtable::roundtable_get_room,
             commands::roundtable::roundtable_delete_room,
