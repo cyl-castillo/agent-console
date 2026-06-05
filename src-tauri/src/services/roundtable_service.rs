@@ -279,6 +279,23 @@ impl RoomSummary {
     }
 }
 
+/// Outcome of sharing a working room's branch with collaborators. The push is
+/// the contract; `pr_url` is a best-effort convenience for the recognized hosts.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareResult {
+    /// The pushed branch (e.g. "room/r-…").
+    pub branch: String,
+    /// The remote it was pushed to (e.g. "origin").
+    pub remote: String,
+    /// A ready-to-open URL where a colleague opens the MR/PR for this branch,
+    /// derived from the remote host (GitHub / GitLab). `None` for an unrecognized
+    /// host — the branch is still pushed and reviewable, just open the MR by hand.
+    pub pr_url: Option<String>,
+    /// Human-readable summary the feed shows after a share.
+    pub message: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct RoomsFile {
     #[serde(default)]
@@ -718,6 +735,32 @@ impl RoundtableService {
         Ok(())
     }
 
+    /// Push a working room's `room/<id>` branch to the shared remote so human
+    /// colleagues can review it and open an MR/PR — turning the room's per-turn
+    /// commits into reviewable work in the platform the team already uses. This
+    /// is the simplest cowork bridge: no realtime infra, just the branch the
+    /// room is already producing, made visible to everyone on the remote.
+    pub fn share(&self, id: &str) -> AppResult<ShareResult> {
+        let control = self
+            .runs
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
+        let branch = control.branch.clone().ok_or_else(|| {
+            AppError::Other(
+                "this is a conversation room (read-only) — only a working room \
+                 produces a branch to share"
+                    .into(),
+            )
+        })?;
+        // Push the latest turns first so the remote branch isn't stale, then push
+        // the branch itself. The worktree is where commits land; the branch ref
+        // lives in the shared repo object store, so pushing from `repo` works.
+        push_room_branch(&control.repo, &branch)
+    }
+
     fn with_run(&self, id: &str, f: impl FnOnce(&RunControl)) -> AppResult<()> {
         let control = self
             .runs
@@ -1105,6 +1148,98 @@ fn commit_worktree(wt: &Path, message: &str) {
         .output();
 }
 
+// ----- Sharing a working room with human collaborators (push + MR/PR link) -----
+
+/// Detect the team's remote, push the branch with upstream tracking, and derive
+/// a "create MR/PR" URL from the remote host. Best-effort URL — the push is what
+/// matters; an unrecognized host just yields `pr_url: None`.
+fn push_room_branch(repo: &Path, branch: &str) -> AppResult<ShareResult> {
+    // Pick a remote: prefer "origin" (the convention), else the first configured.
+    let listed = proc::command("git")
+        .args(["remote"])
+        .current_dir(repo)
+        .output()?;
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    let remote = listed
+        .lines()
+        .map(str::trim)
+        .find(|r| *r == "origin")
+        .or_else(|| listed.lines().map(str::trim).find(|r| !r.is_empty()))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            AppError::Other(
+                "no git remote configured — add one (git remote add origin <url>) \
+                 so colleagues can fetch this room's branch"
+                    .into(),
+            )
+        })?;
+
+    let push = proc::command("git")
+        .args(["push", "-u", &remote, branch])
+        .current_dir(repo)
+        .output()?;
+    if !push.status.success() {
+        let err = String::from_utf8_lossy(&push.stderr);
+        return Err(AppError::Other(format!("git push failed: {}", err.trim())));
+    }
+
+    let url = proc::command("git")
+        .args(["remote", "get-url", &remote])
+        .current_dir(repo)
+        .output()?;
+    let url = String::from_utf8_lossy(&url.stdout).trim().to_string();
+    let pr_url = pr_url_for(&url, branch);
+
+    let message = match &pr_url {
+        Some(u) => format!("Pushed {branch} → {remote}. Open the MR/PR: {u}"),
+        None => format!(
+            "Pushed {branch} → {remote}. Open an MR/PR from it in your git host."
+        ),
+    };
+    Ok(ShareResult {
+        branch: branch.to_string(),
+        remote,
+        pr_url,
+        message,
+    })
+}
+
+/// Turn a remote URL into a "create MR/PR for this branch" web URL for the hosts
+/// we recognize (GitHub, GitLab). `None` for anything else.
+fn pr_url_for(remote_url: &str, branch: &str) -> Option<String> {
+    let (host, path) = parse_remote(remote_url)?;
+    let path = path.trim_end_matches('/').trim_end_matches(".git");
+    if host.contains("github") {
+        Some(format!("https://{host}/{path}/compare/{branch}?expand=1"))
+    } else if host.contains("gitlab") {
+        Some(format!(
+            "https://{host}/{path}/-/merge_requests/new?merge_request%5Bsource_branch%5D={branch}"
+        ))
+    } else {
+        None
+    }
+}
+
+/// Split a git remote URL into (host, "owner/repo"). Supports scp-like SSH
+/// (`git@host:owner/repo.git`), `ssh://`, and `http(s)://`, stripping any
+/// `user@` and the trailing `.git` so it round-trips into a web URL.
+fn parse_remote(url: &str) -> Option<(String, String)> {
+    let url = url.trim();
+    if let Some(rest) = url.strip_prefix("git@") {
+        let (host, path) = rest.split_once(':')?;
+        return Some((host.to_string(), path.to_string()));
+    }
+    for scheme in ["https://", "http://", "ssh://"] {
+        if let Some(rest) = url.strip_prefix(scheme) {
+            // Drop a leading user@ (ssh URLs) before the host.
+            let rest = rest.split_once('@').map(|(_, r)| r).unwrap_or(rest);
+            let (host, path) = rest.split_once('/')?;
+            return Some((host.to_string(), path.to_string()));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1129,6 +1264,27 @@ mod tests {
             text: format!("msg from {author} on turn {turn}"),
             turn,
         }
+    }
+
+    #[test]
+    fn pr_url_for_github_and_gitlab_ssh_and_https() {
+        let b = "room/r-123";
+        // GitHub, both URL forms.
+        assert_eq!(
+            pr_url_for("git@github.com:acme/widgets.git", b).as_deref(),
+            Some("https://github.com/acme/widgets/compare/room/r-123?expand=1")
+        );
+        assert_eq!(
+            pr_url_for("https://github.com/acme/widgets", b).as_deref(),
+            Some("https://github.com/acme/widgets/compare/room/r-123?expand=1")
+        );
+        // GitLab (incl. self-hosted host containing "gitlab").
+        assert_eq!(
+            pr_url_for("git@gitlab.example.com:team/app.git", b).as_deref(),
+            Some("https://gitlab.example.com/team/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=room/r-123")
+        );
+        // Unrecognized host → no link, but the branch is still pushed.
+        assert_eq!(pr_url_for("git@bitbucket.org:x/y.git", b), None);
     }
 
     fn room(id: &str, problem: &str, updated_at_ms: u64) -> PersistedRoom {
