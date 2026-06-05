@@ -1926,6 +1926,74 @@ mod tests {
         let _ = fs::remove_dir_all(&colab);
     }
 
+    /// The outbound half of cowork: `share` pushes the room branch to the remote
+    /// the colleague reviews, and — the t5 round-trip guard — when a colleague has
+    /// advanced the branch first, the rejected push points the human at Sync rather
+    /// than leaking a raw git error. Hermetic: bare remote + temp clone.
+    #[test]
+    fn room_share_pushes_branch_and_guides_on_nonfastforward() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let git = |args: &[&str], cwd: &Path| {
+            proc::command("git").args(args).current_dir(cwd).output().unwrap()
+        };
+        let tmp = std::env::temp_dir();
+
+        // A bare repo standing in for the team's shared remote.
+        let remote = tmp.join(format!("ac-share-remote-{nanos}"));
+        fs::create_dir_all(&remote).unwrap();
+        git(&["init", "-q", "--bare"], &remote);
+        let remote_url = remote.to_string_lossy().to_string();
+
+        // The room's repo with one seed commit and `origin` set.
+        let repo = tmp.join(format!("ac-share-repo-{nanos}"));
+        fs::create_dir_all(&repo).unwrap();
+        git(&["init", "-q"], &repo);
+        git(&["config", "user.email", "t@t"], &repo);
+        git(&["config", "user.name", "T"], &repo);
+        fs::write(repo.join("seed.txt"), "seed\n").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+        git(&["remote", "add", "origin", &remote_url], &repo);
+
+        // The room's live worktree on a fresh branch.
+        let branch = "room/share-test";
+        let wt = room_worktree_path(&format!("share-{nanos}"));
+        add_room_worktree(&repo, &wt, branch).unwrap();
+
+        // Share pushes the branch to the remote.
+        let res = push_room_branch(&repo, branch).unwrap();
+        assert_eq!(res.remote, "origin");
+        assert_eq!(res.branch, branch);
+        assert!(res.pr_url.is_none(), "a filesystem remote has no recognized host → no MR link");
+        let on_remote = git(&["rev-parse", "--verify", branch], &remote);
+        assert!(on_remote.status.success(), "the remote now carries the room branch");
+
+        // A colleague clones, advances the branch, and pushes.
+        let colab = tmp.join(format!("ac-share-colab-{nanos}"));
+        git(&["clone", "-q", &remote_url, &colab.to_string_lossy()], &tmp);
+        git(&["config", "user.email", "c@c"], &colab);
+        git(&["config", "user.name", "C"], &colab);
+        git(&["checkout", "-q", branch], &colab);
+        fs::write(colab.join("colab.txt"), "x\n").unwrap();
+        git(&["add", "-A"], &colab);
+        git(&["commit", "-qm", "colleague"], &colab);
+        git(&["push", "-q", "origin", branch], &colab);
+
+        // Meanwhile the room commits its own turn, so local and remote diverge.
+        fs::write(wt.join("room.txt"), "y\n").unwrap();
+        commit_worktree(&wt, "room turn");
+
+        // Share again without syncing → push rejected, guidance points at Sync.
+        let err = push_room_branch(&repo, branch).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Sync"), "non-fast-forward push guides the human to Sync: {msg}");
+
+        remove_room_worktree(&repo, &wt);
+        let _ = fs::remove_dir_all(&repo);
+        let _ = fs::remove_dir_all(&remote);
+        let _ = fs::remove_dir_all(&colab);
+    }
+
     #[test]
     fn worktree_creation_fails_without_a_git_repo() {
         // A plain folder (no git, or a repo with no commits) can't host a worktree.
