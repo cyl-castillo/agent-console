@@ -76,6 +76,11 @@ The loop: room produces work → **Share** (out for review, with context) → co
 reviews/extends on the platform → **Sync** (back in) → next turn continues. If a
 colleague pushed first, Share tells you to Sync, then Share again.
 
+A room **reopened in a later session** comes back read-only (re-attaching its live
+worktree is planned), but its `room/<id>` branch still lives in the repo — so you
+can still **Share** it for review. **Sync** needs the live worktree and stays
+available only while the room is running.
+
 ## Requirements
 
 - **Claude Code CLI** installed and authenticated:

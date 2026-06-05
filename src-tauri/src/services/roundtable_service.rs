@@ -769,13 +769,26 @@ impl RoundtableService {
             .get(id)
             .cloned()
             .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
-        let branch = control.branch.clone().ok_or_else(|| {
-            AppError::Other(
-                "this is a conversation room (read-only) — only a working room \
-                 produces a branch to share"
-                    .into(),
-            )
-        })?;
+        // A live working room carries its branch handle. A *resumed* room lost it
+        // (reattach is W3, pending) but its `room/<id>` branch still lives in the
+        // repo — fall back to it by name so a room reopened in a later session can
+        // still go out for review. A genuine conversation room has no such branch,
+        // so the lookup fails and we return the read-only error as before.
+        let branch = match control.branch.clone() {
+            Some(b) => b,
+            None => {
+                let candidate = format!("room/{id}");
+                if branch_exists(&control.repo, &candidate) {
+                    candidate
+                } else {
+                    return Err(AppError::Other(
+                        "this is a conversation room (read-only) — only a working \
+                         room produces a branch to share"
+                            .into(),
+                    ));
+                }
+            }
+        };
         // Before pushing, drop the room's conversation into the branch as a
         // `.room/<id>.md` artifact and commit it. The MR then carries the full
         // reasoning next to the diff — a reviewer sees WHY each change was made,
@@ -1315,6 +1328,17 @@ fn pick_remote(repo: &Path) -> AppResult<String> {
         })
 }
 
+/// Whether a local branch exists in the repo. Lets `share` recover a resumed
+/// room's `room/<id>` branch by name when the live handle was dropped on resume.
+fn branch_exists(repo: &Path, branch: &str) -> bool {
+    proc::command("git")
+        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+        .current_dir(repo)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Bring a colleague's commits *into* the live working room: fetch the remote
 /// `room/<id>` branch and merge it into the worktree the agents are editing. This
 /// is the return path of cowork — `share` pushes the room out, `sync` pulls a
@@ -1764,6 +1788,30 @@ mod tests {
         remove_room_worktree(&repo, &wt);
         assert!(!wt.exists(), "checkout dir removed on teardown");
         assert_eq!(count("room/wt-test"), 2, "branch + commits survive teardown");
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// `branch_exists` is what lets a *resumed* room (which lost its live branch
+    /// handle) still Share by recovering `room/<id>` by name. Hermetic temp repo.
+    #[test]
+    fn branch_exists_detects_room_branch() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let repo = std::env::temp_dir().join(format!("ac-be-test-{nanos}"));
+        fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            proc::command("git").args(args).current_dir(&repo).output().unwrap()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "T"]);
+        fs::write(repo.join("seed.txt"), "seed").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "seed"]);
+
+        assert!(!branch_exists(&repo, "room/r-missing"), "absent branch → false");
+        git(&["branch", "room/r-here"]);
+        assert!(branch_exists(&repo, "room/r-here"), "created branch → true");
 
         let _ = fs::remove_dir_all(&repo);
     }
