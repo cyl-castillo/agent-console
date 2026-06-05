@@ -630,6 +630,25 @@ impl RoundtableService {
         // Resume where the saved transcript left off; `continue_run` raises the
         // target above this to actually run more turns.
         let last_turn = room.transcript.iter().map(|m| m.turn).max().unwrap_or(0);
+        // Reattach the live worktree if this was a working room and its branch
+        // survives — so a reopened room can Sync + keep editing, not only Share.
+        // Best-effort: on any failure this falls back to read-only, exactly the
+        // prior behavior, so a resume never breaks.
+        let allow_edits = room.allow_edits;
+        let (workspace, worktree, branch, tools) =
+            reattach_room_worktree(&repo, &id, allow_edits);
+        // If it WAS a working room but the worktree couldn't be remounted, say so
+        // once on resume: Share still works (by branch name), Sync needs the
+        // worktree. Surfaced as the feed banner when the room next runs.
+        let notice = if allow_edits && worktree.is_none() {
+            Some(
+                "Reopened without a live worktree — Share still works, but editing \
+                 and Sync need a remountable room/<id> branch."
+                    .into(),
+            )
+        } else {
+            None
+        };
         let control = Arc::new(RunControl {
             paused: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
@@ -645,20 +664,17 @@ impl RoundtableService {
             last_seen: Mutex::new(room.last_seen),
             participants: room.participants,
             problem: room.problem,
-            // A resumed room comes back conversation-only/read-only for now;
-            // reattaching a working room's worktree is a later phase (the
-            // `room/<id>` branch with its commits still lives in the repo).
-            workspace: repo.clone(),
-            tools: ToolPolicy::ReadOnly,
-            worktree: None,
-            branch: None,
-            // The branch handle is gone until W3 reattaches the worktree, but the
-            // room WAS a working room iff it was persisted as one — carry that so
-            // Share (which works by branch name) stays reachable from the UI.
-            allow_edits: room.allow_edits,
+            // Working room reattached above (or degraded to read-only): a reopened
+            // room can now Sync + edit again when its branch remounts; Share works
+            // either way (by branch name, even read-only).
+            workspace,
+            tools,
+            worktree,
+            branch,
+            allow_edits,
             repo,
             rooms: self.rooms.clone(),
-            notice: None,
+            notice,
         });
         self.runs.lock().unwrap().insert(id.clone(), control);
         Ok(id)
@@ -1202,6 +1218,67 @@ fn add_room_worktree(repo: &Path, path: &Path, branch: &str) -> AppResult<()> {
         )));
     }
     Ok(())
+}
+
+/// Mount a worktree that checks out an EXISTING branch (no `-b`). Used to
+/// reattach a reopened working room to its `room/<id>` branch — unlike
+/// `add_room_worktree`, it never creates a branch, just checks out the one whose
+/// commits already live in the repo.
+fn add_existing_worktree(repo: &Path, path: &Path, branch: &str) -> AppResult<()> {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let out = proc::command("git")
+        .args(["worktree", "add", &path.to_string_lossy(), branch])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).to_string();
+        return Err(AppError::Other(format!(
+            "git worktree add (reattach): {}",
+            msg.trim()
+        )));
+    }
+    Ok(())
+}
+
+/// Best-effort: re-mount a reopened working room's live worktree so a resumed
+/// room can **Sync** (and keep editing), not just Share — closing the one
+/// asymmetry that remained for reopened rooms. Returns the working-room tuple
+/// `(workspace, worktree, branch, tools)` on success, or conversation-only /
+/// read-only defaults on ANY failure: a resume must never break because a
+/// worktree couldn't be remounted. Only attempts it for a room that WAS a working
+/// room (`allow_edits`) and whose `room/<id>` branch still exists in the repo.
+fn reattach_room_worktree(
+    repo: &Path,
+    id: &str,
+    allow_edits: bool,
+) -> (PathBuf, Option<PathBuf>, Option<String>, ToolPolicy) {
+    let readonly = (repo.to_path_buf(), None, None, ToolPolicy::ReadOnly);
+    let branch = format!("room/{id}");
+    if !allow_edits || !branch_exists(repo, &branch) {
+        return readonly;
+    }
+    let wt = room_worktree_path(id);
+    // A prior session's temp checkout is usually gone after a reboot, but its
+    // `.git/worktrees` registration can linger and would make `worktree add`
+    // refuse. Prune it; then clear any leftover dir (safe — it's our own temp
+    // namespace under `agent-console-rooms/`).
+    let _ = proc::command("git")
+        .args(["worktree", "prune"])
+        .current_dir(repo)
+        .output();
+    if wt.exists() {
+        let _ = proc::command("git")
+            .args(["worktree", "remove", "--force", &wt.to_string_lossy()])
+            .current_dir(repo)
+            .output();
+        let _ = fs::remove_dir_all(&wt);
+    }
+    match add_existing_worktree(repo, &wt, &branch) {
+        Ok(()) => (wt.clone(), Some(wt), Some(branch), ToolPolicy::AcceptEdits),
+        Err(_) => readonly,
+    }
 }
 
 /// Tear down a working room's checkout. Keeps the `room/<id>` branch (and its
@@ -1817,6 +1894,62 @@ mod tests {
         assert!(!wt.exists(), "checkout dir removed on teardown");
         assert_eq!(count("room/wt-test"), 2, "branch + commits survive teardown");
 
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    /// Reattach closes the last loop asymmetry: a reopened working room gets its
+    /// live worktree back, so it can **Sync** + keep editing, not only Share. And
+    /// it must degrade to read-only (never break resume) when there's nothing to
+    /// remount. Hermetic temp repo.
+    #[test]
+    fn reattach_remounts_a_reopened_working_room() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let repo = std::env::temp_dir().join(format!("ac-reattach-{nanos}"));
+        fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str], cwd: &Path| {
+            proc::command("git").args(args).current_dir(cwd).output().unwrap()
+        };
+        git(&["init", "-q"], &repo);
+        git(&["config", "user.email", "t@t"], &repo);
+        git(&["config", "user.name", "T"], &repo);
+        fs::write(repo.join("seed.txt"), "seed").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+
+        let id = format!("reattach-{nanos}");
+        let branch = format!("room/{id}");
+        let wt = room_worktree_path(&id);
+        // Stand up a working room, make a committed edit, then end the session
+        // (checkout removed; branch + commit survive) — exactly a reopened room.
+        add_room_worktree(&repo, &wt, &branch).unwrap();
+        fs::write(wt.join("agent.txt"), "from a prior session").unwrap();
+        commit_worktree(&wt, "prior turn");
+        remove_room_worktree(&repo, &wt);
+        assert!(!wt.exists(), "session ended: no live checkout");
+
+        // Reattach: the reopened working room gets its worktree back.
+        let (workspace, worktree, branch_out, tools) =
+            reattach_room_worktree(&repo, &id, true);
+        assert_eq!(worktree.as_deref(), Some(wt.as_path()), "worktree remounted");
+        assert_eq!(workspace, wt, "turns run in the remounted checkout");
+        assert_eq!(branch_out.as_deref(), Some(branch.as_str()));
+        assert!(matches!(tools, ToolPolicy::AcceptEdits), "editing re-enabled");
+        assert!(
+            wt.join("agent.txt").exists(),
+            "checkout carries the branch's prior-session commits"
+        );
+
+        // A conversation room (allow_edits=false) stays read-only, untouched.
+        let (_, ro_wt, ro_branch, ro_tools) = reattach_room_worktree(&repo, &id, false);
+        assert!(ro_wt.is_none() && ro_branch.is_none());
+        assert!(matches!(ro_tools, ToolPolicy::ReadOnly));
+        // A working room whose branch is gone → no reattach, read-only fallback.
+        let (_, gone_wt, _, gone_tools) =
+            reattach_room_worktree(&repo, &format!("no-such-{nanos}"), true);
+        assert!(gone_wt.is_none(), "no branch → read-only");
+        assert!(matches!(gone_tools, ToolPolicy::ReadOnly));
+
+        remove_room_worktree(&repo, &wt);
         let _ = fs::remove_dir_all(&repo);
     }
 
