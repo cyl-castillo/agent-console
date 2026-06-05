@@ -53,6 +53,29 @@ Principles:
 - Keyboard shortcuts (terminal-first navigation).
 - Persisted "recent projects" list across launches.
 
+## Rooms & cowork
+
+A **room** is a shared conversation about one problem between you and N agents
+(Claude and/or Codex). In a **working room** (the "let them edit" toggle) the
+agents edit code in an isolated git worktree on a `room/<id>` branch, committing
+one checkpoint per turn — your own files stay untouched until you review and merge.
+
+**Cowork with human colleagues** happens over the git remote you already use — no
+realtime sync, no extra infra. From a live working room:
+
+- **Share / open MR** — pushes the `room/<id>` branch to the remote (with the full
+  conversation committed alongside as `.room/<id>.md`, so reviewers see the diff
+  *and* the reasoning) and hands back a ready-to-open MR/PR link (GitHub/GitLab,
+  SSH or HTTPS).
+- **Sync colleague work** — fetches that branch and merges a colleague's commits
+  back into the live worktree so the next turn builds on top. It refuses on a dirty
+  worktree and aborts cleanly on conflict (reporting the files), so the
+  auto-committing turn loop never runs on a half-merged tree.
+
+The loop: room produces work → **Share** (out for review, with context) → colleague
+reviews/extends on the platform → **Sync** (back in) → next turn continues. If a
+colleague pushed first, Share tells you to Sync, then Share again.
+
 ## Requirements
 
 - **Claude Code CLI** installed and authenticated:
