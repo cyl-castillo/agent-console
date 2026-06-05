@@ -9,13 +9,12 @@
   <!-- OG / Twitter -->
   <meta property="og:title" content="Agent Console" />
   <meta property="og:description" content="A minimalist, terminal-first desktop app for directing AI agents inside any repository." />
-  <!-- Track 3: swap og:image + twitter:image to og-cover.png (1200×630) once captured. -->
-  <meta property="og:image" content="https://cyl-castillo.github.io/agent-console/logo.png" />
+  <meta property="og:image" content="https://cyl-castillo.github.io/agent-console/shots/og-cover.png" />
   <meta property="og:image:alt" content="Agent Console — terminal-first desktop app for directing AI agents inside your repo" />
   <meta property="og:url" content="https://cyl-castillo.github.io/agent-console/" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://cyl-castillo.github.io/agent-console/logo.png" />
+  <meta name="twitter:image" content="https://cyl-castillo.github.io/agent-console/shots/og-cover.png" />
   <meta name="twitter:image:alt" content="Agent Console — terminal-first desktop app for directing AI agents inside your repo" />
 
   <link rel="icon" href="logo.png" type="image/png" />
@@ -490,41 +489,25 @@
           <div class="frame">
             <span class="ph">Multi-agent room</span>
             <!-- shots/room-multi-agent.png -->
-            <img src="shots/room-multi-agent.png" alt="A room where two AI agents and the human work one problem together, with an agent's diff open" width="1440" height="720" loading="lazy" onerror="this.closest('figure').remove()" />
+            <img src="shots/room-multi-agent.png" alt="A room where two Claude agents (Opus and Sonnet) hold one shared conversation, converging on a fix with a change summary and cost" width="1534" height="773" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
-          <figcaption>Multi-agent room — you and several agents on one problem</figcaption>
+          <figcaption>Multi-agent room — you and several agents on one problem, one shared thread</figcaption>
         </figure>
         <figure>
           <div class="frame">
-            <span class="ph">Roundtable</span>
-            <!-- shots/roundtable.png -->
-            <img src="shots/roundtable.png" alt="Roundtable view: two agents debating in twin worktrees, moderator picking the winning diff" width="720" height="450" loading="lazy" onerror="this.closest('figure').remove()" />
-          </div>
-          <figcaption>Roundtable — debate in twin worktrees, keep the winner</figcaption>
-        </figure>
-        <figure>
-          <div class="frame">
-            <span class="ph">Worktree review</span>
+            <span class="ph">Review the diff</span>
             <!-- shots/worktree-review.png -->
-            <img src="shots/worktree-review.png" alt="Per-agent worktree diff and review-before-merge interface" width="720" height="450" loading="lazy" onerror="this.closest('figure').remove()" />
+            <img src="shots/worktree-review.png" alt="Split git diff of the agents' work with a file tree and inspector — review before merge" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
-          <figcaption>Worktree-per-agent — review every diff before it merges</figcaption>
+          <figcaption>Review every diff before it merges — split view, per file, revert anytime</figcaption>
         </figure>
         <figure>
           <div class="frame">
-            <span class="ph">File preview</span>
-            <!-- shots/file-preview.png -->
-            <img src="shots/file-preview.png" alt="File preview tab showing a diff on tree click" width="720" height="450" loading="lazy" onerror="this.closest('figure').remove()" />
+            <span class="ph">Set up the room</span>
+            <!-- shots/room-setup.png -->
+            <img src="shots/room-setup.png" alt="Room setup: pick the agents, their engine (Claude or Codex) and model, optional roles, turn and token budgets, and whether they may edit" width="1534" height="652" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
-          <figcaption>File preview — diff if modified, content if clean</figcaption>
-        </figure>
-        <figure>
-          <div class="frame">
-            <span class="ph">MCP &amp; engines</span>
-            <!-- shots/mcp-engines.png -->
-            <img src="shots/mcp-engines.png" alt="MCP servers panel and engine picker for Claude or Codex" width="720" height="450" loading="lazy" onerror="this.closest('figure').remove()" />
-          </div>
-          <figcaption>MCP servers &amp; engines — Claude or Codex, your tools</figcaption>
+          <figcaption>Set up the room — pick agents, engine (Claude or Codex), and who can edit</figcaption>
         </figure>
       </div>
     </div>
