@@ -252,6 +252,38 @@
     .features li .dim { color: var(--dim); }
     @media (max-width: 720px) { .features { grid-template-columns: 1fr; } }
 
+    /* --- Screenshots band --- */
+    .shots {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+    }
+    .shots figure {
+      margin: 0;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--bg-1);
+      overflow: hidden;
+    }
+    .shots figure.lead { grid-column: 1 / -1; }
+    .shots .frame {
+      position: relative;
+      aspect-ratio: 16 / 10;
+      display: flex; align-items: center; justify-content: center;
+      background: repeating-linear-gradient(45deg, var(--bg-1) 0 14px, var(--bg-2) 14px 28px);
+    }
+    .shots figure.lead .frame { aspect-ratio: 16 / 8; }
+    .shots .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .shots .frame .ph {
+      position: absolute; font-family: var(--mono); font-size: 12px;
+      color: var(--faint); letter-spacing: 0.5px; pointer-events: none; text-align: center;
+    }
+    .shots figcaption {
+      padding: 11px 14px; font-size: 12.5px; color: var(--dim);
+      border-top: 1px solid var(--border); font-family: var(--mono);
+    }
+    @media (max-width: 720px) { .shots { grid-template-columns: 1fr; } }
+
     /* --- Code blocks --- */
     pre, code { font-family: var(--mono); }
     pre {
@@ -417,6 +449,7 @@
       </div>
       <div class="links">
         <a href="#install">Install</a>
+        <a href="#screens">Screens</a>
         <a href="#tour">Tour</a>
         <a href="#arch">Architecture</a>
         <a href="#support">Support</a>
@@ -446,6 +479,56 @@
       <a href="https://github.com/cyl-castillo/agent-console" class="btn" target="_blank" rel="noopener">★ Star on GitHub</a>
     </div>
   </header>
+
+  <!-- Screenshots band. Drop PNGs into docs/shots/ (filenames below) and each
+       replaces its placeholder automatically — no code change. See LANDING_SHOTLIST.md. -->
+  <section id="screens">
+    <div class="container">
+      <h2>See it in motion</h2>
+      <div class="shots">
+        <figure class="lead">
+          <div class="frame">
+            <span class="ph">Multi-agent room</span>
+            <!-- shots/room-multi-agent.png -->
+            <img src="shots/room-multi-agent.png" alt="A room where two AI agents and the human work one problem together, with an agent's diff open" loading="lazy" width="1440" height="720" onerror="this.remove()" />
+          </div>
+          <figcaption>Multi-agent room — you and several agents on one problem</figcaption>
+        </figure>
+        <figure>
+          <div class="frame">
+            <span class="ph">Roundtable</span>
+            <!-- shots/roundtable.png -->
+            <img src="shots/roundtable.png" alt="Roundtable view: two agents debating in twin worktrees, moderator picking the winning diff" loading="lazy" width="720" height="450" onerror="this.remove()" />
+          </div>
+          <figcaption>Roundtable — debate in twin worktrees, keep the winner</figcaption>
+        </figure>
+        <figure>
+          <div class="frame">
+            <span class="ph">Worktree review</span>
+            <!-- shots/worktree-review.png -->
+            <img src="shots/worktree-review.png" alt="Per-agent worktree diff and review-before-merge interface" loading="lazy" width="720" height="450" onerror="this.remove()" />
+          </div>
+          <figcaption>Worktree-per-agent — review every diff before it merges</figcaption>
+        </figure>
+        <figure>
+          <div class="frame">
+            <span class="ph">File preview</span>
+            <!-- shots/file-preview.png -->
+            <img src="shots/file-preview.png" alt="File preview tab showing a diff on tree click" loading="lazy" width="720" height="450" onerror="this.remove()" />
+          </div>
+          <figcaption>File preview — diff if modified, content if clean</figcaption>
+        </figure>
+        <figure>
+          <div class="frame">
+            <span class="ph">MCP &amp; engines</span>
+            <!-- shots/mcp-engines.png -->
+            <img src="shots/mcp-engines.png" alt="MCP servers panel and engine picker for Claude or Codex" loading="lazy" width="720" height="450" onerror="this.remove()" />
+          </div>
+          <figcaption>MCP servers &amp; engines — Claude or Codex, your tools</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
 
   <section>
     <div class="container">
