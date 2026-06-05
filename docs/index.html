@@ -9,10 +9,14 @@
   <!-- OG / Twitter -->
   <meta property="og:title" content="Agent Console" />
   <meta property="og:description" content="A minimalist, terminal-first desktop app for directing AI agents inside any repository." />
+  <!-- Track 3: swap og:image + twitter:image to og-cover.png (1200×630) once captured. -->
   <meta property="og:image" content="https://cyl-castillo.github.io/agent-console/logo.png" />
+  <meta property="og:image:alt" content="Agent Console — terminal-first desktop app for directing AI agents inside your repo" />
   <meta property="og:url" content="https://cyl-castillo.github.io/agent-console/" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://cyl-castillo.github.io/agent-console/logo.png" />
+  <meta name="twitter:image:alt" content="Agent Console — terminal-first desktop app for directing AI agents inside your repo" />
 
   <link rel="icon" href="logo.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -691,6 +695,10 @@ agent-console</pre>
         const version = tag.replace(/^v/, "");
         const fill = (s) => s.replace(/\{version\}/g, version);
         const assets = new Map((rel.assets || []).map((a) => [a.name, a]));
+        // Only hydrate if this release actually ships downloadable bundles.
+        // Otherwise keep the fully-consistent hardcoded fallback rather than
+        // upgrading the version label while pointing download links at a 404.
+        if (assets.size === 0) return;
         const fmtSize = (b) => b >= 1024 * 1024
           ? (b / 1024 / 1024).toFixed(b >= 100 * 1024 * 1024 ? 0 : 1) + " MB"
           : Math.round(b / 1024) + " KB";
@@ -706,10 +714,12 @@ agent-console</pre>
         });
         document.querySelectorAll("a[data-asset]").forEach((el) => {
           const name = fill(el.getAttribute("data-asset"));
+          const asset = assets.get(name);
+          // Keep the hardcoded href if this specific bundle isn't in the release.
+          if (!asset) return;
           el.href = `https://github.com/cyl-castillo/agent-console/releases/download/${tag}/${name}`;
           if (el.hasAttribute("data-size-label")) {
-            const asset = assets.get(name);
-            if (asset) el.textContent = `↓ Download (${fmtSize(asset.size)})`;
+            el.textContent = `↓ Download (${fmtSize(asset.size)})`;
           }
         });
       })
