@@ -17,7 +17,7 @@
 //! | live pulse   | `text_delta` (per token)                  | `item.started` (per item — coarser)     |
 //! | cost (USD)   | `result.total_cost_usd`                   | not reported → 0.0                       |
 
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -232,41 +232,9 @@ pub struct CodexRunner;
 
 impl EngineRunner for CodexRunner {
     fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
-        // `codex exec resume <id>` continues a prior thread (retaining its
-        // memory); a fresh `codex exec` starts one. Resume has a reduced flag
-        // set: it rejects -s/--sandbox/-C, inheriting the session's sandbox and
-        // taking cwd from the process (set via current_dir below).
-        let effort = format!("model_reasoning_effort={}", ctx.model);
-        let mut args: Vec<String> = vec!["exec".into()];
-        if let Some(r) = ctx.resume {
-            args.push("resume".into());
-            args.push(r.into());
-        }
-        args.push("--json".into());
-        // Run outside a git repo without complaint — kills the "needs a commit"
-        // requirement entirely.
-        args.push("--skip-git-repo-check".into());
-        args.push("-c".into());
-        args.push(effort);
-        match ctx.tools {
-            // Full bypass mirrors Claude's skip-permissions: actually execute
-            // commands instead of auto-denying them. Accepted on resume too.
-            ToolPolicy::Full => args.push("--dangerously-bypass-approvals-and-sandbox".into()),
-            // Sandbox (-s) is only settable on a fresh exec; on resume it is
-            // inherited from the session, so we omit it there.
-            policy if ctx.resume.is_none() => {
-                args.push("-s".into());
-                args.push(match policy {
-                    ToolPolicy::ReadOnly => "read-only".into(),
-                    _ => "workspace-write".into(),
-                });
-            }
-            _ => {}
-        }
-        args.push(ctx.prompt.into());
-
+        let args = codex_exec_args(ctx);
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        let mut cmd = claude_cli::codex_command(&arg_refs);
+        let mut cmd = claude_cli::codex_command_with_stdin(&arg_refs);
         cmd.current_dir(ctx.cwd);
         let mut child = cmd
             .spawn()
@@ -277,6 +245,17 @@ impl EngineRunner for CodexRunner {
             .take()
             .ok_or_else(|| AppError::Other("codex produced no stdout pipe".into()))?;
         let err_handle = drain_stderr(child.stderr.take());
+        // Feed the prompt over stdin (argv ends with `-`). Codex's exec mode
+        // blocks until stdin is closed, so dropping the handle right after the
+        // write is load-bearing, not just tidy.
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Other("codex produced no stdin pipe".into()))?;
+        stdin
+            .write_all(ctx.prompt.as_bytes())
+            .map_err(|e| AppError::Other(format!("codex stdin write failed: {e}")))?;
+        drop(stdin);
 
         let mut final_text = String::new();
         let mut session_id: Option<String> = None;
@@ -347,6 +326,45 @@ impl EngineRunner for CodexRunner {
 }
 
 // ---------------- shared helpers ----------------
+
+fn codex_exec_args(ctx: &RunCtx) -> Vec<String> {
+    // `codex exec resume <id>` continues a prior thread (retaining its
+    // memory); a fresh `codex exec` starts one. Resume has a reduced flag
+    // set: it rejects -s/--sandbox/-C, inheriting the session's sandbox and
+    // taking cwd from the process (set via current_dir below).
+    let effort = format!("model_reasoning_effort={}", ctx.model);
+    let mut args: Vec<String> = vec!["exec".into()];
+    if let Some(r) = ctx.resume {
+        args.push("resume".into());
+        args.push(r.into());
+    }
+    args.push("--json".into());
+    // Run outside a git repo without complaint — kills the "needs a commit"
+    // requirement entirely.
+    args.push("--skip-git-repo-check".into());
+    args.push("-c".into());
+    args.push(effort);
+    match ctx.tools {
+        // Full bypass mirrors Claude's skip-permissions: actually execute
+        // commands instead of auto-denying them. Accepted on resume too.
+        ToolPolicy::Full => args.push("--dangerously-bypass-approvals-and-sandbox".into()),
+        // Sandbox (-s) is only settable on a fresh exec; on resume it is
+        // inherited from the session, so we omit it there.
+        policy if ctx.resume.is_none() => {
+            args.push("-s".into());
+            args.push(match policy {
+                ToolPolicy::ReadOnly => "read-only".into(),
+                _ => "workspace-write".into(),
+            });
+        }
+        _ => {}
+    }
+    // Keep the large, multiline room prompt out of argv. On Windows npm shims
+    // are .cmd files, and Rust rejects some batch-file arguments that cannot be
+    // escaped safely. `-` asks Codex to read the prompt from stdin instead.
+    args.push("-".into());
+    args
+}
 
 /// Drain a child's stderr on its own thread so a chatty stream can't fill the
 /// pipe buffer and deadlock the child.
@@ -469,6 +487,41 @@ mod tests {
             "reasoning_output_tokens": 3,
         });
         assert_eq!(codex_sum_usage(&u), 12678);
+    }
+
+    #[test]
+    fn codex_exec_reads_prompt_from_stdin_for_fresh_turn() {
+        let prompt = "Investigate this room turn\nwith symbols like & | < >";
+        let ctx = RunCtx {
+            cwd: std::path::Path::new("."),
+            model: "high",
+            tools: ToolPolicy::ReadOnly,
+            prompt,
+            resume: None,
+        };
+        let args = codex_exec_args(&ctx);
+
+        assert_eq!(args.last().map(String::as_str), Some("-"));
+        assert!(!args.iter().any(|arg| arg == prompt));
+        assert!(args.windows(2).any(|w| w == ["-s", "read-only"]));
+    }
+
+    #[test]
+    fn codex_resume_reads_prompt_from_stdin_without_sandbox_arg() {
+        let prompt = "Continue the debate with a multiline prompt\nthat stays off argv.";
+        let ctx = RunCtx {
+            cwd: std::path::Path::new("."),
+            model: "medium",
+            tools: ToolPolicy::ReadOnly,
+            prompt,
+            resume: Some("thread-123"),
+        };
+        let args = codex_exec_args(&ctx);
+
+        assert_eq!(args.last().map(String::as_str), Some("-"));
+        assert!(!args.iter().any(|arg| arg == prompt));
+        assert!(args.windows(3).any(|w| w == ["exec", "resume", "thread-123"]));
+        assert!(!args.iter().any(|arg| arg == "-s"));
     }
 
     // Live end-to-end: spawns the real `codex` CLI and makes a model call.

@@ -8,8 +8,8 @@
 //!
 //! The resolution strategy is identical for every agent; only the binary name
 //! and a few install-location leaves differ. `bin()`/`command()` keep the
-//! original `claude`-only API; `codex_bin()`/`codex_command()` are the `codex`
-//! equivalents. Both route through the same parameterized resolver.
+//! original `claude`-only API; `codex_bin()`/`codex_command_with_stdin()` are
+//! the `codex` equivalents. Both route through the same parameterized resolver.
 
 use std::collections::HashMap;
 use std::fs;
@@ -57,20 +57,21 @@ pub fn codex_bin() -> String {
 /// A `claude <args>` command with stdio piped, stdin nulled (so it can never
 /// block waiting for input), and — on Windows — no flashing console window.
 pub fn command(args: &[&str]) -> Command {
-    spawn_command(bin(), args)
+    spawn_command(bin(), args, Stdio::null())
 }
 
-/// A `codex <args>` command, configured identically to `command()`. Codex's
-/// `exec` mode blocks on stdin unless it is closed, so the nulled stdin here is
-/// load-bearing, not just defensive.
-pub fn codex_command(args: &[&str]) -> Command {
-    spawn_command(codex_bin(), args)
+/// A `codex <args>` command with stdin piped for callers that intentionally
+/// feed the prompt over stdin instead of passing it as an argv value. Codex's
+/// `exec` mode blocks until stdin is closed, so the caller must write and then
+/// drop the stdin handle — leaving it open hangs the child.
+pub fn codex_command_with_stdin(args: &[&str]) -> Command {
+    spawn_command(codex_bin(), args, Stdio::piped())
 }
 
-fn spawn_command(program: String, args: &[&str]) -> Command {
+fn spawn_command(program: String, args: &[&str], stdin: Stdio) -> Command {
     let mut cmd = Command::new(program);
     cmd.args(args)
-        .stdin(Stdio::null())
+        .stdin(stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(windows)]
