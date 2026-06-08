@@ -166,6 +166,7 @@ mod tests {
     /// process-global env var, so it must not race a sibling test.
     #[test]
     fn persistence_is_crash_safe() {
+        let _env = crate::test_support::lock_env();
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let base = std::env::temp_dir()
             .join(format!("ac-sessions-test-{}-{}", std::process::id(), nanos));

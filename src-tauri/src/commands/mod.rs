@@ -3,6 +3,7 @@ pub mod context;
 pub mod feedback;
 pub mod git;
 pub mod hooks;
+pub mod learning;
 pub mod mcp;
 pub mod palette;
 pub mod permissions;

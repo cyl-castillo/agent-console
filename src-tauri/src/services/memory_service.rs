@@ -64,6 +64,24 @@ pub fn read(project_root: &Path, name: &str) -> AppResult<String> {
     Ok(fs::read_to_string(&path)?)
 }
 
+/// Create or overwrite a memory entry. Used by "learning mode" to materialize an
+/// accepted suggestion into the project's memory dir, where Claude reads it on
+/// future sessions. Same path-traversal guard as the other operations; the
+/// memory dir is created on demand (a fresh project has none yet). MEMORY.md is
+/// off-limits — it's the hand-curated index, not a place for generated entries.
+pub fn write(project_root: &Path, name: &str, content: &str) -> AppResult<PathBuf> {
+    if name == MEMORY_INDEX {
+        return Err(AppError::InvalidArgument(
+            "refusing to overwrite MEMORY.md (the memory index)".into(),
+        ));
+    }
+    let dir = memory_dir_for(project_root)?;
+    fs::create_dir_all(&dir)?;
+    let path = safe_path(project_root, name)?;
+    fs::write(&path, content)?;
+    Ok(path)
+}
+
 pub fn delete(project_root: &Path, name: &str) -> AppResult<()> {
     if name == MEMORY_INDEX {
         return Err(AppError::InvalidArgument(

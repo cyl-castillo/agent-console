@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
+use crate::services::activity_service::ActivityEvent;
 use crate::services::snapshot_service;
 use crate::state::AppState;
 
@@ -265,16 +266,57 @@ fn handle_event(v: &Value, app: &AppHandle) {
     let _ = app.emit(&format!("hook://{kind}"), v);
 
     if kind == "user_prompt" {
-        // Auto-snapshot in the active project's working tree.
         let state = app.state::<AppState>();
         let project = state.inner.lock().unwrap().project.clone();
         if let Some(p) = project {
+            // Persist the prompt to the durable per-project ledger that
+            // "learning mode" reflects over. Best-effort: a failed append must
+            // never block the snapshot or the UI event.
+            let root = p.root.to_string_lossy();
+            let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            let _ = state.activity.record(
+                root.as_ref(),
+                &ActivityEvent {
+                    ts,
+                    kind: "user_prompt".into(),
+                    prompt: str_field(v, "prompt"),
+                    skill: str_field(v, "skill"),
+                    term_id: str_field(v, "termId"),
+                    session_id: str_field(v, "sessionId"),
+                    snapshot_sha: None,
+                },
+            );
+
+            // Auto-snapshot in the active project's working tree.
             let id = uuid::Uuid::new_v4().to_string();
             if let Ok(Some(snap)) = snapshot_service::create(&p.root, &id) {
+                // Record the snapshot too, so reflection can correlate a prompt
+                // with the working-tree checkpoint it produced.
+                let _ = state.activity.record(
+                    root.as_ref(),
+                    &ActivityEvent {
+                        ts,
+                        kind: "snapshot".into(),
+                        prompt: None,
+                        skill: None,
+                        term_id: str_field(v, "termId"),
+                        session_id: str_field(v, "sessionId"),
+                        snapshot_sha: Some(snap.commit_sha.clone()),
+                    },
+                );
                 let _ = app.emit("snapshot://created", &snap);
             }
         }
     }
+}
+
+/// Read an optional string field from a hook payload, treating empty strings as
+/// absent so the ledger doesn't store noise like `"skill": ""`.
+fn str_field(v: &Value, key: &str) -> Option<String> {
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {

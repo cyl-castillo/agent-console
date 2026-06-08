@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { useSkillsStore } from "../stores/skillsStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
 import { useAdvisorStore } from "../stores/advisorStore";
+import { useLearningStore } from "../stores/learningStore";
 import { useVaultStore } from "../stores/vaultStore";
 import { useContextStore } from "../stores/contextStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
@@ -12,7 +13,7 @@ import { useRoundtableStore } from "../stores/roundtableStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "roundtable" | "vault" | "context" | "plugins" | "mcp" | "feedback";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "vault" | "context" | "plugins" | "mcp" | "feedback";
 
 export function WorkbenchTabs({
   active,
@@ -28,6 +29,10 @@ export function WorkbenchTabs({
     s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
   );
   const advisorAnalyzing = useAdvisorStore((s) => s.status === "analyzing");
+  const learningPending = useLearningStore((s) =>
+    s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
+  );
+  const learningReflecting = useLearningStore((s) => s.status === "reflecting");
   const vaultCount = useVaultStore((s) => s.entries.length);
   const memoriesCount = useContextStore((s) => s.memories.length);
   const pluginsCount = usePluginsStore((s) => s.installed.length);
@@ -76,6 +81,14 @@ export function WorkbenchTabs({
         count={advisorPending}
         active={active === "advisor"}
         onClick={() => onChange("advisor")}
+      />
+      <StripButton
+        icon="sparkles"
+        label={learningReflecting ? "…" : "Learning"}
+        title={learningReflecting ? "Learning (reflecting)" : "Learning — reflect on your activity and suggest improvements"}
+        count={learningPending}
+        active={active === "learning"}
+        onClick={() => onChange("learning")}
       />
       <StripButton
         icon="users"

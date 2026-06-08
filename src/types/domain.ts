@@ -190,6 +190,36 @@ export interface AdvisorAnalysisResult {
   rawExcerpt: string;
 }
 
+/// One improvement proposed by "learning mode" from observed daily activity.
+/// kind: "skill" | "memory" | "friction".
+export interface LearningSuggestion {
+  kind: "skill" | "memory" | "friction";
+  title: string;
+  rationale: string;
+  evidence: string[];
+  skillName?: string;
+  skillMdContent?: string;
+  memoryName?: string;
+  memoryContent?: string;
+}
+
+export interface ReflectionResult {
+  suggestions: LearningSuggestion[];
+  eventsAnalyzed: number;
+  rawExcerpt: string;
+}
+
+/// A persisted activity-ledger record (mirrors the Rust ActivityEvent).
+export interface ActivityEvent {
+  ts: number;
+  kind: string;
+  prompt?: string;
+  skill?: string;
+  termId?: string;
+  sessionId?: string;
+  snapshotSha?: string;
+}
+
 /// A user_prompt event observed by the hook watcher.
 export interface HookUserPromptEvent {
   type: "user_prompt";

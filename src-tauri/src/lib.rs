@@ -70,6 +70,10 @@ pub fn run() {
             commands::usage::session_usage,
             commands::advisor::advisor_analyze,
             commands::advisor::advisor_create_skill,
+            commands::learning::learning_reflect,
+            commands::learning::activity_list,
+            commands::learning::learning_create_skill,
+            commands::learning::learning_save_memory,
             commands::vault::vault_list,
             commands::vault::vault_upsert,
             commands::vault::vault_delete,
@@ -106,4 +110,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Test-only support shared across modules. Placed at the end of the crate so it
+/// doesn't trip clippy's `items_after_test_module` (a cfg(test) module followed
+/// by real items).
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes tests that mutate the process-global `XDG_DATA_HOME` (the
+    /// persistence crash-safety tests in sessions/roundtable/activity all isolate
+    /// their data dir that way). Without this they race: one test's set_var swaps
+    /// the dir out from under another mid-assertion. Hold the guard for the whole
+    /// test body. Poison is recovered — a panic in one test must not cascade.
+    pub static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    pub fn lock_env() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
 }

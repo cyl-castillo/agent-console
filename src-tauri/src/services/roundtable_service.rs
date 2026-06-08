@@ -1151,6 +1151,7 @@ mod tests {
     /// so the user's real rooms.json is never touched.
     #[test]
     fn rooms_persistence_is_crash_safe() {
+        let _env = crate::test_support::lock_env();
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         let base = std::env::temp_dir().join(format!("agent-console-rooms-test-{nanos}"));
         std::env::set_var("XDG_DATA_HOME", &base);
