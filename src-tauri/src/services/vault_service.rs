@@ -105,7 +105,8 @@ pub fn upsert(
     // Persist value: secret → keyring; non-secret → JSON.
     let stored_value = if secret {
         if let Some(v) = value.as_ref() {
-            keyring_entry(&scope, &key)?.set_password(v)
+            keyring_entry(&scope, &key)?
+                .set_password(v)
                 .map_err(|e| AppError::Other(format!("keyring set: {e}")))?;
         } else if existing.is_none() {
             return Err(AppError::InvalidArgument(
@@ -118,7 +119,9 @@ pub fn upsert(
         if let Ok(entry) = keyring_entry(&scope, &key) {
             let _ = entry.delete_credential();
         }
-        value.clone().or_else(|| existing.and_then(|i| store.entries[i].value.clone()))
+        value
+            .clone()
+            .or_else(|| existing.and_then(|i| store.entries[i].value.clone()))
     };
 
     let entry = VaultEntryMeta {
@@ -162,10 +165,14 @@ pub fn delete(project_root: Option<&Path>, scope: Scope, key: &str) -> AppResult
 pub fn get_value(project_root: Option<&Path>, scope: Scope, key: &str) -> AppResult<String> {
     let path = store_path(project_root, &scope)?;
     let store = load_store(&path)?;
-    let entry = store.entries.iter().find(|e| e.key == key)
+    let entry = store
+        .entries
+        .iter()
+        .find(|e| e.key == key)
         .ok_or_else(|| AppError::NotFound(format!("vault entry '{key}'")))?;
     if entry.secret {
-        keyring_entry(&scope, key)?.get_password()
+        keyring_entry(&scope, key)?
+            .get_password()
             .map_err(|e| AppError::Other(format!("keyring get: {e}")))
     } else {
         Ok(entry.value.clone().unwrap_or_default())
@@ -197,7 +204,8 @@ pub fn env_for_spawn(project_root: Option<&Path>) -> AppResult<BTreeMap<String, 
 
 fn read_value(e: &VaultEntryMeta, scope: Scope) -> AppResult<String> {
     if e.secret {
-        keyring_entry(&scope, &e.key)?.get_password()
+        keyring_entry(&scope, &e.key)?
+            .get_password()
             .map_err(|e| AppError::Other(format!("keyring get: {e}")))
     } else {
         Ok(e.value.clone().unwrap_or_default())
@@ -207,8 +215,9 @@ fn read_value(e: &VaultEntryMeta, scope: Scope) -> AppResult<String> {
 fn store_path(project_root: Option<&Path>, scope: &Scope) -> AppResult<PathBuf> {
     match scope {
         Scope::Project => {
-            let root = project_root
-                .ok_or_else(|| AppError::InvalidArgument("project scope requires an open project".into()))?;
+            let root = project_root.ok_or_else(|| {
+                AppError::InvalidArgument("project scope requires an open project".into())
+            })?;
             Ok(project_path(root))
         }
         Scope::Global => global_path(),
@@ -229,8 +238,8 @@ fn load_store(path: &Path) -> AppResult<StoreFile> {
         return Ok(StoreFile::default());
     }
     let raw = fs::read_to_string(path)?;
-    let store: StoreFile = serde_json::from_str(&raw)
-        .map_err(|e| AppError::Other(format!("vault parse: {e}")))?;
+    let store: StoreFile =
+        serde_json::from_str(&raw).map_err(|e| AppError::Other(format!("vault parse: {e}")))?;
     Ok(store)
 }
 

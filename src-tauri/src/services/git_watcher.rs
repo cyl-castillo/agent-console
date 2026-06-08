@@ -15,9 +15,24 @@ use walkdir::WalkDir;
 /// and liable to exhaust `fs.inotify.max_user_watches` on Linux.
 #[cfg(target_os = "linux")]
 const UNWATCHED_DIRS: &[&str] = &[
-    ".git", "node_modules", "target", "dist", "build", ".next", ".nuxt",
-    ".venv", "venv", "__pycache__", ".idea", ".vscode", ".gradle",
-    ".cache", ".turbo", ".parcel-cache", ".angular", "coverage",
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".idea",
+    ".vscode",
+    ".gradle",
+    ".cache",
+    ".turbo",
+    ".parcel-cache",
+    ".angular",
+    "coverage",
 ];
 
 /// Upper bound on how many directories we'll register watches for. A runaway
@@ -45,12 +60,17 @@ struct Active {
 }
 
 impl Default for GitWatcher {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GitWatcher {
     pub fn new() -> Self {
-        Self { inner: Arc::new(Mutex::new(None)), generation: Arc::new(AtomicU64::new(0)) }
+        Self {
+            inner: Arc::new(Mutex::new(None)),
+            generation: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     /// Start (or restart) watching `root`. Cheap to call repeatedly; if the
@@ -64,7 +84,9 @@ impl GitWatcher {
         {
             let guard = self.inner.lock().unwrap();
             if let Some(active) = guard.as_ref() {
-                if active.root == root { return; }
+                if active.root == root {
+                    return;
+                }
             }
         }
 
@@ -96,10 +118,17 @@ impl GitWatcher {
 
             // A newer watch request may have superseded us while we walked;
             // only install if we're still the latest generation.
-            if generation.load(Ordering::SeqCst) != my_gen { return; }
+            if generation.load(Ordering::SeqCst) != my_gen {
+                return;
+            }
             let mut guard = inner.lock().unwrap();
-            if generation.load(Ordering::SeqCst) != my_gen { return; }
-            *guard = Some(Active { _debouncer: debouncer, root });
+            if generation.load(Ordering::SeqCst) != my_gen {
+                return;
+            }
+            *guard = Some(Active {
+                _debouncer: debouncer,
+                root,
+            });
         });
     }
 
@@ -132,16 +161,28 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) {
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
-            if e.depth() == 0 { return true; }
+            if e.depth() == 0 {
+                return true;
+            }
             let name = e.file_name().to_string_lossy();
             !(e.file_type().is_dir() && UNWATCHED_DIRS.iter().any(|d| *d == name.as_ref()))
         });
     for entry in walker.flatten() {
-        if !entry.file_type().is_dir() { continue; }
-        if watcher.watch(entry.path(), RecursiveMode::NonRecursive).is_err() { continue; }
+        if !entry.file_type().is_dir() {
+            continue;
+        }
+        if watcher
+            .watch(entry.path(), RecursiveMode::NonRecursive)
+            .is_err()
+        {
+            continue;
+        }
         count += 1;
         if count >= MAX_WATCH_DIRS {
-            eprintln!("git_watcher: hit {MAX_WATCH_DIRS} watch cap under {}", root.display());
+            eprintln!(
+                "git_watcher: hit {MAX_WATCH_DIRS} watch cap under {}",
+                root.display()
+            );
             break;
         }
     }
@@ -150,7 +191,10 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) {
         let _ = watcher.watch(&git_dir, RecursiveMode::NonRecursive);
     }
     if count == 0 {
-        eprintln!("git_watcher: watched no directories under {}", root.display());
+        eprintln!(
+            "git_watcher: watched no directories under {}",
+            root.display()
+        );
     }
 }
 
@@ -168,18 +212,29 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) {
 /// We do allow `.git/index` and `.git/HEAD` through, so a commit / checkout
 /// is reflected immediately.
 fn ignored(path: &Path, root: &Path) -> bool {
-    let Ok(rel) = path.strip_prefix(root) else { return true };
-    let parts: Vec<_> = rel.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
-    if parts.is_empty() { return true; }
+    let Ok(rel) = path.strip_prefix(root) else {
+        return true;
+    };
+    let parts: Vec<_> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect();
+    if parts.is_empty() {
+        return true;
+    }
 
     if parts[0] == ".git" {
-        if parts.len() == 1 { return true; }
+        if parts.len() == 1 {
+            return true;
+        }
         match parts[1].as_str() {
             "HEAD" | "ORIG_HEAD" | "index" | "MERGE_HEAD" | "FETCH_HEAD" => false,
             _ => true,
         }
     } else {
-        matches!(parts[0].as_str(),
-            "node_modules" | "target" | "dist" | "build" | ".next" | ".venv" | ".idea" | ".vscode")
+        matches!(
+            parts[0].as_str(),
+            "node_modules" | "target" | "dist" | "build" | ".next" | ".venv" | ".idea" | ".vscode"
+        )
     }
 }

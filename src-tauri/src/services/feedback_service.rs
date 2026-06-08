@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::services::proc;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -48,9 +48,15 @@ fn git_branch(root: &Path) -> Option<String> {
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .ok()?;
-    if !out.status.success() { return None; }
+    if !out.status.success() {
+        return None;
+    }
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 pub fn submit(input: FeedbackInput, ctx: &FeedbackContext) -> AppResult<String> {
@@ -74,19 +80,26 @@ pub fn submit(input: FeedbackInput, ctx: &FeedbackContext) -> AppResult<String> 
 
     let out = proc::command("gh")
         .args(["issue", "create", "--repo", REPO, "--label", FEEDBACK_LABEL])
-        .arg("--title").arg(&full_title)
-        .arg("--body").arg(&body)
+        .arg("--title")
+        .arg(&full_title)
+        .arg("--body")
+        .arg(&body)
         .output()
-        .map_err(|e| AppError::Other(format!(
-            "gh CLI not available ({e}). Install: https://cli.github.com/"
-        )))?;
+        .map_err(|e| {
+            AppError::Other(format!(
+                "gh CLI not available ({e}). Install: https://cli.github.com/"
+            ))
+        })?;
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
         return Err(AppError::Other(format!("gh issue create failed: {stderr}")));
     }
     let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let url = stdout.lines().rev().find(|l| l.contains("github.com"))
+    let url = stdout
+        .lines()
+        .rev()
+        .find(|l| l.contains("github.com"))
         .map(|s| s.to_string())
         .unwrap_or(stdout);
     Ok(url)
@@ -94,7 +107,11 @@ pub fn submit(input: FeedbackInput, ctx: &FeedbackContext) -> AppResult<String> 
 
 fn sanitize_token(v: &str, allowed: &[&str]) -> String {
     let v = v.trim().to_lowercase();
-    if allowed.iter().any(|a| *a == v) { v } else { allowed[0].to_string() }
+    if allowed.iter().any(|a| *a == v) {
+        v
+    } else {
+        allowed[0].to_string()
+    }
 }
 
 fn format_body(description: &str, ctx: &FeedbackContext, cat: &str, sev: &str) -> String {

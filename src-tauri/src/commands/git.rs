@@ -64,7 +64,10 @@ pub fn git_checkout_branch(name: String, state: State<'_, AppState>) -> AppResul
 }
 
 #[tauri::command]
-pub fn git_recent_messages(limit: Option<u32>, state: State<'_, AppState>) -> AppResult<Vec<String>> {
+pub fn git_recent_messages(
+    limit: Option<u32>,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<String>> {
     let repo = current_repo(&state)?;
     git_service::recent_messages(&repo, limit.unwrap_or(10))
 }

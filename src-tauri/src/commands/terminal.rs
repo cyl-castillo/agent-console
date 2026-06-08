@@ -29,13 +29,21 @@ pub fn term_spawn(
     }
     // Inject Vault entries (project overrides global) so the agent can use
     // `$KEY` in shell commands without ever seeing the value in its context.
-    let project_root = state.inner.lock().unwrap().project.as_ref().map(|p| p.root.clone());
+    let project_root = state
+        .inner
+        .lock()
+        .unwrap()
+        .project
+        .as_ref()
+        .map(|p| p.root.clone());
     if let Ok(vault_env) = crate::services::vault_service::env_for_spawn(project_root.as_deref()) {
         for (k, v) in vault_env {
             extra.push((k, v));
         }
     }
-    state.terminals.spawn_with_env(app, &PathBuf::from(cwd), &extra)
+    state
+        .terminals
+        .spawn_with_env(app, &PathBuf::from(cwd), &extra)
 }
 
 #[tauri::command]
@@ -44,12 +52,7 @@ pub fn term_write(id: String, data: String, state: State<'_, AppState>) -> AppRe
 }
 
 #[tauri::command]
-pub fn term_resize(
-    id: String,
-    cols: u16,
-    rows: u16,
-    state: State<'_, AppState>,
-) -> AppResult<()> {
+pub fn term_resize(id: String, cols: u16, rows: u16, state: State<'_, AppState>) -> AppResult<()> {
     state.terminals.resize(&id, cols, rows)
 }
 

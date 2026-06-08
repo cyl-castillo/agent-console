@@ -7,7 +7,12 @@ use crate::services::snapshot_service;
 use crate::state::AppState;
 
 fn repo(state: &AppState) -> AppResult<PathBuf> {
-    state.inner.lock().unwrap().project.as_ref()
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .project
+        .as_ref()
         .map(|p| p.root.clone())
         .ok_or_else(|| AppError::InvalidArgument("no project open".into()))
 }

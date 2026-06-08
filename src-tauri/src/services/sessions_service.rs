@@ -46,7 +46,9 @@ pub struct SessionsService {
 
 impl SessionsService {
     pub fn new() -> Self {
-        Self { lock: Mutex::new(()) }
+        Self {
+            lock: Mutex::new(()),
+        }
     }
 
     fn dir() -> AppResult<PathBuf> {
@@ -124,7 +126,11 @@ impl SessionsService {
     pub fn list(&self, project_root: &str) -> AppResult<Vec<PersistedSession>> {
         let _g = self.lock.lock().unwrap();
         let file = Self::load_file()?;
-        Ok(file.by_project.get(project_root).cloned().unwrap_or_default())
+        Ok(file
+            .by_project
+            .get(project_root)
+            .cloned()
+            .unwrap_or_default())
     }
 
     pub fn save(&self, project_root: &str, sessions: Vec<PersistedSession>) -> AppResult<()> {
@@ -167,9 +173,12 @@ mod tests {
     #[test]
     fn persistence_is_crash_safe() {
         let _env = crate::test_support::lock_env();
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let base = std::env::temp_dir()
-            .join(format!("ac-sessions-test-{}-{}", std::process::id(), nanos));
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-sessions-test-{}-{}", std::process::id(), nanos));
         std::fs::create_dir_all(&base).unwrap();
         std::env::set_var("XDG_DATA_HOME", &base);
 
@@ -177,7 +186,10 @@ mod tests {
         let proj = "/proj/a";
 
         // 1. Fresh install (no file): empty, and crucially NOT an error.
-        assert!(svc.list(proj).unwrap().is_empty(), "fresh list should be empty");
+        assert!(
+            svc.list(proj).unwrap().is_empty(),
+            "fresh list should be empty"
+        );
 
         // 2. Save then read back; temp file must be renamed away (atomic write).
         svc.save(proj, vec![sample("s1"), sample("s2")]).unwrap();
@@ -193,7 +205,11 @@ mod tests {
         svc.save(proj, vec![sample("s1")]).unwrap();
         assert!(bak.exists(), "backup should exist after a second save");
         svc.save("/proj/b", vec![sample("b1")]).unwrap();
-        assert_eq!(svc.list(proj).unwrap().len(), 1, "proj a untouched by proj b save");
+        assert_eq!(
+            svc.list(proj).unwrap().len(),
+            1,
+            "proj a untouched by proj b save"
+        );
         assert_eq!(svc.list("/proj/b").unwrap().len(), 1);
 
         // 4. CRITICAL: corrupt main file but a valid backup → recover from the
@@ -210,7 +226,10 @@ mod tests {
         //    save must ABORT rather than clobber unreadable history.
         std::fs::write(&path, "garbage").unwrap();
         std::fs::write(&bak, "also garbage").unwrap();
-        assert!(svc.list(proj).is_err(), "unreadable history must error, never look empty");
+        assert!(
+            svc.list(proj).is_err(),
+            "unreadable history must error, never look empty"
+        );
         assert!(
             svc.save(proj, vec![sample("x")]).is_err(),
             "save must not overwrite history it could not read"

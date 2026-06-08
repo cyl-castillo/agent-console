@@ -5,7 +5,10 @@ use crate::services::sessions_service::PersistedSession;
 use crate::state::AppState;
 
 #[tauri::command]
-pub fn sessions_list(project_root: String, state: State<'_, AppState>) -> AppResult<Vec<PersistedSession>> {
+pub fn sessions_list(
+    project_root: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<PersistedSession>> {
     state.sessions.list(&project_root)
 }
 

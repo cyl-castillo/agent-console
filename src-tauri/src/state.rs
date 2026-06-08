@@ -20,8 +20,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        let hooks = HooksRuntime::new()
-            .expect("failed to initialize hooks runtime");
+        let hooks = HooksRuntime::new().expect("failed to initialize hooks runtime");
         Self {
             inner: Mutex::new(SessionState::default()),
             terminals: TerminalRegistry::new(),
@@ -35,7 +34,9 @@ impl AppState {
 }
 
 impl Default for AppState {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Default)]

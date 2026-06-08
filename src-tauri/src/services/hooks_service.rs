@@ -43,11 +43,14 @@ impl HooksRuntime {
             .ok_or_else(|| AppError::Other("no cache dir".into()))?
             .join("agent-console");
         fs::create_dir_all(&cache)?;
-        let session_dir = cache.join("sessions").join(format!("{}", std::process::id()));
+        let session_dir = cache
+            .join("sessions")
+            .join(format!("{}", std::process::id()));
         fs::create_dir_all(&session_dir)?;
         fs::create_dir_all(session_dir.join("approvals"))?;
         let script_path = ensure_hook_script(&cache, "userprompt-hook.cjs", USERPROMPT_HOOK)?;
-        let pretooluse_script_path = ensure_hook_script(&cache, "pretooluse-hook.cjs", PRETOOLUSE_HOOK)?;
+        let pretooluse_script_path =
+            ensure_hook_script(&cache, "pretooluse-hook.cjs", PRETOOLUSE_HOOK)?;
         Ok(Self {
             session_dir,
             script_path,
@@ -57,8 +60,12 @@ impl HooksRuntime {
         })
     }
 
-    pub fn session_dir(&self) -> &Path { &self.session_dir }
-    pub fn script_path(&self) -> &Path { &self.script_path }
+    pub fn session_dir(&self) -> &Path {
+        &self.session_dir
+    }
+    pub fn script_path(&self) -> &Path {
+        &self.script_path
+    }
 
     /// Start the events.jsonl watcher (idempotent).
     pub fn start_watcher(&self, app: AppHandle) {
@@ -81,8 +88,11 @@ impl HooksRuntime {
 
     pub fn status(&self) -> HooksStatus {
         let settings_path = settings_path();
-        let installed = is_hook_installed(&settings_path, "UserPromptSubmit", &self.script_path).unwrap_or(false);
-        let pretooluse_installed = is_hook_installed(&settings_path, "PreToolUse", &self.pretooluse_script_path).unwrap_or(false);
+        let installed = is_hook_installed(&settings_path, "UserPromptSubmit", &self.script_path)
+            .unwrap_or(false);
+        let pretooluse_installed =
+            is_hook_installed(&settings_path, "PreToolUse", &self.pretooluse_script_path)
+                .unwrap_or(false);
         HooksStatus {
             session_dir: self.session_dir.clone(),
             script_path: self.script_path.clone(),
@@ -96,18 +106,27 @@ impl HooksRuntime {
     /// Merge UserPromptSubmit + PreToolUse hooks into ~/.claude/settings.json.
     pub fn install(&self) -> AppResult<HooksStatus> {
         let settings_path = settings_path();
-        if let Some(parent) = settings_path.parent() { fs::create_dir_all(parent)?; }
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
 
         let mut settings: Value = if settings_path.exists() {
             let txt = fs::read_to_string(&settings_path)?;
             serde_json::from_str(&txt).unwrap_or(json!({}))
-        } else { json!({}) };
-        if !settings.is_object() { settings = json!({}); }
+        } else {
+            json!({})
+        };
+        if !settings.is_object() {
+            settings = json!({});
+        }
 
         upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
         upsert_hook(&mut settings, "PreToolUse", &self.pretooluse_script_path);
 
-        fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap())?;
+        fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )?;
         Ok(self.status())
     }
 
@@ -141,7 +160,10 @@ impl HooksRuntime {
             settings = json!({});
         }
         upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
-        fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap())?;
+        fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )?;
         // Best-effort marker: if it fails we'd re-run the idempotent upsert next
         // launch, which is harmless.
         let _ = fs::write(&marker, b"1");
@@ -151,18 +173,27 @@ impl HooksRuntime {
     /// Remove our hook entries from settings.json. Other hooks/settings untouched.
     pub fn uninstall(&self) -> AppResult<HooksStatus> {
         let settings_path = settings_path();
-        if !settings_path.exists() { return Ok(self.status()); }
+        if !settings_path.exists() {
+            return Ok(self.status());
+        }
         let txt = fs::read_to_string(&settings_path)?;
         let mut settings: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
         if let Some(hooks) = settings.get_mut("hooks").and_then(|v| v.as_object_mut()) {
             for key in ["UserPromptSubmit", "PreToolUse"] {
-                let target = if key == "UserPromptSubmit" { &self.script_path } else { &self.pretooluse_script_path };
+                let target = if key == "UserPromptSubmit" {
+                    &self.script_path
+                } else {
+                    &self.pretooluse_script_path
+                };
                 if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
                     arr.retain(|e| !has_command_path(e, target));
                 }
             }
         }
-        fs::write(&settings_path, serde_json::to_string_pretty(&settings).unwrap())?;
+        fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )?;
         Ok(self.status())
     }
 
@@ -170,7 +201,9 @@ impl HooksRuntime {
     /// for <session_dir>/approvals/<id>.res.json and will pick this up.
     pub fn respond(&self, id: &str, decision: &str, reason: Option<&str>) -> AppResult<()> {
         if !["allow", "deny", "ask"].contains(&decision) {
-            return Err(AppError::InvalidArgument(format!("bad decision: {decision}")));
+            return Err(AppError::InvalidArgument(format!(
+                "bad decision: {decision}"
+            )));
         }
         let dir = self.session_dir.join("approvals");
         fs::create_dir_all(&dir)?;
@@ -191,15 +224,24 @@ fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path) {
         "matcher": "*",
         "hooks": [{ "type": "command", "command": script_path.to_string_lossy() }]
     });
-    let arr = hooks.get_mut(event)
+    let arr = hooks
+        .get_mut(event)
         .and_then(|v| v.as_array_mut())
         .cloned()
         .unwrap_or_default();
     let already = arr.iter().any(|e| has_command_path(e, script_path));
     let mut new_arr = arr;
-    if !already { new_arr.push(entry); }
-    hooks.as_object_mut().unwrap().insert(event.to_string(), Value::Array(new_arr));
-    settings.as_object_mut().unwrap().insert("hooks".to_string(), hooks);
+    if !already {
+        new_arr.push(entry);
+    }
+    hooks
+        .as_object_mut()
+        .unwrap()
+        .insert(event.to_string(), Value::Array(new_arr));
+    settings
+        .as_object_mut()
+        .unwrap()
+        .insert("hooks".to_string(), hooks);
 }
 
 fn settings_path() -> PathBuf {
@@ -222,10 +264,15 @@ fn ensure_hook_script(runtime_dir: &Path, filename: &str, body: &str) -> AppResu
 }
 
 fn is_hook_installed(settings_path: &Path, event: &str, script_path: &Path) -> AppResult<bool> {
-    if !settings_path.exists() { return Ok(false); }
+    if !settings_path.exists() {
+        return Ok(false);
+    }
     let txt = fs::read_to_string(settings_path)?;
     let v: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
-    let Some(arr) = v.pointer(&format!("/hooks/{event}")).and_then(|v| v.as_array()) else {
+    let Some(arr) = v
+        .pointer(&format!("/hooks/{event}"))
+        .and_then(|v| v.as_array())
+    else {
         return Ok(false);
     };
     Ok(arr.iter().any(|e| has_command_path(e, script_path)))
@@ -233,9 +280,14 @@ fn is_hook_installed(settings_path: &Path, event: &str, script_path: &Path) -> A
 
 fn has_command_path(entry: &Value, target: &Path) -> bool {
     let target_str = target.to_string_lossy().to_string();
-    let Some(hooks) = entry.get("hooks").and_then(|v| v.as_array()) else { return false };
+    let Some(hooks) = entry.get("hooks").and_then(|v| v.as_array()) else {
+        return false;
+    };
     hooks.iter().any(|h| {
-        h.get("command").and_then(|c| c.as_str()).map(|c| c == target_str).unwrap_or(false)
+        h.get("command")
+            .and_then(|c| c.as_str())
+            .map(|c| c == target_str)
+            .unwrap_or(false)
     })
 }
 
@@ -244,17 +296,33 @@ fn watcher_loop(app: AppHandle, dir: PathBuf) {
     let mut last_size: u64 = 0;
     loop {
         thread::sleep(Duration::from_millis(120));
-        let Ok(meta) = fs::metadata(&events_file) else { continue };
+        let Ok(meta) = fs::metadata(&events_file) else {
+            continue;
+        };
         let size = meta.len();
-        if size == last_size { continue; }
-        if size < last_size { last_size = 0; continue; }
+        if size == last_size {
+            continue;
+        }
+        if size < last_size {
+            last_size = 0;
+            continue;
+        }
 
-        let Ok(content) = fs::read_to_string(&events_file) else { continue };
-        if (content.len() as u64) < last_size { last_size = 0; continue; }
+        let Ok(content) = fs::read_to_string(&events_file) else {
+            continue;
+        };
+        if (content.len() as u64) < last_size {
+            last_size = 0;
+            continue;
+        }
         let tail = &content[(last_size as usize).min(content.len())..];
         for line in tail.lines() {
-            if line.trim().is_empty() { continue; }
-            let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
             handle_event(&v, &app);
         }
         last_size = size;
@@ -323,15 +391,25 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
     let mut seen: HashSet<String> = HashSet::new();
     loop {
         thread::sleep(Duration::from_millis(100));
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         let mut current: HashSet<String> = HashSet::new();
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
-            if !name.ends_with(".req.json") { continue; }
+            if !name.ends_with(".req.json") {
+                continue;
+            }
             current.insert(name.clone());
-            if seen.contains(&name) { continue; }
-            let Ok(txt) = fs::read_to_string(e.path()) else { continue };
-            let Ok(v) = serde_json::from_str::<Value>(&txt) else { continue };
+            if seen.contains(&name) {
+                continue;
+            }
+            let Ok(txt) = fs::read_to_string(e.path()) else {
+                continue;
+            };
+            let Ok(v) = serde_json::from_str::<Value>(&txt) else {
+                continue;
+            };
             let _ = app.emit("approval://request", &v);
             seen.insert(name);
         }

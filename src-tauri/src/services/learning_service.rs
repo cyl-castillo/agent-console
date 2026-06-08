@@ -308,8 +308,113 @@ mod tests {
         ];
         let d = build_digest(&events);
         assert!(d.contains("3 prompts"), "digest should count prompts: {d}");
-        assert!(d.contains("/deploy ×2"), "digest should rank slash-commands: {d}");
-        assert!(d.contains("fix the build"), "digest should include prompt text");
+        assert!(
+            d.contains("/deploy ×2"),
+            "digest should rank slash-commands: {d}"
+        );
+        assert!(
+            d.contains("fix the build"),
+            "digest should include prompt text"
+        );
+    }
+
+    /// True end-to-end: seed the real ledger, read it back, reflect through the
+    /// real `claude` CLI, then materialize both a memory and a skill. Ignored by
+    /// default (spawns Claude, costs tokens, needs auth). Run explicitly:
+    ///   cargo test end_to_end_reflect_and_materialize -- --ignored --nocapture
+    #[test]
+    #[ignore = "spawns real `claude`; run with --ignored"]
+    fn end_to_end_reflect_and_materialize() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        // Isolated ledger dir, and a real (empty) project dir to run `claude` in.
+        let base = std::env::temp_dir().join(format!("ac-e2e-data-{nanos}"));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let project = std::env::temp_dir().join(format!("ac-e2e-proj-{nanos}"));
+        std::fs::create_dir_all(&project).unwrap();
+        let root = project.to_string_lossy().to_string();
+
+        // 1. Seed the ledger through the real service — a clear repeated-deploy
+        //    pattern Claude should latch onto, plus an unrelated testing thread.
+        let svc = crate::services::activity_service::ActivityService::new();
+        let seed = [
+            ("deploy the backend to prod", true),
+            ("the deploy script failed, run it again", true),
+            ("deploy backend to prod once more", true),
+            ("why does the deploy keep timing out on lightsail", true),
+            ("add a unit test for the login endpoint", false),
+            ("write a test for the user service too", false),
+        ];
+        for (i, (p, is_deploy)) in seed.iter().enumerate() {
+            svc.record(
+                &root,
+                &ActivityEvent {
+                    ts: (i as i64) * 60_000,
+                    kind: "user_prompt".into(),
+                    prompt: Some((*p).into()),
+                    skill: is_deploy.then(|| "/deploy".to_string()),
+                    term_id: Some("t1".into()),
+                    session_id: None,
+                    snapshot_sha: None,
+                },
+            )
+            .unwrap();
+        }
+
+        // 2. Read back through the service, then reflect via real `claude`.
+        let events = svc.list(&root, Some(400)).unwrap();
+        assert_eq!(events.len(), 6, "ledger round-trip");
+        let result = reflect(&project, &events).expect("reflect should succeed");
+        eprintln!("\n=== events_analyzed: {} ===", result.events_analyzed);
+        eprintln!("=== raw excerpt ===\n{}\n", result.raw_excerpt);
+        for s in &result.suggestions {
+            eprintln!("- [{}] {}\n    {}", s.kind, s.title, s.rationale);
+            for e in &s.evidence {
+                eprintln!("    · {e}");
+            }
+        }
+        assert_eq!(result.events_analyzed, 6);
+        assert!(!result.suggestions.is_empty(), "expected >=1 suggestion");
+        assert!(
+            result
+                .suggestions
+                .iter()
+                .all(|s| { matches!(s.kind.as_str(), "skill" | "memory" | "friction") }),
+            "every suggestion must be a known kind"
+        );
+
+        // 3. Materialize both output paths the UI offers.
+        let mem = crate::services::memory_service::write(
+            &project,
+            "e2e-deploy.md",
+            "---\nname: e2e-deploy\ndescription: deploy runbook\nmetadata:\n  type: project\n---\n\nDeploy notes.",
+        )
+        .expect("memory write");
+        assert!(mem.exists(), "memory file written");
+        let skill = crate::services::advisor_service::create_skill(
+            &project,
+            "project",
+            "e2e-deploy-skill",
+            "---\nname: e2e-deploy-skill\ndescription: deploy\n---\n\nBody.",
+        )
+        .expect("skill create");
+        assert!(skill.exists(), "SKILL.md written");
+
+        // Cleanup: temp project (holds .claude/skills) + isolated data dir + the
+        // memory slug dir (lives under ~/.claude/projects/<slug>/memory).
+        if let Some(memory_dir) = mem.parent() {
+            if let Some(slug_dir) = memory_dir.parent() {
+                let _ = std::fs::remove_dir_all(slug_dir);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&project);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

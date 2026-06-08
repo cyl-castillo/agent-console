@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::services::proc;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +41,8 @@ pub fn create(repo: &Path, id: &str) -> AppResult<Option<Snapshot>> {
     if !add.status.success() {
         cleanup(&tmp_idx);
         return Err(AppError::Other(format!(
-            "snapshot add: {}", String::from_utf8_lossy(&add.stderr)
+            "snapshot add: {}",
+            String::from_utf8_lossy(&add.stderr)
         )));
     }
 
@@ -54,7 +55,8 @@ pub fn create(repo: &Path, id: &str) -> AppResult<Option<Snapshot>> {
     cleanup(&tmp_idx);
     if !tree_out.status.success() {
         return Err(AppError::Other(format!(
-            "write-tree: {}", String::from_utf8_lossy(&tree_out.stderr)
+            "write-tree: {}",
+            String::from_utf8_lossy(&tree_out.stderr)
         )));
     }
     let tree_sha = String::from_utf8_lossy(&tree_out.stdout).trim().to_string();
@@ -74,10 +76,13 @@ pub fn create(repo: &Path, id: &str) -> AppResult<Option<Snapshot>> {
         .output()?;
     if !commit_out.status.success() {
         return Err(AppError::Other(format!(
-            "commit-tree: {}", String::from_utf8_lossy(&commit_out.stderr)
+            "commit-tree: {}",
+            String::from_utf8_lossy(&commit_out.stderr)
         )));
     }
-    let commit_sha = String::from_utf8_lossy(&commit_out.stdout).trim().to_string();
+    let commit_sha = String::from_utf8_lossy(&commit_out.stdout)
+        .trim()
+        .to_string();
 
     // Pin via ref so GC won't collect it.
     let _ = proc::command("git")
@@ -85,7 +90,10 @@ pub fn create(repo: &Path, id: &str) -> AppResult<Option<Snapshot>> {
         .current_dir(repo)
         .output()?;
 
-    Ok(Some(Snapshot { id: id.to_string(), commit_sha }))
+    Ok(Some(Snapshot {
+        id: id.to_string(),
+        commit_sha,
+    }))
 }
 
 /// Force working tree + index to match this snapshot's tree. Doesn't move HEAD.
@@ -97,7 +105,8 @@ pub fn restore(repo: &Path, commit_sha: &str) -> AppResult<()> {
         .output()?;
     if !tree.status.success() {
         return Err(AppError::Other(format!(
-            "snapshot not found: {}", String::from_utf8_lossy(&tree.stderr)
+            "snapshot not found: {}",
+            String::from_utf8_lossy(&tree.stderr)
         )));
     }
     let tree_sha = String::from_utf8_lossy(&tree.stdout).trim().to_string();
@@ -108,7 +117,8 @@ pub fn restore(repo: &Path, commit_sha: &str) -> AppResult<()> {
         .output()?;
     if !out.status.success() {
         return Err(AppError::Other(format!(
-            "read-tree restore: {}", String::from_utf8_lossy(&out.stderr)
+            "read-tree restore: {}",
+            String::from_utf8_lossy(&out.stderr)
         )));
     }
     Ok(())
@@ -144,6 +154,8 @@ fn head_sha(repo: &Path) -> Option<String> {
         .current_dir(repo)
         .output()
         .ok()?;
-    if !out.status.success() { return None; }
+    if !out.status.success() {
+        return None;
+    }
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }

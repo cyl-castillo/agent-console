@@ -26,8 +26,19 @@ pub struct FileNode {
 
 /// Folders we never descend into when scanning a repo.
 const IGNORED_DIRS: &[&str] = &[
-    ".git", "node_modules", "target", "dist", "build", ".next", ".nuxt",
-    ".venv", "venv", "__pycache__", ".idea", ".vscode", ".gradle",
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".idea",
+    ".vscode",
+    ".gradle",
 ];
 
 pub fn open_project(path: &Path) -> AppResult<Project> {
@@ -74,7 +85,12 @@ fn build_node(path: &Path, depth: usize) -> AppResult<FileNode> {
 /// re-`stat()` the path. On Windows every `stat`/`read_dir` is intercepted by
 /// Defender, so the previous double-stat (one in the loop, one on recursion)
 /// roughly doubled the cost of the project-open tree read.
-fn build_node_known(path: PathBuf, name: String, is_dir: bool, depth: usize) -> AppResult<FileNode> {
+fn build_node_known(
+    path: PathBuf,
+    name: String,
+    is_dir: bool,
+    depth: usize,
+) -> AppResult<FileNode> {
     let children = if is_dir && depth > 0 {
         let mut entries: Vec<FileNode> = Vec::new();
         let read = std::fs::read_dir(&path)?;
@@ -90,7 +106,12 @@ fn build_node_known(path: PathBuf, name: String, is_dir: bool, depth: usize) -> 
                 continue;
             }
 
-            entries.push(build_node_known(entry_path, entry_name, child_is_dir, depth - 1)?);
+            entries.push(build_node_known(
+                entry_path,
+                entry_name,
+                child_is_dir,
+                depth - 1,
+            )?);
         }
         // Dirs first, then alphabetic.
         entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
@@ -104,7 +125,12 @@ fn build_node_known(path: PathBuf, name: String, is_dir: bool, depth: usize) -> 
         None
     };
 
-    Ok(FileNode { name, path, is_dir, children })
+    Ok(FileNode {
+        name,
+        path,
+        is_dir,
+        children,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,7 +161,9 @@ pub fn workspace_context(root: &Path) -> AppResult<WorkspaceContext> {
             !(e.file_type().is_dir() && IGNORED_DIRS.contains(&name.as_ref()))
         });
     for entry in walker.flatten().take(20_000) {
-        if entry.file_type().is_file() { file_count += 1; }
+        if entry.file_type().is_file() {
+            file_count += 1;
+        }
     }
 
     let package_scripts = read_package_scripts(root);
@@ -155,23 +183,40 @@ pub fn workspace_context(root: &Path) -> AppResult<WorkspaceContext> {
 
 fn read_package_scripts(root: &Path) -> Vec<String> {
     let pkg = root.join("package.json");
-    if !pkg.exists() { return Vec::new(); }
-    let Ok(txt) = std::fs::read_to_string(&pkg) else { return Vec::new() };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else { return Vec::new() };
-    let Some(scripts) = v.get("scripts").and_then(|s| s.as_object()) else { return Vec::new() };
+    if !pkg.exists() {
+        return Vec::new();
+    }
+    let Ok(txt) = std::fs::read_to_string(&pkg) else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) else {
+        return Vec::new();
+    };
+    let Some(scripts) = v.get("scripts").and_then(|s| s.as_object()) else {
+        return Vec::new();
+    };
     scripts.keys().cloned().collect()
 }
 
 fn detect_entry_points(root: &Path) -> Vec<String> {
     let candidates = [
-        "src/main.rs", "src/lib.rs",
-        "src/index.ts", "src/index.tsx", "src/main.ts", "src/main.tsx",
-        "src/index.js", "src/main.js",
-        "main.py", "app.py", "src/main.py",
-        "main.go", "cmd/main.go",
+        "src/main.rs",
+        "src/lib.rs",
+        "src/index.ts",
+        "src/index.tsx",
+        "src/main.ts",
+        "src/main.tsx",
+        "src/index.js",
+        "src/main.js",
+        "main.py",
+        "app.py",
+        "src/main.py",
+        "main.go",
+        "cmd/main.go",
         "src/main/java", // dir, indicates Java entry tree
     ];
-    candidates.iter()
+    candidates
+        .iter()
         .filter(|p| root.join(p).exists())
         .map(|p| (*p).to_string())
         .collect()
@@ -180,7 +225,9 @@ fn detect_entry_points(root: &Path) -> Vec<String> {
 fn read_readme_preview(root: &Path) -> Option<String> {
     for name in ["README.md", "README.MD", "Readme.md", "readme.md", "README"] {
         let p = root.join(name);
-        if !p.exists() { continue; }
+        if !p.exists() {
+            continue;
+        }
         let txt = std::fs::read_to_string(&p).ok()?;
         let trimmed: String = txt
             .lines()
@@ -191,7 +238,9 @@ fn read_readme_preview(root: &Path) -> Option<String> {
             .chars()
             .take(280)
             .collect();
-        if !trimmed.is_empty() { return Some(trimmed); }
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
     }
     None
 }
@@ -201,7 +250,8 @@ fn detect_stack(root: &Path) -> (Option<String>, Option<String>) {
     let has = |f: &str| root.join(f).exists();
 
     if has("package.json") {
-        let framework = if has("next.config.js") || has("next.config.ts") || has("next.config.mjs") {
+        let framework = if has("next.config.js") || has("next.config.ts") || has("next.config.mjs")
+        {
             Some("next".into())
         } else if has("vite.config.ts") || has("vite.config.js") {
             Some("vite".into())
@@ -218,7 +268,11 @@ fn detect_stack(root: &Path) -> (Option<String>, Option<String>) {
         return (Some("java".into()), Some("maven".into()));
     }
     if has("build.gradle") || has("build.gradle.kts") {
-        let lang = if has("build.gradle.kts") { "kotlin" } else { "java" };
+        let lang = if has("build.gradle.kts") {
+            "kotlin"
+        } else {
+            "java"
+        };
         return (Some(lang.into()), Some("gradle".into()));
     }
     if has("Cargo.toml") {

@@ -28,9 +28,10 @@ pub async fn learning_reflect(
     limit: Option<usize>,
 ) -> AppResult<ReflectionResult> {
     let root = project_root(&state)?;
-    let events = state
-        .activity
-        .list(&root.to_string_lossy(), Some(limit.unwrap_or(DEFAULT_WINDOW)))?;
+    let events = state.activity.list(
+        &root.to_string_lossy(),
+        Some(limit.unwrap_or(DEFAULT_WINDOW)),
+    )?;
     // Offload the blocking `claude -p` call so we don't stall the runtime.
     tokio::task::spawn_blocking(move || learning_service::reflect(&root, &events))
         .await

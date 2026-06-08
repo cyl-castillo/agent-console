@@ -50,7 +50,9 @@ pub struct ActivityService {
 
 impl ActivityService {
     pub fn new() -> Self {
-        Self { lock: Mutex::new(()) }
+        Self {
+            lock: Mutex::new(()),
+        }
     }
 
     fn dir() -> AppResult<PathBuf> {
@@ -172,9 +174,12 @@ mod tests {
     #[test]
     fn ledger_persists_and_isolates_by_project() {
         let _env = crate::test_support::lock_env();
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let base = std::env::temp_dir()
-            .join(format!("ac-activity-test-{}-{}", std::process::id(), nanos));
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-activity-test-{}-{}", std::process::id(), nanos));
         std::fs::create_dir_all(&base).unwrap();
         std::env::set_var("XDG_DATA_HOME", &base);
 
@@ -193,7 +198,11 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].prompt.as_deref(), Some("first"));
         assert_eq!(got[1].prompt.as_deref(), Some("second"));
-        assert_eq!(svc.list(b, None).unwrap().len(), 1, "projects must not bleed");
+        assert_eq!(
+            svc.list(b, None).unwrap().len(),
+            1,
+            "projects must not bleed"
+        );
 
         // 3. limit returns the most recent N, still chronological.
         svc.record(a, &ev(3, "third")).unwrap();
@@ -207,7 +216,11 @@ mod tests {
         let mut f = OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(b"{ this is half a line").unwrap();
         drop(f);
-        assert_eq!(svc.list(a, None).unwrap().len(), 3, "torn tail line is ignored");
+        assert_eq!(
+            svc.list(a, None).unwrap().len(),
+            3,
+            "torn tail line is ignored"
+        );
 
         let _ = std::fs::remove_dir_all(&base);
     }
