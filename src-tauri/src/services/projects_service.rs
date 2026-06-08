@@ -34,15 +34,23 @@ fn recents_path() -> AppResult<PathBuf> {
 }
 
 pub fn load() -> Vec<RecentProject> {
-    let Ok(path) = recents_path() else { return Vec::new() };
-    let Ok(txt) = fs::read_to_string(&path) else { return Vec::new() };
+    let Ok(path) = recents_path() else {
+        return Vec::new();
+    };
+    let Ok(txt) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
     let file: RecentsFile = serde_json::from_str(&txt).unwrap_or_default();
     // Drop entries whose folder no longer exists.
-    file.entries.into_iter().filter(|e| Path::new(&e.path).is_dir()).collect()
+    file.entries
+        .into_iter()
+        .filter(|e| Path::new(&e.path).is_dir())
+        .collect()
 }
 
 pub fn remember(path: &Path) -> AppResult<()> {
-    let name = path.file_name()
+    let name = path
+        .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| path.display().to_string());
     let now = std::time::SystemTime::now()

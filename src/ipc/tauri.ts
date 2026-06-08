@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  ActivityEvent,
   AdvisorAnalysisResult,
   BranchInfo,
   ContextFileStat, ContextStatus,
@@ -12,6 +13,7 @@ import type {
   MemoryEntry, PermissionsSnapshot,
   PersistedRoom, PersistedSession, Project, RecentProject,
   RoomSummary, RoundtableConfig,
+  ReflectionResult,
   SessionUsage, Skill, StoredRule, VaultEntryView,
   WorkspaceContext,
 } from "../types/domain";
@@ -134,6 +136,15 @@ export const ipc = {
     skillMdContent: string,
   ) =>
     invoke<string>("advisor_create_skill", { scope, name, skillMdContent }),
+
+  learningReflect: (limit?: number) =>
+    invoke<ReflectionResult>("learning_reflect", { limit: limit ?? null }),
+  activityList: (limit?: number) =>
+    invoke<ActivityEvent[]>("activity_list", { limit: limit ?? null }),
+  learningCreateSkill: (name: string, skillMdContent: string) =>
+    invoke<string>("learning_create_skill", { name, skillMdContent }),
+  learningSaveMemory: (name: string, content: string) =>
+    invoke<string>("learning_save_memory", { name, content }),
 
   roundtableStart: (config: RoundtableConfig) =>
     invoke<string>("roundtable_start", { config }),

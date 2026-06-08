@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::services::proc;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -48,7 +48,11 @@ pub fn status(repo: &Path) -> AppResult<GitStatus> {
         .current_dir(repo)
         .output()?;
     if !inside.status.success() {
-        return Ok(GitStatus { is_repo: false, branch: None, changes: Vec::new() });
+        return Ok(GitStatus {
+            is_repo: false,
+            branch: None,
+            changes: Vec::new(),
+        });
     }
 
     let branch_out = proc::command("git")
@@ -56,8 +60,14 @@ pub fn status(repo: &Path) -> AppResult<GitStatus> {
         .current_dir(repo)
         .output()?;
     let branch = if branch_out.status.success() {
-        let s = String::from_utf8_lossy(&branch_out.stdout).trim().to_string();
-        if s.is_empty() { None } else { Some(s) }
+        let s = String::from_utf8_lossy(&branch_out.stdout)
+            .trim()
+            .to_string();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     } else {
         None
     };
@@ -74,16 +84,28 @@ pub fn status(repo: &Path) -> AppResult<GitStatus> {
     let raw = String::from_utf8_lossy(&status_out.stdout);
     let mut changes = Vec::new();
     for line in raw.lines() {
-        if line.len() < 3 { continue; }
+        if line.len() < 3 {
+            continue;
+        }
         let code = line[..2].to_string();
         let path = line[3..].to_string();
         let staged = !code.starts_with(' ') && !code.starts_with('?');
         let unstaged = !code[1..].starts_with(' ') && !code.starts_with('?');
         let untracked = code == "??";
-        changes.push(GitFileChange { path, code, staged, unstaged, untracked });
+        changes.push(GitFileChange {
+            path,
+            code,
+            staged,
+            unstaged,
+            untracked,
+        });
     }
 
-    Ok(GitStatus { is_repo: true, branch, changes })
+    Ok(GitStatus {
+        is_repo: true,
+        branch,
+        changes,
+    })
 }
 
 /// Unified diff for a single file. Falls back to a synthetic diff for
@@ -203,7 +225,9 @@ pub fn file_log(repo: &Path, file: &str, limit: u32) -> AppResult<Vec<GitCommitI
     let mut commits = Vec::new();
     for line in raw.lines() {
         let parts: Vec<&str> = line.split(SEP).collect();
-        if parts.len() != 5 { continue; }
+        if parts.len() != 5 {
+            continue;
+        }
         let date_ms = parts[4].parse::<i64>().unwrap_or(0) * 1000;
         commits.push(GitCommitInfo {
             sha: parts[0].to_string(),
@@ -254,10 +278,16 @@ pub fn branches(repo: &Path) -> AppResult<Vec<BranchInfo>> {
     let mut result = Vec::new();
     for line in raw.lines() {
         let parts: Vec<&str> = line.splitn(5, SEP).collect();
-        if parts.len() < 5 { continue; }
+        if parts.len() < 5 {
+            continue;
+        }
         let current = parts[0].trim() == "*";
         let name = parts[1].to_string();
-        let upstream = if parts[2].is_empty() { None } else { Some(parts[2].to_string()) };
+        let upstream = if parts[2].is_empty() {
+            None
+        } else {
+            Some(parts[2].to_string())
+        };
         let last_commit_ms = parts[3].parse::<i64>().unwrap_or(0) * 1000;
         let last_subject = parts[4].to_string();
 
@@ -268,7 +298,13 @@ pub fn branches(repo: &Path) -> AppResult<Vec<BranchInfo>> {
         };
 
         result.push(BranchInfo {
-            name, current, upstream, ahead, behind, last_commit_ms, last_subject,
+            name,
+            current,
+            upstream,
+            ahead,
+            behind,
+            last_commit_ms,
+            last_subject,
         });
     }
     Ok(result)
@@ -284,10 +320,17 @@ fn ahead_behind(repo: &Path, branch: &str, upstream: &str) -> AppResult<(u32, u3
         ])
         .current_dir(repo)
         .output()?;
-    if !out.status.success() { return Ok((0, 0)); }
+    if !out.status.success() {
+        return Ok((0, 0));
+    }
     let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let nums: Vec<u32> = raw.split_whitespace().filter_map(|s| s.parse().ok()).collect();
-    if nums.len() != 2 { return Ok((0, 0)); }
+    let nums: Vec<u32> = raw
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    if nums.len() != 2 {
+        return Ok((0, 0));
+    }
     // Left side = upstream (behind), right side = branch (ahead).
     Ok((nums[1], nums[0]))
 }
@@ -357,7 +400,9 @@ pub fn amend_commit(repo: &Path, message: &str) -> AppResult<String> {
     if !out.status.success() {
         let msg = String::from_utf8_lossy(&out.stderr).to_string();
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        return Err(AppError::Other(format!("git commit --amend failed: {msg}{stdout}")));
+        return Err(AppError::Other(format!(
+            "git commit --amend failed: {msg}{stdout}"
+        )));
     }
     let sha_out = proc::command("git")
         .args(["rev-parse", "HEAD"])

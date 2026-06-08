@@ -7,7 +7,13 @@ use crate::services::memory_service::{self, MemoryEntry};
 use crate::state::AppState;
 
 fn project_root(state: &AppState) -> Option<std::path::PathBuf> {
-    state.inner.lock().unwrap().project.as_ref().map(|p| p.root.clone())
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .project
+        .as_ref()
+        .map(|p| p.root.clone())
 }
 
 #[tauri::command]
@@ -49,8 +55,8 @@ pub fn context_open_md_externally(
 
 #[tauri::command]
 pub fn context_generate_starter(state: State<'_, AppState>) -> AppResult<String> {
-    let root = project_root(&state)
-        .ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
+    let root =
+        project_root(&state).ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
     context_service::generate_starter(&root)
 }
 
@@ -64,14 +70,14 @@ pub fn memory_list(state: State<'_, AppState>) -> AppResult<Vec<MemoryEntry>> {
 
 #[tauri::command]
 pub fn memory_read(state: State<'_, AppState>, name: String) -> AppResult<String> {
-    let root = project_root(&state)
-        .ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
+    let root =
+        project_root(&state).ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
     memory_service::read(&root, &name)
 }
 
 #[tauri::command]
 pub fn memory_delete(state: State<'_, AppState>, name: String) -> AppResult<()> {
-    let root = project_root(&state)
-        .ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
+    let root =
+        project_root(&state).ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
     memory_service::delete(&root, &name)
 }

@@ -1,9 +1,7 @@
 use tauri::State;
 
 use crate::error::AppResult;
-use crate::services::permissions_service::{
-    self, Effect, PermissionsSnapshot, Scope, StoredRule,
-};
+use crate::services::permissions_service::{self, Effect, PermissionsSnapshot, Scope, StoredRule};
 use crate::state::AppState;
 
 #[tauri::command]

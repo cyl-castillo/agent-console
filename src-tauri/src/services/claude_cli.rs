@@ -30,13 +30,24 @@ struct AgentBin {
     env_override: &'static str,
 }
 
-const CLAUDE: AgentBin = AgentBin { base: "claude", env_override: "AGENT_CONSOLE_CLAUDE_BIN" };
-const CODEX: AgentBin = AgentBin { base: "codex", env_override: "AGENT_CONSOLE_CODEX_BIN" };
+const CLAUDE: AgentBin = AgentBin {
+    base: "claude",
+    env_override: "AGENT_CONSOLE_CLAUDE_BIN",
+};
+const CODEX: AgentBin = AgentBin {
+    base: "codex",
+    env_override: "AGENT_CONSOLE_CODEX_BIN",
+};
 
 /// Filenames to probe for `base` in each directory (Windows ships shims).
 #[cfg(windows)]
 fn names_for(base: &str) -> Vec<String> {
-    vec![format!("{base}.cmd"), format!("{base}.exe"), format!("{base}.bat"), base.to_string()]
+    vec![
+        format!("{base}.cmd"),
+        format!("{base}.exe"),
+        format!("{base}.bat"),
+        base.to_string(),
+    ]
 }
 #[cfg(not(windows))]
 fn names_for(base: &str) -> Vec<String> {
@@ -147,7 +158,9 @@ fn login_shell_which(base: &str) -> Option<String> {
     // profile), so we also try zsh (mac default) and bash explicitly.
     let mut shells: Vec<String> = Vec::new();
     if let Ok(s) = std::env::var("SHELL") {
-        if !s.trim().is_empty() { shells.push(s); }
+        if !s.trim().is_empty() {
+            shells.push(s);
+        }
     }
     for s in ["/bin/zsh", "/bin/bash", "/bin/sh"] {
         if !shells.iter().any(|x| x == s) && Path::new(s).exists() {
@@ -165,8 +178,12 @@ fn login_shell_which(base: &str) -> Option<String> {
             .arg(format!("command -v {base}"))
             .stdin(Stdio::null())
             .output()
-        else { continue };
-        if !output.status.success() { continue; }
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
         // Take the last line that is an actual file — rc files may print banners.
         let stdout = String::from_utf8_lossy(&output.stdout);
         if let Some(p) = stdout
@@ -195,7 +212,7 @@ fn common_locations(base: &str) -> Option<String> {
         candidates.push(h.join(format!(".yarn/bin/{base}")));
         candidates.push(h.join(format!(".volta/bin/{base}"))); // volta
         candidates.push(h.join(format!(".asdf/shims/{base}"))); // asdf
-        // nvm/fnm install node per-version; scan for the newest that has it.
+                                                                // nvm/fnm install node per-version; scan for the newest that has it.
         if let Some(p) = scan_version_manager(&h.join(".nvm/versions/node"), base) {
             candidates.push(p);
         }
@@ -236,7 +253,10 @@ fn scan_version_manager(root: &Path, base: &str) -> Option<std::path::PathBuf> {
     versions.sort();
     for ver in versions.into_iter().rev() {
         // fnm nests an `installation` dir; nvm puts bin directly under the version.
-        for bin in [ver.join(format!("bin/{base}")), ver.join(format!("installation/bin/{base}"))] {
+        for bin in [
+            ver.join(format!("bin/{base}")),
+            ver.join(format!("installation/bin/{base}")),
+        ] {
             if bin.is_file() {
                 return Some(bin);
             }

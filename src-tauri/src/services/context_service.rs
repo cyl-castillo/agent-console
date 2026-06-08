@@ -38,9 +38,17 @@ pub fn status(project_root: Option<&Path>) -> AppResult<ContextStatus> {
     let global_claude_md = file_stat(&global);
     let memory_dir = match project_root {
         Some(root) => dir_stat(&memory_dir_for(root)?),
-        None => DirStat { path: String::new(), exists: false, entry_count: 0 },
+        None => DirStat {
+            path: String::new(),
+            exists: false,
+            entry_count: 0,
+        },
     };
-    Ok(ContextStatus { project_claude_md, global_claude_md, memory_dir })
+    Ok(ContextStatus {
+        project_claude_md,
+        global_claude_md,
+        memory_dir,
+    })
 }
 
 pub fn read_md(project_root: Option<&Path>, scope: &str) -> AppResult<String> {
@@ -101,7 +109,9 @@ fn render_starter(ctx: &WorkspaceContext) -> String {
 
     let mut md = String::new();
     md.push_str(&format!("# {name}\n\n"));
-    md.push_str("Project-level context for Claude Code. Loaded automatically into every session.\n\n");
+    md.push_str(
+        "Project-level context for Claude Code. Loaded automatically into every session.\n\n",
+    );
 
     md.push_str("## Stack\n\n");
     match (&ctx.language, &ctx.framework) {
@@ -129,7 +139,9 @@ fn render_starter(ctx: &WorkspaceContext) -> String {
     }
 
     md.push_str("## Conventions\n\n");
-    md.push_str("- _(describe the rules you want Claude to follow: tests, commit style, etc.)_\n\n");
+    md.push_str(
+        "- _(describe the rules you want Claude to follow: tests, commit style, etc.)_\n\n",
+    );
 
     md.push_str("## Avoid\n\n");
     md.push_str("- _(list things Claude should NOT do in this project)_\n");
@@ -140,8 +152,9 @@ fn render_starter(ctx: &WorkspaceContext) -> String {
 fn resolve_md(project_root: Option<&Path>, scope: &str) -> AppResult<PathBuf> {
     match scope {
         "project" => {
-            let root = project_root
-                .ok_or_else(|| AppError::InvalidArgument("project scope requires an open project".into()))?;
+            let root = project_root.ok_or_else(|| {
+                AppError::InvalidArgument("project scope requires an open project".into())
+            })?;
             Ok(root.join("CLAUDE.md"))
         }
         "global" => global_claude_md_path(),
@@ -160,7 +173,9 @@ fn global_claude_md_path() -> AppResult<PathBuf> {
 /// per-project state: replace each `/` (or `\` on Windows) with `-`. The
 /// leading separator becomes a leading `-` too.
 pub fn memory_dir_for(project_root: &Path) -> AppResult<PathBuf> {
-    let abs = project_root.canonicalize().unwrap_or_else(|_| project_root.to_path_buf());
+    let abs = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
     let s = abs.to_string_lossy().replace(['/', '\\'], "-");
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home dir".into()))?;
     Ok(home.join(".claude").join("projects").join(s).join("memory"))
@@ -169,7 +184,8 @@ pub fn memory_dir_for(project_root: &Path) -> AppResult<PathBuf> {
 fn file_stat(path: &Path) -> FileStat {
     if let Ok(meta) = fs::metadata(path) {
         let size_bytes = meta.len();
-        let modified_ms = meta.modified()
+        let modified_ms = meta
+            .modified()
             .ok()
             .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64)
@@ -195,11 +211,15 @@ fn dir_stat(path: &Path) -> DirStat {
     let entry_count = if exists {
         fs::read_dir(path)
             .ok()
-            .map(|r| r.flatten().filter(|e| {
-                e.file_name().to_string_lossy().ends_with(".md")
-            }).count() as u32)
+            .map(|r| {
+                r.flatten()
+                    .filter(|e| e.file_name().to_string_lossy().ends_with(".md"))
+                    .count() as u32
+            })
             .unwrap_or(0)
-    } else { 0 };
+    } else {
+        0
+    };
     DirStat {
         path: path.to_string_lossy().to_string(),
         exists,

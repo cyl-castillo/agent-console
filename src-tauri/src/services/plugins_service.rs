@@ -54,12 +54,19 @@ fn claude_command(args: &[&str]) -> Command {
 /// Run `claude <args>` and return stdout on success, or a useful error.
 fn run_claude(args: &[&str]) -> AppResult<String> {
     let output = claude_command(args).output().map_err(|e| {
-        AppError::Other(format!("failed to run `claude {}`: {e}. Is it on PATH?", args.join(" ")))
+        AppError::Other(format!(
+            "failed to run `claude {}`: {e}. Is it on PATH?",
+            args.join(" ")
+        ))
     })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = if !stderr.trim().is_empty() { stderr } else { stdout };
+        let detail = if !stderr.trim().is_empty() {
+            stderr
+        } else {
+            stdout
+        };
         return Err(AppError::Other(format!(
             "claude {} failed: {}",
             args.join(" "),
@@ -166,16 +173,29 @@ pub fn list_available() -> AvailableSnapshot {
 
     let cli = match run_claude(&["plugin", "marketplace", "list", "--json"]) {
         Ok(s) => s,
-        Err(_) => return AvailableSnapshot { marketplaces, plugins },
+        Err(_) => {
+            return AvailableSnapshot {
+                marketplaces,
+                plugins,
+            }
+        }
     };
     let configured: Vec<CliMarketplace> = serde_json::from_str(cli.trim()).unwrap_or_default();
 
     for mk in configured {
         marketplaces.push(mk.name.clone());
-        let Some(loc) = mk.install_location else { continue; };
-        let manifest_path = Path::new(&loc).join(".claude-plugin").join("marketplace.json");
-        let Ok(text) = fs::read_to_string(&manifest_path) else { continue; };
-        let Ok(manifest) = serde_json::from_str::<MarketplaceManifest>(&text) else { continue; };
+        let Some(loc) = mk.install_location else {
+            continue;
+        };
+        let manifest_path = Path::new(&loc)
+            .join(".claude-plugin")
+            .join("marketplace.json");
+        let Ok(text) = fs::read_to_string(&manifest_path) else {
+            continue;
+        };
+        let Ok(manifest) = serde_json::from_str::<MarketplaceManifest>(&text) else {
+            continue;
+        };
         for p in manifest.plugins {
             plugins.push(MarketplacePlugin {
                 install_id: format!("{}@{}", p.name, mk.name),
@@ -190,7 +210,10 @@ pub fn list_available() -> AvailableSnapshot {
     }
 
     plugins.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    AvailableSnapshot { marketplaces, plugins }
+    AvailableSnapshot {
+        marketplaces,
+        plugins,
+    }
 }
 
 /// Install a plugin via `claude plugin install <id> --scope <scope>`.
@@ -205,7 +228,9 @@ pub fn install_plugin(install_id: &str, scope: &str) -> AppResult<String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '/'))
     {
-        return Err(AppError::InvalidArgument(format!("invalid plugin id: {install_id}")));
+        return Err(AppError::InvalidArgument(format!(
+            "invalid plugin id: {install_id}"
+        )));
     }
     let scope = match scope {
         "user" | "project" | "local" => scope,

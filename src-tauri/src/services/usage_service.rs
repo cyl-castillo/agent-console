@@ -71,9 +71,16 @@ pub fn read_usage(project_root: &Path, session_id: &str) -> AppResult<Option<Usa
         if !line.contains("\"usage\"") {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-        let Some(u) = v.get("message").and_then(|m| m.get("usage")).or_else(|| v.get("usage"))
-        else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let Some(u) = v
+            .get("message")
+            .and_then(|m| m.get("usage"))
+            .or_else(|| v.get("usage"))
+        else {
+            continue;
+        };
 
         let field = |k: &str| u.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
         let input = field("input_tokens");

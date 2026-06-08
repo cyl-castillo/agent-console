@@ -20,10 +20,7 @@ pub fn feedback_context(state: State<'_, AppState>) -> FeedbackContext {
 }
 
 #[tauri::command]
-pub fn feedback_submit(
-    input: FeedbackInput,
-    state: State<'_, AppState>,
-) -> AppResult<String> {
+pub fn feedback_submit(input: FeedbackInput, state: State<'_, AppState>) -> AppResult<String> {
     let ctx = {
         let s = state.inner.lock().unwrap();
         let project = s.project.as_ref();

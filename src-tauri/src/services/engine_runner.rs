@@ -134,9 +134,9 @@ impl EngineRunner for ClaudeRunner {
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let mut cmd = claude_cli::command(&arg_refs);
         cmd.current_dir(ctx.cwd);
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?"))
+        })?;
 
         let stdout = child
             .stdout
@@ -163,7 +163,10 @@ impl EngineRunner for ClaudeRunner {
                     if v.get("subtype").and_then(Value::as_str) == Some("init")
                         && session_id.is_none()
                     {
-                        session_id = v.get("session_id").and_then(Value::as_str).map(str::to_string);
+                        session_id = v
+                            .get("session_id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
                     }
                 }
                 Some("assistant") => {
@@ -191,17 +194,16 @@ impl EngineRunner for ClaudeRunner {
                 }
                 Some("stream_event") => {
                     let ev = v.get("event");
-                    let is_text_delta = ev
-                        .and_then(|e| e.get("type"))
-                        .and_then(Value::as_str)
+                    let is_text_delta = ev.and_then(|e| e.get("type")).and_then(Value::as_str)
                         == Some("content_block_delta")
                         && ev
                             .and_then(|e| e.pointer("/delta/type"))
                             .and_then(Value::as_str)
                             == Some("text_delta");
                     if is_text_delta {
-                        if let Some(t) =
-                            ev.and_then(|e| e.pointer("/delta/text")).and_then(Value::as_str)
+                        if let Some(t) = ev
+                            .and_then(|e| e.pointer("/delta/text"))
+                            .and_then(Value::as_str)
                         {
                             if !t.is_empty() {
                                 on_activity("text", "", t);
@@ -210,11 +212,18 @@ impl EngineRunner for ClaudeRunner {
                     }
                 }
                 Some("result") => {
-                    final_text = v.get("result").and_then(Value::as_str).unwrap_or("").to_string();
+                    final_text = v
+                        .get("result")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
                     if let Some(sid) = v.get("session_id").and_then(Value::as_str) {
                         session_id = Some(sid.to_string());
                     }
-                    cost_usd = v.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0);
+                    cost_usd = v
+                        .get("total_cost_usd")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.0);
                     tokens = v.get("usage").map(claude_sum_usage).unwrap_or(0);
                 }
                 _ => {}
@@ -222,7 +231,12 @@ impl EngineRunner for ClaudeRunner {
         }
 
         finish(child.wait(), err_handle, "claude")?;
-        Ok(TurnOutput { text: final_text, session_id, tokens, cost_usd })
+        Ok(TurnOutput {
+            text: final_text,
+            session_id,
+            tokens,
+            cost_usd,
+        })
     }
 }
 
@@ -236,9 +250,9 @@ impl EngineRunner for CodexRunner {
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let mut cmd = claude_cli::codex_command_with_stdin(&arg_refs);
         cmd.current_dir(ctx.cwd);
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| AppError::Other(format!("failed to spawn `codex`: {e}. Is it on PATH?")))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            AppError::Other(format!("failed to spawn `codex`: {e}. Is it on PATH?"))
+        })?;
 
         let stdout = child
             .stdout
@@ -273,8 +287,10 @@ impl EngineRunner for CodexRunner {
             match v.get("type").and_then(Value::as_str) {
                 Some("thread.started") => {
                     if session_id.is_none() {
-                        session_id =
-                            v.get("thread_id").and_then(Value::as_str).map(str::to_string);
+                        session_id = v
+                            .get("thread_id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
                     }
                 }
                 // `item.started` is Codex's only live pulse (no token deltas):
@@ -283,8 +299,7 @@ impl EngineRunner for CodexRunner {
                 Some("item.started") => {
                     if let Some(item) = v.get("item") {
                         if item.get("type").and_then(Value::as_str) == Some("command_execution") {
-                            let cmd_str =
-                                item.get("command").and_then(Value::as_str).unwrap_or("");
+                            let cmd_str = item.get("command").and_then(Value::as_str).unwrap_or("");
                             on_activity("tool", "shell", &truncate(cmd_str, 120));
                         }
                     }
@@ -321,7 +336,12 @@ impl EngineRunner for CodexRunner {
 
         finish(child.wait(), err_handle, "codex")?;
         // Codex does not report a dollar cost — only token usage.
-        Ok(TurnOutput { text: final_text, session_id, tokens, cost_usd: 0.0 })
+        Ok(TurnOutput {
+            text: final_text,
+            session_id,
+            tokens,
+            cost_usd: 0.0,
+        })
     }
 }
 
@@ -368,7 +388,9 @@ fn codex_exec_args(ctx: &RunCtx) -> Vec<String> {
 
 /// Drain a child's stderr on its own thread so a chatty stream can't fill the
 /// pipe buffer and deadlock the child.
-fn drain_stderr(stderr: Option<std::process::ChildStderr>) -> Option<std::thread::JoinHandle<String>> {
+fn drain_stderr(
+    stderr: Option<std::process::ChildStderr>,
+) -> Option<std::thread::JoinHandle<String>> {
     stderr.map(|mut e| {
         std::thread::spawn(move || {
             let mut s = String::new();
@@ -399,10 +421,14 @@ fn finish(
 /// resumed turn re-reads the whole cached prompt (huge yet near-free), so
 /// counting it inflates the total ~10-20x and trips the budget early.
 fn claude_sum_usage(u: &Value) -> u64 {
-    ["input_tokens", "output_tokens", "cache_creation_input_tokens"]
-        .iter()
-        .filter_map(|k| u.get(*k).and_then(Value::as_u64))
-        .sum()
+    [
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+    ]
+    .iter()
+    .filter_map(|k| u.get(*k).and_then(Value::as_u64))
+    .sum()
 }
 
 /// Real new tokens in a Codex turn. Excludes `cached_input_tokens` for the same
@@ -416,7 +442,9 @@ fn codex_sum_usage(u: &Value) -> u64 {
 
 /// A compact one-line summary of a tool call's input for the activity feed.
 pub(crate) fn summarize_tool_input(name: &str, input: Option<&Value>) -> String {
-    let Some(input) = input else { return String::new() };
+    let Some(input) = input else {
+        return String::new();
+    };
     let pick = |key: &str| input.get(key).and_then(Value::as_str).map(str::to_string);
     let raw = match name {
         "Read" | "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => pick("file_path")
@@ -520,7 +548,9 @@ mod tests {
 
         assert_eq!(args.last().map(String::as_str), Some("-"));
         assert!(!args.iter().any(|arg| arg == prompt));
-        assert!(args.windows(3).any(|w| w == ["exec", "resume", "thread-123"]));
+        assert!(args
+            .windows(3)
+            .any(|w| w == ["exec", "resume", "thread-123"]));
         assert!(!args.iter().any(|arg| arg == "-s"));
     }
 
@@ -543,13 +573,25 @@ mod tests {
         let sink = |kind: &str, _label: &str, _text: &str| {
             activity_kinds.borrow_mut().push(kind.to_string());
         };
-        let out = CodexRunner.run(&ctx, &sink).expect("codex turn should succeed");
+        let out = CodexRunner
+            .run(&ctx, &sink)
+            .expect("codex turn should succeed");
         eprintln!(
             "text={:?} session_id={:?} tokens={} kinds={:?}",
-            out.text, out.session_id, out.tokens, activity_kinds.borrow()
+            out.text,
+            out.session_id,
+            out.tokens,
+            activity_kinds.borrow()
         );
-        assert!(out.text.to_uppercase().contains("PONG"), "got: {:?}", out.text);
-        assert!(out.session_id.is_some(), "should capture a resume thread id");
+        assert!(
+            out.text.to_uppercase().contains("PONG"),
+            "got: {:?}",
+            out.text
+        );
+        assert!(
+            out.session_id.is_some(),
+            "should capture a resume thread id"
+        );
         assert!(out.tokens > 0, "should report token usage");
         assert_eq!(out.cost_usd, 0.0, "codex reports no dollar cost");
     }

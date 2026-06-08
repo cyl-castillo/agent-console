@@ -20,7 +20,11 @@ pub struct FileContent {
 }
 
 #[tauri::command]
-pub fn open_project(path: String, app: AppHandle, state: State<'_, AppState>) -> AppResult<Project> {
+pub fn open_project(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Project> {
     let path_buf = PathBuf::from(&path);
     let project = project_manager::open_project(&path_buf)?;
     {
@@ -47,7 +51,12 @@ pub fn current_project(state: State<'_, AppState>) -> Option<Project> {
 
 #[tauri::command]
 pub fn workspace_context(state: State<'_, AppState>) -> AppResult<WorkspaceContext> {
-    let root = state.inner.lock().unwrap().project.as_ref()
+    let root = state
+        .inner
+        .lock()
+        .unwrap()
+        .project
+        .as_ref()
         .map(|p| p.root.clone())
         .ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
     project_manager::workspace_context(&root)
@@ -75,10 +84,25 @@ pub fn read_file_text(path: String) -> AppResult<FileContent> {
 
     let probe = &buf[..buf.len().min(8192)];
     if probe.contains(&0) {
-        return Ok(FileContent { content: String::new(), is_binary: true, size_bytes, truncated });
+        return Ok(FileContent {
+            content: String::new(),
+            is_binary: true,
+            size_bytes,
+            truncated,
+        });
     }
     match String::from_utf8(buf) {
-        Ok(content) => Ok(FileContent { content, is_binary: false, size_bytes, truncated }),
-        Err(_) => Ok(FileContent { content: String::new(), is_binary: true, size_bytes, truncated }),
+        Ok(content) => Ok(FileContent {
+            content,
+            is_binary: false,
+            size_bytes,
+            truncated,
+        }),
+        Err(_) => Ok(FileContent {
+            content: String::new(),
+            is_binary: true,
+            size_bytes,
+            truncated,
+        }),
     }
 }

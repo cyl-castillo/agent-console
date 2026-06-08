@@ -49,10 +49,20 @@ impl TerminalRegistry {
         self.spawn_with_env(app, cwd, &[])
     }
 
-    pub fn spawn_with_env(&self, app: AppHandle, cwd: &Path, extra_env: &[(String, String)]) -> AppResult<String> {
+    pub fn spawn_with_env(
+        &self,
+        app: AppHandle,
+        cwd: &Path,
+        extra_env: &[(String, String)],
+    ) -> AppResult<String> {
         let pty_system = native_pty_system();
         let pair = pty_system
-            .openpty(PtySize { rows: 30, cols: 100, pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows: 30,
+                cols: 100,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|e| AppError::Other(format!("openpty: {e}")))?;
 
         let mut cmd = CommandBuilder::new(default_shell());
@@ -101,7 +111,10 @@ impl TerminalRegistry {
                             let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
                             let _ = app.emit(
                                 "term://output",
-                                TermOutput { id: id.clone(), data: chunk },
+                                TermOutput {
+                                    id: id.clone(),
+                                    data: chunk,
+                                },
                             );
                         }
                         Err(_) => break,
@@ -123,7 +136,11 @@ impl TerminalRegistry {
 
         self.terms.lock().unwrap().insert(
             id.clone(),
-            TerminalHandle { master: pair.master, writer, killer },
+            TerminalHandle {
+                master: pair.master,
+                writer,
+                killer,
+            },
         );
         Ok(id)
     }
@@ -145,7 +162,12 @@ impl TerminalRegistry {
             .get(id)
             .ok_or_else(|| AppError::InvalidArgument(format!("unknown terminal: {id}")))?;
         term.master
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|e| AppError::Other(format!("resize: {e}")))?;
         Ok(())
     }

@@ -3051,7 +3051,34 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .wb-advisor-badge.status-created { background: rgba(60,180,120,0.18); color: #6cd49b; }
 .wb-advisor-badge.status-error { background: rgba(255,90,90,0.18); color: #ff8585; }
 .wb-advisor-badge.status-skipped { color: var(--text-faint); }
+.wb-advisor-badge.status-applied { background: rgba(60,180,120,0.18); color: #6cd49b; }
+.wb-advisor-badge.status-applying { color: var(--text-faint); }
 .wb-cta-sm { padding: 3px 10px; font-size: 11px; }
+
+/* ===== Learning mode ===== */
+.wb-learning-kind {
+  display: inline-block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 6px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-faint);
+}
+.wb-learning-kind.kind-skill { background: rgba(120,150,255,0.18); color: #9db0ff; }
+.wb-learning-kind.kind-memory { background: rgba(180,140,255,0.18); color: #c4a6ff; }
+.wb-learning-kind.kind-friction { background: rgba(255,170,80,0.16); color: #ffba6c; }
+.wb-learning-evidence {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--text-muted, #aab);
+  line-height: 1.45;
+}
+.wb-learning-evidence li { margin: 2px 0; }
 
 /* ===== Getting Started modal ===== */
 .getting-started-modal {

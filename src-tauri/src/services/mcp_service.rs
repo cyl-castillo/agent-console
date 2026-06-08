@@ -57,12 +57,18 @@ fn run(args: &[&str], cwd: Option<&str>) -> AppResult<String> {
         cmd.current_dir(dir);
     }
     let output = cmd.output().map_err(|e| {
-        AppError::Other(format!("failed to run `claude mcp`: {e}. Is claude on PATH?"))
+        AppError::Other(format!(
+            "failed to run `claude mcp`: {e}. Is claude on PATH?"
+        ))
     })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = if !stderr.trim().is_empty() { stderr } else { stdout };
+        let detail = if !stderr.trim().is_empty() {
+            stderr
+        } else {
+            stdout
+        };
         return Err(AppError::Other(detail.trim().to_string()));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -71,7 +77,9 @@ fn run(args: &[&str], cwd: Option<&str>) -> AppResult<String> {
 fn name_re_ok(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// Names of configured servers, parsed from `claude mcp list`. Lines look like:
@@ -123,16 +131,18 @@ fn parse_get(name: &str, text: &str) -> McpServer {
         }
         if let Some(v) = trimmed.strip_prefix("Scope:") {
             let v = v.trim();
-            scope = Some(if v.contains("Local") {
-                "local"
-            } else if v.contains("User") {
-                "user"
-            } else if v.contains("Project") {
-                "project"
-            } else {
-                "unknown"
-            }
-            .to_string());
+            scope = Some(
+                if v.contains("Local") {
+                    "local"
+                } else if v.contains("User") {
+                    "user"
+                } else if v.contains("Project") {
+                    "project"
+                } else {
+                    "unknown"
+                }
+                .to_string(),
+            );
         } else if let Some(v) = trimmed.strip_prefix("Status:") {
             if v.contains("Connected") {
                 status = "connected".into();
@@ -199,7 +209,10 @@ pub fn list_servers(cwd: Option<&str>) -> AppResult<Vec<McpServer>> {
 /// values can't be shell-injected; we still validate the name and scope.
 pub fn add_server(input: &McpAddInput, cwd: Option<&str>) -> AppResult<String> {
     if !name_re_ok(&input.name) {
-        return Err(AppError::InvalidArgument(format!("invalid server name: {}", input.name)));
+        return Err(AppError::InvalidArgument(format!(
+            "invalid server name: {}",
+            input.name
+        )));
     }
     let scope = match input.scope.as_str() {
         "local" | "user" | "project" => input.scope.as_str(),
@@ -211,7 +224,9 @@ pub fn add_server(input: &McpAddInput, cwd: Option<&str>) -> AppResult<String> {
     };
     let target = input.command_or_url.trim();
     if target.is_empty() {
-        return Err(AppError::InvalidArgument("command or URL is required".into()));
+        return Err(AppError::InvalidArgument(
+            "command or URL is required".into(),
+        ));
     }
 
     let mut args: Vec<String> = vec![
@@ -258,7 +273,9 @@ pub fn add_server(input: &McpAddInput, cwd: Option<&str>) -> AppResult<String> {
 /// Remove a server from a given scope.
 pub fn remove_server(name: &str, scope: &str, cwd: Option<&str>) -> AppResult<String> {
     if !name_re_ok(name) {
-        return Err(AppError::InvalidArgument(format!("invalid server name: {name}")));
+        return Err(AppError::InvalidArgument(format!(
+            "invalid server name: {name}"
+        )));
     }
     let scope = match scope {
         "local" | "user" | "project" => scope,

@@ -301,7 +301,9 @@ impl Default for RoomsStore {
 
 impl RoomsStore {
     pub fn new() -> Self {
-        Self { lock: Mutex::new(()) }
+        Self {
+            lock: Mutex::new(()),
+        }
     }
 
     fn dir() -> AppResult<PathBuf> {
@@ -391,7 +393,11 @@ impl RoomsStore {
     /// All persisted rooms for a project, most-recently-updated first.
     fn load_sorted(project_root: &str) -> AppResult<Vec<PersistedRoom>> {
         let file = Self::load_file()?;
-        let mut rooms = file.by_project.get(project_root).cloned().unwrap_or_default();
+        let mut rooms = file
+            .by_project
+            .get(project_root)
+            .cloned()
+            .unwrap_or_default();
         rooms.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
         Ok(rooms)
     }
@@ -399,13 +405,18 @@ impl RoomsStore {
     /// Lightweight summaries for the sidebar, most-recently-updated first.
     pub fn summaries(&self, project_root: &str) -> AppResult<Vec<RoomSummary>> {
         let _g = self.lock.lock().unwrap();
-        Ok(Self::load_sorted(project_root)?.iter().map(RoomSummary::of).collect())
+        Ok(Self::load_sorted(project_root)?
+            .iter()
+            .map(RoomSummary::of)
+            .collect())
     }
 
     /// The full persisted state of one room, for read-only re-hydration.
     pub fn get(&self, project_root: &str, room_id: &str) -> AppResult<Option<PersistedRoom>> {
         let _g = self.lock.lock().unwrap();
-        Ok(Self::load_sorted(project_root)?.into_iter().find(|r| r.id == room_id))
+        Ok(Self::load_sorted(project_root)?
+            .into_iter()
+            .find(|r| r.id == room_id))
     }
 
     /// Drop one room from a project's history. Idempotent.
@@ -483,7 +494,11 @@ impl RoundtableService {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let id = format!("r-{}-{}", ts, &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        let id = format!(
+            "r-{}-{}",
+            ts,
+            &uuid::Uuid::new_v4().simple().to_string()[..8]
+        );
 
         // Working room: stand up an isolated worktree branched off HEAD so agents
         // edit there with `AcceptEdits` (never the user's real checkout), each
@@ -532,7 +547,10 @@ impl RoundtableService {
             rooms: self.rooms.clone(),
             notice,
         });
-        self.runs.lock().unwrap().insert(id.clone(), control.clone());
+        self.runs
+            .lock()
+            .unwrap()
+            .insert(id.clone(), control.clone());
 
         let driver_id = id.clone();
         tauri::async_runtime::spawn(async move {
@@ -633,7 +651,9 @@ impl RoundtableService {
         let budget = control.token_budget.load(Ordering::SeqCst);
         let total = control.total_tokens.load(Ordering::SeqCst);
         if budget > 0 && total >= budget {
-            control.token_budget.store(total.saturating_add(budget), Ordering::SeqCst);
+            control
+                .token_budget
+                .store(total.saturating_add(budget), Ordering::SeqCst);
         }
         control.paused.store(false, Ordering::SeqCst);
         // Spawn a fresh driver only if none is running. The CAS makes that race
@@ -756,7 +776,14 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
     // Carry the one-time room notice (e.g. "running read-only") on the first status
     // so it surfaces as the feed banner; later running emits pass None and the
     // frontend keeps the last message.
-    emit_status(&app, &id, "running", control.turn_no.load(Ordering::SeqCst), total_tokens, control.notice.clone());
+    emit_status(
+        &app,
+        &id,
+        "running",
+        control.turn_no.load(Ordering::SeqCst),
+        total_tokens,
+        control.notice.clone(),
+    );
 
     let end = loop {
         let turn = control.turn_no.load(Ordering::SeqCst) + 1;
@@ -782,7 +809,12 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         // seen yet, minus its own messages (it remembers those via its session).
         let (delta, seen_to): (Vec<Message>, usize) = {
             let t = control.transcript.lock().unwrap();
-            let start = *control.last_seen.lock().unwrap().get(&participant.id).unwrap_or(&0);
+            let start = *control
+                .last_seen
+                .lock()
+                .unwrap()
+                .get(&participant.id)
+                .unwrap_or(&0);
             let delta = t[start..]
                 .iter()
                 .filter(|m| m.author_id != participant.id)
@@ -792,7 +824,15 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         };
 
         let target = control.target_turns.load(Ordering::SeqCst);
-        let prompt = build_room_prompt(&control.problem, &participant, &control.participants, &delta, turn, target, control.worktree.is_some());
+        let prompt = build_room_prompt(
+            &control.problem,
+            &participant,
+            &control.participants,
+            &delta,
+            turn,
+            target,
+            control.worktree.is_some(),
+        );
 
         // Working room runs the turn in the isolated worktree with edits allowed;
         // a conversation room runs read-only in the project root.
@@ -826,7 +866,14 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                 break DriveEnd::Errored;
             }
             Err(e) => {
-                emit_status(&app, &id, "error", turn, total_tokens, Some(format!("turn task panicked: {e}")));
+                emit_status(
+                    &app,
+                    &id,
+                    "error",
+                    turn,
+                    total_tokens,
+                    Some(format!("turn task panicked: {e}")),
+                );
                 break DriveEnd::Errored;
             }
         };
@@ -834,7 +881,11 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         total_tokens = total_tokens.saturating_add(outcome.tokens);
         control.total_tokens.store(total_tokens, Ordering::SeqCst);
         if let Some(sid) = outcome.session_id {
-            control.resume.lock().unwrap().insert(participant.id.clone(), sid);
+            control
+                .resume
+                .lock()
+                .unwrap()
+                .insert(participant.id.clone(), sid);
         }
 
         let msg = Message {
@@ -850,7 +901,11 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         // anything the human injected while this turn ran sits past seen_to and
         // must surface on our next turn. Our own message is excluded by the
         // author_id filter, so it never replays.
-        control.last_seen.lock().unwrap().insert(participant.id.clone(), seen_to);
+        control
+            .last_seen
+            .lock()
+            .unwrap()
+            .insert(participant.id.clone(), seen_to);
         autosave(&control, &id);
         // Working room: checkpoint whatever this turn edited as one commit on the
         // room branch, so the diff is inspectable per turn and the work survives
@@ -878,7 +933,14 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             // true via its CAS) in the window since we released it, a fresh loop
             // is already running — don't paint a stale "awaiting" over it.
             if !control.driving.load(Ordering::SeqCst) {
-                emit_status(&app, &id, "awaiting", turn, total_tokens, Some("reached the turn limit — add a message or continue".into()));
+                emit_status(
+                    &app,
+                    &id,
+                    "awaiting",
+                    turn,
+                    total_tokens,
+                    Some("reached the turn limit — add a message or continue".into()),
+                );
             }
         }
         DriveEnd::DoneBudget => {
@@ -907,7 +969,14 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
     }
 }
 
-fn emit_status(app: &AppHandle, id: &str, status: &str, turn: u32, total_tokens: u64, message: Option<String>) {
+fn emit_status(
+    app: &AppHandle,
+    id: &str,
+    status: &str,
+    turn: u32,
+    total_tokens: u64,
+    message: Option<String>,
+) {
     let _ = app.emit(
         "roundtable://status",
         RoundtableStatus {
@@ -920,7 +989,14 @@ fn emit_status(app: &AppHandle, id: &str, status: &str, turn: u32, total_tokens:
     );
 }
 
-fn emit_turn(app: &AppHandle, id: &str, msg: &Message, is_human: bool, total_tokens: u64, cost_usd: f64) {
+fn emit_turn(
+    app: &AppHandle,
+    id: &str,
+    msg: &Message,
+    is_human: bool,
+    total_tokens: u64,
+    cost_usd: f64,
+) {
     let _ = app.emit(
         "roundtable://turn",
         RoundtableTurn {
@@ -938,7 +1014,15 @@ fn emit_turn(app: &AppHandle, id: &str, msg: &Message, is_human: bool, total_tok
     );
 }
 
-fn emit_activity(app: &AppHandle, id: &str, author_id: &str, turn: u32, kind: &str, label: &str, text: &str) {
+fn emit_activity(
+    app: &AppHandle,
+    id: &str,
+    author_id: &str,
+    turn: u32,
+    kind: &str,
+    label: &str,
+    text: &str,
+) {
     let _ = app.emit(
         "roundtable://activity",
         RoundtableActivity {
@@ -981,7 +1065,13 @@ fn build_room_prompt(
     } else {
         let body = delta
             .iter()
-            .map(|m| format!("{}:\n{}", m.author_name, engine_runner::truncate(&m.text, 4000)))
+            .map(|m| {
+                format!(
+                    "{}:\n{}",
+                    m.author_name,
+                    engine_runner::truncate(&m.text, 4000)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n\n");
         format!("New since you last spoke (your colleagues and the human):\n\"\"\"\n{body}\n\"\"\"")
@@ -1059,7 +1149,14 @@ fn add_room_worktree(repo: &Path, path: &Path, branch: &str) -> AppResult<()> {
         let _ = fs::create_dir_all(parent);
     }
     let out = proc::command("git")
-        .args(["worktree", "add", "-b", branch, &path.to_string_lossy(), "HEAD"])
+        .args([
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            &path.to_string_lossy(),
+            "HEAD",
+        ])
         .current_dir(repo)
         .output()?;
     if !out.status.success() {
@@ -1089,7 +1186,10 @@ fn remove_room_worktree(repo: &Path, path: &Path) {
 /// Best-effort and no-op when the turn changed nothing (no empty commits). Uses
 /// the user's own git identity (inherited from the repo/global config).
 fn commit_worktree(wt: &Path, message: &str) {
-    let _ = proc::command("git").args(["add", "-A"]).current_dir(wt).output();
+    let _ = proc::command("git")
+        .args(["add", "-A"])
+        .current_dir(wt)
+        .output();
     // `git diff --cached --quiet` exits non-zero exactly when something is staged.
     let staged = proc::command("git")
         .args(["diff", "--cached", "--quiet"])
@@ -1151,7 +1251,11 @@ mod tests {
     /// so the user's real rooms.json is never touched.
     #[test]
     fn rooms_persistence_is_crash_safe() {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let base = std::env::temp_dir().join(format!("agent-console-rooms-test-{nanos}"));
         std::env::set_var("XDG_DATA_HOME", &base);
 
@@ -1169,7 +1273,10 @@ mod tests {
         assert_eq!(full.version, ROOM_SCHEMA_VERSION);
         assert_eq!(full.transcript.len(), 2);
         assert_eq!(full.transcript[0].text, "msg from p1 on turn 1");
-        assert_eq!(full.resume.get("p1").map(String::as_str), Some("resume-token-p1"));
+        assert_eq!(
+            full.resume.get("p1").map(String::as_str),
+            Some("resume-token-p1")
+        );
         assert_eq!(full.last_seen.get("p1"), Some(&2usize));
         assert_eq!(full.total_tokens, 4242);
         // Summary derives its fields from the room.
@@ -1183,7 +1290,9 @@ mod tests {
 
         // Add B (distinct id), then upsert A in place — count stays 2, A updates.
         store.save_room(&room("b", "problem B", 200), p1).unwrap();
-        store.save_room(&room("a", "problem A v2", 300), p1).unwrap();
+        store
+            .save_room(&room("a", "problem A v2", 300), p1)
+            .unwrap();
         let sum = store.summaries("/proj/one").unwrap();
         assert_eq!(sum.len(), 2, "upsert must not duplicate an existing id");
         // Sorted most-recently-updated first: A (300) before B (200).
@@ -1205,7 +1314,10 @@ mod tests {
         }
         let kept = store.summaries("/proj/two").unwrap();
         assert_eq!(kept.len(), MAX_ROOMS_PER_PROJECT);
-        assert!(!kept.iter().any(|r| r.id == "r0"), "oldest room must be pruned");
+        assert!(
+            !kept.iter().any(|r| r.id == "r0"),
+            "oldest room must be pruned"
+        );
 
         // Delete: remove B from p1, then A — emptying p1 drops the project key.
         store.delete_room("/proj/one", "b").unwrap();
@@ -1219,7 +1331,11 @@ mod tests {
         let main = base.join("agent-console").join("rooms.json");
         fs::write(&main, b"{ this is not valid json ]").unwrap();
         let recovered = store.summaries("/proj/two").unwrap();
-        assert_eq!(recovered.len(), MAX_ROOMS_PER_PROJECT, "must recover p2 from .bak");
+        assert_eq!(
+            recovered.len(),
+            MAX_ROOMS_PER_PROJECT,
+            "must recover p2 from .bak"
+        );
 
         let _ = fs::remove_dir_all(&base);
     }
@@ -1258,11 +1374,18 @@ mod tests {
     /// teardown keeps the branch. Hermetic (temp dir + temp repo, no env, no net).
     #[test]
     fn working_room_worktree_lifecycle() {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let repo = std::env::temp_dir().join(format!("ac-wt-test-{nanos}"));
         fs::create_dir_all(&repo).unwrap();
         let git = |args: &[&str], cwd: &Path| {
-            proc::command("git").args(args).current_dir(cwd).output().unwrap()
+            proc::command("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap()
         };
         // Minimal repo with one commit — a worktree must branch off something.
         git(&["init", "-q"], &repo);
@@ -1274,7 +1397,10 @@ mod tests {
 
         let count = |branch: &str| -> usize {
             let out = git(&["rev-list", "--count", branch], &repo);
-            String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0)
         };
 
         // Create the working-room worktree on a fresh branch off HEAD.
@@ -1295,7 +1421,11 @@ mod tests {
         // Teardown removes the checkout but keeps the branch and its commits.
         remove_room_worktree(&repo, &wt);
         assert!(!wt.exists(), "checkout dir removed on teardown");
-        assert_eq!(count("room/wt-test"), 2, "branch + commits survive teardown");
+        assert_eq!(
+            count("room/wt-test"),
+            2,
+            "branch + commits survive teardown"
+        );
 
         let _ = fs::remove_dir_all(&repo);
     }
@@ -1306,13 +1436,19 @@ mod tests {
         // `start` catches exactly this Err and degrades the room to read-only
         // instead of failing — so opening a non-git workspace (Jira/GitLab/MCP
         // only) still works, just without agent editing.
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let plain = std::env::temp_dir().join(format!("ac-norepo-test-{nanos}"));
         fs::create_dir_all(&plain).unwrap();
 
         let wt = room_worktree_path(&format!("norepo-{nanos}"));
         let res = add_room_worktree(&plain, &wt, "room/norepo-test");
-        assert!(res.is_err(), "a non-git folder cannot host a working-room worktree");
+        assert!(
+            res.is_err(),
+            "a non-git folder cannot host a working-room worktree"
+        );
         assert!(!wt.exists(), "no stray checkout left behind on failure");
 
         let _ = fs::remove_dir_all(&plain);
