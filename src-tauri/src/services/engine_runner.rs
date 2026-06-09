@@ -159,16 +159,15 @@ impl EngineRunner for ClaudeRunner {
                 continue;
             };
             match v.get("type").and_then(Value::as_str) {
-                Some("system") => {
+                Some("system")
                     if v.get("subtype").and_then(Value::as_str) == Some("init")
                         && session_id.is_none()
-                    {
+                    => {
                         session_id = v
                             .get("session_id")
                             .and_then(Value::as_str)
                             .map(str::to_string);
                     }
-                }
                 Some("assistant") => {
                     if let Some(content) = v.pointer("/message/content").and_then(Value::as_array) {
                         for block in content {
@@ -285,14 +284,13 @@ impl EngineRunner for CodexRunner {
                 continue;
             };
             match v.get("type").and_then(Value::as_str) {
-                Some("thread.started") => {
-                    if session_id.is_none() {
+                Some("thread.started")
+                    if session_id.is_none() => {
                         session_id = v
                             .get("thread_id")
                             .and_then(Value::as_str)
                             .map(str::to_string);
                     }
-                }
                 // `item.started` is Codex's only live pulse (no token deltas):
                 // it fires when a tool/message begins, which is enough for the
                 // staleness clock and to show "running a command" in real time.

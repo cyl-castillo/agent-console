@@ -52,6 +52,7 @@ impl TerminalRegistry {
     }
 
     /// Spawn a new PTY in `cwd` running the user's default shell.
+    #[allow(dead_code)]
     pub fn spawn(&self, app: AppHandle, cwd: &Path) -> AppResult<String> {
         self.spawn_with_env(app, cwd, &[])
     }

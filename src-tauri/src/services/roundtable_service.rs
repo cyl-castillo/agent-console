@@ -384,7 +384,7 @@ impl RoomsStore {
             None => list.push(room.clone()),
         }
         if list.len() > MAX_ROOMS_PER_PROJECT {
-            list.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+            list.sort_by_key(|r| std::cmp::Reverse(r.updated_at_ms));
             list.truncate(MAX_ROOMS_PER_PROJECT);
         }
         Self::write_file(&file)
@@ -398,7 +398,7 @@ impl RoomsStore {
             .get(project_root)
             .cloned()
             .unwrap_or_default();
-        rooms.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+        rooms.sort_by_key(|r| std::cmp::Reverse(r.updated_at_ms));
         Ok(rooms)
     }
 

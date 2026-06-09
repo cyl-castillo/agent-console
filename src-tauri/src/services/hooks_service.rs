@@ -63,6 +63,7 @@ impl HooksRuntime {
     pub fn session_dir(&self) -> &Path {
         &self.session_dir
     }
+    #[allow(dead_code)]
     pub fn script_path(&self) -> &Path {
         &self.script_path
     }

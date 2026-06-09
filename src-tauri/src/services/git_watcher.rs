@@ -139,6 +139,7 @@ impl GitWatcher {
         });
     }
 
+    #[allow(dead_code)]
     pub fn stop(&self) {
         // Bump the generation so any in-flight setup thread won't install.
         self.generation.fetch_add(1, Ordering::SeqCst);
@@ -216,6 +217,7 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) {
 /// - anything under `.git/objects/`, `.git/refs/`, `.git/logs/` — these
 ///   churn during background gc and on `git status` itself.
 /// - typical heavy dirs that change on builds (node_modules, target, dist).
+///
 /// We do allow `.git/index` and `.git/HEAD` through, so a commit / checkout
 /// is reflected immediately.
 fn ignored(path: &Path, root: &Path) -> bool {
@@ -234,10 +236,10 @@ fn ignored(path: &Path, root: &Path) -> bool {
         if parts.len() == 1 {
             return true;
         }
-        match parts[1].as_str() {
-            "HEAD" | "ORIG_HEAD" | "index" | "MERGE_HEAD" | "FETCH_HEAD" => false,
-            _ => true,
-        }
+        !matches!(
+            parts[1].as_str(),
+            "HEAD" | "ORIG_HEAD" | "index" | "MERGE_HEAD" | "FETCH_HEAD"
+        )
     } else {
         matches!(
             parts[0].as_str(),
