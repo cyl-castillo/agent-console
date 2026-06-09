@@ -468,6 +468,146 @@ pub fn revert_file(repo: &Path, file: &str) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn git(args: &[&str], cwd: &Path) -> std::process::Output {
+        proc::command("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap()
+    }
+
+    fn init_repo(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("ac-git-{tag}-{nanos}"));
+        fs::create_dir_all(&repo).unwrap();
+        git(&["init", "-q"], &repo);
+        git(&["config", "user.email", "t@t"], &repo);
+        git(&["config", "user.name", "T"], &repo);
+        git(&["config", "commit.gpgsign", "false"], &repo);
+        repo
+    }
+
+    fn change_for<'a>(st: &'a GitStatus, path: &str) -> Option<&'a GitFileChange> {
+        st.changes.iter().find(|c| c.path == path)
+    }
+
+    #[test]
+    fn non_repo_status_is_a_normal_state() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let plain = std::env::temp_dir().join(format!("ac-git-norepo-{nanos}"));
+        fs::create_dir_all(&plain).unwrap();
+        let st = status(&plain).unwrap();
+        assert!(!st.is_repo, "non-repo is not an error, just is_repo=false");
+        assert!(st.changes.is_empty());
+        let _ = fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn stage_unstage_commit_diff_revert_lifecycle() {
+        let repo = init_repo("ops");
+        fs::write(repo.join("a.txt"), "one\n").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+
+        // Clean tree.
+        let st = status(&repo).unwrap();
+        assert!(st.is_repo);
+        assert!(st.changes.is_empty());
+
+        // Untracked file: ?? code, synthetic diff shows full content as adds.
+        fs::write(repo.join("b.txt"), "hello\n").unwrap();
+        let st = status(&repo).unwrap();
+        let b = change_for(&st, "b.txt").expect("b.txt listed");
+        assert!(b.untracked);
+        assert_eq!(b.code, "??");
+        let d = diff_file(&repo, "b.txt").unwrap();
+        assert!(d.contains("new file (untracked)"));
+        assert!(d.contains("+hello"));
+
+        // Stage → A , unstage → back to untracked.
+        stage_file(&repo, "b.txt").unwrap();
+        let st = status(&repo).unwrap();
+        let b = change_for(&st, "b.txt").unwrap();
+        assert!(b.staged && !b.untracked);
+        unstage_file(&repo, "b.txt").unwrap();
+        let st = status(&repo).unwrap();
+        assert!(change_for(&st, "b.txt").unwrap().untracked);
+
+        // Commit clears the change list and head_message reflects it.
+        stage_file(&repo, "b.txt").unwrap();
+        let sha = commit(&repo, "add b").unwrap();
+        assert_eq!(sha.len(), 40, "commit returns the full sha");
+        assert!(status(&repo).unwrap().changes.is_empty());
+        assert_eq!(head_message(&repo).unwrap(), "add b");
+        let msgs = recent_messages(&repo, 5).unwrap();
+        assert_eq!(msgs.first().map(String::as_str), Some("add b"));
+
+        // Tracked modification: diff vs HEAD shows old and new lines.
+        fs::write(repo.join("b.txt"), "world\n").unwrap();
+        let st = status(&repo).unwrap();
+        assert!(change_for(&st, "b.txt").unwrap().unstaged);
+        let d = diff_file(&repo, "b.txt").unwrap();
+        assert!(d.contains("-hello"));
+        assert!(d.contains("+world"));
+
+        // Revert tracked → content restored from HEAD.
+        revert_file(&repo, "b.txt").unwrap();
+        assert_eq!(fs::read_to_string(repo.join("b.txt")).unwrap(), "hello\n");
+        assert!(status(&repo).unwrap().changes.is_empty());
+
+        // Revert untracked → file deleted; missing file is a no-op.
+        fs::write(repo.join("c.txt"), "tmp").unwrap();
+        revert_file(&repo, "c.txt").unwrap();
+        assert!(!repo.join("c.txt").exists());
+        revert_file(&repo, "c.txt").unwrap();
+
+        // Amend rewrites the message without adding a commit.
+        let amended = amend_commit(&repo, "add b (amended)").unwrap();
+        assert_ne!(amended, sha, "amend creates a new sha");
+        assert_eq!(head_message(&repo).unwrap(), "add b (amended)");
+        let count = git(&["rev-list", "--count", "HEAD"], &repo);
+        assert_eq!(String::from_utf8_lossy(&count.stdout).trim(), "2");
+
+        // file_log sees both commits that touched b.txt.
+        let log = file_log(&repo, "b.txt", 10).unwrap();
+        assert_eq!(log.len(), 1, "b.txt was touched by one surviving commit");
+        assert_eq!(log[0].subject, "add b (amended)");
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn branch_listing_and_checkout() {
+        let repo = init_repo("branch");
+        fs::write(repo.join("a.txt"), "x").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+        git(&["branch", "feature"], &repo);
+
+        let bs = branches(&repo).unwrap();
+        let names: Vec<_> = bs.iter().map(|b| b.name.as_str()).collect();
+        assert!(names.contains(&"feature"));
+        assert_eq!(bs.iter().filter(|b| b.current).count(), 1);
+
+        checkout_branch(&repo, "feature").unwrap();
+        let bs = branches(&repo).unwrap();
+        let cur = bs.iter().find(|b| b.current).unwrap();
+        assert_eq!(cur.name, "feature");
+
+        // Unknown branch is a clear error.
+        assert!(checkout_branch(&repo, "nope").is_err());
+
+        let _ = fs::remove_dir_all(&repo);
+    }
 
     #[test]
     fn resolve_in_repo_accepts_inside_rejects_escapes() {

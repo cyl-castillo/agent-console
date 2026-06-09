@@ -159,3 +159,100 @@ fn head_sha(repo: &Path) -> Option<String> {
     }
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn git(args: &[&str], cwd: &Path) -> std::process::Output {
+        proc::command("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap()
+    }
+
+    fn init_repo(tag: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("ac-snap-{tag}-{nanos}"));
+        fs::create_dir_all(&repo).unwrap();
+        git(&["init", "-q"], &repo);
+        git(&["config", "user.email", "t@t"], &repo);
+        git(&["config", "user.name", "T"], &repo);
+        git(&["config", "commit.gpgsign", "false"], &repo);
+        repo
+    }
+
+    #[test]
+    fn non_repo_yields_no_snapshot() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let plain = std::env::temp_dir().join(format!("ac-snap-norepo-{nanos}"));
+        fs::create_dir_all(&plain).unwrap();
+        assert!(create(&plain, "x").unwrap().is_none());
+        let _ = fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn snapshot_lifecycle_create_restore_delete() {
+        let repo = init_repo("life");
+        fs::write(repo.join("tracked.txt"), "v1").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+
+        // State to capture: a tracked edit AND an untracked file. The snapshot
+        // must include both (that's its whole point vs. plain stash-like flows).
+        fs::write(repo.join("tracked.txt"), "v2").unwrap();
+        fs::write(repo.join("untracked.txt"), "new").unwrap();
+        let snap = create(&repo, "turn-1").unwrap().expect("repo → snapshot");
+        assert!(!snap.commit_sha.is_empty());
+
+        // Pinned via ref (GC-safe), temp index cleaned up, HEAD untouched.
+        let r = git(&["rev-parse", "refs/agent-console/turn-1"], &repo);
+        assert!(r.status.success(), "snapshot ref must exist");
+        assert_eq!(
+            String::from_utf8_lossy(&r.stdout).trim(),
+            snap.commit_sha,
+            "ref points at the snapshot commit"
+        );
+        assert!(
+            !repo.join(".git/agent-console-idx-turn-1").exists(),
+            "temp index file is cleaned up"
+        );
+        let head = git(&["log", "-1", "--format=%s"], &repo);
+        assert_eq!(
+            String::from_utf8_lossy(&head.stdout).trim(),
+            "seed",
+            "HEAD never moves"
+        );
+
+        // Wreck the tree after the snapshot, then restore to it.
+        fs::write(repo.join("tracked.txt"), "v3-bad").unwrap();
+        fs::remove_file(repo.join("untracked.txt")).unwrap();
+        restore(&repo, &snap.commit_sha).unwrap();
+        assert_eq!(fs::read_to_string(repo.join("tracked.txt")).unwrap(), "v2");
+        assert_eq!(
+            fs::read_to_string(repo.join("untracked.txt")).unwrap(),
+            "new",
+            "untracked-at-snapshot files come back on restore"
+        );
+
+        // Restore of a bogus sha is a clear error, not silent corruption.
+        assert!(restore(&repo, "0000000000000000000000000000000000000000").is_err());
+
+        // Delete drops the pin; deleting again is idempotent.
+        delete(&repo, "turn-1").unwrap();
+        let r = git(&["rev-parse", "refs/agent-console/turn-1"], &repo);
+        assert!(!r.status.success(), "ref removed");
+        delete(&repo, "turn-1").unwrap();
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+}

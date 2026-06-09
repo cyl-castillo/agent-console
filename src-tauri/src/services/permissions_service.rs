@@ -173,9 +173,15 @@ fn read_settings(path: &Path) -> AppResult<Value> {
 }
 
 fn write_settings(path: &Path, v: &Value) -> AppResult<()> {
-    fs::write(path, serde_json::to_string_pretty(v).unwrap())?;
+    // Temp + rename: a crash mid-write must never truncate settings.json.
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string_pretty(v).unwrap())?;
+    fs::rename(&tmp, path)?;
     Ok(())
 }
+
+/// How many timestamped `.bak` copies of a settings file we keep around.
+const MAX_BACKUPS: usize = 5;
 
 fn backup(path: &Path) -> AppResult<()> {
     if !path.exists() {
@@ -183,7 +189,37 @@ fn backup(path: &Path) -> AppResult<()> {
     }
     let bak = path.with_extension(format!("json.{}.bak", now_ms()));
     fs::copy(path, &bak)?;
+    prune_backups(path);
     Ok(())
+}
+
+/// Drop all but the newest MAX_BACKUPS `<name>.json.<ts>.bak` siblings.
+/// Best-effort: a failed prune never blocks the rule edit that triggered it.
+fn prune_backups(path: &Path) {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return;
+    };
+    let prefix = format!("{}.", name.to_string_lossy());
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    let mut baks: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name().is_some_and(|f| {
+                let f = f.to_string_lossy();
+                f.starts_with(&prefix) && f.ends_with(".bak")
+            })
+        })
+        .collect();
+    // Timestamps are fixed-width ms since epoch, so lexicographic = chronological.
+    baks.sort();
+    if baks.len() > MAX_BACKUPS {
+        for old in &baks[..baks.len() - MAX_BACKUPS] {
+            let _ = fs::remove_file(old);
+        }
+    }
 }
 
 fn read_rules_from(path: &Path, scope: Scope, sidecar: &Path) -> AppResult<Vec<StoredRule>> {
@@ -286,4 +322,132 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("ac-perm-{tag}-{nanos}"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// Only project-scope rules: global scope reads/writes the real
+    /// ~/.claude/settings.json, which tests must never touch.
+    fn project_rules(root: &Path) -> Vec<StoredRule> {
+        snapshot(Some(root))
+            .unwrap()
+            .rules
+            .into_iter()
+            .filter(|r| r.scope == Scope::Project)
+            .collect()
+    }
+
+    #[test]
+    fn project_rule_roundtrip_dedup_and_provenance() {
+        let root = temp_root("rt");
+        assert!(project_rules(&root).is_empty(), "no settings → no rules");
+
+        // Add → visible, attributed to us (sidecar metadata present).
+        let rule = add_rule(Some(&root), Scope::Project, Effect::Allow, "Bash(npm:*)").unwrap();
+        assert_eq!(rule.source, "agent-console");
+        assert!(rule.created_at_ms.is_some());
+        let rules = project_rules(&root);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].raw, "Bash(npm:*)");
+        assert_eq!(rules[0].effect, Effect::Allow);
+
+        // Re-adding the same rule must not duplicate it.
+        add_rule(Some(&root), Scope::Project, Effect::Allow, "Bash(npm:*)").unwrap();
+        assert_eq!(project_rules(&root).len(), 1, "add is idempotent");
+
+        // A rule someone wrote by hand (no sidecar entry) reads as external.
+        let path = root.join(".claude/settings.json");
+        let mut v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        v["permissions"]["deny"] = serde_json::json!(["WebFetch"]);
+        fs::write(&path, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+        let rules = project_rules(&root);
+        let ext = rules.iter().find(|r| r.raw == "WebFetch").unwrap();
+        assert_eq!(ext.source, "external");
+        assert_eq!(ext.effect, Effect::Deny);
+        assert!(ext.created_at_ms.is_none());
+
+        // Remove only touches the targeted rule; removing a missing rule is a no-op.
+        remove_rule(Some(&root), Scope::Project, Effect::Allow, "Bash(npm:*)").unwrap();
+        let rules = project_rules(&root);
+        assert_eq!(rules.len(), 1, "the external deny rule survives");
+        assert_eq!(rules[0].raw, "WebFetch");
+        remove_rule(Some(&root), Scope::Project, Effect::Allow, "Bash(npm:*)").unwrap();
+
+        // Other settings keys in the file survive our edits.
+        let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(v.get("permissions").is_some());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn corrupt_settings_fall_back_instead_of_failing() {
+        let root = temp_root("corrupt");
+        let dir = root.join(".claude");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("settings.json"), "{not json").unwrap();
+
+        // Snapshot tolerates the corrupt file; add_rule rebuilds it from {}.
+        assert!(project_rules(&root).is_empty());
+        add_rule(Some(&root), Scope::Project, Effect::Ask, "Bash(rm:*)").unwrap();
+        let rules = project_rules(&root);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].effect, Effect::Ask);
+
+        // The pre-edit corrupt content was backed up before being replaced.
+        let baks: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".bak"))
+            .collect();
+        assert_eq!(baks.len(), 1, "corrupt original preserved as .bak");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn backups_rotate_to_a_bounded_set() {
+        let root = temp_root("baks");
+        // First add creates the file (no backup); each later edit backs up the
+        // previous version. Timestamps are ms, so space the edits out enough
+        // that each backup gets a distinct name.
+        for i in 0..(MAX_BACKUPS + 4) {
+            add_rule(
+                Some(&root),
+                Scope::Project,
+                Effect::Allow,
+                &format!("Bash(tool{i}:*)"),
+            )
+            .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let dir = root.join(".claude");
+        let baks = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".bak"))
+            .count();
+        assert!(
+            baks <= MAX_BACKUPS,
+            "backups must rotate, found {baks} > {MAX_BACKUPS}"
+        );
+        assert!(baks > 0, "edits after the first do produce backups");
+
+        // All rules survived the rotation churn.
+        assert_eq!(project_rules(&root).len(), MAX_BACKUPS + 4);
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
