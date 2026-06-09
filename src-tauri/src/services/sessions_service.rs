@@ -40,6 +40,40 @@ struct SessionsFile {
     by_project: HashMap<String, Vec<PersistedSession>>,
 }
 
+/// Produce a stable lookup key for a project path so the same folder always
+/// maps to the same history bucket. History is indexed by the project path the
+/// folder picker handed back; on Windows that picker can return the SAME
+/// directory with a different drive-letter case or slash direction across app
+/// versions/reinstalls. An exact-string HashMap key then misses and the user's
+/// history looks erased even though it's still on disk under the old spelling.
+/// We collapse those Windows-only variants (lowercase + forward slashes + no
+/// trailing slash). POSIX paths are case-sensitive, so there we only trim a
+/// trailing slash and never touch case.
+fn normalize_key(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let is_windows_path = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/');
+    if is_windows_path {
+        let lowered = raw.to_lowercase().replace('\\', "/");
+        let trimmed = lowered.trim_end_matches('/');
+        // Keep a bare drive root as "c:/" rather than collapsing it to "c:".
+        if trimmed.len() == 2 {
+            format!("{trimmed}/")
+        } else {
+            trimmed.to_string()
+        }
+    } else {
+        let trimmed = raw.trim_end_matches('/');
+        if trimmed.is_empty() {
+            "/".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
 pub struct SessionsService {
     lock: Mutex<()>,
 }
@@ -126,11 +160,21 @@ impl SessionsService {
     pub fn list(&self, project_root: &str) -> AppResult<Vec<PersistedSession>> {
         let _g = self.lock.lock().unwrap();
         let file = Self::load_file()?;
-        Ok(file
-            .by_project
-            .get(project_root)
-            .cloned()
-            .unwrap_or_default())
+        if let Some(v) = file.by_project.get(project_root) {
+            return Ok(v.clone());
+        }
+        // No exact match: the path may be stored under an equivalent but
+        // differently-spelled key (Windows drive-letter case / slash direction
+        // drifted across versions). Recover by matching on the normalized key so
+        // history isn't reported as lost. The next save() collapses it back to
+        // the current spelling.
+        let target = normalize_key(project_root);
+        for (k, v) in &file.by_project {
+            if normalize_key(k) == target {
+                return Ok(v.clone());
+            }
+        }
+        Ok(Vec::new())
     }
 
     pub fn save(&self, project_root: &str, sessions: Vec<PersistedSession>) -> AppResult<()> {
@@ -138,6 +182,13 @@ impl SessionsService {
         // If the existing file can't be read, abort rather than clobbering the
         // other projects' history with a blind overwrite.
         let mut file = Self::load_file()?;
+        // Absorb any equivalent-but-differently-spelled keys for this same folder
+        // into the current spelling, so old orphaned entries are migrated rather
+        // than left as stale duplicates. Keep the exact current key; drop only
+        // the equivalent variants.
+        let target = normalize_key(project_root);
+        file.by_project
+            .retain(|k, _| k == project_root || normalize_key(k) != target);
         if sessions.is_empty() {
             file.by_project.remove(project_root);
         } else {
@@ -234,6 +285,77 @@ mod tests {
             svc.save(proj, vec![sample("x")]).is_err(),
             "save must not overwrite history it could not read"
         );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// normalize_key collapses the Windows-only path variants (drive-letter
+    /// case, slash direction, trailing slash) that caused history to look lost
+    /// after an update, while keeping case-sensitive POSIX paths distinct.
+    #[test]
+    fn normalize_key_collapses_windows_variants() {
+        // Same Windows folder spelled four ways → one key.
+        let canon = normalize_key("C:\\Users\\Foo\\Proj");
+        assert_eq!(canon, normalize_key("c:/users/foo/proj"));
+        assert_eq!(canon, normalize_key("C:/Users/Foo/Proj/"));
+        assert_eq!(canon, normalize_key("c:\\users\\foo\\proj\\"));
+        assert_eq!(canon, "c:/users/foo/proj");
+
+        // A bare drive root stays a drive root.
+        assert_eq!(normalize_key("C:\\"), "c:/");
+        assert_eq!(normalize_key("c:/"), "c:/");
+
+        // POSIX: trailing slash trimmed, but case is preserved (case-sensitive FS).
+        assert_eq!(normalize_key("/proj/a/"), "/proj/a");
+        assert_eq!(normalize_key("/proj/a"), "/proj/a");
+        assert_ne!(normalize_key("/Proj"), normalize_key("/proj"));
+        assert_eq!(normalize_key("/"), "/");
+    }
+
+    /// History saved under one spelling of a Windows path is recovered when the
+    /// project is reopened under an equivalent spelling, and the next save
+    /// collapses the old key into the new one instead of leaving a duplicate.
+    #[test]
+    fn recovers_history_across_windows_path_spellings() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-sessions-norm-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let svc = SessionsService::new();
+        let old_key = "C:\\Users\\Foo\\Proj";
+        let new_key = "c:/users/foo/proj";
+
+        // 1. History saved under the old spelling...
+        svc.save(old_key, vec![sample("s1"), sample("s2")]).unwrap();
+
+        // 2. ...is recovered when the folder is reopened under the new spelling.
+        assert_eq!(
+            svc.list(new_key).unwrap().len(),
+            2,
+            "history must be found under an equivalent Windows path spelling"
+        );
+
+        // 3. Saving under the new spelling collapses the old key — no duplicate
+        //    bucket lingers, and the data lives under the current spelling.
+        svc.save(new_key, vec![sample("s1")]).unwrap();
+        let file = SessionsService::load_file().unwrap();
+        assert_eq!(
+            file.by_project.len(),
+            1,
+            "equivalent old key must be absorbed, not duplicated"
+        );
+        assert!(
+            file.by_project.contains_key(new_key),
+            "data should live under the current spelling after save"
+        );
+        assert_eq!(svc.list(old_key).unwrap().len(), 1, "old spelling still resolves");
+        assert_eq!(svc.list(new_key).unwrap().len(), 1, "new spelling resolves");
 
         let _ = std::fs::remove_dir_all(&base);
     }
