@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ipc } from "../ipc/tauri";
 import type { HooksStatus, HookUserPromptEvent, Skill, Snapshot } from "../types/domain";
 import { useChangesStore } from "./changesStore";
+import { useLearningStore } from "./learningStore";
 import { useOnboardingStore } from "./onboardingStore";
 import { useTerminalsStore } from "./terminalsStore";
 
@@ -114,6 +115,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     };
     set((s) => ({ recent: [entry, ...s.recent].slice(0, MAX_RECENT) }));
     useOnboardingStore.getState().markPromptedClaude();
+    // Feed the learning auto-trigger: enough new activity reflects on its own.
+    useLearningStore.getState().noteActivity();
 
     // Associate the Claude session id with the terminal that emitted the prompt.
     // The hook tags each prompt with the PTY's terminal-session id (termId, from

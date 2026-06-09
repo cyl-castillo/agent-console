@@ -3079,6 +3079,26 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   line-height: 1.45;
 }
 .wb-learning-evidence li { margin: 2px 0; }
+.wb-learning-auto {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  opacity: 0.6;
+}
+.wb-learning-auto.on {
+  opacity: 1;
+  color: #9db0ff;
+}
+.wb-learning-auto-tag {
+  margin-left: 6px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(120,150,255,0.18);
+  color: #9db0ff;
+  vertical-align: middle;
+}
 
 /* ===== Getting Started modal ===== */
 .getting-started-modal {
