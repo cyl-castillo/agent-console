@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
@@ -292,41 +294,99 @@ fn has_command_path(entry: &Value, target: &Path) -> bool {
     })
 }
 
+/// Watch a directory and return (watcher, wake-receiver, wait-interval).
+///
+/// Preferred mode: a platform filesystem watcher wakes the loop the moment
+/// something changes, with a slow 2s heartbeat as a safety net for missed
+/// events. If the watcher can't start (inotify exhaustion, exotic FS), fall
+/// back to pure polling at `poll_fallback` — the pre-notify behavior.
+fn dir_wake_source(
+    dir: &Path,
+    poll_fallback: Duration,
+) -> (
+    Option<notify::RecommendedWatcher>,
+    mpsc::Receiver<()>,
+    Duration,
+) {
+    let (tx, rx) = mpsc::channel::<()>();
+    let watcher = notify::recommended_watcher(move |_res| {
+        let _ = tx.send(());
+    })
+    .ok()
+    .and_then(|mut w| match w.watch(dir, RecursiveMode::NonRecursive) {
+        Ok(()) => Some(w),
+        Err(e) => {
+            eprintln!("hooks: fs watch on {} failed, polling: {e}", dir.display());
+            None
+        }
+    });
+    let interval = if watcher.is_some() {
+        Duration::from_secs(2)
+    } else {
+        poll_fallback
+    };
+    (watcher, rx, interval)
+}
+
+/// Block until the next filesystem wake-up (or the heartbeat), then coalesce
+/// any burst of queued wake-ups into this one pass.
+fn await_wake(rx: &mpsc::Receiver<()>, interval: Duration, watching: bool) {
+    if watching {
+        let _ = rx.recv_timeout(interval);
+        while rx.try_recv().is_ok() {}
+    } else {
+        thread::sleep(interval);
+    }
+}
+
+/// Parse JSONL appended to `path` past `last_size`. Returns the events and the
+/// new read offset. Only complete lines (through the last `\n`) are consumed —
+/// a torn tail mid-append stays buffered for the next pass instead of being
+/// half-parsed and dropped. A shrunken file (truncation) resets to 0 so the
+/// next pass reprocesses from the start.
+fn drain_new_lines(path: &Path, last_size: u64) -> (Vec<Value>, u64) {
+    let Ok(meta) = fs::metadata(path) else {
+        return (Vec::new(), last_size);
+    };
+    let size = meta.len();
+    if size == last_size {
+        return (Vec::new(), last_size);
+    }
+    if size < last_size {
+        return (Vec::new(), 0);
+    }
+    let Ok(mut f) = fs::File::open(path) else {
+        return (Vec::new(), last_size);
+    };
+    if f.seek(SeekFrom::Start(last_size)).is_err() {
+        return (Vec::new(), last_size);
+    }
+    let mut buf = String::new();
+    if f.read_to_string(&mut buf).is_err() {
+        return (Vec::new(), last_size);
+    }
+    let Some(consumed) = buf.rfind('\n').map(|i| i + 1) else {
+        return (Vec::new(), last_size);
+    };
+    let events = buf[..consumed]
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect();
+    (events, last_size + consumed as u64)
+}
+
 fn watcher_loop(app: AppHandle, dir: PathBuf) {
     let events_file = dir.join("events.jsonl");
+    let (watcher, rx, interval) = dir_wake_source(&dir, Duration::from_millis(120));
     let mut last_size: u64 = 0;
     loop {
-        thread::sleep(Duration::from_millis(120));
-        let Ok(meta) = fs::metadata(&events_file) else {
-            continue;
-        };
-        let size = meta.len();
-        if size == last_size {
-            continue;
+        await_wake(&rx, interval, watcher.is_some());
+        let (events, next) = drain_new_lines(&events_file, last_size);
+        last_size = next;
+        for v in &events {
+            handle_event(v, &app);
         }
-        if size < last_size {
-            last_size = 0;
-            continue;
-        }
-
-        let Ok(content) = fs::read_to_string(&events_file) else {
-            continue;
-        };
-        if (content.len() as u64) < last_size {
-            last_size = 0;
-            continue;
-        }
-        let tail = &content[(last_size as usize).min(content.len())..];
-        for line in tail.lines() {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let Ok(v) = serde_json::from_str::<Value>(line) else {
-                continue;
-            };
-            handle_event(&v, &app);
-        }
-        last_size = size;
     }
 }
 
@@ -389,9 +449,10 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
 }
 
 fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
+    let (watcher, rx, interval) = dir_wake_source(&dir, Duration::from_millis(100));
     let mut seen: HashSet<String> = HashSet::new();
     loop {
-        thread::sleep(Duration::from_millis(100));
+        await_wake(&rx, interval, watcher.is_some());
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
@@ -416,5 +477,72 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
         }
         // Drop ids that disappeared (hook cleaned them up).
         seen.retain(|n| current.contains(n));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn drain_consumes_complete_lines_incrementally() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ac-hooks-drain-{nanos}.jsonl"));
+
+        // Missing file: nothing to do, offset unchanged.
+        let (evs, off) = drain_new_lines(&path, 0);
+        assert!(evs.is_empty());
+        assert_eq!(off, 0);
+
+        // Two complete events arrive.
+        fs::write(&path, "{\"type\":\"a\"}\n{\"type\":\"b\"}\n").unwrap();
+        let (evs, off) = drain_new_lines(&path, 0);
+        assert_eq!(evs.len(), 2);
+        assert_eq!(evs[1]["type"], "b");
+
+        // No growth: nothing new.
+        let (evs, off2) = drain_new_lines(&path, off);
+        assert!(evs.is_empty());
+        assert_eq!(off2, off);
+
+        // A torn append (no trailing newline yet) must NOT be consumed…
+        let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"{\"type\":\"c\"").unwrap();
+        f.flush().unwrap();
+        let (evs, off3) = drain_new_lines(&path, off);
+        assert!(evs.is_empty(), "half-written line stays buffered");
+        assert_eq!(off3, off, "offset must not advance past torn tail");
+
+        // …and is delivered intact once the writer finishes the line.
+        f.write_all(b"}\n").unwrap();
+        f.flush().unwrap();
+        let (evs, off4) = drain_new_lines(&path, off3);
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0]["type"], "c");
+        assert!(off4 > off3);
+
+        // Blank and malformed lines are skipped, valid neighbors still parse.
+        let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"\nnot json\n{\"type\":\"d\"}\n").unwrap();
+        drop(f);
+        let (evs, off5) = drain_new_lines(&path, off4);
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0]["type"], "d");
+
+        // Truncation resets the offset so the next pass starts over.
+        fs::write(&path, "{\"type\":\"fresh\"}\n").unwrap();
+        let (evs, off6) = drain_new_lines(&path, off5);
+        assert!(evs.is_empty(), "shrink pass only resets");
+        assert_eq!(off6, 0);
+        let (evs, _) = drain_new_lines(&path, off6);
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0]["type"], "fresh");
+
+        let _ = fs::remove_file(&path);
     }
 }
