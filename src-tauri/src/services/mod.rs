@@ -22,6 +22,7 @@ pub mod roundtable_service;
 pub mod secure_channel;
 pub mod sessions_service;
 pub mod transport;
+pub mod voice_handler;
 pub mod skills_service;
 pub mod snapshot_service;
 pub mod terminal_runner;

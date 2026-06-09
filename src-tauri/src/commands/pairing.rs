@@ -6,8 +6,10 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::paired_devices_service::{DeviceScope, PairedDevice, PendingPairing};
-use crate::services::transport::{self, ServerHandle};
+use crate::services::transport::{self, ServerHandle, VoiceHandler};
+use crate::services::voice_handler::ClaudeVoiceHandler;
 use crate::state::AppState;
+use std::sync::Arc;
 
 /// How long a pairing QR stays valid. Short on purpose — the QR is the
 /// out-of-band trust anchor and shouldn't linger on screen.
@@ -135,7 +137,10 @@ pub async fn voice_server_start(app: AppHandle, state: State<'_, AppState>) -> A
         .map_err(|e| AppError::Other(format!("local_addr: {e}")))?;
     let pairing = state.pairing.clone();
     let devices = state.paired_devices.clone();
-    let task = tokio::spawn(transport::run_listener(listener, pairing, devices, move |_out| {
+    // Voice handler runs the agent in the currently-open project, if any.
+    let project_root = state.inner.lock().unwrap().project.as_ref().map(|p| p.root.clone());
+    let handler: Arc<dyn VoiceHandler> = Arc::new(ClaudeVoiceHandler::new(project_root));
+    let task = tokio::spawn(transport::run_listener(listener, pairing, devices, handler, move |_out| {
         // Nudge the UI to refresh its pending/devices lists.
         let _ = app.emit("pairing://changed", ());
     }));

@@ -62,6 +62,36 @@ pub enum Outcome {
     Reconnected { device_id: String },
 }
 
+// ---- Voice application protocol (rides on the E2E channel after reconnect) ----
+
+/// A message from the phone to the desktop.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ClientMessage {
+    /// A transcribed voice utterance (STT happened on the phone — only text
+    /// crosses the wire).
+    Utterance { text: String },
+    Ping,
+}
+
+/// A message from the desktop to the phone.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ServerMessage {
+    /// Text for the phone to speak (TTS happens on the phone).
+    Say { text: String },
+    Pong,
+    Error { message: String },
+}
+
+/// Turns a spoken request into a spoken reply. The real implementation shells out
+/// to the agent, so `respond` is synchronous and is called on a blocking thread;
+/// tests provide a trivial stub. `device_id` lets a handler scope behaviour per
+/// device (e.g. honour its scope).
+pub trait VoiceHandler: Send + Sync + 'static {
+    fn respond(&self, device_id: &str, utterance: &str) -> AppResult<String>;
+}
+
 // ---- Length-prefixed framing ----
 
 async fn write_frame<W: AsyncWrite + Unpin>(w: &mut W, data: &[u8]) -> AppResult<()> {
@@ -135,6 +165,7 @@ pub async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
     pairing: &PairingService,
     devices: &PairedDevicesService,
+    handler: Arc<dyn VoiceHandler>,
     now_ms: i64,
 ) -> AppResult<Outcome> {
     let hello_bytes = read_frame_required(&mut stream).await?;
@@ -142,7 +173,9 @@ pub async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
         .map_err(|e| AppError::Other(format!("bad hello: {e}")))?;
     match hello {
         Hello::Pair => serve_pairing(&mut stream, pairing, devices, now_ms).await,
-        Hello::Reconnect { key } => serve_reconnect(&mut stream, &key, pairing, devices).await,
+        Hello::Reconnect { key } => {
+            serve_reconnect(&mut stream, &key, pairing, devices, handler).await
+        }
     }
 }
 
@@ -184,6 +217,7 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
     key_b64: &str,
     pairing: &PairingService,
     devices: &PairedDevicesService,
+    handler: Arc<dyn VoiceHandler>,
 ) -> AppResult<Outcome> {
     // The auth gate: a revoked/unknown key matches no device → refuse before any
     // crypto work.
@@ -200,13 +234,27 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
         .into_transport_mode()
         .map_err(|e| AppError::Other(format!("transport: {e}")))?;
 
-    // Application loop: decrypt each request, echo an authenticated reply. Ends
-    // on a clean EOF. (Voice/commands replace the echo later.)
+    // Voice loop: decrypt each ClientMessage, dispatch, reply with a ServerMessage.
+    // Ends on a clean EOF. The agent call (in the handler) is blocking, so it runs
+    // on a blocking thread to avoid stalling the runtime.
     while let Some(ct) = read_frame(stream).await? {
-        let msg = decrypt(&mut t, &ct)?;
-        let mut reply = b"ack:".to_vec();
-        reply.extend_from_slice(&msg);
-        let out = encrypt(&mut t, &reply)?;
+        let plain = decrypt(&mut t, &ct)?;
+        let reply = match serde_json::from_slice::<ClientMessage>(&plain) {
+            Ok(ClientMessage::Ping) => ServerMessage::Pong,
+            Ok(ClientMessage::Utterance { text }) => {
+                let h = handler.clone();
+                let did = device.id.clone();
+                match tokio::task::spawn_blocking(move || h.respond(&did, &text)).await {
+                    Ok(Ok(say)) => ServerMessage::Say { text: say },
+                    Ok(Err(e)) => ServerMessage::Error { message: e.to_string() },
+                    Err(e) => ServerMessage::Error { message: format!("handler panicked: {e}") },
+                }
+            }
+            Err(e) => ServerMessage::Error { message: format!("bad message: {e}") },
+        };
+        let bytes = serde_json::to_vec(&reply)
+            .map_err(|e| AppError::Other(format!("serialize reply: {e}")))?;
+        let out = encrypt(&mut t, &bytes)?;
         write_frame(stream, &out).await?;
     }
     Ok(Outcome::Reconnected { device_id: device.id })
@@ -242,6 +290,7 @@ pub async fn run_listener<F>(
     listener: TcpListener,
     pairing: Arc<PairingService>,
     devices: Arc<PairedDevicesService>,
+    handler: Arc<dyn VoiceHandler>,
     on_done: F,
 ) where
     F: Fn(AppResult<Outcome>) + Send + Sync + Clone + 'static,
@@ -253,9 +302,10 @@ pub async fn run_listener<F>(
         };
         let pairing = pairing.clone();
         let devices = devices.clone();
+        let handler = handler.clone();
         let on_done = on_done.clone();
         tokio::spawn(async move {
-            let out = serve_connection(stream, &pairing, &devices, now_ms()).await;
+            let out = serve_connection(stream, &pairing, &devices, handler, now_ms()).await;
             on_done(out);
         });
     }
@@ -282,6 +332,17 @@ mod tests {
             .join(format!("ac-transport-test-{}-{}", std::process::id(), nanos));
         std::fs::create_dir_all(&base).unwrap();
         std::env::set_var("XDG_DATA_HOME", &base);
+    }
+
+    /// Trivial voice handler for tests — echoes the utterance back, no agent.
+    struct StubHandler;
+    impl VoiceHandler for StubHandler {
+        fn respond(&self, _device_id: &str, utterance: &str) -> AppResult<String> {
+            Ok(format!("you said: {utterance}"))
+        }
+    }
+    fn stub_handler() -> Arc<dyn VoiceHandler> {
+        Arc::new(StubHandler)
     }
 
     /// The phone side of the wire protocol, used to drive the desktop transport
@@ -323,21 +384,22 @@ mod tests {
         // Takes the stream BY VALUE and drops it on return, so the desktop's
         // read loop sees a clean EOF and finishes — otherwise `join!` would wait
         // forever for a server that's still reading.
-        async fn reconnect_echo<S: AsyncRead + AsyncWrite + Unpin>(
+        async fn reconnect_say<S: AsyncRead + AsyncWrite + Unpin>(
             &self,
             mut stream: S,
-            msg: &[u8],
-        ) -> AppResult<Vec<u8>> {
+            utterance: &str,
+        ) -> AppResult<ServerMessage> {
             let hello = serde_json::to_vec(&Hello::Reconnect { key: self.public_b64() }).unwrap();
             write_frame(&mut stream, &hello).await?;
             let desktop_pub = self.pinned_desktop.as_ref().expect("paired first");
             let init = build_initiator_known(&self.keys.private, desktop_pub)?;
             let hs = handshake_over_stream(&mut stream, init, true).await?;
             let mut t = hs.into_transport_mode().map_err(|e| AppError::Other(e.to_string()))?;
-            let ct = encrypt(&mut t, msg)?;
+            let msg = serde_json::to_vec(&ClientMessage::Utterance { text: utterance.into() }).unwrap();
+            let ct = encrypt(&mut t, &msg)?;
             write_frame(&mut stream, &ct).await?;
             let reply = decrypt(&mut t, &read_frame_required(&mut stream).await?)?;
-            Ok(reply)
+            serde_json::from_slice(&reply).map_err(|e| AppError::Other(format!("bad reply: {e}")))
         }
     }
 
@@ -355,7 +417,7 @@ mod tests {
         let mut phone = PhoneWire::new();
         let phone_b64 = phone.public_b64();
 
-        let server = serve_connection(desk, &pairing, &devices, now);
+        let server = serve_connection(desk, &pairing, &devices, stub_handler(), now);
         let client = phone.pair(&mut phone_side, &offer, "Carlos iPhone");
         let (server_out, client_out) = tokio::join!(server, client);
         client_out.unwrap();
@@ -371,11 +433,15 @@ mod tests {
         let dev = devices.approve_pairing(&pid, now).unwrap();
 
         let (desk2, phone2) = tokio::io::duplex(8192);
-        let server = serve_connection(desk2, &pairing, &devices, now);
-        let client = phone.reconnect_echo(phone2, b"hello agent");
+        let server = serve_connection(desk2, &pairing, &devices, stub_handler(), now);
+        let client = phone.reconnect_say(phone2, "hello agent");
         let (server_out, reply) = tokio::join!(server, client);
         assert_eq!(server_out.unwrap(), Outcome::Reconnected { device_id: dev.id });
-        assert_eq!(reply.unwrap(), b"ack:hello agent");
+        assert_eq!(
+            reply.unwrap(),
+            ServerMessage::Say { text: "you said: hello agent".into() },
+            "the stub handler's spoken reply round-trips over the E2E channel"
+        );
     }
 
     #[tokio::test]
@@ -391,7 +457,7 @@ mod tests {
         let (desk, mut phone_side) = tokio::io::duplex(8192);
         let mut phone = PhoneWire::new();
         let (s, c) = tokio::join!(
-            serve_connection(desk, &pairing, &devices, now),
+            serve_connection(desk, &pairing, &devices, stub_handler(), now),
             phone.pair(&mut phone_side, &offer, "phone")
         );
         c.unwrap();
@@ -403,8 +469,8 @@ mod tests {
         // Reconnect must be refused — the pinned key matches nothing now.
         let (desk2, phone2) = tokio::io::duplex(8192);
         let (server_out, _client) = tokio::join!(
-            serve_connection(desk2, &pairing, &devices, now),
-            phone.reconnect_echo(phone2, b"let me in")
+            serve_connection(desk2, &pairing, &devices, stub_handler(), now),
+            phone.reconnect_say(phone2, "let me in")
         );
         assert!(server_out.is_err(), "revoked device must be refused");
     }
@@ -427,7 +493,7 @@ mod tests {
         let offer = pairing.start_pairing(now, 60);
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<AppResult<Outcome>>(4);
-        let server = tokio::spawn(run_listener(listener, pairing.clone(), devices.clone(), move |out| {
+        let server = tokio::spawn(run_listener(listener, pairing.clone(), devices.clone(), stub_handler(), move |out| {
             let _ = tx.try_send(out);
         }));
 
