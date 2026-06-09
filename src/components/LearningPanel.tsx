@@ -9,6 +9,9 @@ export function LearningPanel() {
   const eventsAnalyzed = useLearningStore((s) => s.eventsAnalyzed);
   const reflect = useLearningStore((s) => s.reflect);
   const reset = useLearningStore((s) => s.reset);
+  const autoEnabled = useLearningStore((s) => s.autoEnabled);
+  const setAutoEnabled = useLearningStore((s) => s.setAutoEnabled);
+  const lastWasAuto = useLearningStore((s) => s.lastWasAuto);
 
   // Elapsed-time counter while reflecting, so the wait reads as live progress.
   const [elapsed, setElapsed] = useState(0);
@@ -25,6 +28,17 @@ export function LearningPanel() {
       <div className="workbench-header workbench-header-slim">
         <span className="workbench-title">learning</span>
         <span className="spacer" />
+        <button
+          className={`workbench-action wb-learning-auto ${autoEnabled ? "on" : ""}`}
+          onClick={() => setAutoEnabled(!autoEnabled)}
+          title={
+            autoEnabled
+              ? "Auto-reflect is ON — reflects on its own as activity builds up. Click to turn off."
+              : "Auto-reflect is OFF — only reflects when you click. Click to turn on."
+          }
+        >
+          {autoEnabled ? "auto ⚡" : "auto"}
+        </button>
         {status === "results" && (
           <button className="workbench-action" onClick={reset} title="Clear results">×</button>
         )}
@@ -47,6 +61,11 @@ export function LearningPanel() {
               and proposes skills to automate repeated work, memories worth
               keeping, and friction worth fixing. Nothing is written until you
               confirm.
+            </p>
+            <p className="wb-hint">
+              {autoEnabled
+                ? "Auto-reflect is on — it'll surface suggestions on its own as you work. You can also run it now:"
+                : "Auto-reflect is off — run it whenever you like:"}
             </p>
             <button className="wb-cta" onClick={reflect}>Reflect on recent activity</button>
           </section>
@@ -84,6 +103,7 @@ export function LearningPanel() {
             <div className="wb-section-title">
               suggestions
               <span className="wb-count">{items.length}</span>
+              {lastWasAuto && <span className="wb-learning-auto-tag" title="Triggered automatically by recent activity">auto</span>}
             </div>
             {items.length === 0 ? (
               <p className="wb-hint">
