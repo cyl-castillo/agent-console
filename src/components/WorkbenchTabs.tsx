@@ -4,6 +4,7 @@ import { useSkillsStore } from "../stores/skillsStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
 import { useAdvisorStore } from "../stores/advisorStore";
 import { useLearningStore } from "../stores/learningStore";
+import { usePairingStore } from "../stores/pairingStore";
 import { useVaultStore } from "../stores/vaultStore";
 import { useContextStore } from "../stores/contextStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
@@ -13,7 +14,7 @@ import { useRoundtableStore } from "../stores/roundtableStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "vault" | "context" | "plugins" | "mcp" | "feedback";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "devices" | "vault" | "context" | "plugins" | "mcp" | "feedback";
 
 export function WorkbenchTabs({
   active,
@@ -33,6 +34,8 @@ export function WorkbenchTabs({
     s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
   );
   const learningReflecting = useLearningStore((s) => s.status === "reflecting");
+  const devicesPending = usePairingStore((s) => s.pending.length);
+  const devicesCount = usePairingStore((s) => s.devices.length);
   const vaultCount = useVaultStore((s) => s.entries.length);
   const memoriesCount = useContextStore((s) => s.memories.length);
   const pluginsCount = usePluginsStore((s) => s.installed.length);
@@ -96,6 +99,15 @@ export function WorkbenchTabs({
         title={rtActive ? "Room (running)" : "Agent Room — you + N agents converse on a problem"}
         active={active === "roundtable"}
         onClick={() => onChange("roundtable")}
+      />
+      <StripButton
+        icon="smartphone"
+        label="Devices"
+        title="Paired devices — mobile voice companion pairing"
+        count={devicesPending || devicesCount}
+        flagged={devicesPending}
+        active={active === "devices"}
+        onClick={() => onChange("devices")}
       />
       <StripButton
         icon="lock"

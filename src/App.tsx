@@ -18,6 +18,7 @@ import { SkillsPanel } from "./components/SkillsPanel";
 import { PermissionsPanel } from "./components/PermissionsPanel";
 import { AdvisorPanel } from "./components/AdvisorPanel";
 import { LearningPanel } from "./components/LearningPanel";
+import { DevicesPanel } from "./components/DevicesPanel";
 import { RoundtablePanel } from "./components/RoundtablePanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { ContextPanel } from "./components/ContextPanel";
@@ -176,7 +177,7 @@ export default function App() {
     };
     const onOpenWb = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "feedback") {
+      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "devices" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "feedback") {
         setWorkbenchTab(d);
       }
     };
@@ -252,7 +253,7 @@ export default function App() {
     try {
       const saved = localStorage.getItem(`agent-console:workbench-tab:${project.root}`);
       if (saved === "skills" || saved === "permissions" || saved === "advisor"
-          || saved === "learning" || saved === "roundtable" || saved === "vault" || saved === "context"
+          || saved === "learning" || saved === "devices" || saved === "roundtable" || saved === "vault" || saved === "context"
           || saved === "plugins" || saved === "mcp" || saved === "feedback") {
         setWorkbenchTabState(saved);
       }
@@ -438,6 +439,7 @@ export default function App() {
                 {workbenchTab === "permissions" && <PermissionsPanel />}
                 {workbenchTab === "advisor" && <AdvisorPanel />}
                 {workbenchTab === "learning" && <LearningPanel />}
+                {workbenchTab === "devices" && <DevicesPanel />}
                 {workbenchTab === "roundtable" && <RoundtablePanel />}
                 {workbenchTab === "vault" && <VaultPanel />}
                 {workbenchTab === "context" && <ContextPanel />}

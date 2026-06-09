@@ -14,6 +14,7 @@ export type IconName =
   | "server"
   | "panel-right"
   | "sparkles"
+  | "smartphone"
   | "users";
 
 interface Props {
@@ -82,6 +83,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
   // Lucide: message-square
   "message-square": (
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+  ),
+  // Lucide: smartphone
+  smartphone: (
+    <>
+      <rect width="14" height="20" x="5" y="2" rx="2" ry="2" />
+      <path d="M12 18h.01" />
+    </>
   ),
   // Lucide: sparkles
   sparkles: (

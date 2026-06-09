@@ -5,6 +5,7 @@ pub mod git;
 pub mod hooks;
 pub mod learning;
 pub mod mcp;
+pub mod pairing;
 pub mod palette;
 pub mod permissions;
 pub mod plugins;

@@ -6,6 +6,7 @@ import type {
   ActivityEvent,
   AdvisorAnalysisResult,
   BranchInfo,
+  DeviceScope, PairedDevice, PairingStartResult, PendingPairing,
   ContextFileStat, ContextStatus,
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
@@ -145,6 +146,19 @@ export const ipc = {
     invoke<string>("learning_create_skill", { name, skillMdContent }),
   learningSaveMemory: (name: string, content: string) =>
     invoke<string>("learning_save_memory", { name, content }),
+
+  pairingStart: () => invoke<PairingStartResult>("pairing_start"),
+  pairingPending: () => invoke<PendingPairing[]>("pairing_pending"),
+  pairingApprove: (pendingId: string, scope?: DeviceScope) =>
+    invoke<PairedDevice>("pairing_approve", { pendingId, scope: scope ?? null }),
+  pairingReject: (pendingId: string) =>
+    invoke<void>("pairing_reject", { pendingId }),
+  devicesList: () => invoke<PairedDevice[]>("devices_list"),
+  devicesRevoke: (id: string) => invoke<void>("devices_revoke", { id }),
+  devicesSetScope: (id: string, scope: DeviceScope) =>
+    invoke<void>("devices_set_scope", { id, scope }),
+  pairingSimulateIncoming: (label: string) =>
+    invoke<string>("pairing_simulate_incoming", { label }),
 
   roundtableStart: (config: RoundtableConfig) =>
     invoke<string>("roundtable_start", { config }),

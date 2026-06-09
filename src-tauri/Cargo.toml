@@ -36,3 +36,5 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 snow = "0.9"
 rand = "0.8"
 data-encoding = "2"
+# QR rendering for the pairing offer (SVG only; image backend disabled).
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }

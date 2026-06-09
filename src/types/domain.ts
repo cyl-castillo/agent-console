@@ -209,6 +209,33 @@ export interface ReflectionResult {
   rawExcerpt: string;
 }
 
+/// Mobile voice companion — paired-device management.
+export type DeviceScope = "readOnly" | "readApprovals" | "full";
+
+export interface PairedDevice {
+  id: string;
+  label: string;
+  publicKey: string;
+  scope: DeviceScope;
+  pairedAtMs: number;
+  lastSeenMs?: number;
+}
+
+export interface PendingPairing {
+  id: string;
+  label: string;
+  publicKey: string;
+  proposedScope: DeviceScope;
+  createdMs: number;
+}
+
+export interface PairingStartResult {
+  uri: string;
+  qrSvg: string;
+  ttlSecs: number;
+  expiresAtMs: number;
+}
+
 /// A persisted activity-ledger record (mirrors the Rust ActivityEvent).
 export interface ActivityEvent {
   ts: number;
