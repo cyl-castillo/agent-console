@@ -14,15 +14,28 @@
 
 #![allow(dead_code)]
 
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use data_encoding::BASE64URL_NOPAD;
 use serde::{Deserialize, Serialize};
 use snow::HandshakeState;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
 
 use crate::error::{AppError, AppResult};
 use crate::services::paired_devices_service::{DeviceScope, PairedDevicesService};
 use crate::services::pairing_service::PairingService;
 use crate::services::secure_channel::{decrypt, encrypt};
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
 
 /// Hard cap on a single frame, so a hostile peer can't make us allocate huge
 /// buffers. Generous for handshake messages and short voice utterances.
@@ -199,6 +212,55 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
     Ok(Outcome::Reconnected { device_id: device.id })
 }
 
+// ---- Listener ----
+
+/// A running accept loop. Dropping/stopping it aborts the loop; in-flight
+/// connection tasks are detached and finish on their own.
+pub struct ServerHandle {
+    addr: SocketAddr,
+    task: JoinHandle<()>,
+}
+
+impl ServerHandle {
+    pub fn new(addr: SocketAddr, task: JoinHandle<()>) -> Self {
+        Self { addr, task }
+    }
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+    pub fn stop(self) {
+        self.task.abort();
+    }
+}
+
+/// Accept connections forever on an ALREADY-BOUND listener, serving each on its
+/// own task. The caller binds the listener, so the bind address — and thus the
+/// exposure decision (loopback vs LAN vs relay) — stays at the call site where
+/// it can be policy-gated. `on_done` is invoked with each connection's result
+/// (e.g. to notify the UI that a pending pairing arrived).
+pub async fn run_listener<F>(
+    listener: TcpListener,
+    pairing: Arc<PairingService>,
+    devices: Arc<PairedDevicesService>,
+    on_done: F,
+) where
+    F: Fn(AppResult<Outcome>) + Send + Sync + Clone + 'static,
+{
+    loop {
+        let (stream, _peer) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(_) => continue,
+        };
+        let pairing = pairing.clone();
+        let devices = devices.clone();
+        let on_done = on_done.clone();
+        tokio::spawn(async move {
+            let out = serve_connection(stream, &pairing, &devices, now_ms()).await;
+            on_done(out);
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // The env-serialization guard (lock_env) is intentionally held across awaits
@@ -345,5 +407,42 @@ mod tests {
             phone.reconnect_echo(phone2, b"let me in")
         );
         assert!(server_out.is_err(), "revoked device must be refused");
+    }
+
+    /// End-to-end over a REAL loopback TCP socket (still 127.0.0.1 only — nothing
+    /// exposed): the accept loop serves a phone that pairs over the wire, and the
+    /// pending pairing shows up in the store.
+    #[tokio::test]
+    async fn localhost_listener_accepts_a_pairing_over_tcp() {
+        let _env = crate::test_support::lock_env();
+        isolated_data_dir();
+        // Real time, so the offer's TTL matches the listener's now().
+        let now = now_ms();
+        let pairing = Arc::new(PairingService::load().unwrap());
+        let devices = Arc::new(PairedDevicesService::new());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        assert!(addr.ip().is_loopback(), "must bind loopback only");
+        let offer = pairing.start_pairing(now, 60);
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<AppResult<Outcome>>(4);
+        let server = tokio::spawn(run_listener(listener, pairing.clone(), devices.clone(), move |out| {
+            let _ = tx.try_send(out);
+        }));
+
+        // The phone dials in over TCP and pairs.
+        let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut phone = PhoneWire::new();
+        let phone_b64 = phone.public_b64();
+        phone.pair(&mut sock, &offer, "Carlos iPhone").await.unwrap();
+
+        // The accept loop reported a pending pairing for this device.
+        let outcome = rx.recv().await.unwrap().unwrap();
+        assert!(matches!(outcome, Outcome::PendingApproval { .. }));
+        assert_eq!(devices.pending().len(), 1);
+        assert_eq!(devices.pending()[0].public_key, phone_b64);
+
+        server.abort();
     }
 }

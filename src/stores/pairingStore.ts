@@ -11,10 +11,16 @@ interface PairingState {
   pending: PendingPairing[];
   devices: PairedDevice[];
   error: string | null;
+  /// Loopback listener state.
+  serverRunning: boolean;
+  serverAddr: string | null;
 
   startPairing: () => Promise<void>;
   clearOffer: () => void;
   refresh: () => Promise<void>;
+  loadServerStatus: () => Promise<void>;
+  startServer: () => Promise<void>;
+  stopServer: () => Promise<void>;
   approve: (pendingId: string, scope?: DeviceScope) => Promise<void>;
   reject: (pendingId: string) => Promise<void>;
   revoke: (id: string) => Promise<void>;
@@ -28,6 +34,8 @@ export const usePairingStore = create<PairingState>((set, get) => ({
   pending: [],
   devices: [],
   error: null,
+  serverRunning: false,
+  serverAddr: null,
 
   startPairing: async () => {
     set({ starting: true, error: null });
@@ -40,6 +48,31 @@ export const usePairingStore = create<PairingState>((set, get) => ({
   },
 
   clearOffer: () => set({ offer: null }),
+
+  loadServerStatus: async () => {
+    try {
+      const st = await ipc.voiceServerStatus();
+      set({ serverRunning: st.running, serverAddr: st.addr ?? null });
+    } catch {
+      /* ignore */
+    }
+  },
+
+  startServer: async () => {
+    try {
+      const addr = await ipc.voiceServerStart();
+      set({ serverRunning: true, serverAddr: addr });
+      useToastStore.getState().show(`Listening on ${addr} (localhost only)`, "success");
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  stopServer: async () => {
+    await ipc.voiceServerStop();
+    set({ serverRunning: false, serverAddr: null });
+    useToastStore.getState().show("Listener stopped", "info");
+  },
 
   refresh: async () => {
     try {

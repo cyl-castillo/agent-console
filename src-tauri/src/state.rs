@@ -1,10 +1,11 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::services::activity_service::ActivityService;
 use crate::services::git_watcher::GitWatcher;
 use crate::services::hooks_service::HooksRuntime;
 use crate::services::paired_devices_service::PairedDevicesService;
 use crate::services::pairing_service::PairingService;
+use crate::services::transport::ServerHandle;
 use crate::services::project_manager::Project;
 use crate::services::roundtable_service::RoundtableService;
 use crate::services::sessions_service::SessionsService;
@@ -19,9 +20,12 @@ pub struct AppState {
     pub git_watcher: GitWatcher,
     pub roundtable: RoundtableService,
     /// Mobile voice companion: desktop pairing identity + orchestrator.
-    pub pairing: PairingService,
+    /// Arc so the accept loop can share it across per-connection tasks.
+    pub pairing: Arc<PairingService>,
     /// Trusted paired devices + pending-approval gate.
-    pub paired_devices: PairedDevicesService,
+    pub paired_devices: Arc<PairedDevicesService>,
+    /// The running loopback listener, if started. None = stopped.
+    pub voice_server: Mutex<Option<ServerHandle>>,
 }
 
 impl AppState {
@@ -35,8 +39,11 @@ impl AppState {
             activity: ActivityService::new(),
             git_watcher: GitWatcher::new(),
             roundtable: RoundtableService::new(),
-            pairing: PairingService::load().expect("failed to load device pairing identity"),
-            paired_devices: PairedDevicesService::new(),
+            pairing: Arc::new(
+                PairingService::load().expect("failed to load device pairing identity"),
+            ),
+            paired_devices: Arc::new(PairedDevicesService::new()),
+            voice_server: Mutex::new(None),
         }
     }
 }

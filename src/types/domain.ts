@@ -236,6 +236,11 @@ export interface PairingStartResult {
   expiresAtMs: number;
 }
 
+export interface VoiceServerStatus {
+  running: boolean;
+  addr?: string;
+}
+
 /// A persisted activity-ledger record (mirrors the Rust ActivityEvent).
 export interface ActivityEvent {
   ts: number;

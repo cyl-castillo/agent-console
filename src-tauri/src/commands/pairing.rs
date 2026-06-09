@@ -2,10 +2,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use data_encoding::BASE64URL_NOPAD;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::paired_devices_service::{DeviceScope, PairedDevice, PendingPairing};
+use crate::services::transport::{self, ServerHandle};
 use crate::state::AppState;
 
 /// How long a pairing QR stays valid. Short on purpose — the QR is the
@@ -109,6 +110,54 @@ pub fn devices_set_scope(
     scope: DeviceScope,
 ) -> AppResult<()> {
     state.paired_devices.set_scope(&id, scope)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceServerStatus {
+    pub running: bool,
+    pub addr: Option<String>,
+}
+
+/// Start the pairing/voice listener bound to **loopback only** (127.0.0.1). This
+/// does NOT expose the desktop to the LAN or internet — that is a separate,
+/// explicitly policy-gated step. Idempotent: returns the address if already up.
+#[tauri::command]
+pub async fn voice_server_start(app: AppHandle, state: State<'_, AppState>) -> AppResult<String> {
+    if let Some(h) = state.voice_server.lock().unwrap().as_ref() {
+        return Ok(h.addr().to_string());
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| AppError::Other(format!("bind loopback: {e}")))?;
+    let addr = listener
+        .local_addr()
+        .map_err(|e| AppError::Other(format!("local_addr: {e}")))?;
+    let pairing = state.pairing.clone();
+    let devices = state.paired_devices.clone();
+    let task = tokio::spawn(transport::run_listener(listener, pairing, devices, move |_out| {
+        // Nudge the UI to refresh its pending/devices lists.
+        let _ = app.emit("pairing://changed", ());
+    }));
+    *state.voice_server.lock().unwrap() = Some(ServerHandle::new(addr, task));
+    Ok(addr.to_string())
+}
+
+#[tauri::command]
+pub fn voice_server_stop(state: State<'_, AppState>) -> AppResult<()> {
+    if let Some(h) = state.voice_server.lock().unwrap().take() {
+        h.stop();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn voice_server_status(state: State<'_, AppState>) -> AppResult<VoiceServerStatus> {
+    let guard = state.voice_server.lock().unwrap();
+    Ok(match guard.as_ref() {
+        Some(h) => VoiceServerStatus { running: true, addr: Some(h.addr().to_string()) },
+        None => VoiceServerStatus { running: false, addr: None },
+    })
 }
 
 /// DEV ONLY: fabricate a pending pairing so the approval dialog can be exercised

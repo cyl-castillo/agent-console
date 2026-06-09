@@ -6,7 +6,7 @@ import type {
   ActivityEvent,
   AdvisorAnalysisResult,
   BranchInfo,
-  DeviceScope, PairedDevice, PairingStartResult, PendingPairing,
+  DeviceScope, PairedDevice, PairingStartResult, PendingPairing, VoiceServerStatus,
   ContextFileStat, ContextStatus,
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
@@ -159,6 +159,9 @@ export const ipc = {
     invoke<void>("devices_set_scope", { id, scope }),
   pairingSimulateIncoming: (label: string) =>
     invoke<string>("pairing_simulate_incoming", { label }),
+  voiceServerStart: () => invoke<string>("voice_server_start"),
+  voiceServerStop: () => invoke<void>("voice_server_stop"),
+  voiceServerStatus: () => invoke<VoiceServerStatus>("voice_server_status"),
 
   roundtableStart: (config: RoundtableConfig) =>
     invoke<string>("roundtable_start", { config }),

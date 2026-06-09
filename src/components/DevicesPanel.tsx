@@ -20,13 +20,19 @@ export function DevicesPanel() {
   const startPairing = usePairingStore((s) => s.startPairing);
   const refresh = usePairingStore((s) => s.refresh);
   const simulateIncoming = usePairingStore((s) => s.simulateIncoming);
+  const serverRunning = usePairingStore((s) => s.serverRunning);
+  const serverAddr = usePairingStore((s) => s.serverAddr);
+  const loadServerStatus = usePairingStore((s) => s.loadServerStatus);
+  const startServer = usePairingStore((s) => s.startServer);
+  const stopServer = usePairingStore((s) => s.stopServer);
 
   // Poll while the panel is open so scanned/incoming pairings surface.
   useEffect(() => {
+    void loadServerStatus();
     void refresh();
     const t = setInterval(() => void refresh(), 2000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refresh, loadServerStatus]);
 
   return (
     <div className="workbench">
@@ -42,6 +48,26 @@ export function DevicesPanel() {
             <p className="wb-hint" style={{ color: "#ff8585", whiteSpace: "pre-wrap" }}>{error}</p>
           </section>
         )}
+
+        {/* Listener */}
+        <section className="wb-section">
+          <div className="wb-section-title">listener</div>
+          <p className="wb-hint">
+            {serverRunning
+              ? `Accepting connections on ${serverAddr} — localhost only.`
+              : "Off. Start it to accept device connections on this machine."}
+          </p>
+          <p className="wb-hint" style={{ fontSize: 11, opacity: 0.7 }}>
+            Loopback only (127.0.0.1). Reaching it from a phone over the LAN or a
+            relay is a separate step that exposes the desktop to the network — not
+            enabled here.
+          </p>
+          {serverRunning ? (
+            <button className="wb-link" onClick={() => void stopServer()}>stop listener</button>
+          ) : (
+            <button className="wb-cta" onClick={() => void startServer()}>Start listener (localhost)</button>
+          )}
+        </section>
 
         {/* Pair a new device */}
         <section className="wb-section">
