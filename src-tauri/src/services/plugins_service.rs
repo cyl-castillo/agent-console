@@ -209,7 +209,7 @@ pub fn list_available() -> AvailableSnapshot {
         }
     }
 
-    plugins.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    plugins.sort_by_key(|a| a.name.to_lowercase());
     AvailableSnapshot {
         marketplaces,
         plugins,

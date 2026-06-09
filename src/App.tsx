@@ -207,13 +207,16 @@ export default function App() {
   }, [project, setTab, addTerminal, persistTerminals, showToast]);
 
   useEffect(() => {
+    // If cleanup runs before a listen() promise resolves (StrictMode double
+    // mount, fast unmount), unlisten immediately instead of leaking it.
+    let disposed = false;
     let offSkills: (() => void) | null = null;
     let offApproval: (() => void) | null = null;
     let offGit: (() => void) | null = null;
-    attachSkillsListeners().then((u) => { offSkills = u; });
-    attachApprovalListener().then((u) => { offApproval = u; });
-    attachGitWatcherListener().then((u) => { offGit = u; });
-    return () => { offSkills?.(); offApproval?.(); offGit?.(); };
+    attachSkillsListeners().then((u) => { if (disposed) u(); else offSkills = u; });
+    attachApprovalListener().then((u) => { if (disposed) u(); else offApproval = u; });
+    attachGitWatcherListener().then((u) => { if (disposed) u(); else offGit = u; });
+    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); };
   }, []);
 
   useEffect(() => {

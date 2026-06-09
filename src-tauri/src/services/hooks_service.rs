@@ -63,6 +63,7 @@ impl HooksRuntime {
     pub fn session_dir(&self) -> &Path {
         &self.session_dir
     }
+    #[allow(dead_code)]
     pub fn script_path(&self) -> &Path {
         &self.script_path
     }
@@ -123,10 +124,7 @@ impl HooksRuntime {
         upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
         upsert_hook(&mut settings, "PreToolUse", &self.pretooluse_script_path);
 
-        fs::write(
-            &settings_path,
-            serde_json::to_string_pretty(&settings).unwrap(),
-        )?;
+        write_settings_atomic(&settings_path, &settings)?;
         Ok(self.status())
     }
 
@@ -160,10 +158,7 @@ impl HooksRuntime {
             settings = json!({});
         }
         upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
-        fs::write(
-            &settings_path,
-            serde_json::to_string_pretty(&settings).unwrap(),
-        )?;
+        write_settings_atomic(&settings_path, &settings)?;
         // Best-effort marker: if it fails we'd re-run the idempotent upsert next
         // launch, which is harmless.
         let _ = fs::write(&marker, b"1");
@@ -190,10 +185,7 @@ impl HooksRuntime {
                 }
             }
         }
-        fs::write(
-            &settings_path,
-            serde_json::to_string_pretty(&settings).unwrap(),
-        )?;
+        write_settings_atomic(&settings_path, &settings)?;
         Ok(self.status())
     }
 
@@ -215,6 +207,15 @@ impl HooksRuntime {
         fs::rename(&tmp, &path)?;
         Ok(())
     }
+}
+
+/// Write settings.json via temp file + rename so a crash mid-write can never
+/// leave ~/.claude/settings.json truncated or half-serialized.
+fn write_settings_atomic(settings_path: &Path, settings: &Value) -> AppResult<()> {
+    let tmp = settings_path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_string_pretty(settings).unwrap())?;
+    fs::rename(&tmp, settings_path)?;
+    Ok(())
 }
 
 fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path) {

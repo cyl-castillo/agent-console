@@ -59,6 +59,13 @@ struct Active {
     root: PathBuf,
 }
 
+/// Recover from a poisoned mutex (a panicked setup thread) instead of
+/// poisoning every later watch()/stop() call. Worst case we re-install a
+/// watcher, which is idempotent.
+fn lock_inner(inner: &Mutex<Option<Active>>) -> std::sync::MutexGuard<'_, Option<Active>> {
+    inner.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 impl Default for GitWatcher {
     fn default() -> Self {
         Self::new()
@@ -82,7 +89,7 @@ impl GitWatcher {
     /// project opens.
     pub fn watch(&self, app: AppHandle, root: PathBuf) {
         {
-            let guard = self.inner.lock().unwrap();
+            let guard = lock_inner(&self.inner);
             if let Some(active) = guard.as_ref() {
                 if active.root == root {
                     return;
@@ -121,7 +128,7 @@ impl GitWatcher {
             if generation.load(Ordering::SeqCst) != my_gen {
                 return;
             }
-            let mut guard = inner.lock().unwrap();
+            let mut guard = lock_inner(&inner);
             if generation.load(Ordering::SeqCst) != my_gen {
                 return;
             }
@@ -132,10 +139,11 @@ impl GitWatcher {
         });
     }
 
+    #[allow(dead_code)]
     pub fn stop(&self) {
         // Bump the generation so any in-flight setup thread won't install.
         self.generation.fetch_add(1, Ordering::SeqCst);
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = lock_inner(&self.inner);
         *guard = None;
     }
 }
@@ -209,6 +217,7 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) {
 /// - anything under `.git/objects/`, `.git/refs/`, `.git/logs/` — these
 ///   churn during background gc and on `git status` itself.
 /// - typical heavy dirs that change on builds (node_modules, target, dist).
+///
 /// We do allow `.git/index` and `.git/HEAD` through, so a commit / checkout
 /// is reflected immediately.
 fn ignored(path: &Path, root: &Path) -> bool {
@@ -227,10 +236,10 @@ fn ignored(path: &Path, root: &Path) -> bool {
         if parts.len() == 1 {
             return true;
         }
-        match parts[1].as_str() {
-            "HEAD" | "ORIG_HEAD" | "index" | "MERGE_HEAD" | "FETCH_HEAD" => false,
-            _ => true,
-        }
+        !matches!(
+            parts[1].as_str(),
+            "HEAD" | "ORIG_HEAD" | "index" | "MERGE_HEAD" | "FETCH_HEAD"
+        )
     } else {
         matches!(
             parts[0].as_str(),

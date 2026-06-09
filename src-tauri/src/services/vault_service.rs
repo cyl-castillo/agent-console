@@ -76,7 +76,7 @@ pub fn list(project_root: Option<&Path>) -> AppResult<Vec<VaultEntryView>> {
     }
     let store = load_store(&global_path()?)?;
     out.extend(store.entries.iter().map(VaultEntryView::from));
-    out.sort_by(|a, b| a.key.to_lowercase().cmp(&b.key.to_lowercase()));
+    out.sort_by_key(|a| a.key.to_lowercase());
     Ok(out)
 }
 
@@ -268,7 +268,7 @@ fn validate_key(key: &str) -> AppResult<()> {
     if key.is_empty() {
         return Err(AppError::InvalidArgument("key cannot be empty".into()));
     }
-    if !key.chars().next().unwrap().is_ascii_alphabetic() && key.chars().next().unwrap() != '_' {
+    if !key.chars().next().unwrap().is_ascii_alphabetic() && !key.starts_with('_') {
         return Err(AppError::InvalidArgument(
             "key must start with a letter or underscore".into(),
         ));

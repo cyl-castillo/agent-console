@@ -1,5 +1,5 @@
 use crate::services::proc;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -108,6 +108,25 @@ pub fn status(repo: &Path) -> AppResult<GitStatus> {
     })
 }
 
+/// Resolve a frontend-supplied path strictly inside the repo. Rejects absolute
+/// paths and anything that escapes via `..` or symlinks (canonicalize resolves
+/// both, so the target must exist — which holds for the read/delete callers).
+fn resolve_in_repo(repo: &Path, file: &str) -> AppResult<PathBuf> {
+    if Path::new(file).is_absolute() {
+        return Err(AppError::InvalidArgument(format!(
+            "path escapes repo: {file}"
+        )));
+    }
+    let repo_canon = repo.canonicalize()?;
+    let canon = repo_canon.join(file).canonicalize()?;
+    if !canon.starts_with(&repo_canon) {
+        return Err(AppError::InvalidArgument(format!(
+            "path escapes repo: {file}"
+        )));
+    }
+    Ok(canon)
+}
+
 /// Unified diff for a single file. Falls back to a synthetic diff for
 /// untracked files (whose content is not yet tracked by git).
 pub fn diff_file(repo: &Path, file: &str) -> AppResult<String> {
@@ -117,7 +136,9 @@ pub fn diff_file(repo: &Path, file: &str) -> AppResult<String> {
         .current_dir(repo)
         .output()?;
     if !ls.status.success() {
-        let abs = repo.join(file);
+        let Ok(abs) = resolve_in_repo(repo, file) else {
+            return Ok(String::new());
+        };
         if let Ok(content) = std::fs::read_to_string(&abs) {
             let mut out = format!("diff --git a/{file} b/{file}\n");
             out.push_str("new file (untracked)\n");
@@ -431,10 +452,59 @@ pub fn revert_file(repo: &Path, file: &str) -> AppResult<()> {
         return Ok(());
     }
 
-    // Untracked → remove from working tree.
-    let abs = repo.join(file);
+    // Untracked → remove from working tree, but only if the path resolves
+    // inside the repo. A missing file is a no-op (already gone).
+    let abs = match resolve_in_repo(repo, file) {
+        Ok(p) => p,
+        Err(AppError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
     if abs.is_file() {
         std::fs::remove_file(&abs)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_in_repo_accepts_inside_rejects_escapes() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("ac-resolve-{nanos}"));
+        std::fs::create_dir_all(repo.join("sub")).unwrap();
+        std::fs::write(repo.join("inside.txt"), "x").unwrap();
+        std::fs::write(repo.join("sub/nested.txt"), "x").unwrap();
+        let outside = std::env::temp_dir().join(format!("ac-resolve-outside-{nanos}.txt"));
+        std::fs::write(&outside, "y").unwrap();
+
+        assert!(resolve_in_repo(&repo, "inside.txt").is_ok());
+        assert!(resolve_in_repo(&repo, "sub/nested.txt").is_ok());
+        // `..` that stays inside resolves fine.
+        assert!(resolve_in_repo(&repo, "sub/../inside.txt").is_ok());
+
+        // Absolute paths are rejected outright.
+        assert!(matches!(
+            resolve_in_repo(&repo, outside.to_str().unwrap()),
+            Err(AppError::InvalidArgument(_))
+        ));
+        // Traversal to an existing file outside the repo is rejected.
+        let name = outside.file_name().unwrap().to_string_lossy().to_string();
+        assert!(matches!(
+            resolve_in_repo(&repo, &format!("../{name}")),
+            Err(AppError::InvalidArgument(_))
+        ));
+        // Nonexistent paths surface as io errors (callers treat as no-op).
+        assert!(matches!(
+            resolve_in_repo(&repo, "no-such-file.txt"),
+            Err(AppError::Io(_))
+        ));
+
+        let _ = std::fs::remove_dir_all(&repo);
+        let _ = std::fs::remove_file(&outside);
+    }
 }

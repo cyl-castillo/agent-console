@@ -44,7 +44,15 @@ impl TerminalRegistry {
         Self::default()
     }
 
+    /// Recover from a poisoned mutex (a panicked thread) instead of cascading
+    /// the panic into every later terminal operation. The map itself stays
+    /// consistent: each handle is only touched under the lock.
+    fn lock_terms(&self) -> std::sync::MutexGuard<'_, HashMap<String, TerminalHandle>> {
+        self.terms.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     /// Spawn a new PTY in `cwd` running the user's default shell.
+    #[allow(dead_code)]
     pub fn spawn(&self, app: AppHandle, cwd: &Path) -> AppResult<String> {
         self.spawn_with_env(app, cwd, &[])
     }
@@ -134,7 +142,7 @@ impl TerminalRegistry {
             });
         }
 
-        self.terms.lock().unwrap().insert(
+        self.lock_terms().insert(
             id.clone(),
             TerminalHandle {
                 master: pair.master,
@@ -146,7 +154,7 @@ impl TerminalRegistry {
     }
 
     pub fn write(&self, id: &str, data: &[u8]) -> AppResult<()> {
-        let mut terms = self.terms.lock().unwrap();
+        let mut terms = self.lock_terms();
         let term = terms
             .get_mut(id)
             .ok_or_else(|| AppError::InvalidArgument(format!("unknown terminal: {id}")))?;
@@ -157,7 +165,7 @@ impl TerminalRegistry {
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> AppResult<()> {
-        let terms = self.terms.lock().unwrap();
+        let terms = self.lock_terms();
         let term = terms
             .get(id)
             .ok_or_else(|| AppError::InvalidArgument(format!("unknown terminal: {id}")))?;
@@ -173,7 +181,7 @@ impl TerminalRegistry {
     }
 
     pub fn kill(&self, id: &str) -> AppResult<()> {
-        let mut terms = self.terms.lock().unwrap();
+        let mut terms = self.lock_terms();
         let mut term = terms
             .remove(id)
             .ok_or_else(|| AppError::InvalidArgument(format!("unknown terminal: {id}")))?;
