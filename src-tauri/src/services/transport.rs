@@ -311,6 +311,149 @@ pub async fn run_listener<F>(
     }
 }
 
+// ---- Phone (initiator) reference client ----
+
+/// The phone side of the protocol — the reference implementation a real mobile
+/// app (separate repo) mirrors. Production code: the integration tests and the
+/// `phone-sim` binary both drive it, and it is the executable spec for
+/// `docs/pairing-protocol.md`.
+pub mod client {
+    use super::{
+        decrypt, encrypt, handshake_over_stream, read_frame_required, write_frame, ClientMessage,
+        Hello, ServerMessage,
+    };
+    use crate::error::{AppError, AppResult};
+    use crate::services::secure_channel::{
+        build_initiator, build_initiator_known, generate_static, verify_pinned_remote, PairingOffer,
+        StaticKeypair,
+    };
+    use data_encoding::BASE64URL_NOPAD;
+    use serde::{Deserialize, Serialize};
+    use tokio::io::{AsyncRead, AsyncWrite};
+
+    /// Decode an `agentconsole://pair?d=<base64url(json)>` URI into an offer.
+    pub fn parse_offer_uri(uri: &str) -> AppResult<PairingOffer> {
+        let d = uri
+            .split_once("?d=")
+            .map(|(_, d)| d)
+            .ok_or_else(|| AppError::Other("offer uri missing ?d=".into()))?;
+        let json = BASE64URL_NOPAD
+            .decode(d.trim().as_bytes())
+            .map_err(|e| AppError::Other(format!("bad offer encoding: {e}")))?;
+        serde_json::from_slice(&json).map_err(|e| AppError::Other(format!("bad offer json: {e}")))
+    }
+
+    /// A phone client: its identity keypair, plus (after pairing) the pinned
+    /// desktop key it authenticates against on reconnect.
+    pub struct PhoneClient {
+        keys: StaticKeypair,
+        pinned_desktop: Option<Vec<u8>>,
+    }
+
+    impl PhoneClient {
+        pub fn new() -> AppResult<Self> {
+            Ok(Self { keys: generate_static()?, pinned_desktop: None })
+        }
+
+        pub fn public_b64(&self) -> String {
+            BASE64URL_NOPAD.encode(&self.keys.public)
+        }
+
+        pub fn is_paired(&self) -> bool {
+            self.pinned_desktop.is_some()
+        }
+
+        /// First-contact pairing over `stream`. On success, pins the desktop key.
+        /// The desktop holds the pairing pending until a human approves it.
+        pub async fn pair<S: AsyncRead + AsyncWrite + Unpin>(
+            &mut self,
+            stream: &mut S,
+            offer: &PairingOffer,
+            label: &str,
+        ) -> AppResult<()> {
+            let pinned = offer.responder_static_bytes()?;
+            write_frame(stream, &serde_json::to_vec(&Hello::Pair).unwrap()).await?;
+            let init = build_initiator(&self.keys.private, &offer.psk_bytes()?)?;
+            let hs = handshake_over_stream(stream, init, true).await?;
+            // Anti-MITM: the desktop we just spoke to must be the QR's desktop.
+            verify_pinned_remote(&hs, &pinned)?;
+            let mut t = hs
+                .into_transport_mode()
+                .map_err(|e| AppError::Other(format!("transport: {e}")))?;
+            write_frame(stream, &encrypt(&mut t, label.as_bytes())?).await?;
+            let ack = decrypt(&mut t, &read_frame_required(stream).await?)?;
+            if ack != b"pending-approval" {
+                return Err(AppError::Other("unexpected pairing ack".into()));
+            }
+            self.pinned_desktop = Some(pinned);
+            Ok(())
+        }
+
+        /// Reconnect (KK) and send one message, returning the reply. Consumes the
+        /// stream so it closes cleanly on return (ending the desktop's loop).
+        pub async fn request<S: AsyncRead + AsyncWrite + Unpin>(
+            &self,
+            mut stream: S,
+            msg: ClientMessage,
+        ) -> AppResult<ServerMessage> {
+            let desktop = self
+                .pinned_desktop
+                .as_ref()
+                .ok_or_else(|| AppError::Other("not paired".into()))?;
+            let hello = serde_json::to_vec(&Hello::Reconnect { key: self.public_b64() }).unwrap();
+            write_frame(&mut stream, &hello).await?;
+            let init = build_initiator_known(&self.keys.private, desktop)?;
+            let hs = handshake_over_stream(&mut stream, init, true).await?;
+            let mut t = hs
+                .into_transport_mode()
+                .map_err(|e| AppError::Other(format!("transport: {e}")))?;
+            let bytes = serde_json::to_vec(&msg).map_err(|e| AppError::Other(e.to_string()))?;
+            write_frame(&mut stream, &encrypt(&mut t, &bytes)?).await?;
+            let reply = decrypt(&mut t, &read_frame_required(&mut stream).await?)?;
+            serde_json::from_slice(&reply).map_err(|e| AppError::Other(format!("bad reply: {e}")))
+        }
+
+        /// Convenience: send a voice utterance and get the spoken reply.
+        pub async fn say<S: AsyncRead + AsyncWrite + Unpin>(
+            &self,
+            stream: S,
+            utterance: &str,
+        ) -> AppResult<ServerMessage> {
+            self.request(stream, ClientMessage::Utterance { text: utterance.into() })
+                .await
+        }
+
+        pub fn to_state(&self) -> PhoneState {
+            PhoneState {
+                private: BASE64URL_NOPAD.encode(&self.keys.private),
+                public: BASE64URL_NOPAD.encode(&self.keys.public),
+                desktop_public: self.pinned_desktop.as_ref().map(|d| BASE64URL_NOPAD.encode(d)),
+            }
+        }
+
+        pub fn from_state(s: &PhoneState) -> AppResult<Self> {
+            let dec = |x: &str| {
+                BASE64URL_NOPAD
+                    .decode(x.as_bytes())
+                    .map_err(|e| AppError::Other(format!("decode phone state: {e}")))
+            };
+            Ok(Self {
+                keys: StaticKeypair { private: dec(&s.private)?, public: dec(&s.public)? },
+                pinned_desktop: s.desktop_public.as_deref().map(dec).transpose()?,
+            })
+        }
+    }
+
+    /// Persisted phone-side state (for the reference CLI). A real app stores the
+    /// private key in the OS keystore instead of a file.
+    #[derive(Serialize, Deserialize)]
+    pub struct PhoneState {
+        pub private: String,
+        pub public: String,
+        pub desktop_public: Option<String>,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // The env-serialization guard (lock_env) is intentionally held across awaits
@@ -320,10 +463,7 @@ mod tests {
     #![allow(clippy::await_holding_lock)]
 
     use super::*;
-    use crate::services::secure_channel::{
-        build_initiator, build_initiator_known, generate_static, verify_pinned_remote, PairingOffer,
-        StaticKeypair,
-    };
+    use client::PhoneClient;
 
     fn isolated_data_dir() {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -345,64 +485,6 @@ mod tests {
         Arc::new(StubHandler)
     }
 
-    /// The phone side of the wire protocol, used to drive the desktop transport
-    /// over a duplex stream in tests.
-    struct PhoneWire {
-        keys: StaticKeypair,
-        pinned_desktop: Option<Vec<u8>>,
-    }
-
-    impl PhoneWire {
-        fn new() -> Self {
-            Self { keys: generate_static().unwrap(), pinned_desktop: None }
-        }
-
-        async fn pair<S: AsyncRead + AsyncWrite + Unpin>(
-            &mut self,
-            stream: &mut S,
-            offer: &PairingOffer,
-            label: &str,
-        ) -> AppResult<()> {
-            self.pinned_desktop = Some(offer.responder_static_bytes()?);
-            let hello = serde_json::to_vec(&Hello::Pair).unwrap();
-            write_frame(stream, &hello).await?;
-            let init = build_initiator(&self.keys.private, &offer.psk_bytes()?)?;
-            let hs = handshake_over_stream(stream, init, true).await?;
-            verify_pinned_remote(&hs, self.pinned_desktop.as_ref().unwrap())?;
-            let mut t = hs.into_transport_mode().map_err(|e| AppError::Other(e.to_string()))?;
-            let ct = encrypt(&mut t, label.as_bytes())?;
-            write_frame(stream, &ct).await?;
-            let ack = decrypt(&mut t, &read_frame_required(stream).await?)?;
-            assert_eq!(ack, b"pending-approval");
-            Ok(())
-        }
-
-        fn public_b64(&self) -> String {
-            BASE64URL_NOPAD.encode(&self.keys.public)
-        }
-
-        // Takes the stream BY VALUE and drops it on return, so the desktop's
-        // read loop sees a clean EOF and finishes — otherwise `join!` would wait
-        // forever for a server that's still reading.
-        async fn reconnect_say<S: AsyncRead + AsyncWrite + Unpin>(
-            &self,
-            mut stream: S,
-            utterance: &str,
-        ) -> AppResult<ServerMessage> {
-            let hello = serde_json::to_vec(&Hello::Reconnect { key: self.public_b64() }).unwrap();
-            write_frame(&mut stream, &hello).await?;
-            let desktop_pub = self.pinned_desktop.as_ref().expect("paired first");
-            let init = build_initiator_known(&self.keys.private, desktop_pub)?;
-            let hs = handshake_over_stream(&mut stream, init, true).await?;
-            let mut t = hs.into_transport_mode().map_err(|e| AppError::Other(e.to_string()))?;
-            let msg = serde_json::to_vec(&ClientMessage::Utterance { text: utterance.into() }).unwrap();
-            let ct = encrypt(&mut t, &msg)?;
-            write_frame(&mut stream, &ct).await?;
-            let reply = decrypt(&mut t, &read_frame_required(&mut stream).await?)?;
-            serde_json::from_slice(&reply).map_err(|e| AppError::Other(format!("bad reply: {e}")))
-        }
-    }
-
     #[tokio::test]
     async fn pairing_then_approved_reconnect_over_a_stream() {
         let _env = crate::test_support::lock_env();
@@ -414,7 +496,7 @@ mod tests {
         // --- Pair over a real async duplex stream ---
         let offer = pairing.start_pairing(now, 60);
         let (desk, mut phone_side) = tokio::io::duplex(8192);
-        let mut phone = PhoneWire::new();
+        let mut phone = PhoneClient::new().unwrap();
         let phone_b64 = phone.public_b64();
 
         let server = serve_connection(desk, &pairing, &devices, stub_handler(), now);
@@ -434,7 +516,7 @@ mod tests {
 
         let (desk2, phone2) = tokio::io::duplex(8192);
         let server = serve_connection(desk2, &pairing, &devices, stub_handler(), now);
-        let client = phone.reconnect_say(phone2, "hello agent");
+        let client = phone.say(phone2, "hello agent");
         let (server_out, reply) = tokio::join!(server, client);
         assert_eq!(server_out.unwrap(), Outcome::Reconnected { device_id: dev.id });
         assert_eq!(
@@ -455,7 +537,7 @@ mod tests {
         // Pair + approve, then revoke.
         let offer = pairing.start_pairing(now, 60);
         let (desk, mut phone_side) = tokio::io::duplex(8192);
-        let mut phone = PhoneWire::new();
+        let mut phone = PhoneClient::new().unwrap();
         let (s, c) = tokio::join!(
             serve_connection(desk, &pairing, &devices, stub_handler(), now),
             phone.pair(&mut phone_side, &offer, "phone")
@@ -470,7 +552,7 @@ mod tests {
         let (desk2, phone2) = tokio::io::duplex(8192);
         let (server_out, _client) = tokio::join!(
             serve_connection(desk2, &pairing, &devices, stub_handler(), now),
-            phone.reconnect_say(phone2, "let me in")
+            phone.say(phone2, "let me in")
         );
         assert!(server_out.is_err(), "revoked device must be refused");
     }
@@ -499,7 +581,7 @@ mod tests {
 
         // The phone dials in over TCP and pairs.
         let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
-        let mut phone = PhoneWire::new();
+        let mut phone = PhoneClient::new().unwrap();
         let phone_b64 = phone.public_b64();
         phone.pair(&mut sock, &offer, "Carlos iPhone").await.unwrap();
 
@@ -508,6 +590,50 @@ mod tests {
         assert!(matches!(outcome, Outcome::PendingApproval { .. }));
         assert_eq!(devices.pending().len(), 1);
         assert_eq!(devices.pending()[0].public_key, phone_b64);
+
+        server.abort();
+    }
+
+    /// The whole loop over real loopback TCP with the reference client: pair →
+    /// approve → reconnect → voice round-trip. This is the executable spec the
+    /// phone app mirrors.
+    #[tokio::test]
+    async fn reference_client_full_voice_loop_over_tcp() {
+        let _env = crate::test_support::lock_env();
+        isolated_data_dir();
+        let now = now_ms();
+        let pairing = Arc::new(PairingService::load().unwrap());
+        let devices = Arc::new(PairedDevicesService::new());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let offer = pairing.start_pairing(now, 60);
+        let server = tokio::spawn(run_listener(
+            listener,
+            pairing.clone(),
+            devices.clone(),
+            stub_handler(),
+            move |_out| {},
+        ));
+
+        // 1. Pair (the phone goes through the same path as `parse_offer_uri` would).
+        let mut phone = PhoneClient::new().unwrap();
+        let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+        phone.pair(&mut sock, &offer, "Carlos iPhone").await.unwrap();
+        drop(sock);
+
+        // 2. Human approves on the desktop.
+        let pid = devices.pending()[0].id.clone();
+        devices.approve_pairing(&pid, now).unwrap();
+
+        // 3. Reconnect over a fresh TCP connection and speak.
+        let sock2 = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let reply = phone.say(sock2, "what's the build status?").await.unwrap();
+        assert_eq!(
+            reply,
+            ServerMessage::Say { text: "you said: what's the build status?".into() },
+            "the spoken reply round-trips E2E over real TCP"
+        );
 
         server.abort();
     }

@@ -3,6 +3,11 @@ mod error;
 mod services;
 mod state;
 
+// Public surface for the reference phone client (`phone-sim` binary) and any
+// external consumer of the pairing/voice protocol.
+pub use crate::services::transport::client as phone_protocol;
+pub use crate::services::transport::{ClientMessage, ServerMessage};
+
 use crate::state::AppState;
 use tauri::Manager;
 
