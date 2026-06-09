@@ -59,6 +59,13 @@ struct Active {
     root: PathBuf,
 }
 
+/// Recover from a poisoned mutex (a panicked setup thread) instead of
+/// poisoning every later watch()/stop() call. Worst case we re-install a
+/// watcher, which is idempotent.
+fn lock_inner(inner: &Mutex<Option<Active>>) -> std::sync::MutexGuard<'_, Option<Active>> {
+    inner.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 impl Default for GitWatcher {
     fn default() -> Self {
         Self::new()
@@ -82,7 +89,7 @@ impl GitWatcher {
     /// project opens.
     pub fn watch(&self, app: AppHandle, root: PathBuf) {
         {
-            let guard = self.inner.lock().unwrap();
+            let guard = lock_inner(&self.inner);
             if let Some(active) = guard.as_ref() {
                 if active.root == root {
                     return;
@@ -121,7 +128,7 @@ impl GitWatcher {
             if generation.load(Ordering::SeqCst) != my_gen {
                 return;
             }
-            let mut guard = inner.lock().unwrap();
+            let mut guard = lock_inner(&inner);
             if generation.load(Ordering::SeqCst) != my_gen {
                 return;
             }
@@ -135,7 +142,7 @@ impl GitWatcher {
     pub fn stop(&self) {
         // Bump the generation so any in-flight setup thread won't install.
         self.generation.fetch_add(1, Ordering::SeqCst);
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = lock_inner(&self.inner);
         *guard = None;
     }
 }

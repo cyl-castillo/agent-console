@@ -102,7 +102,9 @@ interface RoundtableState {
   resumeRoom: () => Promise<void>;
 }
 
-let listenersBound = false;
+// Promise-singleton so concurrent initListeners() calls (panel mount + start)
+// share one bind, and teardown can await an in-flight bind before unlistening.
+let bindPromise: Promise<void> | null = null;
 let unlistenTurn: UnlistenFn | null = null;
 let unlistenStatus: UnlistenFn | null = null;
 let unlistenActivity: UnlistenFn | null = null;
@@ -129,61 +131,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   draft: { ...DEFAULT_DRAFT, participants: DEFAULT_DRAFT.participants.map((p) => ({ ...p })) },
   roster: [],
 
-  initListeners: async () => {
-    if (listenersBound) return;
-    listenersBound = true;
-    unlistenActivity = await listen<RoundtableActivity>("roundtable://activity", (e) => {
-      const a = e.payload;
-      if (a.id !== get().runId) return;
-      // Coalesce consecutive "text" chunks from the same author+turn so a
-      // streamed answer reads as one growing block rather than many lines.
-      set((s) => {
-        const last = s.activities[s.activities.length - 1];
-        if (
-          a.kind === "text" &&
-          last &&
-          last.kind === "text" &&
-          last.authorId === a.authorId &&
-          last.turn === a.turn
-        ) {
-          const merged = { ...last, text: `${last.text}${a.text}` };
-          return { activities: [...s.activities.slice(0, -1), merged], lastActivityAt: Date.now() };
-        }
-        return { activities: [...s.activities, a], lastActivityAt: Date.now() };
-      });
-    });
-    unlistenTurn = await listen<RoundtableTurn>("roundtable://turn", (e) => {
-      const t = e.payload;
-      if (t.id !== get().runId) return;
-      set((s) => {
-        // Human injections don't advance token totals or the per-turn clock —
-        // they just join the feed. (Backend sends totalTokens=0 for them.)
-        if (t.isHuman) {
-          return { turns: [...s.turns, t] };
-        }
-        return {
-          turns: [...s.turns, t],
-          totalTokens: t.totalTokens,
-          turn: t.turn,
-          approxCostUsd: s.approxCostUsd + (t.costUsd || 0),
-          // A turn finished → the next begins now. Reset the per-turn clock.
-          liveStartedAt: Date.now(),
-          lastActivityAt: null,
-        };
-      });
-    });
-    unlistenStatus = await listen<RoundtableStatus>("roundtable://status", (e) => {
-      const st = e.payload;
-      if (st.id !== get().runId) return;
-      const known: RtPhase[] = ["running", "paused", "awaiting", "done", "stopped", "error"];
-      const phase = known.includes(st.status as RtPhase) ? (st.status as RtPhase) : get().phase;
-      set({
-        phase,
-        turn: st.turn || get().turn,
-        totalTokens: st.totalTokens || get().totalTokens,
-        message: st.message ?? get().message,
-      });
-    });
+  initListeners: () => {
+    bindPromise ??= bindListeners(set, get);
+    return bindPromise;
   },
 
   setDraft: (patch) => set((s) => ({ draft: { ...s.draft, ...patch } })),
@@ -446,12 +396,77 @@ export function modelsFor(engine: "claude" | "codex") {
   return profileFor(engine).models;
 }
 
-export function teardownRoundtableListeners() {
+async function bindListeners(
+  set: (
+    partial:
+      | Partial<RoundtableState>
+      | ((s: RoundtableState) => Partial<RoundtableState>),
+  ) => void,
+  get: () => RoundtableState,
+): Promise<void> {
+  unlistenActivity = await listen<RoundtableActivity>("roundtable://activity", (e) => {
+    const a = e.payload;
+    if (a.id !== get().runId) return;
+    // Coalesce consecutive "text" chunks from the same author+turn so a
+    // streamed answer reads as one growing block rather than many lines.
+    set((s) => {
+      const last = s.activities[s.activities.length - 1];
+      if (
+        a.kind === "text" &&
+        last &&
+        last.kind === "text" &&
+        last.authorId === a.authorId &&
+        last.turn === a.turn
+      ) {
+        const merged = { ...last, text: `${last.text}${a.text}` };
+        return { activities: [...s.activities.slice(0, -1), merged], lastActivityAt: Date.now() };
+      }
+      return { activities: [...s.activities, a], lastActivityAt: Date.now() };
+    });
+  });
+  unlistenTurn = await listen<RoundtableTurn>("roundtable://turn", (e) => {
+    const t = e.payload;
+    if (t.id !== get().runId) return;
+    set((s) => {
+      // Human injections don't advance token totals or the per-turn clock —
+      // they just join the feed. (Backend sends totalTokens=0 for them.)
+      if (t.isHuman) {
+        return { turns: [...s.turns, t] };
+      }
+      return {
+        turns: [...s.turns, t],
+        totalTokens: t.totalTokens,
+        turn: t.turn,
+        approxCostUsd: s.approxCostUsd + (t.costUsd || 0),
+        // A turn finished → the next begins now. Reset the per-turn clock.
+        liveStartedAt: Date.now(),
+        lastActivityAt: null,
+      };
+    });
+  });
+  unlistenStatus = await listen<RoundtableStatus>("roundtable://status", (e) => {
+    const st = e.payload;
+    if (st.id !== get().runId) return;
+    const known: RtPhase[] = ["running", "paused", "awaiting", "done", "stopped", "error"];
+    const phase = known.includes(st.status as RtPhase) ? (st.status as RtPhase) : get().phase;
+    set({
+      phase,
+      turn: st.turn || get().turn,
+      totalTokens: st.totalTokens || get().totalTokens,
+      message: st.message ?? get().message,
+    });
+  });
+}
+
+export async function teardownRoundtableListeners() {
+  // Wait out an in-flight bind so we never unlisten before listen resolves.
+  const inFlight = bindPromise;
+  bindPromise = null;
+  if (inFlight) await inFlight.catch(() => {});
   unlistenTurn?.();
   unlistenStatus?.();
   unlistenActivity?.();
   unlistenTurn = null;
   unlistenStatus = null;
   unlistenActivity = null;
-  listenersBound = false;
 }
