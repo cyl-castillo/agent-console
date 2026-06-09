@@ -23,6 +23,9 @@
 //! than leak a wall of warnings until then.
 #![allow(dead_code)]
 
+use std::fs;
+use std::path::PathBuf;
+
 use data_encoding::BASE64URL_NOPAD;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -30,9 +33,14 @@ use snow::{Builder, HandshakeState, TransportState};
 
 use crate::error::{AppError, AppResult};
 
-/// Mutual auth (XX) with the one-time pairing secret mixed in as a PSK (psk3),
-/// over X25519 / ChaChaPoly / BLAKE2s.
+/// First-contact pairing: mutual auth (XX) with the one-time pairing secret
+/// mixed in as a PSK (psk3), over X25519 / ChaChaPoly / BLAKE2s.
 const NOISE_PARAMS: &str = "Noise_XXpsk3_25519_ChaChaPoly_BLAKE2s";
+
+/// Reconnect of an already-paired device: both peers already know (have pinned)
+/// each other's static key, so KK authenticates from the keys alone — no QR,
+/// no PSK.
+const NOISE_PARAMS_RECONNECT: &str = "Noise_KK_25519_ChaChaPoly_BLAKE2s";
 
 /// A Noise static keypair. The private half is an identity secret and must never
 /// leave the device (in production it lives in the OS keystore; the raw bytes
@@ -43,10 +51,13 @@ pub struct StaticKeypair {
     pub public: Vec<u8>,
 }
 
-fn params() -> AppResult<snow::params::NoiseParams> {
-    NOISE_PARAMS
-        .parse()
+fn parse_params(s: &str) -> AppResult<snow::params::NoiseParams> {
+    s.parse()
         .map_err(|e| AppError::Other(format!("invalid noise params: {e}")))
+}
+
+fn params() -> AppResult<snow::params::NoiseParams> {
+    parse_params(NOISE_PARAMS)
 }
 
 /// Generate a fresh static keypair using snow's CSPRNG.
@@ -55,6 +66,61 @@ pub fn generate_static() -> AppResult<StaticKeypair> {
         .generate_keypair()
         .map_err(|e| AppError::Other(format!("keypair gen: {e}")))?;
     Ok(StaticKeypair { private: kp.private, public: kp.public })
+}
+
+// ---- Desktop long-term identity ----
+
+#[derive(Serialize, Deserialize)]
+struct IdentityFile {
+    private: String,
+    public: String,
+}
+
+fn identity_path() -> AppResult<PathBuf> {
+    let dir = dirs::data_local_dir()
+        .ok_or_else(|| AppError::Other("no data_local dir".into()))?
+        .join("agent-console");
+    fs::create_dir_all(&dir)?;
+    Ok(dir.join("device-identity.json"))
+}
+
+/// Load the desktop's long-term static keypair, creating it once on first run.
+/// This is the identity the QR pins and that reconnects authenticate against, so
+/// it must be **stable**.
+///
+/// NOTE (MVP): the private key is stored in a 0600 file. Production must move it
+/// to the OS keystore (the `keyring` crate, already a dependency) — tracked as a
+/// hardening item before this leaves the branch.
+pub fn load_or_create_identity() -> AppResult<StaticKeypair> {
+    let path = identity_path()?;
+    if path.exists() {
+        let txt = fs::read_to_string(&path)
+            .map_err(|e| AppError::Other(format!("read identity: {e}")))?;
+        let f: IdentityFile = serde_json::from_str(&txt)
+            .map_err(|e| AppError::Other(format!("parse identity: {e}")))?;
+        let private = BASE64URL_NOPAD
+            .decode(f.private.as_bytes())
+            .map_err(|e| AppError::Other(format!("decode identity private: {e}")))?;
+        let public = BASE64URL_NOPAD
+            .decode(f.public.as_bytes())
+            .map_err(|e| AppError::Other(format!("decode identity public: {e}")))?;
+        return Ok(StaticKeypair { private, public });
+    }
+    let kp = generate_static()?;
+    let f = IdentityFile {
+        private: BASE64URL_NOPAD.encode(&kp.private),
+        public: BASE64URL_NOPAD.encode(&kp.public),
+    };
+    let json = serde_json::to_string(&f).map_err(|e| AppError::Other(format!("serialize: {e}")))?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, json.as_bytes())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+    }
+    fs::rename(&tmp, &path)?;
+    Ok(kp)
 }
 
 /// The payload encoded into the pairing QR. Authenticated only by being shown on
@@ -80,13 +146,15 @@ impl PairingOffer {
         now_ms.saturating_sub(self.created_ms) > (self.ttl_secs as i64) * 1000
     }
 
-    fn psk_bytes(&self) -> AppResult<Vec<u8>> {
+    /// Decode the one-time PSK from the offer (as a phone would after scanning).
+    pub fn psk_bytes(&self) -> AppResult<Vec<u8>> {
         BASE64URL_NOPAD
             .decode(self.psk.as_bytes())
             .map_err(|e| AppError::Other(format!("bad psk encoding: {e}")))
     }
 
-    fn responder_static_bytes(&self) -> AppResult<Vec<u8>> {
+    /// Decode the responder (desktop) static key the phone must pin.
+    pub fn responder_static_bytes(&self) -> AppResult<Vec<u8>> {
         BASE64URL_NOPAD
             .decode(self.responder_static.as_bytes())
             .map_err(|e| AppError::Other(format!("bad responder key encoding: {e}")))
@@ -130,6 +198,56 @@ pub fn build_initiator(local_private: &[u8], psk: &[u8]) -> AppResult<HandshakeS
         .map_err(|e| AppError::Other(format!("build initiator: {e}")))
 }
 
+/// Reconnect handshake (KK) for an already-paired device. Both sides supply
+/// their own private key AND the peer's pinned public key, so authentication
+/// comes from the keys alone. Responder = desktop (knows the device's pinned
+/// key, looked up in the device store); initiator = phone (knows the desktop
+/// identity it pinned at pairing time).
+pub fn build_responder_known(local_private: &[u8], remote_public: &[u8]) -> AppResult<HandshakeState> {
+    Builder::new(parse_params(NOISE_PARAMS_RECONNECT)?)
+        .local_private_key(local_private)
+        .remote_public_key(remote_public)
+        .build_responder()
+        .map_err(|e| AppError::Other(format!("build KK responder: {e}")))
+}
+
+pub fn build_initiator_known(local_private: &[u8], remote_public: &[u8]) -> AppResult<HandshakeState> {
+    Builder::new(parse_params(NOISE_PARAMS_RECONNECT)?)
+        .local_private_key(local_private)
+        .remote_public_key(remote_public)
+        .build_initiator()
+        .map_err(|e| AppError::Other(format!("build KK initiator: {e}")))
+}
+
+/// Drive a handshake to completion between two in-memory peers (initiator
+/// writes first, alternating), returning the finished states. Generic over the
+/// pattern (works for both XX pairing and KK reconnect). A transport carries the
+/// same messages over the wire in later hitos; here it lets us prove the flow.
+/// Returns an error if any step fails (e.g. a PSK or key mismatch aborts).
+pub fn drive_handshake(
+    mut initiator: HandshakeState,
+    mut responder: HandshakeState,
+) -> AppResult<(HandshakeState, HandshakeState)> {
+    let mut buf = vec![0u8; 65535];
+    let mut out = vec![0u8; 65535];
+    let mut turn_initiator = true;
+    while !(initiator.is_handshake_finished() && responder.is_handshake_finished()) {
+        let (writer, reader) = if turn_initiator {
+            (&mut initiator, &mut responder)
+        } else {
+            (&mut responder, &mut initiator)
+        };
+        let n = writer
+            .write_message(&[], &mut buf)
+            .map_err(|e| AppError::Other(format!("handshake write: {e}")))?;
+        reader
+            .read_message(&buf[..n], &mut out)
+            .map_err(|e| AppError::Other(format!("handshake read: {e}")))?;
+        turn_initiator = !turn_initiator;
+    }
+    Ok((initiator, responder))
+}
+
 /// After a finished handshake, confirm the peer's static key matches what we
 /// pinned out-of-band (the QR). This is the explicit anti-MITM check, on top of
 /// the PSK already binding the handshake.
@@ -166,35 +284,6 @@ pub fn decrypt(t: &mut TransportState, ciphertext: &[u8]) -> AppResult<Vec<u8>> 
 mod tests {
     use super::*;
 
-    /// Drive the full XX handshake between two in-memory peers, returning the
-    /// finished handshake states (moved, not transport yet) so the caller can run
-    /// the pin check before converting to transport mode. Errors if any step
-    /// fails (e.g. a PSK mismatch aborts the handshake).
-    fn run_handshake(
-        mut initiator: HandshakeState,
-        mut responder: HandshakeState,
-    ) -> AppResult<(HandshakeState, HandshakeState)> {
-        let mut buf = vec![0u8; 65535];
-        let mut out = vec![0u8; 65535];
-        // XX = 3 messages, initiator first.
-        let mut turn_initiator = true;
-        while !(initiator.is_handshake_finished() && responder.is_handshake_finished()) {
-            let (writer, reader) = if turn_initiator {
-                (&mut initiator, &mut responder)
-            } else {
-                (&mut responder, &mut initiator)
-            };
-            let n = writer
-                .write_message(&[], &mut buf)
-                .map_err(|e| AppError::Other(format!("write: {e}")))?;
-            reader
-                .read_message(&buf[..n], &mut out)
-                .map_err(|e| AppError::Other(format!("read: {e}")))?;
-            turn_initiator = !turn_initiator;
-        }
-        Ok((initiator, responder))
-    }
-
     fn now() -> i64 {
         1_700_000_000_000
     }
@@ -213,7 +302,7 @@ mod tests {
         let initiator = build_initiator(&phone.private, &offer_psk).unwrap();
         let responder = build_responder(&desktop.private, &psk).unwrap();
         let (init_hs, resp_hs) =
-            run_handshake(initiator, responder).expect("handshake should succeed");
+            drive_handshake(initiator, responder).expect("handshake should succeed");
 
         // Anti-MITM pin check: phone confirms it really spoke to the QR's desktop,
         // and the desktop now knows the phone's identity for future sessions.
@@ -256,7 +345,7 @@ mod tests {
         // Attacker knows the PSK in this scenario but NOT the desktop key.
         let attacker_resp = build_responder(&attacker.private, &psk).unwrap();
         let (init_hs, _resp_hs) =
-            run_handshake(initiator, attacker_resp).expect("handshake completes with attacker key");
+            drive_handshake(initiator, attacker_resp).expect("handshake completes with attacker key");
 
         // ...but the pin check rejects it: the remote static is the attacker's,
         // not the desktop key the phone pinned from the QR.
@@ -278,7 +367,7 @@ mod tests {
         let initiator = build_initiator(&phone.private, &wrong).unwrap();
         let responder = build_responder(&desktop.private, &psk).unwrap();
         assert!(
-            run_handshake(initiator, responder).is_err(),
+            drive_handshake(initiator, responder).is_err(),
             "a mismatched PSK must fail the handshake"
         );
     }
