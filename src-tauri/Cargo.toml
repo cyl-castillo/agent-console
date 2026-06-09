@@ -31,3 +31,8 @@ notify = "6"
 notify-debouncer-mini = "0.4"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# Secure pairing / E2E channel (mobile voice companion). snow = the vetted Rust
+# implementation of the Noise Protocol Framework — we do NOT roll our own crypto.
+snow = "0.9"
+rand = "0.8"
+data-encoding = "2"
