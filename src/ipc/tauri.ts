@@ -30,6 +30,12 @@ export const ipc = {
     invoke<string>("term_spawn", { cwd, termKey: termKey ?? null }),
   termWrite: (id: string, data: string) =>
     invoke<void>("term_write", { id, data }),
+  // Save pasted image bytes to a temp file; returns its absolute path.
+  // Raw-body invoke: bytes travel as the request body, ext as a header.
+  termSavePasteImage: (bytes: Uint8Array, ext: string) =>
+    invoke<string>("term_save_paste_image", bytes, {
+      headers: { "x-image-ext": ext },
+    }),
   termResize: (id: string, cols: number, rows: number) =>
     invoke<void>("term_resize", { id, cols, rows }),
   termKill: (id: string) => invoke<void>("term_kill", { id }),

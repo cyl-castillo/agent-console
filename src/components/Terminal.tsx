@@ -183,20 +183,32 @@ export function Terminal({ session, visible }: Props) {
     window.addEventListener("ac:term-input", onTermInput as EventListener);
 
     // Image-only paste. The webview fires `paste` with no text, so xterm
-    // writes nothing and the agent never sees the keystroke. Forward the
-    // Ctrl+V byte (0x16) to the PTY instead: Claude/Codex read the OS
-    // clipboard natively when they receive it, exactly as in a native
-    // terminal. When the clipboard also carries text we fall through and
-    // xterm pastes the text as usual (text wins, like a native terminal).
-    // Capture phase so this runs before xterm's own handler on its textarea.
+    // writes nothing. Forwarding the keystroke to the agent is a dead end:
+    // Claude on Windows binds image paste to alt+v, which ConPTY input can't
+    // deliver (see docs/superpowers/specs/2026-06-09-clipboard-image-paste-
+    // design.md). Instead, save the pasted bytes to a temp file and type its
+    // quoted path into the composer — the drag-and-drop flow every agent CLI
+    // already understands. When the clipboard also carries text we fall
+    // through and xterm pastes the text as usual (text wins, like a native
+    // terminal). Capture phase so this runs before xterm's own handler.
     const onPaste = (e: ClipboardEvent) => {
       const dt = e.clipboardData;
       if (!dt || !termId) return;
       if (dt.getData("text/plain")) return;
-      if (!Array.from(dt.items).some((it) => it.type.startsWith("image/"))) return;
+      const file = Array.from(dt.items)
+        .find((it) => it.type.startsWith("image/"))
+        ?.getAsFile();
+      if (!file) return;
       e.preventDefault();
       e.stopPropagation();
-      ipc.termWrite(termId, "\x16").catch(() => {});
+      const subtype = file.type.split("/")[1] ?? "png";
+      const ext = subtype === "jpeg" ? "jpg" : subtype;
+      const tid = termId;
+      file
+        .arrayBuffer()
+        .then((buf) => ipc.termSavePasteImage(new Uint8Array(buf), ext))
+        .then((path) => ipc.termWrite(tid, `"${path}" `))
+        .catch(() => {});
     };
     host.addEventListener("paste", onPaste, true);
 
