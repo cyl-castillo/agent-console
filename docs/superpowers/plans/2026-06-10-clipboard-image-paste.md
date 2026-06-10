@@ -1,197 +1,120 @@
-# Clipboard Image Paste Implementation Plan
+# Clipboard Image Paste Implementation Plan (v2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** When the clipboard holds an image and no text, pressing Ctrl+V (or Cmd+V / context-menu Paste) in a terminal session forwards the Ctrl+V byte (`0x16`) to the PTY so the agent CLI (Claude Code, Codex) attaches the image with its own native clipboard support.
+**Goal:** When the clipboard holds an image and no text, Ctrl+V in a terminal session saves the image to a temp file and types its quoted path into the agent composer (same flow as drag & drop).
 
-**Architecture:** Frontend-only change. A capture-phase `paste` listener on the xterm host element in `Terminal.tsx` inspects the synchronous `clipboardData`: text pastes fall through to xterm unchanged; image-only pastes are swallowed and replaced by `ipc.termWrite(termId, "\x16")`. No Rust changes, no new IPC, no per-agent code. One new row in `ShortcutsModal.tsx` for discoverability.
+**Architecture:** The capture-phase `paste` listener in `Terminal.tsx` (from v1) keeps its text-wins/image-only gating, but instead of forwarding `0x16` it reads the pasted `File` bytes and calls a new raw-body Tauri command `term_save_paste_image`, then `termWrite`s the returned path quoted. v1's key-forwarding was abandoned: claude on Windows binds image paste to `alt+v`, which is undeliverable through ConPTY (see spec v2 for the evidence).
 
-**Tech Stack:** React 19 + TypeScript, xterm.js 6, existing Tauri 2 `term_write` IPC. No new dependencies.
+**Tech Stack:** React 19 + TypeScript, xterm.js 6, Tauri 2 IPC raw-body request. No new dependencies (std-only Rust).
 
-**Spec:** `docs/superpowers/specs/2026-06-09-clipboard-image-paste-design.md`
+**Spec:** `docs/superpowers/specs/2026-06-09-clipboard-image-paste-design.md` (v2)
 
-**Testing note:** The repo has no test framework (`package.json` has no `test` script), and the behavior is webview + PTY + external-CLI integration that cannot be exercised headlessly. Per the approved spec, verification is the TypeScript typecheck plus the manual checklist in Task 3. Do NOT add a test framework for this feature.
+**Testing note:** No test framework in the repo; verification is `tsc` + the cargo build from the running `tauri dev` + live CDP synthetic-paste check + the manual checklist (Task 3).
 
-**Branch:** work happens on `feat/clipboard-image-paste` (already created off `main`; spec is committed there).
+**Branch:** `feat/clipboard-image-paste`.
 
 ---
 
-### Task 1: Forward image-only paste in Terminal.tsx
+### Task 1: Rust command `term_save_paste_image`
 
 **Files:**
-- Modify: `src/components/Terminal.tsx` (listener registration ~line 183, cleanup ~line 192)
+- Modify: `src-tauri/src/commands/terminal.rs` (append command)
+- Modify: `src-tauri/src/lib.rs` (register after `term_kill`)
 
-- [ ] **Step 1: Register the paste handler**
+- [ ] **Step 1: Append to terminal.rs**
 
-In `src/components/Terminal.tsx`, find this block inside the mount effect:
+```rust
+/// Save image bytes pasted into a terminal to a temp file and return its
+/// absolute path. The frontend then types that path into the agent composer
+/// (same flow as dragging an image file onto the terminal). Raw-body command:
+/// the bytes arrive as `InvokeBody::Raw`, the extension via the
+/// `x-image-ext` header (allowlisted, defaults to png).
+#[tauri::command]
+pub fn term_save_paste_image(request: tauri::ipc::Request<'_>) -> AppResult<String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-```ts
-    window.addEventListener("ac:term-input", onTermInput as EventListener);
-
-    return () => {
-```
-
-Insert the paste handler between the `ac:term-input` registration and the `return () => {` line:
-
-```ts
-    window.addEventListener("ac:term-input", onTermInput as EventListener);
-
-    // Image-only paste. The webview fires `paste` with no text, so xterm
-    // writes nothing and the agent never sees the keystroke. Forward the
-    // Ctrl+V byte (0x16) to the PTY instead: Claude/Codex read the OS
-    // clipboard natively when they receive it, exactly as in a native
-    // terminal. When the clipboard also carries text we fall through and
-    // xterm pastes the text as usual (text wins, like a native terminal).
-    // Capture phase so this runs before xterm's own handler on its textarea.
-    const onPaste = (e: ClipboardEvent) => {
-      const dt = e.clipboardData;
-      if (!dt || !termId) return;
-      if (dt.getData("text/plain")) return;
-      if (!Array.from(dt.items).some((it) => it.type.startsWith("image/"))) return;
-      e.preventDefault();
-      e.stopPropagation();
-      ipc.termWrite(termId, "\x16").catch(() => {});
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(crate::error::AppError::InvalidArgument(
+            "expected raw image bytes".into(),
+        ));
     };
-    host.addEventListener("paste", onPaste, true);
+    if bytes.is_empty() {
+        return Err(crate::error::AppError::InvalidArgument(
+            "empty image payload".into(),
+        ));
+    }
+    let ext = request
+        .headers()
+        .get("x-image-ext")
+        .and_then(|v| v.to_str().ok())
+        .filter(|e| matches!(*e, "png" | "jpg" | "gif" | "webp" | "bmp"))
+        .unwrap_or("png");
 
-    return () => {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("agent-console-paste-{millis}-{n}.{ext}"));
+    std::fs::write(&path, bytes)?;
+    Ok(path.to_string_lossy().to_string())
+}
 ```
 
-Notes for the implementer:
-- `termId` is the `let termId: string | null = null` declared at the top of the effect (~line 70); the existing `onTermInput` handler reads it the same way, so closing over it is the established pattern.
-- `host` is the captured `hostRef.current` from the top of the effect.
-- Do not use `navigator.clipboard.read()` — it needs webview permissions; `e.clipboardData` is synchronous and permission-free.
+- [ ] **Step 2: Register in lib.rs** — add `commands::terminal::term_save_paste_image,` after `commands::terminal::term_kill,`.
 
-- [ ] **Step 2: Remove the listener in the teardown**
-
-In the same effect's cleanup, find:
-
-```ts
-      window.removeEventListener("ac:clear-terminal", onClear);
-      window.removeEventListener("ac:term-input", onTermInput as EventListener);
-```
-
-and add the paste cleanup directly after those two lines:
-
-```ts
-      window.removeEventListener("ac:clear-terminal", onClear);
-      window.removeEventListener("ac:term-input", onTermInput as EventListener);
-      host.removeEventListener("paste", onPaste, true);
-```
-
-- [ ] **Step 3: Typecheck**
-
-Run from the repo root (`C:\Users\Usuario\work\personal\agent-console`):
-
-```powershell
-npx tsc --noEmit
-```
-
-Expected: exit code 0, no output.
+- [ ] **Step 3: Verify build** — the running `tauri dev` recompiles on save; check its log (or `cargo check` in `src-tauri/`) for errors.
 
 - [ ] **Step 4: Commit**
 
 ```powershell
-git add src/components/Terminal.tsx
-git commit -m "Terminal: forward image-only paste to the agent PTY"
+git add src-tauri/src/commands/terminal.rs src-tauri/src/lib.rs
+git commit -m "Terminal: add term_save_paste_image raw-body command"
 ```
-
-(Per user config: no `Co-Authored-By: Claude` trailer.)
 
 ---
 
-### Task 2: Document the shortcut in ShortcutsModal
+### Task 2: Frontend — save bytes + type path
 
 **Files:**
-- Modify: `src/components/ShortcutsModal.tsx:28-36` (the `Workflows` group in `GROUPS`)
+- Modify: `src/ipc/tauri.ts` (add wrapper next to termWrite)
+- Modify: `src/components/Terminal.tsx` (rework onPaste body)
 
-- [ ] **Step 1: Add the row**
-
-In `src/components/ShortcutsModal.tsx`, find the `Workflows` group:
-
-```ts
-  {
-    title: "Workflows",
-    rows: [
-      ["Ctrl+L", "Clear terminal"],
-```
-
-and add the new row directly after `["Ctrl+L", "Clear terminal"],`:
+- [ ] **Step 1: tauri.ts wrapper**
 
 ```ts
-  {
-    title: "Workflows",
-    rows: [
-      ["Ctrl+L", "Clear terminal"],
-      ["Ctrl+V", "Paste clipboard image into the agent"],
+  termSavePasteImage: (bytes: Uint8Array, ext: string) =>
+    invoke<string>("term_save_paste_image", bytes, {
+      headers: { "x-image-ext": ext },
+    }),
 ```
 
-- [ ] **Step 2: Typecheck**
+- [ ] **Step 2: Rework the onPaste handler in Terminal.tsx** — keep
+registration/teardown; replace the body so the image-only branch reads the
+`File`, saves it, and types the quoted path (see spec v2 Design for the
+exact behavior; final code lives in the component).
+
+- [ ] **Step 3: Typecheck** — `node_modules/.bin/tsc --noEmit` → exit 0.
+
+- [ ] **Step 4: Commit**
 
 ```powershell
-npx tsc --noEmit
-```
-
-Expected: exit code 0, no output.
-
-- [ ] **Step 3: Commit**
-
-```powershell
-git add src/components/ShortcutsModal.tsx
-git commit -m "Shortcuts: document Ctrl+V clipboard image paste"
+git add src/ipc/tauri.ts src/components/Terminal.tsx
+git commit -m "Terminal: paste clipboard images as temp-file paths"
 ```
 
 ---
 
-### Task 3: Manual verification
+### Task 3: Verification
 
-**Files:** none (run the app).
+- [ ] **Step 1: CDP synthetic check** — dispatch a synthetic `paste` event
+carrying a PNG `File` on the xterm textarea of a live session; expect the
+quoted `agent-console-paste-*.png` path to appear in the agent composer and
+the file to exist on disk.
 
-- [ ] **Step 1: Launch the dev app**
-
-```powershell
-npm run tauri dev
-```
-
-Expected: the app window opens; open a project and start a Claude session (terminal spawns, `claude` launches in the PTY).
-
-- [ ] **Step 2: Image-only paste reaches Claude**
-
-Take a screenshot with `Win+Shift+S` (puts an image-only payload on the clipboard), focus the terminal, press `Ctrl+V`.
-
-Expected: Claude Code's composer shows `[Image #1]` (its native pasted-image chip).
-
-- [ ] **Step 3: Image-only paste reaches Codex**
-
-Start a Codex session, repeat Step 2.
-
-Expected: Codex's composer shows its image attachment.
-
-- [ ] **Step 4: Text paste is unchanged**
-
-Copy a single-line string, paste into the terminal; then copy a multiline string, paste again.
-
-Expected: both paste as text exactly as before this change (multiline goes through bracketed paste, no stray `0x16` behavior).
-
-- [ ] **Step 5: Text+image clipboard pastes the text**
-
-Copy rich content that carries both text and image (e.g. select text+image in a browser page and copy).
-
-Expected: the text is pasted; no image is attached.
-
-- [ ] **Step 6: Empty clipboard does nothing**
-
-Clear the clipboard (copy nothing / press `Win+V` and clear), press `Ctrl+V` in the terminal.
-
-Expected: nothing happens, no errors in the dev console.
-
-- [ ] **Step 7: Check off the spec's verification list**
-
-All five checks in the spec's "Verification (manual)" section are covered by Steps 2–6. If any failed, stop and fix before proceeding.
-
----
-
-## Out of scope (from the spec)
-
-- Drag & drop of image files onto the terminal.
-- Fallback for agent CLIs without native clipboard paste (`supportsClipboardImagePaste` profile flag) — revisit only when such an agent is added.
+- [ ] **Step 2: Manual checklist** (user): screenshot → Ctrl+V in Claude
+session shows the quoted path (submit a prompt to confirm claude reads it);
+same in Codex; text paste unchanged; text+image pastes text; empty
+clipboard no-ops.
