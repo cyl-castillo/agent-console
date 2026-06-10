@@ -182,6 +182,24 @@ export function Terminal({ session, visible }: Props) {
     };
     window.addEventListener("ac:term-input", onTermInput as EventListener);
 
+    // Image-only paste. The webview fires `paste` with no text, so xterm
+    // writes nothing and the agent never sees the keystroke. Forward the
+    // Ctrl+V byte (0x16) to the PTY instead: Claude/Codex read the OS
+    // clipboard natively when they receive it, exactly as in a native
+    // terminal. When the clipboard also carries text we fall through and
+    // xterm pastes the text as usual (text wins, like a native terminal).
+    // Capture phase so this runs before xterm's own handler on its textarea.
+    const onPaste = (e: ClipboardEvent) => {
+      const dt = e.clipboardData;
+      if (!dt || !termId) return;
+      if (dt.getData("text/plain")) return;
+      if (!Array.from(dt.items).some((it) => it.type.startsWith("image/"))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      ipc.termWrite(termId, "\x16").catch(() => {});
+    };
+    host.addEventListener("paste", onPaste, true);
+
     return () => {
       disposed = true;
       if (debounceTimer !== null) window.clearTimeout(debounceTimer);
@@ -191,6 +209,7 @@ export function Terminal({ session, visible }: Props) {
       if (termId) ipc.termKill(termId).catch(() => {});
       window.removeEventListener("ac:clear-terminal", onClear);
       window.removeEventListener("ac:term-input", onTermInput as EventListener);
+      host.removeEventListener("paste", onPaste, true);
       window.removeEventListener("focus", onFocus);
       term.dispose();
     };
