@@ -27,6 +27,7 @@ const GROUPS = [
     title: "Workflows",
     rows: [
       ["Ctrl+L", "Clear terminal"],
+      ["Ctrl+V", "Paste clipboard image into the agent"],
       ["Ctrl+R", "Refresh git changes"],
       ["Ctrl+W", "Close active session"],
       ["Esc", "Deny pending agent action or close modal"],
