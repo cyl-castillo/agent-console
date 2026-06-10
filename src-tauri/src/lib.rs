@@ -37,6 +37,7 @@ pub fn run() {
             commands::terminal::term_write,
             commands::terminal::term_resize,
             commands::terminal::term_kill,
+            commands::terminal::term_save_paste_image,
             commands::git::git_status,
             commands::git::git_diff_file,
             commands::git::git_revert_file,
