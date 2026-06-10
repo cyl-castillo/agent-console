@@ -60,3 +60,40 @@ pub fn term_resize(id: String, cols: u16, rows: u16, state: State<'_, AppState>)
 pub fn term_kill(id: String, state: State<'_, AppState>) -> AppResult<()> {
     state.terminals.kill(&id)
 }
+
+/// Save image bytes pasted into a terminal to a temp file and return its
+/// absolute path. The frontend then types that path into the agent composer
+/// (same flow as dragging an image file onto the terminal). Raw-body command:
+/// the bytes arrive as `InvokeBody::Raw`, the extension via the
+/// `x-image-ext` header (allowlisted, defaults to png).
+#[tauri::command]
+pub fn term_save_paste_image(request: tauri::ipc::Request<'_>) -> AppResult<String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(crate::error::AppError::InvalidArgument(
+            "expected raw image bytes".into(),
+        ));
+    };
+    if bytes.is_empty() {
+        return Err(crate::error::AppError::InvalidArgument(
+            "empty image payload".into(),
+        ));
+    }
+    let ext = request
+        .headers()
+        .get("x-image-ext")
+        .and_then(|v| v.to_str().ok())
+        .filter(|e| matches!(*e, "png" | "jpg" | "gif" | "webp" | "bmp"))
+        .unwrap_or("png");
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("agent-console-paste-{millis}-{n}.{ext}"));
+    std::fs::write(&path, bytes)?;
+    Ok(path.to_string_lossy().to_string())
+}
