@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "@xterm/xterm/css/xterm.css";
 
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
@@ -70,6 +71,7 @@ export function Terminal({ session, visible }: Props) {
     let termId: string | null = null;
     let unlistenOutput: UnlistenFn | null = null;
     let unlistenExit: UnlistenFn | null = null;
+    let unlistenDragDrop: UnlistenFn | null = null;
     let disposed = false;
 
     (async () => {
@@ -83,6 +85,24 @@ export function Terminal({ session, visible }: Props) {
         if (e.payload.id === termId) {
           term.write(`\r\n\x1b[90m[process exited: ${e.payload.code ?? "?"}]\x1b[0m\r\n`);
         }
+      });
+
+      // Drop files/folders onto this terminal: type their quoted paths into
+      // the composer (same flow as the clipboard-image paste below). Tauri
+      // intercepts webview drag&drop (dragDropEnabled defaults to true), so
+      // HTML5 drop events never fire and this webview event — which carries
+      // real OS paths — is the only source. Every mounted Terminal listens;
+      // the visibility + hit-test gate picks the one under the cursor.
+      unlistenDragDrop = await getCurrentWebview().onDragDropEvent((e) => {
+        if (e.payload.type !== "drop" || !termId) return;
+        if (host.style.display === "none") return;
+        const scale = window.devicePixelRatio || 1;
+        const x = e.payload.position.x / scale;
+        const y = e.payload.position.y / scale;
+        const r = host.getBoundingClientRect();
+        if (x < r.left || x > r.right || y < r.top || y > r.bottom) return;
+        const text = e.payload.paths.map((p) => `"${p}"`).join(" ");
+        if (text) ipc.termWrite(termId, `${text} `).catch(() => {});
       });
 
       try {
@@ -218,6 +238,7 @@ export function Terminal({ session, visible }: Props) {
       ro.disconnect();
       unlistenOutput?.();
       unlistenExit?.();
+      unlistenDragDrop?.();
       if (termId) ipc.termKill(termId).catch(() => {});
       window.removeEventListener("ac:clear-terminal", onClear);
       window.removeEventListener("ac:term-input", onTermInput as EventListener);
