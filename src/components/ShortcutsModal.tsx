@@ -28,6 +28,8 @@ const GROUPS = [
     rows: [
       ["Ctrl+L", "Clear terminal"],
       ["Ctrl+V", "Paste clipboard image into the agent"],
+      ["Ctrl+Shift+V", "Toggle voice input on/off"],
+      ["Ctrl+Space (hold)", "Push-to-talk: dictate into the composer"],
       ["Ctrl+R", "Refresh git changes"],
       ["Ctrl+W", "Close active session"],
       ["Esc", "Deny pending agent action or close modal"],

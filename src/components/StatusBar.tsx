@@ -5,6 +5,7 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useUIStore } from "../stores/uiStore";
 import { useModelStore, modelLabel } from "../stores/modelStore";
+import { useVoiceStore } from "../stores/voiceStore";
 import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
 import type { TermInputDetail } from "./Terminal";
@@ -81,6 +82,7 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
           live={activeSession.status === "live"}
         />
       )}
+      <VoicePill />
       <span className="sb-item sb-muted" title="Live PTY sessions">
         {liveCount} live
       </span>
@@ -177,6 +179,42 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
         </div>
       )}
     </div>
+  );
+}
+
+/// Local voice input toggle + state. Click (or Ctrl+Shift+V) enables voice
+/// mode: first use downloads the Whisper model, then holding Ctrl+Space
+/// records and releasing types the transcript into the active composer.
+function VoicePill() {
+  const phase = useVoiceStore((s) => s.phase);
+  const progress = useVoiceStore((s) => s.progress);
+  const toggle = useVoiceStore((s) => s.toggle);
+
+  const pct = progress?.total
+    ? Math.round((progress.downloaded / progress.total) * 100)
+    : null;
+  const label =
+    phase === "off" ? "voice off"
+    : phase === "loading" ? (pct != null ? `voice ${pct}%` : "voice loading…")
+    : phase === "listening" ? "listening…"
+    : phase === "transcribing" ? "transcribing…"
+    : "voice ready";
+  const title =
+    phase === "off"
+      ? "Enable voice input (Ctrl+Shift+V). First use downloads the Whisper model (~190 MB, local)."
+      : phase === "loading"
+        ? "Downloading / loading the Whisper model…"
+        : "Hold Ctrl+Space to talk; release to type into the composer. Click to disable.";
+
+  return (
+    <button
+      className={`sb-item sb-clickable voice-pill voice-${phase}`}
+      onClick={() => void toggle()}
+      title={title}
+    >
+      <span className="voice-glyph">{phase === "listening" ? "●" : "🎙"}</span>
+      <span>{label}</span>
+    </button>
   );
 }
 

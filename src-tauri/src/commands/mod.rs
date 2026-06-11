@@ -17,3 +17,4 @@ pub mod snapshot;
 pub mod terminal;
 pub mod usage;
 pub mod vault;
+pub mod voice;

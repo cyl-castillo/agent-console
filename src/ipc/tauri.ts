@@ -15,6 +15,7 @@ import type {
   RoomSummary, RoundtableConfig,
   ReflectionResult,
   SessionUsage, Skill, StoredRule, VaultEntryView,
+  VoiceStatus,
   WorkspaceContext,
 } from "../types/domain";
 
@@ -169,6 +170,12 @@ export const ipc = {
     invoke<void>("roundtable_delete_room", { id }),
   roundtableResumeRoom: (id: string) =>
     invoke<string>("roundtable_resume_room", { id }),
+
+  voiceStatus: () => invoke<VoiceStatus>("voice_status"),
+  voiceEnable: () => invoke<VoiceStatus>("voice_enable"),
+  voiceDisable: () => invoke<VoiceStatus>("voice_disable"),
+  voicePttStart: () => invoke<void>("voice_ptt_start"),
+  voicePttStop: () => invoke<string>("voice_ptt_stop"),
 };
 
 export async function pickFolder(): Promise<string | null> {
