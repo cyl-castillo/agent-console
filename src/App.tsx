@@ -6,7 +6,7 @@ import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { attachApprovalListener } from "./stores/approvalStore";
-import { attachVoiceListeners } from "./stores/voiceStore";
+import { attachVoiceListeners, attachVoiceApprovalWatcher } from "./stores/voiceStore";
 import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -221,7 +221,8 @@ export default function App() {
     attachApprovalListener().then((u) => { if (disposed) u(); else offApproval = u; });
     attachGitWatcherListener().then((u) => { if (disposed) u(); else offGit = u; });
     attachVoiceListeners().then((u) => { if (disposed) u(); else offVoice = u; });
-    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); offVoice?.(); };
+    const offVoiceApproval = attachVoiceApprovalWatcher();
+    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); offVoice?.(); offVoiceApproval(); };
   }, []);
 
   useEffect(() => {

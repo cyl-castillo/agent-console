@@ -48,3 +48,21 @@ pub async fn voice_ptt_stop(state: State<'_, AppState>) -> AppResult<String> {
         .await
         .map_err(|e| AppError::Other(format!("voice transcribe task panicked: {e}")))?
 }
+
+/// Speak text aloud via the system TTS (blocks until the utterance ends).
+#[tauri::command]
+pub async fn voice_speak(text: String) -> AppResult<()> {
+    tokio::task::spawn_blocking(move || voice_service::speak(&text))
+        .await
+        .map_err(|e| AppError::Other(format!("voice speak task panicked: {e}")))?
+}
+
+/// Open the mic for a fixed window and return the transcript (used for spoken
+/// yes/no confirmations after an announcement).
+#[tauri::command]
+pub async fn voice_listen(state: State<'_, AppState>, seconds: f32) -> AppResult<String> {
+    let svc = state.voice.clone();
+    tokio::task::spawn_blocking(move || svc.listen_window(seconds))
+        .await
+        .map_err(|e| AppError::Other(format!("voice listen task panicked: {e}")))?
+}

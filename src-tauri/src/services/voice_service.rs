@@ -46,6 +46,7 @@ pub struct VoiceStatus {
     pub capturing: bool,
     pub model_present: bool,
     pub model_file: String,
+    pub language: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -119,6 +120,7 @@ impl VoiceService {
             capturing: self.capture.lock().unwrap().is_some(),
             model_present: model_path().map(|p| p.exists()).unwrap_or(false),
             model_file: model_file(),
+            language: model_language(),
         }
     }
 
@@ -205,6 +207,40 @@ impl VoiceService {
         }
         transcribe(&ctx, &audio)
     }
+
+    /// Blocking: open the mic for a fixed window (voice confirmations like
+    /// "sí"/"no" after an announcement), then transcribe what was heard.
+    pub fn listen_window(&self, seconds: f32) -> AppResult<String> {
+        if self.capture.lock().unwrap().is_some() {
+            return Err(AppError::Other("already capturing".into()));
+        }
+        let secs = if seconds.is_finite() { seconds.clamp(1.0, 10.0) } else { 4.0 };
+        self.start_capture()?;
+        std::thread::sleep(Duration::from_secs_f32(secs));
+        self.stop_and_transcribe()
+    }
+}
+
+/// Speak `text` through speech-dispatcher (`spd-say -w`), in the same language
+/// voice input uses. Blocking until the utterance finishes so callers can
+/// sequence speak → listen without overlap.
+pub fn speak(text: &str) -> AppResult<()> {
+    let lang = model_language();
+    let status = std::process::Command::new("spd-say")
+        .args(["-w", "-l", &lang])
+        .arg(text)
+        .status()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                AppError::Other("spd-say not found — install speech-dispatcher".into())
+            } else {
+                AppError::Other(format!("tts: {e}"))
+            }
+        })?;
+    if !status.success() {
+        return Err(AppError::Other(format!("spd-say exited with {status}")));
+    }
+    Ok(())
 }
 
 fn transcribe(ctx: &WhisperContext, audio: &[f32]) -> AppResult<String> {

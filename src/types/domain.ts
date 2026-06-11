@@ -425,6 +425,7 @@ export interface VoiceStatus {
   capturing: boolean;
   modelPresent: boolean;
   modelFile: string;
+  language: string;
 }
 
 /// Payload of the `voice://model-progress` event during model download.

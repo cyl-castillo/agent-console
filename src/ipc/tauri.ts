@@ -176,6 +176,8 @@ export const ipc = {
   voiceDisable: () => invoke<VoiceStatus>("voice_disable"),
   voicePttStart: () => invoke<void>("voice_ptt_start"),
   voicePttStop: () => invoke<string>("voice_ptt_stop"),
+  voiceSpeak: (text: string) => invoke<void>("voice_speak", { text }),
+  voiceListen: (seconds: number) => invoke<string>("voice_listen", { seconds }),
 };
 
 export async function pickFolder(): Promise<string | null> {
