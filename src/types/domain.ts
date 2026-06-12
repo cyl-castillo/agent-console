@@ -418,3 +418,18 @@ export interface RoomSummary {
   totalTokens: number;
   updatedAtMs: number;
 }
+
+/// Local voice input (push-to-talk → Whisper → composer).
+export interface VoiceStatus {
+  enabled: boolean;
+  capturing: boolean;
+  modelPresent: boolean;
+  modelFile: string;
+  language: string;
+}
+
+/// Payload of the `voice://model-progress` event during model download.
+export interface VoiceModelProgress {
+  downloaded: number;
+  total: number | null;
+}

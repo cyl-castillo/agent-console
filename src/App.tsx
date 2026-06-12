@@ -6,6 +6,7 @@ import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { attachApprovalListener } from "./stores/approvalStore";
+import { attachVoiceListeners, attachVoiceApprovalWatcher } from "./stores/voiceStore";
 import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -41,6 +42,7 @@ import { Icon } from "./components/Icon";
 import { usePaletteStore } from "./stores/paletteStore";
 import { useOnboardingStore } from "./stores/onboardingStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useVoicePtt } from "./hooks/useVoicePtt";
 import { useToastStore } from "./stores/toastStore";
 import { ipc } from "./ipc/tauri";
 import type { WorkspaceContext } from "./types/domain";
@@ -167,6 +169,7 @@ export default function App() {
   };
 
   useKeyboardShortcuts({ setTab });
+  useVoicePtt();
 
   // Listen for palette-triggered navigation events.
   useEffect(() => {
@@ -213,10 +216,13 @@ export default function App() {
     let offSkills: (() => void) | null = null;
     let offApproval: (() => void) | null = null;
     let offGit: (() => void) | null = null;
+    let offVoice: (() => void) | null = null;
     attachSkillsListeners().then((u) => { if (disposed) u(); else offSkills = u; });
     attachApprovalListener().then((u) => { if (disposed) u(); else offApproval = u; });
     attachGitWatcherListener().then((u) => { if (disposed) u(); else offGit = u; });
-    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); };
+    attachVoiceListeners().then((u) => { if (disposed) u(); else offVoice = u; });
+    const offVoiceApproval = attachVoiceApprovalWatcher();
+    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); offVoice?.(); offVoiceApproval(); };
   }, []);
 
   useEffect(() => {

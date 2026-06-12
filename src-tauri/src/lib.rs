@@ -108,6 +108,13 @@ pub fn run() {
             commands::roundtable::roundtable_get_room,
             commands::roundtable::roundtable_delete_room,
             commands::roundtable::roundtable_resume_room,
+            commands::voice::voice_enable,
+            commands::voice::voice_disable,
+            commands::voice::voice_status,
+            commands::voice::voice_ptt_start,
+            commands::voice::voice_ptt_stop,
+            commands::voice::voice_speak,
+            commands::voice::voice_listen,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

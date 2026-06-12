@@ -4732,3 +4732,24 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .rt-steps > summary::before { content: "▸ "; color: var(--text-faint); }
 .rt-steps[open] > summary::before { content: "▾ "; }
 .rt-steps > summary:hover { color: var(--text); }
+
+/* --- Voice approval hint (ApprovalModal) ----------------------------------- */
+.approval-voice-hint {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-dim); margin-bottom: 6px;
+}
+.approval-voice-hint.listening { color: var(--error, #e5534b); }
+
+/* --- Voice input pill (StatusBar) ----------------------------------------- */
+.voice-pill .voice-glyph { font-size: 10px; }
+.voice-pill.voice-off { opacity: 0.55; }
+.voice-pill.voice-loading,
+.voice-pill.voice-transcribing { opacity: 0.85; }
+.voice-pill.voice-listening { color: var(--error, #e5534b); }
+.voice-pill.voice-listening .voice-glyph {
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}

@@ -23,3 +23,4 @@ pub mod snapshot_service;
 pub mod terminal_runner;
 pub mod usage_service;
 pub mod vault_service;
+pub mod voice_service;

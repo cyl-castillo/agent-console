@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useApprovalStore } from "../stores/approvalStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
+import { useVoiceStore } from "../stores/voiceStore";
 import { suggestRules, classify, buildRaw, isHardDenyAllow, assessCommand } from "../permissions/rules";
 import type { RuleSuggestion, Scope } from "../permissions/types";
 import type { ApprovalRequest } from "../types/domain";
@@ -131,6 +132,7 @@ export function ApprovalModal() {
   const req = queue[0] ?? null;
   const decide = useApprovalStore((s) => s.decide);
   const addRule = usePermissionsStore((s) => s.add);
+  const voiceStage = useVoiceStore((s) => s.approvalStage);
 
   const [showAlways, setShowAlways] = useState(false);
   const [scope, setScope] = useState<Scope>("project");
@@ -187,6 +189,15 @@ export function ApprovalModal() {
             <span className="approval-queue-depth">{queue.length} queued</span>
           )}
         </div>
+
+        {voiceStage === "speaking" && (
+          <div className="approval-voice-hint">🔊 Announcing aloud…</div>
+        )}
+        {voiceStage === "listening" && (
+          <div className="approval-voice-hint listening">
+            🎙 Listening — say “sí” to approve or “no” to deny
+          </div>
+        )}
 
         <pre className="approval-primary">{primary}</pre>
 

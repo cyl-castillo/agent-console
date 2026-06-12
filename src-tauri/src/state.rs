@@ -7,6 +7,7 @@ use crate::services::project_manager::Project;
 use crate::services::roundtable_service::RoundtableService;
 use crate::services::sessions_service::SessionsService;
 use crate::services::terminal_runner::TerminalRegistry;
+use crate::services::voice_service::VoiceService;
 
 pub struct AppState {
     pub inner: Mutex<SessionState>,
@@ -16,6 +17,7 @@ pub struct AppState {
     pub activity: ActivityService,
     pub git_watcher: GitWatcher,
     pub roundtable: RoundtableService,
+    pub voice: VoiceService,
 }
 
 impl AppState {
@@ -29,6 +31,7 @@ impl AppState {
             activity: ActivityService::new(),
             git_watcher: GitWatcher::new(),
             roundtable: RoundtableService::new(),
+            voice: VoiceService::default(),
         }
     }
 }
