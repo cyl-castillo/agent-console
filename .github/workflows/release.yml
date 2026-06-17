@@ -61,6 +61,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # whisper.cpp (via whisper-rs) uses std::filesystem, which Apple marks
+          # available only from macOS 10.15. The cc crate reads this env var to
+          # set -mmacosx-version-min; without it the default (10.13) fails to
+          # compile ggml-backend-reg.cpp. Harmless on Linux/Windows.
+          MACOSX_DEPLOYMENT_TARGET: '10.15'
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Agent Console ${{ github.ref_name }}'

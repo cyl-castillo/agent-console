@@ -40,6 +40,9 @@
     ],
     "resources": ["resources/userprompt-hook.cjs"],
     "createUpdaterArtifacts": true,
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
     "linux": {
       "deb": {
         "depends": ["nodejs"]
