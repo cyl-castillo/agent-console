@@ -1,0 +1,34 @@
+{
+  "name": "@cyl-castillo/agent-console",
+  "version": "0.29.0",
+  "description": "Launcher for Agent Console — downloads and runs the native desktop app for your platform.",
+  "type": "module",
+  "bin": {
+    "agent-console": "bin/agent-console.mjs"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "agent-console",
+    "tauri",
+    "claude",
+    "ai",
+    "launcher"
+  ],
+  "homepage": "https://github.com/cyl-castillo/agent-console#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyl-castillo/agent-console.git",
+    "directory": "launcher"
+  },
+  "bugs": {
+    "url": "https://github.com/cyl-castillo/agent-console/issues"
+  },
+  "license": "MIT",
+  "author": "Carlos Castillo"
+}

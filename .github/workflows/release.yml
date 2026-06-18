@@ -71,4 +71,43 @@ jobs:
           releaseName: 'Agent Console ${{ github.ref_name }}'
           releaseDraft: false
           prerelease: false
+
+  # Publish the npm launcher (launcher/) AFTER every platform's release assets
+  # are uploaded — the launcher fetches those assets at runtime, so it must not
+  # go out ahead of them. Only runs for real version tags; skips cleanly if the
+  # version is already on npm (e.g. a re-cut tag).
+  publish-launcher:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish launcher to npm
+        working-directory: launcher
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The published version always matches the release tag, so the launcher
+          # fetches the assets from its own release. The committed version is just
+          # a dev default.
+          VERSION="${GITHUB_REF_NAME#v}"
+          npm pkg set version="$VERSION"
+          NAME="$(npm pkg get name | tr -d '"')"
+          # `npm view pkg@version version` prints the version when published and
+          # nothing (exit 0) when that version is absent — so test for output,
+          # not exit code.
+          EXISTING="$(npm view "$NAME@$VERSION" version 2>/dev/null || true)"
+          if [ -n "$EXISTING" ]; then
+            echo "$NAME@$VERSION already on npm — skipping publish."
+          else
+            npm publish --access public
+          fi
           args: ${{ matrix.args }}
