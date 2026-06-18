@@ -50,14 +50,23 @@ Cache location: `~/.cache/agent-console` (Linux), `~/Library/Caches/agent-consol
 
 ## Releasing (maintainers)
 
-The launcher version mirrors the app version, and a launcher version only works
-once the matching GitHub Release exists (it fetches assets from the tag of the
-same version). So:
+**Automatic.** The `Release` workflow publishes this launcher to npm on every
+`vX.Y.Z` tag, in a `publish-launcher` job that runs *after* all platform build
+jobs finish (so the assets the launcher fetches already exist). The job sets the
+launcher version to the tag, then publishes — skipping cleanly if that version
+is already on npm (e.g. a re-cut tag). So the normal flow is just: cut the app
+release (`release-bump` → tag `vX.Y.Z`); the launcher ships itself.
 
-1. Cut the app release first (tag `vX.Y.Z`, wait for all platform assets to
-   upload — see the repo's `release-bump` flow).
-2. Bump `launcher/package.json` `version` to the same `X.Y.Z`.
-3. From `launcher/`: `npm publish --access public` (scoped packages are private
-   by default; `--access public` makes the first publish public).
+Requirement: a repo secret `NPM_TOKEN` — an npm **automation** token for an
+account with publish rights to the `@cyl-castillo` scope. Add it with:
 
-Requires `npm login` (or an `NPM_TOKEN`) for the `@cyl-castillo` scope.
+```sh
+gh secret set NPM_TOKEN   # paste the token when prompted
+```
+
+The committed `version` here is only a dev default (used when running the
+launcher straight from the repo); CI overrides it from the tag at publish time.
+
+**Manual fallback** (if you ever need to publish outside CI): from `launcher/`,
+`npm login` then `npm publish --access public` (scoped packages are private by
+default; `--access public` makes the first publish public).
