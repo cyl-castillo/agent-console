@@ -59,7 +59,8 @@ export function ProjectPicker() {
                   className="recent-forget"
                   onClick={() => forget(r.path)}
                   title="Remove from list"
-                >×</button>
+                  aria-label="Remove from list"
+                ><Icon name="x" size={14} /></button>
               </div>
             ))}
           </div>
