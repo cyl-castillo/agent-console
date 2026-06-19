@@ -417,7 +417,7 @@ export default function App() {
                   <div className="terminal-empty-title">No active sessions</div>
                   <div className="terminal-empty-copy">Each new session starts in this project and launches its agent automatically.</div>
                 </div>
-                <button className="primary" onClick={newSession}>+ New session</button>
+                <button className="btn btn-primary" onClick={newSession}>+ New session</button>
               </div>
             ) : (
               <div className="terminals-stack">

@@ -28,7 +28,7 @@ export function ChangesList() {
     return (
       <div className="changes-empty">
         <span>Working tree clean.</span>
-        <button className="link-btn" onClick={() => refresh()} title="Refresh">refresh</button>
+        <button className="btn btn-link" onClick={() => refresh()} title="Refresh">refresh</button>
       </div>
     );
   }

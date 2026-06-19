@@ -24,7 +24,7 @@ export function UpdateBanner() {
             Update available · v{info.currentVersion} → <strong>v{info.version}</strong>
           </span>
           <span className="update-banner-actions">
-            <button className="primary" onClick={() => install()}>Install &amp; restart</button>
+            <button className="btn btn-primary" onClick={() => install()}>Install &amp; restart</button>
             <button onClick={dismiss}>Later</button>
           </span>
         </>
@@ -36,7 +36,7 @@ export function UpdateBanner() {
             <span className="update-banner-hint"> · download the new package manually</span>
           </span>
           <span className="update-banner-actions">
-            <button className="primary" onClick={() => openDownload()}>Download</button>
+            <button className="btn btn-primary" onClick={() => openDownload()}>Download</button>
             <button onClick={dismiss}>Later</button>
           </span>
         </>

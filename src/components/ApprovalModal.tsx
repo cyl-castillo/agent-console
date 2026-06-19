@@ -217,21 +217,21 @@ export function ApprovalModal() {
         {!showAlways ? (
           <div className="approval-actions">
             <button
-              className="btn-deny"
+              className="btn btn-danger"
               disabled={busy}
               onClick={async () => { setBusy(true); await decide(req.id, "deny", "user denied"); }}
             >
               Deny
             </button>
             <button
-              className="btn-secondary"
+              className="btn btn-secondary"
               disabled={busy}
               onClick={() => setShowAlways(true)}
             >
               Always…
             </button>
             <button
-              className="btn-approve"
+              className="btn btn-success"
               disabled={busy}
               title={cmdAssessment?.level === "dangerous" ? "Click required — keyboard shortcut disabled for dangerous commands" : "Ctrl+Enter"}
               onClick={async () => { setBusy(true); await decide(req.id, "allow", "approved once"); }}
@@ -379,9 +379,9 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
       )}
 
       <div className="approval-actions">
-        <button className="btn-secondary" onClick={onCancel}>Back</button>
+        <button className="btn btn-secondary" onClick={onCancel}>Back</button>
         <button
-          className="btn-approve"
+          className="btn btn-success"
           disabled={
             blocked ||
             (requiresTyping && confirmText !== live.raw) ||

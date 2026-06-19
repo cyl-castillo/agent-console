@@ -106,7 +106,7 @@ export function PermissionsPanel() {
       {error && (
         <div className="modal-error" style={{ margin: "0 10px" }}>
           {error}
-          <button className="link-btn" style={{ marginLeft: 8 }} onClick={clearError}>dismiss</button>
+          <button className="btn btn-link" style={{ marginLeft: 8 }} onClick={clearError}>dismiss</button>
         </div>
       )}
 
@@ -126,7 +126,7 @@ export function PermissionsPanel() {
       {filter.query && (
         <div className="perm-result-count">
           {filteredRules.length} of {counts.total} rules
-          <button className="link-btn" onClick={() => setFilter({ ...filter, query: "" })}>clear</button>
+          <button className="btn btn-link" onClick={() => setFilter({ ...filter, query: "" })}>clear</button>
         </div>
       )}
 
@@ -371,8 +371,8 @@ function RuleForm({ edit, defaultScope, hasProject, onClose }: RuleFormProps) {
       )}
 
       <div className="perm-form-actions">
-        <button className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-        <button className="btn-approve" disabled={!canSave || busy} onClick={onSave}>
+        <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+        <button className="btn btn-success" disabled={!canSave || busy} onClick={onSave}>
           {edit ? "Save changes" : "Add rule"}
         </button>
       </div>
@@ -419,7 +419,7 @@ function RuleGroup({
           {totalInScope === 0 ? (
             <>
               <span>No {title.toLowerCase()} rules yet.</span>
-              <button className="link-btn" onClick={onAdd}>+ add one</button>
+              <button className="btn btn-link" onClick={onAdd}>+ add one</button>
             </>
           ) : (
             <span>No rules match the current filter.</span>

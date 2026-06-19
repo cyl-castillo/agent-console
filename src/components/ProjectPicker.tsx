@@ -36,7 +36,7 @@ export function ProjectPicker() {
         <p>
           A minimalist, AI-native console for directing agents inside a repository.
         </p>
-        <button className="primary" onClick={onPick} disabled={loading}>
+        <button className="btn btn-primary" onClick={onPick} disabled={loading}>
           {loading ? "Opening..." : "Open folder"}
         </button>
         {error && <div className="error">{error}</div>}
