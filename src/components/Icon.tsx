@@ -13,8 +13,14 @@ export type IconName =
   | "plug"
   | "server"
   | "panel-right"
+  | "panel-left"
   | "sparkles"
-  | "users";
+  | "users"
+  | "command"
+  | "help-circle"
+  | "info"
+  | "x"
+  | "check";
 
 interface Props {
   name: IconName;
@@ -138,4 +144,40 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M15 3v18" />
     </>
   ),
+  // Lucide: panel-left
+  "panel-left": (
+    <>
+      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+      <path d="M9 3v18" />
+    </>
+  ),
+  // Lucide: command
+  command: (
+    <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+  ),
+  // Lucide: circle-help
+  "help-circle": (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <path d="M12 17h.01" />
+    </>
+  ),
+  // Lucide: info
+  info: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </>
+  ),
+  // Lucide: x
+  x: (
+    <>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </>
+  ),
+  // Lucide: check
+  check: <path d="M20 6 9 17l-5-5" />,
 };

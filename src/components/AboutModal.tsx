@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { Modal } from "./Modal";
 
 const REPO_URL = "https://github.com/cyl-castillo/agent-console";
 const SPONSORS_URL = "https://github.com/sponsors/cyl-castillo";
@@ -16,15 +17,8 @@ export function AboutModal({ onClose }: Props) {
     getVersion().then(setVersion).catch(() => setVersion(""));
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal about-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} className="about-modal" ariaLabel="About Agent Console">
         <div className="about-head">
           <div className="about-title">Agent Console</div>
           <div className="about-version">{version ? `v${version}` : ""} · early preview</div>
@@ -52,7 +46,6 @@ export function AboutModal({ onClose }: Props) {
         <div className="modal-actions">
           <button onClick={onClose}>Close</button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

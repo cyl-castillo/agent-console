@@ -326,7 +326,7 @@ export default function App() {
             onClick={() => setLeftOpen((v) => !v)}
             title={leftOpen ? "Hide workspace" : "Show workspace"}
           >
-            <span className="sidebar-toggle-icon">{leftOpen ? "◧" : "◨"}</span>
+            <span className="sidebar-toggle-icon"><Icon name="panel-left" size={14} /></span>
             <span>Workspace</span>
             {changesCount > 0 && <span className="sidebar-toggle-badge">{changesCount}</span>}
           </button>
@@ -359,17 +359,20 @@ export default function App() {
             className="topbar-icon"
             onClick={() => setShowShortcuts(true)}
             title="Keyboard shortcuts (Ctrl+/)"
-          >⌘</button>
+            aria-label="Keyboard shortcuts"
+          ><Icon name="command" size={14} /></button>
           <button
             className="topbar-icon"
             onClick={() => setShowGettingStarted(true)}
             title="Getting started guide"
-          >?</button>
+            aria-label="Getting started guide"
+          ><Icon name="help-circle" size={14} /></button>
           <button
             className="topbar-icon"
             onClick={() => setShowAbout(true)}
             title="About Agent Console"
-          >ⓘ</button>
+            aria-label="About Agent Console"
+          ><Icon name="info" size={14} /></button>
           <button
             className="tb-close"
             onClick={() => { persistTerminals(); closeProject(); }}
