@@ -422,9 +422,11 @@ select:focus-visible,
   max-width: 360px;
 }
 .recent-forget {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.4;
   padding: 0 6px;
-  font-size: 14px;
   background: transparent;
   border: none;
 }
