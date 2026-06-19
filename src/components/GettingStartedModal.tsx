@@ -1,5 +1,7 @@
 import { useEffect, useMemo } from "react";
 
+import { Icon } from "./Icon";
+import { Modal } from "./Modal";
 import { useSessionStore } from "../stores/sessionStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { useAdvisorStore } from "../stores/advisorStore";
@@ -25,12 +27,6 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
   const advisorItems = useAdvisorStore((s) => s.items);
   const installedSkills = useSkillsStore((s) => s.installed);
   const recentPromptsCount = useSkillsStore((s) => s.recent.length);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   // Mark seen once when opened so it doesn't auto-open again on next launch.
   useEffect(() => {
@@ -77,8 +73,7 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
   const completed = steps.filter((s) => s.done).length;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal getting-started-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} className="getting-started-modal" ariaLabel="Getting Started">
         <div className="gs-head">
           <div>
             <div className="gs-title">Getting Started</div>
@@ -86,7 +81,9 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
               {completed} de {steps.length} completados
             </div>
           </div>
-          <button className="gs-close" onClick={onClose} title="Cerrar">×</button>
+          <button className="gs-close" onClick={onClose} title="Cerrar" aria-label="Cerrar">
+            <Icon name="x" size={14} />
+          </button>
         </div>
 
         <div className="gs-progress">
@@ -116,7 +113,6 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
           </p>
           <button onClick={onClose}>Cerrar</button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

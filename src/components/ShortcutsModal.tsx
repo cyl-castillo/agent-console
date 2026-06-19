@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { Icon } from "./Icon";
+import { Modal } from "./Modal";
 
 const GROUPS = [
   {
@@ -41,21 +42,16 @@ const GROUPS = [
 ] as const;
 
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal shortcuts-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} className="shortcuts-modal" ariaLabel="Keyboard Shortcuts">
         <div className="shortcuts-head">
           <div>
             <div className="shortcuts-title">Keyboard Shortcuts</div>
             <div className="shortcuts-subtitle">Terminal-first controls for daily navigation.</div>
           </div>
-          <button className="gs-close" onClick={onClose} title="Close">x</button>
+          <button className="gs-close" onClick={onClose} title="Close" aria-label="Close">
+            <Icon name="x" size={14} />
+          </button>
         </div>
 
         <div className="shortcuts-groups">
@@ -77,7 +73,6 @@ export function ShortcutsModal({ onClose }: { onClose: () => void }) {
             </section>
           ))}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

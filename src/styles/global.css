@@ -9,12 +9,48 @@
   --text-dim: #8a93a0;
   --text-faint: #5b626d;
   --accent: #6aa9ff;
-  --accent-soft: rgba(106, 169, 255, 0.12);
+  --accent-soft: var(--accent-12);
   --danger: #ff6a6a;
   --ok: #6cd16c;
 
   --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
   --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Accent steps — derived from --accent so both themes stay in sync.
+     Replaces the ~20 hardcoded rgba(106,169,255,…) literals so the light
+     theme's accent (#2563eb) propagates to active/selected states too. */
+  --accent-12: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-15: color-mix(in srgb, var(--accent) 15%, transparent);
+  --accent-20: color-mix(in srgb, var(--accent) 20%, transparent);
+  --accent-35: color-mix(in srgb, var(--accent) 35%, transparent);
+  --accent-55: color-mix(in srgb, var(--accent) 55%, transparent);
+
+  /* Interaction surfaces — theme-aware hover/press derived from text on the
+     elevated background, replacing the dark-only #1f242b / #181c22 literals. */
+  --hover: color-mix(in srgb, var(--text) 8%, var(--bg-elev-2));
+  --hover-border: color-mix(in srgb, var(--text) 16%, var(--border));
+  --press: color-mix(in srgb, var(--text) 4%, var(--bg-elev-1));
+
+  /* Faint divider — referenced ~19× with a dark-only white fallback that
+     never resolved (the var had no definition). Now theme-aware. */
+  --border-faint: color-mix(in srgb, var(--text) 8%, transparent);
+
+  /* Keyboard focus ring — outline-offset keeps the gap on any background. */
+  --focus-color: var(--accent);
+
+  /* Spacing scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* Radius scale */
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-pill: 999px;
 
   color-scheme: dark;
 }
@@ -60,15 +96,33 @@ button {
   color: var(--text);
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 6px 12px;
+  border-radius: var(--r-1);
+  padding: 6px var(--sp-3);
   cursor: pointer;
-  transition: background 80ms, border-color 80ms;
+  transition: background 80ms, border-color 80ms, box-shadow 80ms, color 80ms;
 }
-button:hover { background: #1f242b; border-color: #353c46; }
-button:active { background: #181c22; }
+button:hover { background: var(--hover); border-color: var(--hover-border); }
+button:active { background: var(--press); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-button.primary:hover { background: rgba(106, 169, 255, 0.2); }
+button.primary:hover { background: var(--accent-20); }
+
+/* --- Keyboard focus (a11y) ---
+   Visible ring only for keyboard navigation (:focus-visible, never on mouse
+   click). outline-offset shows the real underlying background as the gap, so
+   it reads correctly on any surface and in both themes. Layout-neutral.
+   Scoped to explicit controls — NOT textarea/[tabindex] — so it never draws a
+   ring around the xterm terminal (which uses a helper <textarea> and tabindex). */
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[role="tab"]:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
+}
 
 /* --- Layout --- */
 .app {
@@ -299,7 +353,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   overflow: hidden;
   margin-bottom: 4px;
 }
-.recent-open:hover { background: var(--bg-elev-2); border-color: #353c46; }
+.recent-open:hover { background: var(--bg-elev-2); border-color: var(--hover-border); }
 .recent-name { color: var(--text); font-family: var(--font-mono); font-size: 12px; }
 .recent-path {
   color: var(--text-faint);
@@ -1580,7 +1634,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   border: 1px solid var(--accent);
   border-radius: 3px;
 }
-.wb-cta:hover { background: rgba(106, 169, 255, 0.2); border-color: var(--accent); }
+.wb-cta:hover { background: var(--accent-20); border-color: var(--accent); }
 .wb-link {
   margin-left: 6px;
   background: transparent;
@@ -1815,7 +1869,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   text-align: center;
 }
 .wb-chip.active .wb-chip-count {
-  background: rgba(106, 169, 255, 0.25);
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
   color: var(--accent);
 }
 
@@ -2190,7 +2244,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .session-row:hover { background: var(--bg-elev-2, rgba(255,255,255,0.04)); }
 .session-row.active {
-  background: rgba(106, 169, 255, 0.12);
+  background: var(--accent-12);
   color: var(--accent);
 }
 .session-row.stopped .session-name { color: var(--text-faint); font-style: italic; }
@@ -2486,7 +2540,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 
 .risk { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.6px; }
 .risk-safe      { background: rgba(108, 209, 108, 0.12); color: var(--ok); }
-.risk-moderate  { background: rgba(106, 169, 255, 0.12); color: var(--accent); }
+.risk-moderate  { background: var(--accent-12); color: var(--accent); }
 .risk-broad     { background: rgba(255, 180, 80, 0.14); color: #ffb450; }
 .risk-caution   { background: rgba(255, 180, 80, 0.14); color: #ffb450; }
 .risk-dangerous { background: rgba(255, 106, 106, 0.16); color: var(--danger); }
@@ -2726,13 +2780,14 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   border-radius: 0;
   padding: 6px 10px;
   font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-faint);
   cursor: pointer;
   user-select: none;
 }
-.side-section-header:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+.side-section-header:hover { color: var(--text); background: var(--hover); }
 .side-section-header .caret { font-size: 10px; width: 10px; color: var(--text-faint); }
 .side-section-header .title { flex: 1; text-align: left; }
 .side-badge {
@@ -2797,9 +2852,9 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   color: var(--text);
   user-select: none;
 }
-.change-row:hover { background: rgba(255,255,255,0.04); }
+.change-row:hover { background: var(--hover); }
 .change-row.active {
-  background: rgba(106, 169, 255, 0.12);
+  background: var(--accent-12);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .change-tag {
@@ -2815,7 +2870,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .change-tag.added     { color: #4ade80; background: rgba(74, 222, 128, 0.12); }
 .change-tag.deleted   { color: #f87171; background: rgba(248, 113, 113, 0.12); }
 .change-tag.renamed   { color: #a78bfa; background: rgba(167, 139, 250, 0.12); }
-.change-tag.untracked { color: #6aa9ff; background: rgba(106, 169, 255, 0.12); }
+.change-tag.untracked { color: var(--accent); background: var(--accent-12); }
 .change-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2859,7 +2914,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .sidebar-toggle:hover { color: var(--text); border-color: var(--border); background: transparent; }
 .sidebar-toggle.open { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
-.sidebar-toggle-icon { font-size: 13px; line-height: 1; }
+.sidebar-toggle-icon { display: inline-flex; align-items: center; line-height: 1; }
 .sidebar-toggle-badge {
   background: var(--accent);
   color: var(--bg);
@@ -2882,7 +2937,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   font-size: 11px;
 }
 .permissions-panel .workbench-action.perm-add:hover {
-  background: rgba(106, 169, 255, 0.2);
+  background: var(--accent-20);
 }
 
 .perm-search { position: relative; }
@@ -2996,7 +3051,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   cursor: pointer;
   user-select: none;
 }
-.wb-advisor-head:hover { background: rgba(255,255,255,0.03); }
+.wb-advisor-head:hover { background: var(--hover); }
 .wb-advisor-head .caret { color: var(--text-faint); width: 10px; }
 .wb-advisor-text { flex: 1; min-width: 0; }
 .wb-advisor-name { font-weight: 500; font-size: 12px; }
@@ -3112,24 +3167,26 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .gs-title { font-size: 15px; font-weight: 600; }
 .gs-subtitle { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .gs-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--text-faint);
-  font-size: 18px;
   cursor: pointer;
-  padding: 0 6px;
+  padding: 2px 6px;
   line-height: 1;
 }
 .gs-close:hover { color: var(--text); }
 .gs-progress {
   height: 3px;
-  background: rgba(255,255,255,0.06);
+  background: var(--border-faint);
   border-radius: 2px;
   overflow: hidden;
 }
 .gs-progress-fill {
   height: 100%;
-  background: var(--accent, #6aa9ff);
+  background: var(--accent);
   transition: width 200ms ease;
 }
 .gs-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -3171,8 +3228,8 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   align-items: center;
   gap: 10px;
   padding: 7px 12px;
-  background: rgba(106, 169, 255, 0.12);
-  border: 1px solid rgba(106, 169, 255, 0.35);
+  background: var(--accent-12);
+  border: 1px solid var(--accent-35);
   color: var(--text);
   border-radius: 8px;
   font-size: 11.5px;
@@ -3183,7 +3240,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent, #6aa9ff);
+  background: var(--accent);
 }
 .ob-dismiss {
   background: none;
@@ -3225,9 +3282,9 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   cursor: pointer;
   user-select: none;
 }
-.ct-dir-row:hover { background: rgba(255,255,255,0.03); }
+.ct-dir-row:hover { background: var(--hover); }
 .ct-file:hover { background: var(--bg-elev-2, rgba(255,255,255,0.04)); }
-.ct-file.active { background: var(--accent-soft, rgba(106,169,255,0.16)); }
+.ct-file.active { background: var(--accent-soft); }
 .ct-caret { color: var(--text-faint); width: 10px; }
 .ct-folder-icon { color: var(--text-faint); font-size: 9px; }
 .ct-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3295,7 +3352,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.commit-history-item:hover { background: rgba(255,255,255,0.06); }
+.commit-history-item:hover { background: var(--hover); }
 .commit-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 .commit-counter { font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .commit-counter.over { color: #ff8585; }
@@ -3318,7 +3375,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .diff-mode-toggle button:first-child { border-radius: 4px 0 0 4px; }
 .diff-mode-toggle button:last-child  { border-radius: 0 4px 4px 0; border-left: none; }
-.diff-mode-toggle button.active { color: var(--text); background: rgba(106,169,255,0.12); border-color: rgba(106,169,255,0.4); }
+.diff-mode-toggle button.active { color: var(--text); background: var(--accent-12); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 
 /* Side-by-side diff */
 .sbs-diff {
@@ -3396,7 +3453,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   flex-shrink: 0;
 }
 .vault-kind.kind-secret { color: #ff8585; background: rgba(255,90,90,0.15); }
-.vault-kind.kind-config { color: #6aa9ff; background: rgba(106,169,255,0.15); }
+.vault-kind.kind-config { color: var(--accent); background: var(--accent-15); }
 .vault-actions { display: inline-flex; gap: 2px; opacity: 0; transition: opacity 0.1s; }
 .vault-row:hover .vault-actions { opacity: 1; }
 .vault-actions button {
@@ -3409,7 +3466,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   line-height: 1;
   border-radius: 3px;
 }
-.vault-actions button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,0.06); }
+.vault-actions button:hover:not(:disabled) { color: var(--text); background: var(--hover); }
 .vault-actions button:disabled { opacity: 0.4; }
 .vault-value {
   font-family: "JetBrains Mono", ui-monospace, monospace;
@@ -3481,7 +3538,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   cursor: pointer;
   max-width: 220px;
 }
-.branch-chip:hover { background: rgba(255,255,255,0.04); border-color: var(--border); }
+.branch-chip:hover { background: var(--hover); border-color: var(--border); }
 .branch-chip-icon { color: var(--text-faint); }
 .branch-chip-name {
   overflow: hidden;
@@ -3529,7 +3586,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   font-size: 11.5px;
   cursor: pointer;
 }
-.branch-item:hover { background: rgba(255,255,255,0.05); }
+.branch-item:hover { background: var(--hover); }
 .branch-item.current { color: var(--text-faint); cursor: default; }
 .branch-item.current:hover { background: transparent; }
 .branch-item-name {
@@ -3586,7 +3643,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   flex-shrink: 0;
 }
 .ctx-scope-badge.scope-project { background: rgba(108,209,108,0.15); color: #6cd49b; }
-.ctx-scope-badge.scope-global  { background: rgba(106,169,255,0.15); color: #6aa9ff; }
+.ctx-scope-badge.scope-global  { background: var(--accent-15); color: var(--accent); }
 
 .ctx-editor {
   margin-top: 6px;
@@ -3594,7 +3651,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   padding: 4px 0 4px 8px;
 }
 .ctx-editor.scope-project { border-left-color: rgba(108,209,108,0.55); }
-.ctx-editor.scope-global  { border-left-color: rgba(106,169,255,0.55); }
+.ctx-editor.scope-global  { border-left-color: var(--accent-55); }
 
 .ctx-toolbar {
   display: flex;
@@ -3622,7 +3679,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .ctx-mode-toggle button:first-child { border-radius: 4px 0 0 4px; }
 .ctx-mode-toggle button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
-.ctx-mode-toggle button.active { color: var(--text); background: rgba(106,169,255,0.12); border-color: rgba(106,169,255,0.4); }
+.ctx-mode-toggle button.active { color: var(--text); background: var(--accent-12); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 
 .ctx-preview {
   font-size: 12px;
@@ -3672,7 +3729,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   background: rgba(255,255,255,0.02);
   overflow: hidden;
 }
-.ctx-memory.index { border-color: rgba(106,169,255,0.35); background: rgba(106,169,255,0.05); }
+.ctx-memory.index { border-color: var(--accent-35); background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .ctx-memory-head {
   display: flex;
   align-items: center;
@@ -3682,7 +3739,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   font-size: 11.5px;
   user-select: none;
 }
-.ctx-memory-head:hover { background: rgba(255,255,255,0.03); }
+.ctx-memory-head:hover { background: var(--hover); }
 .ctx-memory-head .caret { color: var(--text-faint); width: 10px; }
 .ctx-memory-kind {
   font-size: 9px;
@@ -3697,8 +3754,8 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .ctx-memory-kind.kind-user      { color: #c896ff; background: rgba(200,150,255,0.12); }
 .ctx-memory-kind.kind-feedback  { color: #ffc56b; background: rgba(255,197,107,0.12); }
 .ctx-memory-kind.kind-project   { color: #6cd49b; background: rgba(108,212,155,0.12); }
-.ctx-memory-kind.kind-reference { color: #6aa9ff; background: rgba(106,169,255,0.12); }
-.ctx-memory-kind.kind-index     { color: #6aa9ff; background: rgba(106,169,255,0.18); }
+.ctx-memory-kind.kind-reference { color: var(--accent); background: var(--accent-12); }
+.ctx-memory-kind.kind-index     { color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .ctx-memory-name {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 11px;
@@ -3973,7 +4030,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   font-size: 13px;
   font-family: inherit;
 }
-.feedback-input:focus { outline: 1px solid #60a5fa; }
+.feedback-input:focus { outline: 1px solid var(--accent); }
 .feedback-textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, monospace; }
 .feedback-context {
   background: rgba(255,255,255,0.03);
@@ -4050,11 +4107,11 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   border-radius: 0;
   width: 100%;
 }
-.wb-strip-btn:hover { color: var(--text, #e7eaee); background: rgba(255,255,255,0.04); }
+.wb-strip-btn:hover { color: var(--text); background: var(--hover); }
 .wb-strip-btn.active {
-  color: var(--accent, #60a5fa);
-  border-left-color: var(--accent, #60a5fa);
-  background: rgba(96, 165, 250, 0.08);
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-12);
 }
 .wb-strip-icon {
   display: inline-flex;
@@ -4088,7 +4145,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 }
 .wb-strip-btn.active .wb-strip-count {
   background: var(--accent-soft, rgba(96,165,250,0.25));
-  color: var(--accent, #60a5fa);
+  color: var(--accent);
 }
 .wb-strip-flag {
   position: absolute;
@@ -4136,7 +4193,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
   border-radius: 0;
 }
 .sb-clickable { cursor: pointer; }
-.sb-clickable:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+.sb-clickable:hover { background: var(--hover); color: var(--text); }
 .sb-icon { opacity: 0.85; }
 .sb-sub { color: var(--text-faint); margin-left: 2px; }
 .sb-spacer { flex: 1 1 auto; }
@@ -4161,8 +4218,6 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 /* ===== Light theme surface tweaks =====
    Catches the most visible spots where dark-only rgba(255,255,255,...)
    was used. Full audit pending; this covers nav/hover/badge surfaces. */
-:root[data-theme="light"] .wb-strip-btn:hover { background: rgba(0,0,0,0.04); }
-:root[data-theme="light"] .wb-strip-btn.active { background: rgba(37, 99, 235, 0.08); }
 :root[data-theme="light"] .wb-strip-count {
   background: rgba(0,0,0,0.08);
   color: var(--text);
@@ -4233,7 +4288,7 @@ button.primary:hover { background: rgba(106, 169, 255, 0.2); }
 .session-suggestion-accept { color: var(--ok, #6cd16c); }
 .session-suggestion-accept:hover { background: rgba(108, 209, 108, 0.18); }
 .session-suggestion-dismiss { color: var(--text-faint); }
-.session-suggestion-dismiss:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+.session-suggestion-dismiss:hover { background: var(--hover); color: var(--text); }
 :root[data-theme="light"] .session-suggestion-dismiss:hover { background: rgba(0,0,0,0.06); }
 
 /* ===== Plugins panel ===== */
