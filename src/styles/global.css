@@ -247,7 +247,7 @@ select:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: rgba(255,255,255,0.04);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
   color: var(--text-faint);
   border: 1px solid transparent;
   border-radius: 10px;
@@ -664,7 +664,7 @@ select:focus-visible,
   margin: 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
   white-space: pre-wrap;
 }
 
@@ -695,7 +695,7 @@ select:focus-visible,
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
   font-family: var(--font-mono);
   font-size: 12px;
   border-bottom: 1px dotted var(--border);
@@ -885,7 +885,7 @@ select:focus-visible,
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
 }
 .task-mode {
   font-family: var(--font-mono);
@@ -1327,7 +1327,7 @@ select:focus-visible,
   font-size: 12px;
   padding: 4px 6px;
   border-left: 2px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
 }
 .tool-icon { text-align: center; }
 .tool-name { color: var(--text); font-weight: 600; }
@@ -1918,7 +1918,7 @@ select:focus-visible,
 .wb-chip:disabled { opacity: 0.35; cursor: not-allowed; }
 .wb-chip-count {
   font-size: 10px;
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-faint);
   border-radius: 8px;
   padding: 0 5px;
@@ -1934,7 +1934,7 @@ select:focus-visible,
 .wb-skill-source {
   font-size: 10px;
   color: var(--text-faint);
-  background: rgba(255,255,255,0.05);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   border-radius: 3px;
   padding: 0 5px;
   margin-left: 6px;
@@ -2288,7 +2288,7 @@ select:focus-visible,
   color: var(--text);
   user-select: none;
 }
-.session-row:hover { background: var(--bg-elev-2, rgba(255,255,255,0.04)); }
+.session-row:hover { background: var(--bg-elev-2, color-mix(in srgb, var(--text) 4%, transparent)); }
 .session-row.active {
   background: var(--accent-12);
   color: var(--accent);
@@ -2413,7 +2413,7 @@ select:focus-visible,
   font-size: 12px;
 }
 .commit-button:disabled {
-  background: var(--bg-elev-2, rgba(255,255,255,0.04));
+  background: var(--bg-elev-2, color-mix(in srgb, var(--text) 4%, transparent));
   color: var(--text-faint);
   border-color: var(--border);
   cursor: not-allowed;
@@ -2656,7 +2656,7 @@ select:focus-visible,
 .wb-tab.active { color: var(--accent); border-bottom-color: var(--accent); background: transparent; }
 .wb-tab-label { line-height: 1; }
 .wb-tab-count {
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-faint);
   border-radius: 8px;
   padding: 0 6px;
@@ -3000,7 +3000,7 @@ select:focus-visible,
 .perm-chip.on.eff-ask   { color: #ffb450; border-color: #ffb450; background: rgba(255, 180, 80, 0.10); }
 .perm-chip-count {
   font-size: 9px;
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-faint);
   border-radius: 8px;
   padding: 0 5px;
@@ -3009,7 +3009,7 @@ select:focus-visible,
   letter-spacing: 0;
 }
 .perm-chip.on .perm-chip-count {
-  background: rgba(255,255,255,0.1);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
   color: inherit;
   opacity: 0.85;
 }
@@ -3026,7 +3026,7 @@ select:focus-visible,
 /* Group header with count */
 .rule-group-head { padding: 8px 0 4px; }
 .rule-group-count {
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-faint);
   border-radius: 8px;
   padding: 0 6px;
@@ -3060,9 +3060,9 @@ select:focus-visible,
 /* ===== Advisor panel ===== */
 .wb-advisor-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .wb-advisor {
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.06));
+  border: 1px solid var(--border-faint);
   border-radius: 6px;
-  background: rgba(255,255,255,0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
   overflow: hidden;
 }
 .wb-advisor.dimmed { opacity: 0.55; }
@@ -3079,7 +3079,7 @@ select:focus-visible,
 .wb-advisor-text { flex: 1; min-width: 0; }
 .wb-advisor-name { font-weight: 500; font-size: 12px; }
 .wb-advisor-desc { font-size: 11px; color: var(--text-muted, #aab); margin-top: 2px; }
-.wb-advisor-body { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border-faint, rgba(255,255,255,0.05)); }
+.wb-advisor-body { padding: 4px 12px 12px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border-faint); }
 .wb-advisor-why { font-size: 11px; color: var(--text-muted, #aab); margin: 4px 0; line-height: 1.4; }
 .wb-advisor-why strong { color: var(--text); margin-right: 4px; }
 .wb-advisor-controls {
@@ -3110,7 +3110,7 @@ select:focus-visible,
   font-size: 10.5px;
   line-height: 1.45;
   background: rgba(0,0,0,0.3);
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.05));
+  border: 1px solid var(--border-faint);
   border-radius: 4px;
   padding: 8px;
   white-space: pre-wrap;
@@ -3123,7 +3123,7 @@ select:focus-visible,
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 8px;
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-faint);
 }
 .wb-advisor-badge.status-created { background: rgba(60,180,120,0.18); color: #6cd49b; }
@@ -3143,7 +3143,7 @@ select:focus-visible,
   border-radius: 6px;
   margin-right: 6px;
   vertical-align: middle;
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-faint);
 }
 .wb-learning-kind.kind-skill { background: rgba(120,150,255,0.18); color: #9db0ff; }
@@ -3218,9 +3218,9 @@ select:focus-visible,
   align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.06));
+  border: 1px solid var(--border-faint);
   border-radius: 6px;
-  background: rgba(255,255,255,0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
 }
 .gs-step.done { opacity: 0.55; }
 .gs-check {
@@ -3283,7 +3283,7 @@ select:focus-visible,
 .change-group-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .change-group-action {
   background: transparent;
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.08));
+  border: 1px solid var(--border-faint);
   color: var(--text-faint);
   border-radius: 4px;
   width: 18px;
@@ -3306,7 +3306,7 @@ select:focus-visible,
   user-select: none;
 }
 .ct-dir-row:hover { background: var(--hover); }
-.ct-file:hover { background: var(--bg-elev-2, rgba(255,255,255,0.04)); }
+.ct-file:hover { background: var(--bg-elev-2, color-mix(in srgb, var(--text) 4%, transparent)); }
 .ct-file.active { background: var(--accent-soft); }
 .ct-caret { color: var(--text-faint); width: 10px; }
 .ct-folder-icon { color: var(--text-faint); font-size: 9px; }
@@ -3314,7 +3314,7 @@ select:focus-visible,
 .ct-count {
   font-size: 10px;
   color: var(--text-faint);
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   padding: 0 5px;
   border-radius: 8px;
 }
@@ -3347,7 +3347,7 @@ select:focus-visible,
 .commit-toggle input { cursor: pointer; }
 .commit-history-btn {
   background: transparent;
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.1));
+  border: 1px solid var(--border-faint);
   color: var(--text-muted);
   border-radius: 4px;
   padding: 2px 8px;
@@ -3361,7 +3361,7 @@ select:focus-visible,
   margin: 4px 0;
   padding: 4px;
   background: var(--bg-elev-1, rgba(0,0,0,0.3));
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border: 1px solid var(--border, color-mix(in srgb, var(--text) 8%, transparent));
   border-radius: 4px;
   max-height: 180px;
   overflow-y: auto;
@@ -3385,12 +3385,12 @@ select:focus-visible,
   display: flex;
   align-items: center;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.06));
+  border-bottom: 1px solid var(--border-faint);
 }
 .diff-mode-toggle { display: inline-flex; gap: 0; }
 .diff-mode-toggle button {
   background: transparent;
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.08));
+  border: 1px solid var(--border-faint);
   color: var(--text-faint);
   font-size: 10.5px;
   padding: 2px 8px;
@@ -3412,9 +3412,9 @@ select:focus-visible,
 .sbs-hunk-header {
   color: var(--text-faint);
   padding: 2px 8px;
-  background: rgba(255,255,255,0.03);
-  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.06));
-  border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.06));
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  border-top: 1px solid var(--border-faint);
+  border-bottom: 1px solid var(--border-faint);
 }
 .sbs-table { display: table; width: 100%; }
 .sbs-row { display: table-row; }
@@ -3431,7 +3431,7 @@ select:focus-visible,
 .sbs-ctx { background: transparent; }
 .sbs-del { background: rgba(255, 90, 90, 0.10); color: #ffbcbc; }
 .sbs-add { background: rgba(80, 200, 120, 0.10); color: #bff5d0; }
-.sbs-empty { background: rgba(255,255,255,0.02); }
+.sbs-empty { background: color-mix(in srgb, var(--text) 2%, transparent); }
 .sbs-intra { background: rgba(255, 220, 100, 0.22); color: inherit; padding: 0 1px; border-radius: 2px; }
 .sbs-del .sbs-intra { background: rgba(255, 80, 80, 0.35); }
 .sbs-add .sbs-intra { background: rgba(80, 200, 120, 0.35); }
@@ -3439,9 +3439,9 @@ select:focus-visible,
 /* ===== Vault panel ===== */
 .vault-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .vault-row {
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.06));
+  border: 1px solid var(--border-faint);
   border-radius: 6px;
-  background: rgba(255,255,255,0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
   padding: 8px 10px;
 }
 .vault-row-head { display: flex; align-items: center; gap: 8px; }
@@ -3458,7 +3458,7 @@ select:focus-visible,
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-faint);
   padding: 1px 5px;
   border-radius: 6px;
@@ -3497,7 +3497,7 @@ select:focus-visible,
   margin: 6px 0 0;
   padding: 6px 8px;
   background: rgba(0,0,0,0.35);
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.05));
+  border: 1px solid var(--border-faint);
   border-radius: 4px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -3510,7 +3510,7 @@ select:focus-visible,
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border: 1px solid var(--border, color-mix(in srgb, var(--text) 10%, transparent));
   border-radius: 6px;
   background: rgba(0,0,0,0.2);
   padding: 10px;
@@ -3550,7 +3550,7 @@ select:focus-visible,
 .changes-count { color: var(--text-faint); font-size: 11px; }
 .branch-chip {
   background: transparent;
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.08));
+  border: 1px solid var(--border-faint);
   color: var(--text);
   border-radius: 4px;
   padding: 2px 8px;
@@ -3584,7 +3584,7 @@ select:focus-visible,
   z-index: 30;
   width: 280px;
   background: var(--bg-elev-1, #1a1c20);
-  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border: 1px solid var(--border, color-mix(in srgb, var(--text) 10%, transparent));
   border-radius: 6px;
   box-shadow: 0 6px 22px rgba(0,0,0,0.5);
   display: flex;
@@ -3592,7 +3592,7 @@ select:focus-visible,
   max-height: 360px;
   overflow: hidden;
 }
-.branch-search { padding: 6px; border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.06)); }
+.branch-search { padding: 6px; border-bottom: 1px solid var(--border-faint); }
 .branch-list {
   list-style: none;
   margin: 0;
@@ -3694,7 +3694,7 @@ select:focus-visible,
 .ctx-mode-toggle { display: inline-flex; }
 .ctx-mode-toggle button {
   background: transparent;
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.08));
+  border: 1px solid var(--border-faint);
   color: var(--text-faint);
   font-size: 10.5px;
   padding: 2px 8px;
@@ -3711,7 +3711,7 @@ select:focus-visible,
   overflow: auto;
   padding: 6px 8px;
   background: rgba(0,0,0,0.18);
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.05));
+  border: 1px solid var(--border-faint);
   border-radius: 4px;
 }
 .ctx-textarea {
@@ -3747,9 +3747,9 @@ select:focus-visible,
 /* Memory list */
 .ctx-memory-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .ctx-memory {
-  border: 1px solid var(--border-faint, rgba(255,255,255,0.06));
+  border: 1px solid var(--border-faint);
   border-radius: 5px;
-  background: rgba(255,255,255,0.02);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
   overflow: hidden;
 }
 .ctx-memory.index { border-color: var(--accent-35); background: color-mix(in srgb, var(--accent) 5%, transparent); }
@@ -3770,7 +3770,7 @@ select:focus-visible,
   letter-spacing: 0.05em;
   padding: 1px 5px;
   border-radius: 5px;
-  background: rgba(255,255,255,0.06);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   color: var(--text-faint);
   flex-shrink: 0;
 }
@@ -3805,7 +3805,7 @@ select:focus-visible,
 .ctx-memory-delete:hover { color: #ff8585; }
 .ctx-memory-body {
   padding: 4px 8px 8px;
-  border-top: 1px solid var(--border-faint, rgba(255,255,255,0.05));
+  border-top: 1px solid var(--border-faint);
 }
 .ctx-memory-content {
   font-family: "JetBrains Mono", ui-monospace, monospace;
@@ -4023,8 +4023,8 @@ select:focus-visible,
 }
 .palette-footer .spacer { flex: 1; }
 .palette-footer kbd {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   border-radius: 3px; padding: 1px 5px;
   font-family: inherit; font-size: 10px;
   margin: 0 2px;
@@ -4056,7 +4056,7 @@ select:focus-visible,
 .feedback-input:focus { outline: 1px solid var(--accent); }
 .feedback-textarea { resize: vertical; min-height: 120px; font-family: ui-monospace, monospace; }
 .feedback-context {
-  background: rgba(255,255,255,0.03);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
   border: 1px solid var(--border, #2a2f37);
   border-radius: 6px;
   padding: 8px 10px;
@@ -4153,7 +4153,7 @@ select:focus-visible,
 .wb-strip-count {
   position: absolute;
   top: 4px; right: 6px;
-  background: rgba(255,255,255,0.12);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
   color: var(--text, #e7eaee);
   border-radius: 8px;
   min-width: 14px;
@@ -4239,13 +4239,13 @@ select:focus-visible,
 .side-section.muted .side-section-header .title { color: var(--text-faint); }
 
 /* ===== Light theme surface tweaks =====
-   Catches the most visible spots where dark-only rgba(255,255,255,...)
-   was used. Full audit pending; this covers nav/hover/badge surfaces. */
+   Subtle fills/dividers now derive from --text via color-mix, so they track the
+   theme automatically. The remaining overrides are spots that need a specific
+   light value (stronger badge contrast, bespoke palette shadows/backdrop). */
 :root[data-theme="light"] .wb-strip-count {
   background: rgba(0,0,0,0.08);
   color: var(--text);
 }
-:root[data-theme="light"] .sb-clickable:hover { background: rgba(0,0,0,0.05); }
 :root[data-theme="light"] .palette-row.selected { background: rgba(37, 99, 235, 0.10); }
 :root[data-theme="light"] .palette {
   box-shadow: 0 16px 48px rgba(15, 23, 42, 0.18);
@@ -4256,7 +4256,6 @@ select:focus-visible,
   border-color: rgba(0,0,0,0.10);
   color: var(--text);
 }
-:root[data-theme="light"] .feedback-context { background: rgba(0,0,0,0.03); }
 
 /* Theme toggle in the project picker, top-right corner. */
 .picker { position: relative; }
@@ -4456,7 +4455,7 @@ select:focus-visible,
 
 /* --- MCP servers panel --- */
 .mcp-list { list-style: none; margin: 0; padding: 0; }
-.mcp-row { border-bottom: 1px solid var(--border-faint, rgba(255,255,255,0.05)); }
+.mcp-row { border-bottom: 1px solid var(--border-faint); }
 .mcp-row-head {
   display: flex;
   align-items: center;
