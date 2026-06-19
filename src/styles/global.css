@@ -107,6 +107,55 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.primary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 button.primary:hover { background: var(--accent-20); }
 
+/* --- Button vocabulary ---
+   Canonical set components compose instead of hand-rolling one-off button
+   classes. `.btn` is the neutral base (mirrors the bare <button> element so it
+   also works on <a>/<span>); semantic modifiers set emphasis/intent; layout
+   modifiers (-sm, -block, -mono) stay orthogonal. All colors run through theme
+   tokens so light/dark both work. */
+.btn {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-1);
+  padding: 6px var(--sp-3);
+  cursor: pointer;
+  transition: background 80ms, border-color 80ms, box-shadow 80ms, color 80ms;
+}
+.btn:hover { background: var(--hover); border-color: var(--hover-border); }
+.btn:active { background: var(--press); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Soft accent — the default "primary" emphasis. */
+.btn-primary { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.btn-primary:hover { background: var(--accent-20); border-color: var(--accent); }
+
+/* Filled accent — highest emphasis (e.g. Commit). Text uses --bg so it stays
+   readable on the accent fill in both themes. */
+.btn-solid { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.btn-solid:hover { background: var(--accent); border-color: var(--accent); }
+
+/* Lower-emphasis neutral — keeps the base chrome, dims the label. */
+.btn-secondary { color: var(--text-dim); }
+
+/* Intent colors. */
+.btn-success { background: color-mix(in srgb, var(--ok) 12%, transparent); border-color: var(--ok); color: var(--ok); }
+.btn-success:hover { background: color-mix(in srgb, var(--ok) 20%, transparent); border-color: var(--ok); }
+.btn-danger { background: color-mix(in srgb, var(--danger) 10%, transparent); border-color: var(--danger); color: var(--danger); }
+.btn-danger:hover { background: color-mix(in srgb, var(--danger) 18%, transparent); border-color: var(--danger); }
+
+/* Chrome-less variants for inline actions. */
+.btn-ghost { background: transparent; border: none; color: var(--text-faint); padding: 2px 0; }
+.btn-ghost:hover { background: transparent; border: none; color: var(--accent); }
+.btn-link { background: transparent; border: none; color: var(--accent); text-decoration: underline; padding: 0; }
+.btn-link:hover { background: transparent; border: none; color: var(--accent); }
+
+/* Orthogonal layout/size modifiers. */
+.btn-sm { font-size: 11px; padding: 3px 10px; }
+.btn-block { display: block; width: 100%; }
+.btn-mono { font-family: var(--font-mono); }
+
 /* --- Keyboard focus (a11y) ---
    Visible ring only for keyboard navigation (:focus-visible, never on mouse
    click). outline-offset shows the real underlying background as the gap, so
@@ -1911,10 +1960,6 @@ select:focus-visible,
 .wb-skill.pinned { background: rgba(251, 191, 36, 0.04); }
 .wb-skill.pinned:hover { background: rgba(251, 191, 36, 0.08); }
 
-.wb-cta-sm {
-  font-size: 11px;
-  padding: 2px 8px;
-}
 
 /* Show-more */
 .wb-show-more {
@@ -2125,15 +2170,8 @@ select:focus-visible,
 }
 .model-chooser-foot .spacer { flex: 1; }
 .model-chooser-sep { color: var(--text-faint); font-size: 10px; }
-.model-chooser-link {
-  background: transparent;
-  border: none;
-  color: var(--text-faint);
-  font-size: 11px;
-  padding: 2px 0;
-  cursor: pointer;
-}
-.model-chooser-link:hover { color: var(--accent); }
+/* Chrome from .btn-ghost; this only sets the smaller label size. */
+.model-chooser-link { font-size: 11px; }
 .model-chooser-custom { padding: 6px 0 0; }
 
 /* Per-session agent badge (glyph before the model badge). */
@@ -2359,16 +2397,12 @@ select:focus-visible,
 }
 .commit-message:focus { border-color: var(--accent); }
 .commit-message:disabled { opacity: 0.6; }
+/* Color/weight from .btn-solid; this only sets the commit-bar layout. */
 .commit-button {
   align-self: stretch;
   padding: 6px 10px;
-  background: var(--accent);
-  color: #0d0f12;
-  border: 1px solid var(--accent);
   border-radius: 3px;
   font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
 }
 .commit-button:disabled {
   background: var(--bg-elev-2, rgba(255,255,255,0.04));
@@ -2503,9 +2537,6 @@ select:focus-visible,
   display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;
 }
 .approval-actions button { min-width: 96px; }
-.btn-approve { background: rgba(108, 209, 108, 0.12); border-color: var(--ok); color: var(--ok); }
-.btn-deny    { background: rgba(255, 106, 106, 0.10); border-color: var(--danger); color: var(--danger); }
-.btn-secondary { color: var(--text-dim); }
 
 .approval-always { display: flex; flex-direction: column; gap: 10px; }
 .approval-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
@@ -2652,11 +2683,6 @@ select:focus-visible,
 
 .permissions-panel { display: flex; flex-direction: column; gap: 10px; padding: 0 0 10px; overflow: auto; }
 .permissions-panel .panel-header { display: flex; align-items: center; justify-content: space-between; }
-.link-btn {
-  background: none; border: none; color: var(--text-faint);
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; cursor: pointer;
-}
-.link-btn:hover { color: var(--accent); }
 
 .rule-group { padding: 0 10px; }
 .rule-group-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
@@ -2692,7 +2718,6 @@ select:focus-visible,
 
 /* --- Permissions panel extras --- */
 .perm-header-actions { display: flex; gap: 8px; align-items: center; }
-.link-btn.primary { color: var(--accent); }
 
 .lint-banner {
   margin: 6px 10px;
@@ -2889,16 +2914,6 @@ select:focus-visible,
   flex: 1;
   min-width: 0;
 }
-.link-btn {
-  background: transparent;
-  border: none;
-  color: var(--accent);
-  cursor: pointer;
-  padding: 0;
-  font: inherit;
-  text-decoration: underline;
-}
-
 /* Topbar sidebar toggle */
 .sidebar-toggle {
   display: inline-flex;

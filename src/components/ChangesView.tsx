@@ -226,7 +226,7 @@ export function ChangesView() {
             </span>
             <span className="spacer" />
             <button
-              className="commit-button"
+              className="btn btn-solid commit-button"
               onClick={onCommit}
               disabled={!canCommit}
               title={

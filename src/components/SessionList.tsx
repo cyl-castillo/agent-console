@@ -173,15 +173,15 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
       ))}
 
       <div className="model-chooser-foot">
-        <button className="model-chooser-link" onClick={() => onPick(agent, undefined)}>
+        <button className="model-chooser-link btn btn-ghost" onClick={() => onPick(agent, undefined)}>
           {agent === "codex" ? "Config default" : "Account default"}
         </button>
         <span className="model-chooser-sep">·</span>
-        <button className="model-chooser-link" onClick={() => setShowCustom((v) => !v)}>
+        <button className="model-chooser-link btn btn-ghost" onClick={() => setShowCustom((v) => !v)}>
           Custom…
         </button>
         <span className="spacer" />
-        <button className="model-chooser-link" onClick={onCancel}>Cancel</button>
+        <button className="model-chooser-link btn btn-ghost" onClick={onCancel}>Cancel</button>
       </div>
 
       {showCustom && (
