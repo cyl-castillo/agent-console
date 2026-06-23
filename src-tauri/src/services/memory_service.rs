@@ -100,6 +100,30 @@ pub fn delete(project_root: &Path, name: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Retire a memory by **moving** it under `<memory-dir>/_archived/` instead of
+/// deleting it — curation is suggest-only and reversible. `list` only scans
+/// top-level files, so the `_archived` subdir drops out of the active corpus.
+pub fn archive(project_root: &Path, name: &str) -> AppResult<PathBuf> {
+    if name == MEMORY_INDEX {
+        return Err(AppError::InvalidArgument(
+            "refusing to archive MEMORY.md (the memory index)".into(),
+        ));
+    }
+    let src = safe_path(project_root, name)?;
+    if !src.exists() {
+        return Err(AppError::NotFound(format!("memory '{name}'")));
+    }
+    let dir = memory_dir_for(project_root)?;
+    let archived = dir.join("_archived");
+    fs::create_dir_all(&archived)?;
+    let dest = archived.join(name);
+    if dest.exists() {
+        fs::remove_file(&dest)?;
+    }
+    fs::rename(&src, &dest)?;
+    Ok(dest)
+}
+
 /// Resolve a memory entry by name, defending against path traversal.
 /// Rules: must end in `.md`, must not contain path separators or `..`,
 /// and the resolved path must live inside the project's memory dir.
@@ -125,6 +149,41 @@ fn safe_path(project_root: &Path, name: &str) -> AppResult<PathBuf> {
         )));
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn archive_moves_out_of_active_corpus() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        // memory_dir_for resolves under the home dir; isolate it for the test.
+        let home = std::env::temp_dir().join(format!("ac-mem-home-{nanos}"));
+        fs::create_dir_all(&home).unwrap();
+        std::env::set_var("HOME", &home);
+        let project = std::env::temp_dir().join(format!("ac-mem-proj-{nanos}"));
+        fs::create_dir_all(&project).unwrap();
+
+        write(&project, "stale.md", "---\nname: stale\n---\n\nbody").unwrap();
+        assert!(list(&project).unwrap().iter().any(|m| m.name == "stale.md"));
+
+        let dest = archive(&project, "stale.md").unwrap();
+        assert!(dest.exists(), "archived copy exists");
+        let names: Vec<String> = list(&project).unwrap().into_iter().map(|m| m.name).collect();
+        assert!(!names.iter().any(|n| n == "stale.md"), "removed from corpus: {names:?}");
+
+        // Index is protected from archiving.
+        assert!(archive(&project, MEMORY_INDEX).is_err());
+
+        let _ = fs::remove_dir_all(&home);
+        let _ = fs::remove_dir_all(&project);
+    }
 }
 
 fn parse_frontmatter(path: &Path) -> (Option<String>, Option<String>) {

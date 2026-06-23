@@ -3151,6 +3151,27 @@ select:focus-visible,
 .wb-learning-kind.kind-skill { background: rgba(120,150,255,0.18); color: #9db0ff; }
 .wb-learning-kind.kind-memory { background: rgba(180,140,255,0.18); color: #c4a6ff; }
 .wb-learning-kind.kind-friction { background: rgba(255,170,80,0.16); color: #ffba6c; }
+/* Curation action tags reuse the kind-tag shell. */
+.wb-learning-kind.action-merge { background: rgba(120,200,160,0.18); color: #8fe0b6; }
+.wb-learning-kind.action-refactor { background: rgba(120,150,255,0.18); color: #9db0ff; }
+.wb-learning-kind.action-archive { background: rgba(255,170,80,0.16); color: #ffba6c; }
+.wb-learning-kind.action-rerank { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text-faint); }
+/* Chips listing the entries a curation suggestion acts on. */
+.wb-curation-targets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+}
+.wb-curation-target {
+  font-size: 10px;
+  font-family: var(--mono, monospace);
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text-muted, #aab);
+}
 .wb-learning-evidence {
   margin: 4px 0 0;
   padding-left: 16px;

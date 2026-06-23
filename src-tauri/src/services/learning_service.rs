@@ -164,6 +164,8 @@ fn list_existing_skills(root: &Path) -> String {
         .flatten()
         .filter(|e| e.path().is_dir())
         .map(|e| e.file_name().to_string_lossy().to_string())
+        // Skip the reserved `_archived` namespace (and any dotfiles).
+        .filter(|n| !n.starts_with('_') && !n.starts_with('.'))
         .collect();
     if names.is_empty() {
         "(none)".to_string()
@@ -281,6 +283,344 @@ fn truncate(s: &str, max: usize) -> String {
         }
         format!("{}…", &s[..cut])
     }
+}
+
+// ============================================================================
+// Corpus curation
+//
+// Where `reflect` *grows* the corpus (activity → new skills/memories), `curate`
+// *tends* the corpus that already exists, so it doesn't rot as it grows: fuse
+// duplicates, flag entries that point at things the repo no longer has, rewrite
+// sloppy ones, and surface dead weight. Same proven shape as `reflect`
+// (`claude -p` in plan mode → strict JSON), but the input is the corpus content
+// itself plus usage signals, not the activity stream.
+// ============================================================================
+
+/// One curation action the model proposes over the existing corpus.
+///
+/// `action` drives what the UI offers (all suggest-only — the user approves each):
+/// - "merge"    → fuse `targets` (≥2) into one entry (`newName` + `newContent`)
+/// - "refactor" → rewrite a single target's content in place (`newContent`)
+/// - "archive"  → retire a redundant/obsolete entry (no payload)
+/// - "rerank"   → report-only insight about value/usage (no payload, no action)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurationSuggestion {
+    pub action: String,
+    /// "skill" | "memory" — both targets of a suggestion share one kind.
+    pub target_kind: String,
+    /// Existing entry names this acts on. For skills: the directory name.
+    /// For memories: the `*.md` filename.
+    pub targets: Vec<String>,
+    pub title: String,
+    pub rationale: String,
+    /// Concrete grounds: overlap, broken refs, usage=0, etc.
+    #[serde(default)]
+    pub evidence: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurationResult {
+    pub suggestions: Vec<CurationSuggestion>,
+    pub skills_analyzed: usize,
+    pub memories_analyzed: usize,
+    pub raw_excerpt: String,
+}
+
+/// One existing corpus entry, with the code-side signals we compute before
+/// asking the model: how often it was used, and which references look broken.
+struct CorpusEntry {
+    kind: &'static str, // "skill" | "memory"
+    name: String,
+    /// Slash-command invocations seen in the ledger (skills only; memories have
+    /// no usage signal there, so this is `None` for them).
+    usage: Option<usize>,
+    /// Path-like references inside the entry that don't exist in the repo.
+    broken_refs: Vec<String>,
+    content: String,
+}
+
+/// Curate the existing skill/memory corpus and propose improvements. Read-only:
+/// it never mutates the corpus — it returns suggestions the user applies.
+pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<CurationResult> {
+    if !project_root.is_dir() {
+        return Err(AppError::NotADirectory(project_root.display().to_string()));
+    }
+
+    let entries = gather_corpus(project_root, events);
+    let skills_analyzed = entries.iter().filter(|e| e.kind == "skill").count();
+    let memories_analyzed = entries.iter().filter(|e| e.kind == "memory").count();
+
+    // Nothing to consolidate with fewer than two entries — no overlap is
+    // possible and a single entry isn't worth a Claude call.
+    if entries.len() < 2 {
+        return Ok(CurationResult {
+            suggestions: Vec::new(),
+            skills_analyzed,
+            memories_analyzed,
+            raw_excerpt: String::new(),
+        });
+    }
+
+    let prompt = build_curation_prompt(&entries);
+    let mut cmd = crate::services::claude_cli::command(&[
+        "-p",
+        &prompt,
+        "--permission-mode",
+        "plan",
+        "--output-format",
+        "text",
+    ]);
+    cmd.current_dir(project_root);
+    let output = cmd
+        .output()
+        .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Other(format!(
+            "claude exited with status {}: {}",
+            output.status, stderr
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let suggestions = parse_curation(&stdout)?;
+    Ok(CurationResult {
+        suggestions,
+        skills_analyzed,
+        memories_analyzed,
+        raw_excerpt: truncate(&stdout, 4000),
+    })
+}
+
+/// Per-entry content is bounded so a big corpus can't blow up the prompt.
+const CORPUS_ENTRY_MAX: usize = 1500;
+/// Hard cap on how many entries we feed the model in one pass.
+const CORPUS_MAX_ENTRIES: usize = 80;
+
+/// Read the full project corpus (skill bodies + memory bodies) and attach the
+/// code-side signals — usage counts from the ledger and broken file references.
+fn gather_corpus(root: &Path, events: &[ActivityEvent]) -> Vec<CorpusEntry> {
+    let usage = slash_command_usage(events);
+    let mut out = Vec::new();
+
+    // Project skills (the ones learning mode creates live under .claude/skills).
+    if let Ok(skills) = crate::services::skills_service::list(Some(root)) {
+        for s in skills
+            .into_iter()
+            .filter(|s| s.source == "project" && s.kind == "skill")
+        {
+            let content = crate::services::skills_service::read_md(&s.path).unwrap_or_default();
+            let broken_refs = find_broken_refs(root, &content);
+            out.push(CorpusEntry {
+                kind: "skill",
+                usage: Some(*usage.get(&normalize_skill(&s.name)).unwrap_or(&0)),
+                broken_refs,
+                content: truncate(&content, CORPUS_ENTRY_MAX),
+                name: s.name,
+            });
+        }
+    }
+
+    // Project memories (skip the hand-curated MEMORY.md index).
+    if let Ok(mems) = crate::services::memory_service::list(root) {
+        for m in mems.into_iter().filter(|m| !m.is_index) {
+            let content = crate::services::memory_service::read(root, &m.name).unwrap_or_default();
+            let broken_refs = find_broken_refs(root, &content);
+            out.push(CorpusEntry {
+                kind: "memory",
+                name: m.name,
+                usage: None,
+                broken_refs,
+                content: truncate(&content, CORPUS_ENTRY_MAX),
+            });
+        }
+    }
+
+    out.truncate(CORPUS_MAX_ENTRIES);
+    out
+}
+
+/// Count how often each slash-command was invoked, keyed by normalized name so
+/// the ledger's "/deploy" lines up with the "deploy" skill directory.
+fn slash_command_usage(events: &[ActivityEvent]) -> BTreeMap<String, usize> {
+    let mut freq: BTreeMap<String, usize> = BTreeMap::new();
+    for e in events {
+        if let Some(s) = e.skill.as_deref() {
+            *freq.entry(normalize_skill(s)).or_insert(0) += 1;
+        }
+    }
+    freq
+}
+
+fn normalize_skill(s: &str) -> String {
+    s.trim().trim_start_matches('/').to_lowercase()
+}
+
+/// Heuristic, conservative scan for path-like tokens that don't exist in the
+/// repo. Deliberately under-flags (only clear `dir/file.ext`-shaped tokens) —
+/// the model makes the final call, so a missed ref costs less than noise.
+fn find_broken_refs(root: &Path, content: &str) -> Vec<String> {
+    let mut missing = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for raw in content.split(|c: char| {
+        c.is_whitespace() || matches!(c, '`' | '"' | '\'' | '(' | ')' | '[' | ']' | ',' | '<' | '>')
+    }) {
+        let tok = raw.trim_matches(|c: char| matches!(c, '.' | ':' | ';' | '#' | '*' | '!'));
+        if !looks_like_path(tok) {
+            continue;
+        }
+        if !seen.insert(tok.to_string()) {
+            continue;
+        }
+        // Strip a trailing `:line` (and `:col`) reference like `foo.rs:90`.
+        let path_part = tok.split(':').next().unwrap_or(tok);
+        if path_part.is_empty() {
+            continue;
+        }
+        if !root.join(path_part).exists() {
+            missing.push(tok.to_string());
+            if missing.len() >= 8 {
+                break;
+            }
+        }
+    }
+    missing
+}
+
+fn looks_like_path(tok: &str) -> bool {
+    if tok.len() < 3 || tok.len() > 200 {
+        return false;
+    }
+    // URLs, home-relative, and absolute system paths aren't repo refs.
+    if tok.contains("://") || tok.starts_with('~') || tok.starts_with('/') {
+        return false;
+    }
+    if !tok.contains('/') {
+        return false;
+    }
+    if !tok
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | ':'))
+    {
+        return false;
+    }
+    // The last segment must carry an extension (a dot), so we flag `a/b.rs`
+    // but not directory-ish tokens like `and/or`.
+    tok.rsplit('/').next().unwrap_or("").contains('.')
+}
+
+fn build_curation_prompt(entries: &[CorpusEntry]) -> String {
+    let mut corpus = String::new();
+    for e in entries {
+        corpus.push_str(&format!("[{}] {}", e.kind, e.name));
+        if let Some(u) = e.usage {
+            corpus.push_str(&format!("  (invoked ×{u})"));
+        }
+        corpus.push('\n');
+        if !e.broken_refs.is_empty() {
+            corpus.push_str(&format!(
+                "  candidate broken refs: {}\n",
+                e.broken_refs.join(", ")
+            ));
+        }
+        corpus.push_str("  ---\n");
+        for line in e.content.lines() {
+            corpus.push_str("  ");
+            corpus.push_str(line);
+            corpus.push('\n');
+        }
+        corpus.push('\n');
+    }
+
+    format!(
+        r#"You are curating a developer's library of Claude Code skills and memories
+so it stays sharp as it grows. You are given every existing entry's content,
+plus two code-computed signals: how often each skill was invoked, and any
+path-like references that no longer exist in the repo ("candidate broken refs").
+
+Propose concrete curation actions, each of ONE of these kinds:
+
+- "merge": two or more entries overlap heavily (same workflow/fact restated).
+  Fuse them into one. List ALL the source entry names in `targets`, and provide
+  `newName` plus `newContent` (the consolidated entry, keeping every distinct
+  detail — never drop information when merging).
+- "refactor": one entry is vague, bloated, outdated, or has broken refs that you
+  can fix. Rewrite it. Put the single entry in `targets` and the rewritten body
+  in `newContent` (preserve its frontmatter shape). Use this to repair the
+  "candidate broken refs" when the correct path is obvious from context.
+- "archive": one entry is obsolete (its subject no longer exists) or fully
+  redundant with another that survives. Single entry in `targets`, no payload.
+- "rerank": report-only insight about value — e.g. a skill invoked ×0 that may be
+  dead weight, or the highest-leverage entries. No payload, no mutation; informs
+  the user. Use sparingly.
+
+Rules:
+- Ground EVERY suggestion in the actual content/signals shown. Cite specifics in
+  `evidence` (the overlapping phrasing, the broken ref, the usage count).
+- `targetKind` is "skill" or "memory"; a single suggestion never mixes the two.
+- Do NOT propose archiving an entry merely for low usage — usage=0 is a `rerank`
+  insight, not grounds to delete. Archive only for genuine obsolescence/redundancy.
+- Prefer few high-confidence actions over many speculative ones. If the corpus is
+  already clean, return an empty list.
+
+EXISTING CORPUS
+===============
+{corpus}
+
+OUTPUT FORMAT (STRICT)
+======================
+
+Respond with ONLY a JSON object, no prose, no markdown code fences. Shape:
+
+{{
+  "suggestions": [
+    {{
+      "action": "merge" | "refactor" | "archive" | "rerank",
+      "targetKind": "skill" | "memory",
+      "targets": ["existing-entry-name", "..."],
+      "title": "short imperative title",
+      "rationale": "why this helps, 1-2 sentences",
+      "evidence": ["specific overlap / broken ref / usage observed", "..."],
+      "newName": "kebab-case name (merge/refactor only; for memory keep the .md)",
+      "newContent": "full resulting entry incl. frontmatter (merge/refactor only)"
+    }}
+  ]
+}}
+
+Omit `newName`/`newContent` for "archive" and "rerank".
+"#,
+        corpus = corpus,
+    )
+}
+
+#[derive(Deserialize)]
+struct CurationWrapper {
+    suggestions: Vec<CurationSuggestion>,
+}
+
+fn parse_curation(stdout: &str) -> AppResult<Vec<CurationSuggestion>> {
+    let trimmed = stdout.trim();
+    let start = trimmed.find('{');
+    let end = trimmed.rfind('}');
+    let json = match (start, end) {
+        (Some(s), Some(e)) if e > s => &trimmed[s..=e],
+        _ => {
+            return Err(AppError::Other(format!(
+                "claude output did not contain a JSON object. First 400 chars: {}",
+                truncate(trimmed, 400)
+            )))
+        }
+    };
+    let wrapper: CurationWrapper = serde_json::from_str(json)
+        .map_err(|e| AppError::Other(format!("failed to parse curation JSON: {e}")))?;
+    Ok(wrapper.suggestions)
 }
 
 #[cfg(test)]
@@ -415,6 +755,70 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&project);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn looks_like_path_flags_only_repo_refs() {
+        assert!(looks_like_path("src/services/learning.rs"));
+        assert!(looks_like_path(".claude/skills/x/SKILL.md"));
+        // No slash, a URL, home/absolute, or no extension → not a repo ref.
+        assert!(!looks_like_path("Cargo.toml"));
+        assert!(!looks_like_path("https://example.com/a.rs"));
+        assert!(!looks_like_path("~/.claude/foo.md"));
+        assert!(!looks_like_path("/etc/hosts"));
+        assert!(!looks_like_path("and/or"));
+    }
+
+    #[test]
+    fn find_broken_refs_reports_missing_only() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("ac-curate-refs-{nanos}"));
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/real.rs"), "fn main() {}").unwrap();
+
+        let content = "See `src/real.rs` and `src/gone.rs:42` for details. Run scripts/x.sh.";
+        let broken = find_broken_refs(&root, content);
+        assert!(
+            broken.contains(&"src/gone.rs:42".to_string()),
+            "missing ref should be flagged: {broken:?}"
+        );
+        assert!(
+            broken.contains(&"scripts/x.sh".to_string()),
+            "missing ref should be flagged: {broken:?}"
+        );
+        assert!(
+            !broken.iter().any(|r| r.starts_with("src/real.rs")),
+            "existing ref must not be flagged: {broken:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn slash_command_usage_normalizes_names() {
+        let events = vec![
+            prompt_ev(0, "/Deploy now", Some("/deploy")),
+            prompt_ev(1, "deploy again", Some("deploy")),
+            prompt_ev(2, "test it", Some("/test")),
+        ];
+        let usage = slash_command_usage(&events);
+        assert_eq!(usage.get("deploy"), Some(&2));
+        assert_eq!(usage.get("test"), Some(&1));
+    }
+
+    #[test]
+    fn parse_curation_tolerates_surrounding_chatter() {
+        let raw = r#"Sure:
+        {"suggestions":[{"action":"merge","targetKind":"memory","targets":["a.md","b.md"],"title":"t","rationale":"r","evidence":["overlap"],"newName":"ab.md","newContent":"c"}]}
+        done"#;
+        let got = parse_curation(raw).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].action, "merge");
+        assert_eq!(got[0].targets.len(), 2);
+        assert_eq!(got[0].new_name.as_deref(), Some("ab.md"));
     }
 
     #[test]

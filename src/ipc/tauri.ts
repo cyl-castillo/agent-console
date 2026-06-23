@@ -7,6 +7,7 @@ import type {
   AdvisorAnalysisResult,
   BranchInfo,
   ContextFileStat, ContextStatus,
+  CurationResult,
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, McpServer, McpAddInput,
@@ -152,6 +153,22 @@ export const ipc = {
     invoke<string>("learning_create_skill", { name, skillMdContent }),
   learningSaveMemory: (name: string, content: string) =>
     invoke<string>("learning_save_memory", { name, content }),
+  learningCurate: () => invoke<CurationResult>("learning_curate", {}),
+  learningApplyRefactor: (
+    targetKind: "skill" | "memory",
+    name: string,
+    newContent: string,
+  ) =>
+    invoke<string>("learning_apply_refactor", { targetKind, name, newContent }),
+  learningApplyMerge: (
+    targetKind: "skill" | "memory",
+    targets: string[],
+    newName: string,
+    newContent: string,
+  ) =>
+    invoke<string>("learning_apply_merge", { targetKind, targets, newName, newContent }),
+  learningApplyArchive: (targetKind: "skill" | "memory", name: string) =>
+    invoke<string>("learning_apply_archive", { targetKind, name }),
 
   roundtableStart: (config: RoundtableConfig) =>
     invoke<string>("roundtable_start", { config }),

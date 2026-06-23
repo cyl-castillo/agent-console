@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import { ipc } from "../ipc/tauri";
 import type { ContextStatus, MemoryEntry } from "../types/domain";
+import { useLearningStore } from "./learningStore";
 
 type Scope = "project" | "global";
 
@@ -34,6 +35,8 @@ export const useContextStore = create<ContextState>((set, get) => ({
         ipc.memoryList(),
       ]);
       set({ status, memories, loading: false });
+      // Corpus changed → maybe the curator should tidy it (threshold auto-trigger).
+      useLearningStore.getState().noteCorpusSize();
     } catch (e) {
       set({ error: String(e), loading: false });
     }

@@ -73,6 +73,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         ipc.hooksStatus(),
       ]);
       set({ installed: skills, hooks: status });
+      // Corpus changed → maybe the curator should tidy it (threshold auto-trigger).
+      useLearningStore.getState().noteCorpusSize();
     } catch { /* ignore */ }
   },
 

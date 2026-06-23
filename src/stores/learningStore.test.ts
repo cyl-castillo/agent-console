@@ -9,13 +9,24 @@ vi.mock("../ipc/tauri", () => ({
     learningReflect: vi.fn(),
     learningCreateSkill: vi.fn(),
     learningSaveMemory: vi.fn(),
+    learningCurate: vi.fn(),
+    learningApplyMerge: vi.fn(),
+    learningApplyRefactor: vi.fn(),
+    learningApplyArchive: vi.fn(),
   },
 }));
+// Mutable corpus inventory the curation auto-trigger reads from. Tests set these
+// to size the corpus, then call noteCorpusSize().
+const corpus = { skills: [] as unknown[], memories: [] as unknown[] };
+function setCorpus(skills: number, memories: number) {
+  corpus.skills = Array.from({ length: skills }, () => ({ source: "project", kind: "skill" }));
+  corpus.memories = Array.from({ length: memories }, () => ({ isIndex: false }));
+}
 vi.mock("./skillsStore", () => ({
-  useSkillsStore: { getState: () => ({ refresh: vi.fn() }) },
+  useSkillsStore: { getState: () => ({ refresh: vi.fn(), installed: corpus.skills }) },
 }));
 vi.mock("./contextStore", () => ({
-  useContextStore: { getState: () => ({ refresh: vi.fn() }) },
+  useContextStore: { getState: () => ({ refresh: vi.fn(), memories: corpus.memories }) },
 }));
 const toastShow = vi.fn();
 vi.mock("./toastStore", () => ({
@@ -26,6 +37,7 @@ import { ipc } from "../ipc/tauri";
 import { useLearningStore } from "./learningStore";
 
 const mockReflect = vi.mocked(ipc.learningReflect);
+const mockCurate = vi.mocked(ipc.learningCurate);
 
 const REFLECTION: ReflectionResult = {
   suggestions: [
@@ -46,8 +58,29 @@ const REFLECTION: ReflectionResult = {
 /// these tests should fail loudly rather than silently test the wrong bounds.
 const AUTO_THRESHOLD = 15;
 const AUTO_COOLDOWN_MS = 10 * 60 * 1000;
+const CURATE_MIN_CORPUS = 8;
+const CURATE_GROWTH = 5;
+const CURATE_COOLDOWN_MS = 30 * 60 * 1000;
 
 const NOW = 1_750_000_000_000;
+
+const CURATION = {
+  suggestions: [
+    {
+      action: "merge" as const,
+      targetKind: "memory" as const,
+      targets: ["a.md", "b.md"],
+      title: "Fuse overlapping deploy notes",
+      rationale: "two memories say the same thing",
+      evidence: ["both mention lightsail"],
+      newName: "deploy.md",
+      newContent: "# deploy",
+    },
+  ],
+  skillsAnalyzed: 6,
+  memoriesAnalyzed: 4,
+  rawExcerpt: "{...}",
+};
 
 function resetStore(partial: Partial<ReturnType<typeof useLearningStore.getState>> = {}) {
   useLearningStore.setState({
@@ -60,6 +93,14 @@ function resetStore(partial: Partial<ReturnType<typeof useLearningStore.getState
     lastWasAuto: false,
     sinceReflection: 0,
     lastAutoMs: 0,
+    curationStatus: "idle",
+    curationItems: [],
+    curationError: null,
+    skillsAnalyzed: 0,
+    memoriesAnalyzed: 0,
+    curateAutoEnabled: true,
+    lastCuratedSize: 0,
+    lastCurateMs: 0,
     ...partial,
   });
 }
@@ -68,6 +109,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   vi.clearAllMocks();
+  setCorpus(0, 0);
   resetStore();
 });
 
@@ -219,5 +261,90 @@ describe("apply / skip", () => {
 
     expect(useLearningStore.getState().items[0].status).toBe("skipped");
     expect(ipc.learningCreateSkill).not.toHaveBeenCalled();
+  });
+});
+
+describe("curation auto-trigger via noteCorpusSize", () => {
+  it("fires only once the corpus crosses floor + growth", async () => {
+    mockCurate.mockResolvedValue(CURATION);
+
+    // Just below the floor → never fires, even with plenty of growth.
+    setCorpus(CURATE_MIN_CORPUS - 1, 0);
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).not.toHaveBeenCalled();
+
+    // Past the floor, with growth from baseline 0 well over the threshold.
+    setCorpus(6, 4); // size 10 >= floor, growth 10 >= CURATE_GROWTH
+    expect(10).toBeGreaterThanOrEqual(CURATE_MIN_CORPUS);
+    expect(10).toBeGreaterThanOrEqual(CURATE_GROWTH);
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).toHaveBeenCalledTimes(1);
+
+    await vi.waitFor(() => {
+      expect(useLearningStore.getState().curationStatus).toBe("results");
+    });
+    // Baseline re-stamped to the analyzed corpus size.
+    expect(useLearningStore.getState().lastCuratedSize).toBe(10);
+  });
+
+  it("waits for enough new growth since the last pass", () => {
+    mockCurate.mockResolvedValue(CURATION);
+    resetStore({ lastCuratedSize: 10, lastCurateMs: NOW - CURATE_COOLDOWN_MS - 1 });
+
+    setCorpus(8, 5); // size 13, growth 3 < CURATE_GROWTH
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).not.toHaveBeenCalled();
+
+    setCorpus(10, 5); // size 15, growth 5 >= threshold
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).toHaveBeenCalledTimes(1);
+  });
+
+  it("respects the cooldown between auto-curations", () => {
+    mockCurate.mockResolvedValue(CURATION);
+    resetStore({ lastCuratedSize: 0, lastCurateMs: NOW - CURATE_COOLDOWN_MS + 1_000 });
+    setCorpus(8, 5); // size 13, well past floor + growth
+
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).not.toHaveBeenCalled();
+
+    vi.setSystemTime(NOW + 2_000); // cooldown window elapsed
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing when auto-curate is off", () => {
+    resetStore({ curateAutoEnabled: false });
+    setCorpus(20, 20);
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).not.toHaveBeenCalled();
+  });
+
+  it("never clobbers curation results the user is still reviewing", () => {
+    mockCurate.mockResolvedValue(CURATION);
+    resetStore({
+      curationItems: [{ ...CURATION.suggestions[0], id: "x", status: "proposed" }],
+    });
+    setCorpus(10, 5);
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).not.toHaveBeenCalled();
+  });
+
+  it("applyCuration(merge) calls the merge IPC and marks applied", async () => {
+    mockCurate.mockResolvedValue(CURATION);
+    await useLearningStore.getState().curate();
+    const id = useLearningStore.getState().curationItems[0].id;
+    vi.mocked(ipc.learningApplyMerge).mockResolvedValue("/proj/memory/deploy.md");
+
+    await useLearningStore.getState().applyCuration(id);
+
+    const item = useLearningStore.getState().curationItems[0];
+    expect(item.status).toBe("applied");
+    expect(ipc.learningApplyMerge).toHaveBeenCalledWith(
+      "memory",
+      ["a.md", "b.md"],
+      "deploy.md",
+      "# deploy",
+    );
   });
 });

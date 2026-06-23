@@ -209,6 +209,26 @@ export interface ReflectionResult {
   rawExcerpt: string;
 }
 
+/// One curation action proposed over the *existing* corpus (mirrors the Rust
+/// CurationSuggestion). action: "merge" | "refactor" | "archive" | "rerank".
+export interface CurationSuggestion {
+  action: "merge" | "refactor" | "archive" | "rerank";
+  targetKind: "skill" | "memory";
+  targets: string[];
+  title: string;
+  rationale: string;
+  evidence: string[];
+  newName?: string;
+  newContent?: string;
+}
+
+export interface CurationResult {
+  suggestions: CurationSuggestion[];
+  skillsAnalyzed: number;
+  memoriesAnalyzed: number;
+  rawExcerpt: string;
+}
+
 /// A persisted activity-ledger record (mirrors the Rust ActivityEvent).
 export interface ActivityEvent {
   ts: number;
