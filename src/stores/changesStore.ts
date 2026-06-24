@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
 import type { BranchInfo, GitStatus } from "../types/domain";
+import { fireSchedulerEvent } from "./schedulerStore";
 
 interface ChangesState {
   status: GitStatus | null;
@@ -171,6 +172,8 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
       set({ commitMessage: "", committing: false });
       await get().refresh();
       await get().loadCommitHistory();
+      // Notify scheduler jobs watching for commits (e.g. "review what I committed").
+      void fireSchedulerEvent("commit");
       return sha;
     } catch (e) {
       set({ error: String(e), committing: false });

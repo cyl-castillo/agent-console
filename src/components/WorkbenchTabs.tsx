@@ -10,10 +10,11 @@ import { useFeedbackStore } from "../stores/feedbackStore";
 import { usePluginsStore } from "../stores/pluginsStore";
 import { useMcpStore } from "../stores/mcpStore";
 import { useRoundtableStore } from "../stores/roundtableStore";
+import { useSchedulerStore } from "../stores/schedulerStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "vault" | "context" | "plugins" | "mcp" | "feedback";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "schedule" | "vault" | "context" | "plugins" | "mcp" | "feedback";
 
 export function WorkbenchTabs({
   active,
@@ -41,6 +42,8 @@ export function WorkbenchTabs({
   const rtActive = useRoundtableStore(
     (s) => s.phase === "running" || s.phase === "paused",
   );
+  const scheduledCount = useSchedulerStore((s) => s.jobs.filter((j) => j.enabled).length);
+  const schedulerRunning = useSchedulerStore((s) => s.runningJobIds.length > 0);
 
   const flagged = useMemo(() => {
     if (!permsRules) return 0;
@@ -96,6 +99,14 @@ export function WorkbenchTabs({
         title={rtActive ? "Room (running)" : "Agent Room — you + N agents converse on a problem"}
         active={active === "roundtable"}
         onClick={() => onChange("roundtable")}
+      />
+      <StripButton
+        icon="clock"
+        label={schedulerRunning ? "Sched…" : "Schedule"}
+        title={schedulerRunning ? "Schedule (a job is running)" : "Schedule — run skills/prompts/pipelines on a clock (suggest-only)"}
+        count={scheduledCount}
+        active={active === "schedule"}
+        onClick={() => onChange("schedule")}
       />
       <StripButton
         icon="lock"

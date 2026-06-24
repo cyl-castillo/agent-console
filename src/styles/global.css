@@ -3201,6 +3201,179 @@ select:focus-visible,
   vertical-align: middle;
 }
 
+/* ===== Scheduler panel ===== */
+.wb-hint-sm { font-size: 10px; margin-top: 4px; }
+
+/* form fields (shared by the job editor) */
+.wb-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.wb-field-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-faint);
+}
+.wb-field-row { display: flex; gap: 6px; margin-bottom: 8px; }
+.wb-input {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 7px;
+  width: 100%;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.wb-input:focus { outline: none; border-color: var(--accent); }
+.wb-input-narrow { width: 72px; flex: 0 0 auto; }
+.wb-textarea { resize: vertical; line-height: 1.45; }
+.wb-form-error {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--danger, #ff6b6b);
+  margin: 6px 0 0;
+}
+
+.wb-job-editor-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.wb-job-editor .wb-cta { margin-top: 0; }
+
+/* job cards */
+.wb-job-list { display: flex; flex-direction: column; gap: 8px; }
+.wb-job-card {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 8px 10px;
+  background: var(--bg-elev);
+}
+.wb-job-card.paused { opacity: 0.62; }
+.wb-job-head { display: flex; align-items: center; gap: 8px; }
+.wb-job-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wb-job-running {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.wb-job-paused-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.wb-job-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.wb-job-trigger { color: var(--accent); }
+.wb-job-action {
+  color: var(--text-muted, #aab);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.wb-job-sep { color: var(--text-faint); }
+.wb-job-times {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.wb-job-actions { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+.wb-job-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 2px 8px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.wb-job-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.wb-job-btn:disabled { opacity: 0.45; cursor: default; }
+.wb-job-btn.danger:hover { color: var(--danger, #ff6b6b); border-color: var(--danger, #ff6b6b); background: transparent; }
+
+/* pipeline step editor */
+.wb-pipeline { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.wb-pipeline-step-box {
+  border: 1px solid var(--border-faint, var(--border));
+  border-radius: 4px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.wb-pipeline-step { display: flex; align-items: center; gap: 6px; }
+.wb-pipeline-num {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: right;
+}
+.wb-pipeline-cond { display: flex; align-items: center; gap: 6px; padding-left: 20px; }
+.wb-pipeline-cond-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  flex: 0 0 auto;
+}
+.wb-pipeline-add { display: flex; gap: 6px; }
+
+/* run history feed */
+.wb-run-feed { display: flex; flex-direction: column; gap: 6px; }
+.wb-run-row {
+  border-left: 2px solid var(--border);
+  padding: 3px 0 3px 8px;
+}
+.wb-run-row.ok { border-left-color: var(--ok, #4ec9b0); }
+.wb-run-row.error { border-left-color: var(--danger, #ff6b6b); }
+.wb-run-row.missed { border-left-color: var(--text-faint); }
+.wb-run-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.wb-run-status {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9px;
+}
+.wb-run-status.ok { color: var(--ok, #4ec9b0); }
+.wb-run-status.error { color: var(--danger, #ff6b6b); }
+.wb-run-status.missed { color: var(--text-faint); }
+.wb-run-name { color: var(--text); }
+.wb-run-when { color: var(--text-faint); margin-left: auto; }
+.wb-run-summary {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
 /* ===== Getting Started modal ===== */
 .getting-started-modal {
   width: 520px;

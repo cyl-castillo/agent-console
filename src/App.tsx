@@ -5,6 +5,7 @@ import { attachGitWatcherListener, useChangesStore } from "./stores/changesStore
 import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
+import { attachSchedulerListeners, useSchedulerStore } from "./stores/schedulerStore";
 import { attachApprovalListener } from "./stores/approvalStore";
 import { attachVoiceListeners, attachVoiceApprovalWatcher } from "./stores/voiceStore";
 import { useUpdaterStore } from "./stores/updaterStore";
@@ -20,6 +21,7 @@ import { PermissionsPanel } from "./components/PermissionsPanel";
 import { AdvisorPanel } from "./components/AdvisorPanel";
 import { LearningPanel } from "./components/LearningPanel";
 import { RoundtablePanel } from "./components/RoundtablePanel";
+import { SchedulerPanel } from "./components/SchedulerPanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { ContextPanel } from "./components/ContextPanel";
 import { FeedbackPanel } from "./components/FeedbackPanel";
@@ -179,7 +181,7 @@ export default function App() {
     };
     const onOpenWb = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "feedback") {
+      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "schedule" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "feedback") {
         setWorkbenchTab(d);
       }
     };
@@ -217,12 +219,14 @@ export default function App() {
     let offApproval: (() => void) | null = null;
     let offGit: (() => void) | null = null;
     let offVoice: (() => void) | null = null;
+    let offScheduler: (() => void) | null = null;
     attachSkillsListeners().then((u) => { if (disposed) u(); else offSkills = u; });
     attachApprovalListener().then((u) => { if (disposed) u(); else offApproval = u; });
     attachGitWatcherListener().then((u) => { if (disposed) u(); else offGit = u; });
     attachVoiceListeners().then((u) => { if (disposed) u(); else offVoice = u; });
+    attachSchedulerListeners().then((u) => { if (disposed) u(); else offScheduler = u; });
     const offVoiceApproval = attachVoiceApprovalWatcher();
-    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); offVoice?.(); offVoiceApproval(); };
+    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); offVoice?.(); offScheduler?.(); offVoiceApproval(); };
   }, []);
 
   useEffect(() => {
@@ -253,6 +257,7 @@ export default function App() {
     }
     refreshChanges();
     refreshSkills();
+    void useSchedulerStore.getState().refresh();
     resetPaletteForProject(project.root);
     // Palette file index is built lazily on first palette open (see
     // paletteStore.openPalette) — not eagerly here, to keep the full-tree
@@ -261,7 +266,7 @@ export default function App() {
     try {
       const saved = localStorage.getItem(`agent-console:workbench-tab:${project.root}`);
       if (saved === "skills" || saved === "permissions" || saved === "advisor"
-          || saved === "learning" || saved === "roundtable" || saved === "vault" || saved === "context"
+          || saved === "learning" || saved === "roundtable" || saved === "schedule" || saved === "vault" || saved === "context"
           || saved === "plugins" || saved === "mcp" || saved === "feedback") {
         setWorkbenchTabState(saved);
       }
@@ -451,6 +456,7 @@ export default function App() {
                 {workbenchTab === "advisor" && <AdvisorPanel />}
                 {workbenchTab === "learning" && <LearningPanel />}
                 {workbenchTab === "roundtable" && <RoundtablePanel />}
+                {workbenchTab === "schedule" && <SchedulerPanel />}
                 {workbenchTab === "vault" && <VaultPanel />}
                 {workbenchTab === "context" && <ContextPanel />}
                 {workbenchTab === "plugins" && <PluginsPanel />}

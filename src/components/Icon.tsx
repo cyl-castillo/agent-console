@@ -16,6 +16,7 @@ export type IconName =
   | "panel-left"
   | "sparkles"
   | "users"
+  | "clock"
   | "command"
   | "help-circle"
   | "info"
@@ -149,6 +150,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
       <path d="M9 3v18" />
+    </>
+  ),
+  // Lucide: clock
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
     </>
   ),
   // Lucide: command

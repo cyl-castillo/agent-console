@@ -3,8 +3,13 @@ import { create } from "zustand";
 import { ipc } from "../ipc/tauri";
 import type { ContextStatus, MemoryEntry } from "../types/domain";
 import { useLearningStore } from "./learningStore";
+import { fireSchedulerEvent } from "./schedulerStore";
 
 type Scope = "project" | "global";
+
+/// Tracks the non-index memory count across refreshes so "corpus_grew" fires
+/// only when a memory is actually added. -1 = no baseline yet.
+let lastMemoryCount = -1;
 
 interface ContextState {
   status: ContextStatus | null;
@@ -37,6 +42,10 @@ export const useContextStore = create<ContextState>((set, get) => ({
       set({ status, memories, loading: false });
       // Corpus changed → maybe the curator should tidy it (threshold auto-trigger).
       useLearningStore.getState().noteCorpusSize();
+      // Notify scheduler jobs watching for new memories (only on real growth).
+      const n = memories.filter((m) => !m.isIndex).length;
+      if (lastMemoryCount >= 0 && n > lastMemoryCount) void fireSchedulerEvent("corpus_grew");
+      lastMemoryCount = n;
     } catch (e) {
       set({ error: String(e), loading: false });
     }

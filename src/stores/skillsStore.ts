@@ -6,6 +6,7 @@ import type { HooksStatus, HookUserPromptEvent, Skill, Snapshot } from "../types
 import { useChangesStore } from "./changesStore";
 import { useLearningStore } from "./learningStore";
 import { useOnboardingStore } from "./onboardingStore";
+import { fireSchedulerEvent } from "./schedulerStore";
 import { useTerminalsStore } from "./terminalsStore";
 
 /// What the user (or agent in the terminal) has been doing — captured from
@@ -19,6 +20,11 @@ export interface PromptEvent {
 }
 
 const MAX_RECENT = 30;
+
+/// Tracks the project skill count across refreshes so we can fire the
+/// "corpus_grew" scheduler event only when a skill is actually added (not on the
+/// first load, and not on removals). -1 = no baseline yet.
+let lastSkillCount = -1;
 
 /// Turn a user prompt into a short, file-name-ish label for the session row.
 /// Local & instant — first ~5 meaningful words, trimmed, capitalised.
@@ -75,6 +81,10 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       set({ installed: skills, hooks: status });
       // Corpus changed → maybe the curator should tidy it (threshold auto-trigger).
       useLearningStore.getState().noteCorpusSize();
+      // Notify scheduler jobs watching for new skills (only on real growth).
+      const n = skills.filter((sk) => sk.source === "project" && sk.kind === "skill").length;
+      if (lastSkillCount >= 0 && n > lastSkillCount) void fireSchedulerEvent("corpus_grew");
+      lastSkillCount = n;
     } catch { /* ignore */ }
   },
 
@@ -119,6 +129,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     useOnboardingStore.getState().markPromptedClaude();
     // Feed the learning auto-trigger: enough new activity reflects on its own.
     useLearningStore.getState().noteActivity();
+    // Notify scheduler jobs watching for prompts.
+    void fireSchedulerEvent("prompt");
 
     // Associate the Claude session id with the terminal that emitted the prompt.
     // The hook tags each prompt with the PTY's terminal-session id (termId, from

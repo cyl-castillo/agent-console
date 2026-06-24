@@ -19,6 +19,10 @@ pub fn run() {
             // hook events arriving from any terminal session are observed.
             let state = app.state::<AppState>();
             state.hooks.start_watcher(app.handle().clone());
+            // Start the scheduler tick loop: reconciles firings missed while the
+            // app was closed, then runs due jobs on a calm poll. Suggest-only —
+            // every job runs through plan-mode `claude`.
+            state.scheduler.start(app.handle().clone());
             // Register the lightweight UserPromptSubmit observer on first run so
             // session-name suggestions / resume binding / activity / snapshots
             // work without the user having to flip the integration toggle.
@@ -112,6 +116,14 @@ pub fn run() {
             commands::roundtable::roundtable_get_room,
             commands::roundtable::roundtable_delete_room,
             commands::roundtable::roundtable_resume_room,
+            commands::scheduler::scheduler_list,
+            commands::scheduler::scheduler_create,
+            commands::scheduler::scheduler_update,
+            commands::scheduler::scheduler_delete,
+            commands::scheduler::scheduler_set_enabled,
+            commands::scheduler::scheduler_history,
+            commands::scheduler::scheduler_fire_event,
+            commands::scheduler::scheduler_run_now,
             commands::voice::voice_enable,
             commands::voice::voice_disable,
             commands::voice::voice_status,

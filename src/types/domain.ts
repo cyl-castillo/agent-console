@@ -229,6 +229,65 @@ export interface CurationResult {
   rawExcerpt: string;
 }
 
+/// What makes a scheduled job fire (mirrors the Rust `Trigger` enum; tagged by
+/// `type`). Daily/weekly `hour`/`minute` are UTC — the panel converts to/from
+/// the user's local zone for display and editing.
+export type Trigger =
+  | { type: "interval"; everyMs: number }
+  | { type: "daily"; hour: number; minute: number }
+  | { type: "weekly"; weekday: number; hour: number; minute: number }
+  | { type: "event"; name: string };
+
+/// A gate on a pipeline step, evaluated against the previous executed step's
+/// (status, output) (mirrors the Rust `StepCondition`).
+export type StepCondition =
+  | { type: "contains"; text: string }
+  | { type: "prevFailed" }
+  | { type: "prevOk" };
+
+/// One pipeline step: an action plus an optional condition (mirrors the Rust
+/// `PipelineStep`). No condition = run only if the prior step succeeded.
+export interface PipelineStep {
+  action: Action;
+  when?: StepCondition;
+}
+
+/// What a scheduled job does when it fires (mirrors the Rust `Action` enum).
+/// Every leaf runs through plan-mode `claude` (suggest-only).
+export type Action =
+  | { type: "skill"; name: string; args?: string }
+  | { type: "prompt"; text: string }
+  | { type: "pipeline"; steps: PipelineStep[] };
+
+/// What to do with a firing missed because the app was closed.
+export type OnMissed = "catchup" | "skip";
+
+/// One scheduled job (mirrors the Rust `Job`).
+export interface Job {
+  id: string;
+  name: string;
+  enabled: boolean;
+  trigger: Trigger;
+  action: Action;
+  onMissed: OnMissed;
+  cooldownMs: number;
+  createdAtMs: number;
+  lastRunMs?: number;
+  nextDueMs?: number;
+}
+
+/// One recorded execution of a job (mirrors the Rust `RunRecord`).
+export interface RunRecord {
+  jobId: string;
+  jobName: string;
+  startedMs: number;
+  finishedMs: number;
+  /// "ok" | "error" | "missed"
+  status: string;
+  summary: string;
+  outputExcerpt: string;
+}
+
 /// A persisted activity-ledger record (mirrors the Rust ActivityEvent).
 export interface ActivityEvent {
   ts: number;

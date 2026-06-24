@@ -17,6 +17,7 @@ pub mod proc;
 pub mod project_manager;
 pub mod projects_service;
 pub mod roundtable_service;
+pub mod scheduler_service;
 pub mod sessions_service;
 pub mod skills_service;
 pub mod snapshot_service;

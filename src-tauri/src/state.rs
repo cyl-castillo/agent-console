@@ -5,6 +5,7 @@ use crate::services::git_watcher::GitWatcher;
 use crate::services::hooks_service::HooksRuntime;
 use crate::services::project_manager::Project;
 use crate::services::roundtable_service::RoundtableService;
+use crate::services::scheduler_service::SchedulerService;
 use crate::services::sessions_service::SessionsService;
 use crate::services::terminal_runner::TerminalRegistry;
 use crate::services::voice_service::VoiceService;
@@ -17,6 +18,7 @@ pub struct AppState {
     pub activity: ActivityService,
     pub git_watcher: GitWatcher,
     pub roundtable: RoundtableService,
+    pub scheduler: SchedulerService,
     pub voice: VoiceService,
 }
 
@@ -31,6 +33,7 @@ impl AppState {
             activity: ActivityService::new(),
             git_watcher: GitWatcher::new(),
             roundtable: RoundtableService::new(),
+            scheduler: SchedulerService::new(),
             voice: VoiceService::default(),
         }
     }

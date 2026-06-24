@@ -10,10 +10,10 @@ import type {
   CurationResult,
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
-  InstalledPlugin, AvailableSnapshot, McpServer, McpAddInput,
+  InstalledPlugin, AvailableSnapshot, Job, McpServer, McpAddInput,
   MemoryEntry, PermissionsSnapshot,
   PersistedRoom, PersistedSession, Project, RecentProject,
-  RoomSummary, RoundtableConfig,
+  RoomSummary, RoundtableConfig, RunRecord,
   ReflectionResult,
   SessionUsage, Skill, StoredRule, VaultEntryView,
   VoiceStatus,
@@ -169,6 +169,18 @@ export const ipc = {
     invoke<string>("learning_apply_merge", { targetKind, targets, newName, newContent }),
   learningApplyArchive: (targetKind: "skill" | "memory", name: string) =>
     invoke<string>("learning_apply_archive", { targetKind, name }),
+
+  // --- scheduler (visual jobs on a clock; suggest-only via plan mode) ---
+  schedulerList: () => invoke<Job[]>("scheduler_list"),
+  schedulerCreate: (job: Job) => invoke<Job>("scheduler_create", { job }),
+  schedulerUpdate: (job: Job) => invoke<Job>("scheduler_update", { job }),
+  schedulerDelete: (id: string) => invoke<void>("scheduler_delete", { id }),
+  schedulerSetEnabled: (id: string, enabled: boolean) =>
+    invoke<Job>("scheduler_set_enabled", { id, enabled }),
+  schedulerHistory: (limit?: number) =>
+    invoke<RunRecord[]>("scheduler_history", { limit: limit ?? null }),
+  schedulerFireEvent: (name: string) => invoke<void>("scheduler_fire_event", { name }),
+  schedulerRunNow: (id: string) => invoke<RunRecord>("scheduler_run_now", { id }),
 
   roundtableStart: (config: RoundtableConfig) =>
     invoke<string>("roundtable_start", { config }),
