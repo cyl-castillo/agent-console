@@ -236,11 +236,13 @@ export function SchedulerPanel() {
   const status = useSchedulerStore((s) => s.status);
   const errorMessage = useSchedulerStore((s) => s.errorMessage);
   const runningJobIds = useSchedulerStore((s) => s.runningJobIds);
+  const paused = useSchedulerStore((s) => s.paused);
   const refresh = useSchedulerStore((s) => s.refresh);
   const createJob = useSchedulerStore((s) => s.createJob);
   const updateJob = useSchedulerStore((s) => s.updateJob);
   const deleteJob = useSchedulerStore((s) => s.deleteJob);
   const setEnabled = useSchedulerStore((s) => s.setEnabled);
+  const setPaused = useSchedulerStore((s) => s.setPaused);
   const runNow = useSchedulerStore((s) => s.runNow);
 
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -280,6 +282,7 @@ export function SchedulerPanel() {
       onMissed: draft.onMissed,
       cooldownMs: Math.max(0, draft.cooldownMin) * MIN,
       createdAtMs: 0,
+      consecutiveFailures: 0,
     };
     setSaving(true);
     try {
@@ -299,6 +302,17 @@ export function SchedulerPanel() {
       <div className="workbench-header workbench-header-slim">
         <span className="workbench-title">schedule</span>
         <span className="spacer" />
+        <button
+          className={`workbench-action wb-sched-pause ${paused ? "on" : ""}`}
+          onClick={() => void setPaused(!paused)}
+          title={
+            paused
+              ? "Scheduler is PAUSED — no job runs automatically. Click to resume."
+              : "Pause all scheduled jobs (kill-switch). Manual ‘run’ still works."
+          }
+        >
+          {paused ? "paused ⏸" : "pause all"}
+        </button>
         {!draft && (
           <button className="workbench-action" onClick={startNew} title="New scheduled job">
             + new
@@ -315,6 +329,13 @@ export function SchedulerPanel() {
       </div>
 
       <div className="workbench-body">
+        {paused && (
+          <div className="wb-sched-banner">
+            Scheduler paused — automated runs are halted. You can still run a job
+            manually with ▶.
+          </div>
+        )}
+
         {status === "error" && (
           <section className="wb-section">
             <div className="wb-section-title">scheduler error</div>
@@ -407,6 +428,14 @@ function JobCard({
         <span className="wb-job-name" title={job.name}>{job.name}</span>
         {running && <span className="wb-job-running" title="Running now">running…</span>}
         {!job.enabled && !running && <span className="wb-job-paused-tag">paused</span>}
+        {job.consecutiveFailures > 0 && !running && (
+          <span
+            className="wb-job-failing"
+            title={`${job.consecutiveFailures} consecutive failure${job.consecutiveFailures === 1 ? "" : "s"} — backing off before the next try`}
+          >
+            failing ×{job.consecutiveFailures}
+          </span>
+        )}
       </div>
       <div className="wb-job-meta">
         <span className="wb-job-trigger">{describeTrigger(job.trigger)}</span>

@@ -122,6 +122,8 @@ pub fn run() {
             commands::scheduler::scheduler_delete,
             commands::scheduler::scheduler_set_enabled,
             commands::scheduler::scheduler_history,
+            commands::scheduler::scheduler_is_paused,
+            commands::scheduler::scheduler_set_paused,
             commands::scheduler::scheduler_fire_event,
             commands::scheduler::scheduler_run_now,
             commands::voice::voice_enable,

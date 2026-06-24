@@ -180,6 +180,8 @@ export const ipc = {
   schedulerHistory: (limit?: number) =>
     invoke<RunRecord[]>("scheduler_history", { limit: limit ?? null }),
   schedulerFireEvent: (name: string) => invoke<void>("scheduler_fire_event", { name }),
+  schedulerIsPaused: () => invoke<boolean>("scheduler_is_paused"),
+  schedulerSetPaused: (paused: boolean) => invoke<void>("scheduler_set_paused", { paused }),
   schedulerRunNow: (id: string) => invoke<RunRecord>("scheduler_run_now", { id }),
 
   roundtableStart: (config: RoundtableConfig) =>

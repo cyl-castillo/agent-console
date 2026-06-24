@@ -13,6 +13,8 @@ vi.mock("../ipc/tauri", () => ({
     schedulerSetEnabled: vi.fn(),
     schedulerHistory: vi.fn(),
     schedulerFireEvent: vi.fn(),
+    schedulerIsPaused: vi.fn().mockResolvedValue(false),
+    schedulerSetPaused: vi.fn(),
     schedulerRunNow: vi.fn(),
   },
 }));
@@ -30,6 +32,8 @@ const mockDelete = vi.mocked(ipc.schedulerDelete);
 const mockSetEnabled = vi.mocked(ipc.schedulerSetEnabled);
 const mockRunNow = vi.mocked(ipc.schedulerRunNow);
 const mockFireEvent = vi.mocked(ipc.schedulerFireEvent);
+const mockIsPaused = vi.mocked(ipc.schedulerIsPaused);
+const mockSetPaused = vi.mocked(ipc.schedulerSetPaused);
 
 function job(over: Partial<Job> = {}): Job {
   return {
@@ -42,6 +46,7 @@ function job(over: Partial<Job> = {}): Job {
     cooldownMs: 0,
     createdAtMs: 1,
     nextDueMs: 100,
+    consecutiveFailures: 0,
     ...over,
   };
 }
@@ -64,10 +69,12 @@ function reset() {
     jobs: [],
     history: [],
     runningJobIds: [],
+    paused: false,
     status: "idle",
     errorMessage: null,
   });
   vi.clearAllMocks();
+  mockIsPaused.mockResolvedValue(false);
 }
 
 describe("schedulerStore", () => {
@@ -157,6 +164,30 @@ describe("schedulerStore", () => {
     const after = useSchedulerStore.getState();
     expect(after.runningJobIds).not.toContain("j1");
     expect(after.history[0].summary).toBe("fresh");
+  });
+
+  it("refresh reflects the global paused flag", async () => {
+    mockList.mockResolvedValue([]);
+    mockHistory.mockResolvedValue([]);
+    mockIsPaused.mockResolvedValue(true);
+    await useSchedulerStore.getState().refresh();
+    expect(useSchedulerStore.getState().paused).toBe(true);
+  });
+
+  it("setPaused flips optimistically and reverts on failure", async () => {
+    mockSetPaused.mockResolvedValue(undefined);
+    await useSchedulerStore.getState().setPaused(true);
+    expect(mockSetPaused).toHaveBeenCalledWith(true);
+    expect(useSchedulerStore.getState().paused).toBe(true);
+
+    mockSetPaused.mockRejectedValue(new Error("boom"));
+    await expect(useSchedulerStore.getState().setPaused(false)).rejects.toThrow();
+    expect(useSchedulerStore.getState().paused).toBe(true); // reverted
+  });
+
+  it("paused_changed event updates state", () => {
+    useSchedulerStore.getState()._onPausedChanged(true);
+    expect(useSchedulerStore.getState().paused).toBe(true);
   });
 
   it("fireSchedulerEvent forwards the name and swallows failures", async () => {

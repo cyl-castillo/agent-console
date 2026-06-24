@@ -274,6 +274,10 @@ export interface Job {
   createdAtMs: number;
   lastRunMs?: number;
   nextDueMs?: number;
+  /// Consecutive failed runs (drives backoff). 0 when healthy.
+  consecutiveFailures: number;
+  /// Epoch ms until which the job is held back after failures, if any.
+  backoffUntilMs?: number;
 }
 
 /// One recorded execution of a job (mirrors the Rust `RunRecord`).

@@ -68,6 +68,23 @@ pub fn scheduler_history(
         .history(&root, Some(limit.unwrap_or(HISTORY_WINDOW)))
 }
 
+/// Whether the global scheduler kill-switch is engaged.
+#[tauri::command]
+pub fn scheduler_is_paused(state: State<'_, AppState>) -> AppResult<bool> {
+    Ok(state.scheduler.is_paused())
+}
+
+/// Engage/release the global kill-switch. When paused, the tick loop and event
+/// firing run nothing; an explicit "run now" still works.
+#[tauri::command]
+pub fn scheduler_set_paused(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    paused: bool,
+) -> AppResult<()> {
+    state.scheduler.set_paused(&app, paused)
+}
+
 /// Fire any event-triggered jobs registered for `name` (e.g. "commit",
 /// "corpus_grew", "prompt"). Returns immediately; runs are offloaded.
 #[tauri::command]

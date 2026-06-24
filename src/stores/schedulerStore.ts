@@ -33,6 +33,8 @@ interface SchedulerState {
   /// Ids of jobs currently executing (driven by scheduler://run_* events, so
   /// both manual run-now and the background tick loop light up the same way).
   runningJobIds: string[];
+  /// Global kill-switch: when true, automated runs (tick + events) are halted.
+  paused: boolean;
   status: SchedulerStatus;
   errorMessage: string | null;
 
@@ -42,29 +44,33 @@ interface SchedulerState {
   updateJob: (job: Job) => Promise<Job>;
   deleteJob: (id: string) => Promise<void>;
   setEnabled: (id: string, enabled: boolean) => Promise<void>;
+  setPaused: (paused: boolean) => Promise<void>;
   runNow: (id: string) => Promise<void>;
 
   // event handlers (wired by attachSchedulerListeners)
   _onRunStarted: (jobId: string) => void;
   _onRunFinished: (rec: RunRecord) => void;
   _onJobsChanged: () => void;
+  _onPausedChanged: (paused: boolean) => void;
 }
 
 export const useSchedulerStore = create<SchedulerState>((set, get) => ({
   jobs: [],
   history: [],
   runningJobIds: [],
+  paused: false,
   status: "idle",
   errorMessage: null,
 
   refresh: async () => {
     set({ status: "loading", errorMessage: null });
     try {
-      const [jobs, history] = await Promise.all([
+      const [jobs, history, paused] = await Promise.all([
         ipc.schedulerList(),
         ipc.schedulerHistory(),
+        ipc.schedulerIsPaused(),
       ]);
-      set({ jobs, history, status: "ready" });
+      set({ jobs, history, paused, status: "ready" });
     } catch (err) {
       set({
         status: "error",
@@ -113,9 +119,20 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
     }
   },
 
+  setPaused: async (paused) => {
+    set({ paused }); // optimistic; the paused_changed event confirms
+    try {
+      await ipc.schedulerSetPaused(paused);
+    } catch (err) {
+      set({ paused: !paused }); // revert
+      throw err;
+    }
+  },
+
   runNow: async (id) => {
     // The run_started/run_finished events handle the spinner + history; here we
-    // just kick it off and let the result land through the event stream.
+    // just kick it off and let the result land through the event stream. Works
+    // even when globally paused — it's a deliberate manual override.
     await ipc.schedulerRunNow(id);
     await get().refresh();
   },
@@ -140,6 +157,10 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
   _onJobsChanged: () => {
     void get().refresh();
   },
+
+  _onPausedChanged: (paused) => {
+    set({ paused });
+  },
 }));
 
 /// Subscribe to the backend scheduler event stream. Mirrors
@@ -159,6 +180,11 @@ export async function attachSchedulerListeners(): Promise<UnlistenFn> {
   );
   offs.push(
     await listen("scheduler://jobs_changed", () => s._onJobsChanged()),
+  );
+  offs.push(
+    await listen<{ paused: boolean }>("scheduler://paused_changed", (e) =>
+      s._onPausedChanged(e.payload.paused),
+    ),
   );
   return () => {
     for (const off of offs) off();

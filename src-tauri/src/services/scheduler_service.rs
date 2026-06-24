@@ -29,6 +29,7 @@ use std::fs::{self, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -48,6 +49,10 @@ const HISTORY_MAX_BYTES: u64 = 4 * 1024 * 1024;
 const HISTORY_KEEP: usize = 1000;
 /// Cap on a stored run-output excerpt so one chatty run can't bloat the ledger.
 const OUTPUT_EXCERPT_MAX: usize = 4000;
+/// Exponential-backoff base after a failed run (doubles per consecutive failure).
+const BACKOFF_BASE_MS: u64 = 5 * 60_000;
+/// Backoff ceiling, so a permanently-broken job retries at most this often.
+const BACKOFF_MAX_MS: u64 = 6 * 60 * 60_000;
 
 /// What makes a job fire. Time-based variants compute a concrete `next_due`;
 /// `Event` is inert in the time loop (Phase 3 wires it to the hook stream) and
@@ -137,6 +142,14 @@ pub struct Job {
     pub last_run_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_due_ms: Option<u64>,
+    /// Consecutive failed runs; drives exponential backoff. Reset to 0 on success.
+    #[serde(default)]
+    pub consecutive_failures: u32,
+    /// While set and in the future, the job is held back (backoff after errors),
+    /// independent of its trigger — so a broken job can't hammer `claude` (or
+    /// spend tokens) every tick/event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backoff_until_ms: Option<u64>,
 }
 
 /// One recorded execution, appended to the per-project history ledger.
@@ -166,6 +179,10 @@ pub struct SchedulerService {
     /// loop and an explicit run-now never run two agents at once.
     run_lock: Mutex<()>,
     started: Mutex<bool>,
+    /// Global kill-switch: when true, the tick loop and event firing run nothing
+    /// (an explicit run-now still works — it's a deliberate manual override).
+    /// Cached here and backed by `scheduler-config.json` so it survives restart.
+    paused: AtomicBool,
 }
 
 impl Default for SchedulerService {
@@ -180,6 +197,7 @@ impl SchedulerService {
             lock: Mutex::new(()),
             run_lock: Mutex::new(()),
             started: Mutex::new(false),
+            paused: AtomicBool::new(load_paused_flag()),
         }
     }
 
@@ -372,6 +390,19 @@ impl SchedulerService {
         Ok(records)
     }
 
+    /// Whether the global kill-switch is engaged.
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    /// Engage/release the global kill-switch (persisted across restarts).
+    pub fn set_paused(&self, app: &AppHandle, paused: bool) -> AppResult<()> {
+        self.paused.store(paused, Ordering::Relaxed);
+        save_paused_flag(paused)?;
+        let _ = app.emit("scheduler://paused_changed", serde_json::json!({ "paused": paused }));
+        Ok(())
+    }
+
     fn append_history(project_root: &str, rec: &RunRecord) -> AppResult<()> {
         let path = Self::history_path(project_root)?;
         let mut line = serde_json::to_string(rec)
@@ -412,7 +443,7 @@ impl SchedulerService {
                 .ok_or_else(|| AppError::NotFound(format!("job {id} not found")))?
         };
         let rec = self.execute(app, project_root, &job);
-        self.mark_ran(project_root, &job, rec.started_ms)?;
+        self.mark_ran(project_root, &job, &rec)?;
         Ok(rec)
     }
 
@@ -422,6 +453,9 @@ impl SchedulerService {
     /// or a command — never blocks on `claude`. Runs serialize through the same
     /// run lock as the tick loop (cap of 1).
     pub fn fire_event(&self, app: &AppHandle, project_root: &str, name: &str) {
+        if self.is_paused() {
+            return;
+        }
         let now = now_ms();
         let jobs = match self.list(project_root) {
             Ok(j) => j,
@@ -433,6 +467,7 @@ impl SchedulerService {
                 job.enabled
                     && matches!(&job.trigger, Trigger::Event { name: n } if n == name)
                     && cooldown_ok(job, now)
+                    && backoff_ok(job, now)
             })
             .collect();
         if due.is_empty() {
@@ -445,7 +480,7 @@ impl SchedulerService {
             let sched = &state.scheduler;
             for job in &due {
                 let rec = sched.execute(&app2, &project, job);
-                let _ = sched.mark_ran(&project, job, rec.started_ms);
+                let _ = sched.mark_ran(&project, job, &rec);
             }
             let _ = app2.emit("scheduler://jobs_changed", serde_json::json!({}));
         });
@@ -477,14 +512,24 @@ impl SchedulerService {
         rec
     }
 
-    /// After a run, stamp last_run and reschedule the next firing.
-    fn mark_ran(&self, project_root: &str, job: &Job, started: u64) -> AppResult<()> {
+    /// After a run, stamp last_run, reschedule the next firing, and update the
+    /// failure/backoff state: an error grows the backoff window exponentially; a
+    /// success clears it.
+    fn mark_ran(&self, project_root: &str, job: &Job, rec: &RunRecord) -> AppResult<()> {
         let _g = self.lock.lock().unwrap();
         let mut file = Self::load_file()?;
         if let Some(bucket) = file.by_project.get_mut(project_root) {
             if let Some(j) = bucket.iter_mut().find(|j| j.id == job.id) {
-                j.last_run_ms = Some(started);
-                j.next_due_ms = compute_next_due(&j.trigger, started);
+                j.last_run_ms = Some(rec.started_ms);
+                j.next_due_ms = compute_next_due(&j.trigger, rec.started_ms);
+                if rec.status == "error" {
+                    j.consecutive_failures = j.consecutive_failures.saturating_add(1);
+                    j.backoff_until_ms =
+                        Some(rec.started_ms.saturating_add(backoff_delay(j.consecutive_failures)));
+                } else {
+                    j.consecutive_failures = 0;
+                    j.backoff_until_ms = None;
+                }
             }
         }
         Self::write_file(&file)?;
@@ -596,6 +641,10 @@ impl SchedulerService {
     /// projects, respecting the per-job cooldown. Executions are serialized by
     /// the run lock (cap of 1), so a long job just delays the next.
     fn tick(&self, app: &AppHandle) {
+        // Global kill-switch: when paused, the loop observes but runs nothing.
+        if self.is_paused() {
+            return;
+        }
         let now = now_ms();
         let projects: Vec<String> = {
             let _g = self.lock.lock().unwrap();
@@ -618,11 +667,11 @@ impl SchedulerService {
                 if due > now {
                     continue;
                 }
-                if !cooldown_ok(&job, now) {
+                if !cooldown_ok(&job, now) || !backoff_ok(&job, now) {
                     continue;
                 }
                 let rec = self.execute(app, proj, &job);
-                let _ = self.mark_ran(proj, &job, rec.started_ms);
+                let _ = self.mark_ran(proj, &job, &rec);
                 ran = true;
             }
         }
@@ -731,6 +780,52 @@ fn cooldown_ok(job: &Job, now: u64) -> bool {
         Some(last) => job.cooldown_ms == 0 || now.saturating_sub(last) >= job.cooldown_ms,
         None => true,
     }
+}
+
+/// Whether a job's post-failure backoff window has elapsed.
+fn backoff_ok(job: &Job, now: u64) -> bool {
+    match job.backoff_until_ms {
+        Some(until) => until <= now,
+        None => true,
+    }
+}
+
+/// Backoff window after `failures` consecutive errors: BASE doubled per failure,
+/// capped at MAX. Zero when there are no failures.
+fn backoff_delay(failures: u32) -> u64 {
+    if failures == 0 {
+        return 0;
+    }
+    let shift = (failures - 1).min(20);
+    BACKOFF_BASE_MS
+        .saturating_mul(1u64 << shift)
+        .min(BACKOFF_MAX_MS)
+}
+
+/// Path to the small global scheduler config (kill-switch state).
+fn config_path() -> AppResult<PathBuf> {
+    Ok(SchedulerService::dir()?.join("scheduler-config.json"))
+}
+
+/// Read the persisted global pause flag (default false / not paused).
+fn load_paused_flag() -> bool {
+    let Ok(path) = config_path() else { return false };
+    let Ok(txt) = fs::read_to_string(&path) else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(&txt)
+        .ok()
+        .and_then(|v| v.get("paused").and_then(|p| p.as_bool()))
+        .unwrap_or(false)
+}
+
+/// Persist the global pause flag atomically (temp + rename).
+fn save_paused_flag(paused: bool) -> AppResult<()> {
+    let path = config_path()?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::json!({ "paused": paused }).to_string())?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
 }
 
 /// Next firing strictly after `after` (epoch ms), or None for non-time triggers.
@@ -877,6 +972,8 @@ mod tests {
             created_at_ms: 0,
             last_run_ms: None,
             next_due_ms: None,
+            consecutive_failures: 0,
+            backoff_until_ms: None,
         };
         assert!(cooldown_ok(&job, 5000), "never run → always ok");
         job.last_run_ms = Some(4500);
@@ -885,6 +982,36 @@ mod tests {
         job.cooldown_ms = 0;
         job.last_run_ms = Some(4999);
         assert!(cooldown_ok(&job, 5000), "no cooldown → always ok");
+    }
+
+    #[test]
+    fn backoff_grows_then_caps_and_gates() {
+        // Doubles per failure from the base, then saturates at the ceiling.
+        assert_eq!(backoff_delay(0), 0);
+        assert_eq!(backoff_delay(1), BACKOFF_BASE_MS);
+        assert_eq!(backoff_delay(2), BACKOFF_BASE_MS * 2);
+        assert_eq!(backoff_delay(3), BACKOFF_BASE_MS * 4);
+        assert_eq!(backoff_delay(99), BACKOFF_MAX_MS, "caps, never overflows");
+
+        // backoff_ok gates only while the window is in the future.
+        let mut job = Job {
+            id: "j".into(),
+            name: "j".into(),
+            enabled: true,
+            trigger: Trigger::Interval { every_ms: 1000 },
+            action: Action::Prompt { text: "x".into() },
+            on_missed: OnMissed::Catchup,
+            cooldown_ms: 0,
+            created_at_ms: 0,
+            last_run_ms: None,
+            next_due_ms: None,
+            consecutive_failures: 0,
+            backoff_until_ms: None,
+        };
+        assert!(backoff_ok(&job, 1000), "no backoff → ok");
+        job.backoff_until_ms = Some(2000);
+        assert!(!backoff_ok(&job, 1500), "before window end → blocked");
+        assert!(backoff_ok(&job, 2000), "at window end → ok");
     }
 
     #[test]
@@ -919,6 +1046,8 @@ mod tests {
             created_at_ms: 0,
             last_run_ms: None,
             next_due_ms: None,
+            consecutive_failures: 0,
+            backoff_until_ms: None,
         };
         let created = svc.create(proj, job).unwrap();
         assert!(!created.id.is_empty());
