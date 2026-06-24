@@ -7,7 +7,7 @@
   --border: #262b33;
   --text: #d9dde3;
   --text-dim: #8a93a0;
-  --text-faint: #5b626d;
+  --text-faint: #6b7480;
   --accent: #6aa9ff;
   --accent-soft: var(--accent-12);
   --danger: #ff6a6a;
@@ -60,6 +60,42 @@
   --r-3: 8px;
   --r-pill: 999px;
 
+  /* --- Elevation -------------------------------------------------------
+     One coherent shadow ramp. Floating chrome (menus/popovers/toasts)
+     uses -2; modals use -3. --edge-highlight is a hairline top inner
+     light that lifts an elevated surface off the background. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-2: 0 6px 22px rgba(0, 0, 0, 0.42), 0 2px 6px rgba(0, 0, 0, 0.28);
+  --shadow-3: 0 18px 50px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35);
+  --edge-highlight: inset 0 1px 0 color-mix(in srgb, var(--text) 7%, transparent);
+
+  /* Higher surface for stacked floating chrome — a touch lighter than
+     --bg-elev-2 so layered panels read as depth. --bg-elev aliases the
+     base elevated surface (a few panels referenced it before it existed). */
+  --bg-elev-3: #21262e;
+  --bg-elev: var(--bg-elev-1);
+
+  /* Muted text — a tier between dim and faint for secondary labels.
+     Referenced ~17× across panels but never defined (silently inherited
+     full-strength --text, flattening the hierarchy). */
+  --text-muted: #707984;
+
+  /* Secondary brand hue + warning, tokenized (were hardcoded in 6+ shades
+     across panels and broke in the light theme). Soft steps track the hue. */
+  --purple: #8a6aff;
+  --purple-12: color-mix(in srgb, var(--purple) 12%, transparent);
+  --purple-25: color-mix(in srgb, var(--purple) 25%, transparent);
+  --warn: #f0b34a;
+  --warn-12: color-mix(in srgb, var(--warn) 14%, transparent);
+  --warn-25: color-mix(in srgb, var(--warn) 28%, transparent);
+  --error: var(--danger);
+
+  /* Motion — shared timing + easing so hovers and reveals feel uniform. */
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --dur-1: 90ms;
+  --dur-2: 160ms;
+  --dur-3: 240ms;
+
   color-scheme: dark;
 }
 
@@ -72,9 +108,20 @@
   --text-dim: #5b626d;
   --text-faint: #9ba3af;
   --accent: #2563eb;
-  --accent-soft: rgba(37, 99, 235, 0.10);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
   --danger: #dc2626;
   --ok: #16a34a;
+
+  /* Light-theme surfaces, hues and a softer, cooler shadow ramp so
+     elevated chrome doesn't smudge dark on the white canvas. */
+  --bg-elev-3: #ffffff;
+  --text-muted: #6b7280;
+  --purple: #7c3aed;
+  --warn: #b45309;
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.10);
+  --shadow-2: 0 6px 22px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.07);
+  --shadow-3: 0 18px 50px rgba(15, 23, 42, 0.18), 0 4px 14px rgba(15, 23, 42, 0.10);
+  --edge-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 
   color-scheme: light;
 }
@@ -260,8 +307,8 @@ select:focus-visible,
 .tb-pill-lang { color: var(--accent); background: var(--accent-soft); }
 .tb-pill-branch {
   color: var(--text);
-  background: rgba(167, 139, 250, 0.10);
-  border-color: rgba(167, 139, 250, 0.25);
+  background: var(--purple-12);
+  border-color: var(--purple-25);
 }
 .tb-pill-files { color: var(--text-faint); }
 
@@ -1357,17 +1404,18 @@ select:focus-visible,
 /* --- Modal --- */
 .modal-backdrop {
   position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
 }
 .modal {
   width: 480px; max-width: 90vw;
-  background: var(--bg-elev-1);
+  background: var(--bg-elev-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--r-3);
   padding: 20px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-3), var(--edge-highlight);
 }
 .modal-title {
   font-family: var(--font-mono);
@@ -5057,3 +5105,106 @@ select:focus-visible,
   0%, 100% { opacity: 1; }
   50% { opacity: 0.25; }
 }
+
+/* ===========================================================================
+   UI polish layer
+   Appended last so it refines the chrome via the cascade without disturbing
+   the rules above. Theme-token driven; works in both light and dark.
+   =========================================================================== */
+
+/* --- Accessibility: honour the OS reduced-motion preference --------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- Themed scrollbars ----------------------------------------------------
+   The app is dense and scroll-heavy; default OS bars look unfinished on the
+   dark chrome. Thin, track-less, and they fade up on hover. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 16%, transparent) transparent;
+}
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text) 15%, transparent);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--r-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text) 30%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* --- Accent-tinted text selection ----------------------------------------- */
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+
+/* --- Coherent elevation on floating surfaces ------------------------------
+   Replaces the scattered hardcoded drop-shadows with the shadow ramp, and
+   raises stacked chrome onto --bg-elev-3 so layers read as depth. */
+.about-modal,
+.getting-started-modal { box-shadow: var(--shadow-3), var(--edge-highlight); }
+.palette {
+  background: var(--bg-elev-3);
+  box-shadow: var(--shadow-3), var(--edge-highlight);
+}
+.model-menu,
+.branch-popover,
+.toast,
+.update-banner {
+  background: var(--bg-elev-3);
+  box-shadow: var(--shadow-2), var(--edge-highlight);
+}
+
+/* --- Card depth -----------------------------------------------------------
+   The scheduler job cards referenced an undefined --bg-elev (transparent);
+   now they sit on the real elevated surface with a hairline lift. */
+.wb-job-card {
+  background: var(--bg-elev-2);
+  box-shadow: var(--shadow-1);
+}
+
+/* --- Chrome refinements ---------------------------------------------------- */
+/* A hairline of depth under the top bar / tab strip so the center canvas
+   reads as recessed beneath the chrome. */
+.topbar { box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent); }
+
+/* Active tab gets a soft accent wash above its underline — more present than
+   a 2px line alone, still restrained. */
+.tab.active {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 7%, transparent),
+    transparent 70%
+  );
+}
+
+/* Unify input focus on the keyboard ring instead of the bespoke 1px border
+   swaps, so every field focuses the same way. */
+.field input:focus,
+.field select:focus,
+.wb-input:focus,
+.ctx-textarea:focus,
+.session-name-input:focus,
+.constraint-input:focus,
+.commit-message:focus {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+/* Hover-revealed row actions also appear on keyboard focus, so they're not
+   mouse-only (revert / close / pin buttons etc.). */
+.change-revert:focus-visible,
+.session-close:focus-visible,
+.ct-file-action:focus-visible,
+.ct-file-revert:focus-visible,
+.vault-actions :focus-visible,
+.rule-actions :focus-visible { opacity: 1; }
