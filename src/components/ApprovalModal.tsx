@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { useApprovalStore } from "../stores/approvalStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
 import { useVoiceStore } from "../stores/voiceStore";
-import { suggestRules, classify, buildRaw, isHardDenyAllow, assessCommand } from "../permissions/rules";
+import { suggestRules, classify, buildRaw, isHardDenyAllow, assessCommand, toRelative } from "../permissions/rules";
 import type { RuleSuggestion, Scope } from "../permissions/types";
 import type { ApprovalRequest } from "../types/domain";
 
@@ -16,7 +16,9 @@ function describe(req: ApprovalRequest): { primary: string; secondary?: string }
     };
   }
   if (typeof inp.file_path === "string") {
-    return { primary: inp.file_path, secondary: req.tool };
+    // Show the path relative to the working dir so it's clear which file in
+    // *this* repo is being touched (absolute agent-supplied paths are noisy).
+    return { primary: toRelative(inp.file_path, req.cwd) ?? inp.file_path, secondary: req.tool };
   }
   return { primary: JSON.stringify(inp).slice(0, 200), secondary: req.tool };
 }
@@ -103,7 +105,9 @@ function editPreview(req: ApprovalRequest): DiffLine[] | null {
 
 function DiffPreview({ lines }: { lines: DiffLine[] }) {
   const LIMIT = 50;
-  const capped = lines.length > LIMIT;
+  const [expanded, setExpanded] = useState(false);
+  const overflow = lines.length > LIMIT;
+  const capped = overflow && !expanded;
   const visible = capped ? lines.slice(0, LIMIT) : lines;
   const adds = lines.filter((l) => l.type === "add").length;
   const dels = lines.filter((l) => l.type === "del").length;
@@ -114,15 +118,23 @@ function DiffPreview({ lines }: { lines: DiffLine[] }) {
         {adds > 0 && <span className="diff-stat-add">+{adds}</span>}
         {dels > 0 && <span className="diff-stat-del">-{dels}</span>}
       </div>
-      <pre className="approval-diff-body">
+      <pre className={`approval-diff-body${expanded ? " expanded" : ""}`}>
         {visible.map((line, i) => (
           <div key={i} className={`diff-${line.type}`}>
             {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
             {line.text}
           </div>
         ))}
-        {capped && <div className="diff-ctx">  … {lines.length - LIMIT} more lines</div>}
       </pre>
+      {overflow && (
+        <button
+          type="button"
+          className="btn btn-link approval-diff-toggle"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Show less" : `Show all ${lines.length} lines (+${adds}/-${dels})`}
+        </button>
+      )}
     </div>
   );
 }
@@ -239,7 +251,16 @@ export function ApprovalModal() {
               Approve once
             </button>
           </div>
-        ) : (
+        ) : null}
+
+        {!showAlways && (
+          <div className="approval-hint">
+            <strong>Deny</strong> tells the agent no — it keeps going without running this.
+            <span className="approval-hint-keys"><kbd>Esc</kbd> dismiss · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> approve</span>
+          </div>
+        )}
+
+        {showAlways && (
           <AlwaysPanel
             req={req}
             suggestions={suggestions}
@@ -316,16 +337,30 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
       </div>
 
       <ul className="approval-suggestions">
-        {suggestions.map((s, i) => (
-          <li
-            key={s.rule.raw}
-            className={i === selectedIdx ? "selected" : ""}
-            onClick={() => setSelectedIdx(i)}
-          >
-            <input type="radio" checked={i === selectedIdx} readOnly />
-            <span className="sug-label">{s.label}</span>
-          </li>
-        ))}
+        {suggestions.map((s, i) => {
+          // Whole-tool grants ("ANY Bash", "ANY Edit") are far broader than the
+          // exact/prefix rules they sit beside. Separate them under a divider and
+          // mark them so they don't read as a peer of the safe exact-command rule.
+          const broad = s.rule.pattern === null;
+          const firstBroad = broad && suggestions.findIndex((x) => x.rule.pattern === null) === i;
+          return (
+            <Fragment key={s.rule.raw}>
+              {firstBroad && (
+                <li className="approval-sug-divider" aria-hidden="true">
+                  Broader — applies to more than this one action
+                </li>
+              )}
+              <li
+                className={`${i === selectedIdx ? "selected" : ""}${broad ? " broad" : ""}`}
+                onClick={() => setSelectedIdx(i)}
+              >
+                <input type="radio" checked={i === selectedIdx} readOnly />
+                <span className="sug-label">{s.label}</span>
+                {broad && <span className="sug-warn">broad</span>}
+              </li>
+            </Fragment>
+          );
+        })}
       </ul>
 
       <div className="approval-preview">

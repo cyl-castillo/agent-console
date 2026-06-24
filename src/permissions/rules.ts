@@ -43,6 +43,7 @@ const DANGEROUS_COMMAND_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /wget[^|#\n]*\|\s*(ba)?sh/i, reason: "downloads and executes remote code" },
   { re: />\s*\/dev\/(sda|hda|nvme|disk)\d*/i, reason: "raw block device write" },
   { re: /\bdd\s+if=/i, reason: "raw block device write" },
+  { re: /\bmkfs\b/i, reason: "formats a filesystem" },
 ];
 
 // Badge-only tier: amber chip, Ctrl+Enter still works. Broad enough to cover
@@ -55,6 +56,12 @@ const CAUTION_COMMAND_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\bgit\s+reset\s+--hard\b/i, reason: "discards uncommitted changes" },
   { re: /\bgit\s+rebase\b/i, reason: "rewrites commit history" },
   { re: /\bgit\s+clean\s+-[a-z]*f/i, reason: "removes untracked files" },
+  { re: /\bgit\s+restore\b/i, reason: "discards working-tree changes" },
+  { re: /\bgit\s+checkout\s+(--\s|\.(\s|$))/i, reason: "discards working-tree changes" },
+  // Case-sensitive: -D force-deletes, -d only deletes already-merged branches.
+  { re: /\bgit\s+branch\s+-[a-z]*D/, reason: "force-deletes a branch" },
+  { re: /\btruncate\b/i, reason: "truncates a file" },
+  { re: /\bfind\b[^|]*\s-delete\b/i, reason: "deletes matched files" },
   { re: /\bsudo\b/i, reason: "elevated privileges" },
   { re: /\bchmod\b/i, reason: "changes file permissions" },
   { re: /\bapt(-get)?\s+(install|remove|purge)\b/i, reason: "modifies system packages" },
