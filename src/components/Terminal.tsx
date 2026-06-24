@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useThemeStore } from "../stores/themeStore";
+import { useToastStore } from "../stores/toastStore";
 import { profileFor } from "../agents/profiles";
 
 /// Detail for the `ac:term-input` window event: write `data` into the PTY of
@@ -126,7 +127,10 @@ export function Terminal({ session, visible }: Props) {
         markLive(session.id);
         await ipc.termResize(termId, term.cols, term.rows);
       } catch (err) {
-        term.write(`\x1b[31mfailed to spawn terminal: ${err}\x1b[0m\r\n`);
+        term.write(`\x1b[31m✕ Couldn't start a shell session.\x1b[0m\r\n`);
+        term.write(`\x1b[90m  ${err}\x1b[0m\r\n`);
+        term.write(`\x1b[90m  Check that your shell is available, then open a new session to retry.\x1b[0m\r\n`);
+        useToastStore.getState().show(`Couldn't start a terminal session: ${err}`, "error");
         return;
       }
 
