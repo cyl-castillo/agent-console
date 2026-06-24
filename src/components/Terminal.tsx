@@ -65,6 +65,18 @@ export function Terminal({ session, visible }: Props) {
         `\x1b[90m── previous session (${new Date(session.createdAtMs).toLocaleString()}) ──\x1b[0m\r\n`,
       );
       term.write(session.initialScrollback);
+      // The saved scrollback is the raw tail of a live agent TUI, so it carries
+      // the mode-ENABLE sequences (mouse tracking, focus reporting, bracketed
+      // paste, alt-screen) but not the matching disables — those only fire on a
+      // clean exit we never captured. Replaying it leaves the fresh xterm with
+      // those modes stuck on; with any-event mouse tracking (\x1b[?1003h) that
+      // means every mouse move floods the bare shell with SGR reports it tries
+      // to run as commands ("command not found"). Reset the input-affecting
+      // modes here so the terminal is sane while the shell holds the prompt;
+      // the relaunched agent re-enables whatever it needs on startup.
+      term.write(
+        "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[?1049l",
+      );
       term.write(`\r\n\x1b[90m── resumed ──\x1b[0m\r\n`);
     }
 
