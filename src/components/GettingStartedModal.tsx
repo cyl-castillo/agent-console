@@ -6,6 +6,7 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { useAdvisorStore } from "../stores/advisorStore";
 import { useSkillsStore } from "../stores/skillsStore";
+import { usePreflightStore, toolStatus } from "../stores/preflightStore";
 
 interface Props {
   onClose: () => void;
@@ -27,14 +28,26 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
   const advisorItems = useAdvisorStore((s) => s.items);
   const installedSkills = useSkillsStore((s) => s.installed);
   const recentPromptsCount = useSkillsStore((s) => s.recent.length);
+  const preflight = usePreflightStore((s) => s.result);
+  const checkPreflight = usePreflightStore((s) => s.check);
 
   // Mark seen once when opened so it doesn't auto-open again on next launch.
   useEffect(() => {
     if (!onboarding.seenWelcome) onboarding.markSeenWelcome();
+    void checkPreflight();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const requirementsReady =
+    !!toolStatus(preflight, "claude")?.found && !!toolStatus(preflight, "node")?.found;
+
   const steps: Step[] = useMemo(() => [
+    {
+      key: "requirements",
+      title: "Instalá los requisitos",
+      description: "Necesitás el CLI de Claude (`npm i -g @anthropic-ai/claude-code`, después `claude` una vez para loguearte) y Node ≥ 20.",
+      done: requirementsReady,
+    },
     {
       key: "open-project",
       title: "Abrí un proyecto",
@@ -68,7 +81,7 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
       done: onboarding.visitedPermissions,
       action: { label: "Abrir Permissions →", onClick: () => { onJumpToTab("permissions"); onClose(); } },
     },
-  ], [project, onboarding, advisorItems.length, installedSkills.length, recentPromptsCount, onJumpToTab, onClose]);
+  ], [project, onboarding, advisorItems.length, installedSkills.length, recentPromptsCount, requirementsReady, onJumpToTab, onClose]);
 
   const completed = steps.filter((s) => s.done).length;
 

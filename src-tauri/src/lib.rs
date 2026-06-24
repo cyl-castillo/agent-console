@@ -56,6 +56,7 @@ pub fn run() {
             commands::git::git_checkout_branch,
             commands::snapshot::snapshot_restore,
             commands::snapshot::snapshot_delete,
+            commands::preflight::preflight_check,
             commands::projects::projects_recent,
             commands::projects::projects_last,
             commands::projects::projects_forget,

@@ -11,7 +11,7 @@ import type {
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, Job, McpServer, McpAddInput,
-  MemoryEntry, PermissionsSnapshot,
+  MemoryEntry, PermissionsSnapshot, Preflight,
   PersistedRoom, PersistedSession, Project, RecentProject,
   RoomSummary, RoundtableConfig, RunRecord,
   ReflectionResult,
@@ -64,6 +64,8 @@ export const ipc = {
   snapshotRestore: (commitSha: string) =>
     invoke<string | null>("snapshot_restore", { commitSha }),
   snapshotDelete: (id: string) => invoke<void>("snapshot_delete", { id }),
+
+  preflightCheck: () => invoke<Preflight>("preflight_check"),
 
   projectsRecent: () => invoke<RecentProject[]>("projects_recent"),
   projectsLast: () => invoke<RecentProject | null>("projects_last"),

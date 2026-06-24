@@ -426,6 +426,54 @@ select:focus-visible,
   font-size: 12px;
   margin-top: 16px;
 }
+.picker-sub {
+  font-size: 12px;
+  color: var(--text-faint) !important;
+  margin: -12px 0 24px !important;
+  line-height: 1.5;
+}
+
+/* --- First-run preflight card --- */
+.preflight {
+  margin-top: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-2);
+  background: var(--bg-elev-1);
+  padding: 12px 14px;
+  text-align: left;
+}
+.preflight.checking { color: var(--text-faint); font-size: 12px; text-align: center; }
+.preflight.bad  { border-color: var(--warn-25); background: var(--warn-12); }
+.preflight.warn { border-color: var(--warn-25); }
+.preflight-title {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  color: var(--text); margin-bottom: 6px;
+}
+.preflight.bad .preflight-title,
+.preflight.warn .preflight-title { color: var(--warn); }
+.preflight-title.ok { color: var(--ok); margin-bottom: 8px; }
+.preflight-title.ok::before { content: "✓ "; }
+.preflight.bad .preflight-title::before,
+.preflight.warn .preflight-title::before { content: "⚠ "; }
+.preflight-body { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+.preflight-body pre {
+  margin: 8px 0 2px; padding: 8px 10px; font-size: 11.5px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1);
+  white-space: pre-wrap; color: var(--text);
+}
+.preflight-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 10px; flex-wrap: wrap;
+}
+.preflight-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.preflight-pill {
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 1px 7px; border-radius: var(--r-pill);
+  border: 1px solid var(--border); background: var(--bg);
+}
+.preflight-pill.found { color: var(--ok); border-color: var(--ok-18); }
+.preflight-pill.missing { color: var(--danger); border-color: var(--danger-12); }
+.preflight-row .btn-link { font-size: 11px; padding: 0; }
 
 .recent {
   margin-top: 28px;
@@ -4184,6 +4232,15 @@ select:focus-visible,
 }
 .toast-success { border-left-color: var(--ok); }
 .toast-error { border-left-color: var(--danger); }
+.toast {
+  display: flex; align-items: flex-start; gap: 8px;
+}
+.toast-glyph { font-family: var(--font-mono); line-height: 1.5; flex: none; }
+.toast-success .toast-glyph { color: var(--ok); }
+.toast-error .toast-glyph { color: var(--danger); }
+.toast-info .toast-glyph { color: var(--accent); }
+.toast-msg { flex: 1; }
+.toast-dismiss { color: var(--text-faint); flex: none; }
 
 /* --- Shortcuts modal --- */
 .shortcuts-modal {

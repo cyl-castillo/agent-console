@@ -7,6 +7,7 @@ pub mod learning;
 pub mod mcp;
 pub mod palette;
 pub mod permissions;
+pub mod preflight;
 pub mod plugins;
 pub mod project;
 pub mod projects;

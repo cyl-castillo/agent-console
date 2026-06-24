@@ -29,6 +29,16 @@ export interface GitStatus {
   changes: GitFileChange[];
 }
 
+export interface PreflightTool {
+  name: string;
+  found: boolean;
+  version: string | null;
+}
+
+export interface Preflight {
+  tools: PreflightTool[];
+}
+
 export interface BranchInfo {
   name: string;
   current: boolean;
