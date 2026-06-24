@@ -255,4 +255,42 @@ mod tests {
 
         let _ = fs::remove_dir_all(&repo);
     }
+
+    // Mirrors what the snapshot_restore command does: back up the current tree
+    // before the destructive restore, so the restore itself can be undone. The
+    // at-risk work is post-snapshot edits to TRACKED files — `read-tree --reset -u`
+    // overwrites those (untracked new files are left in place).
+    #[test]
+    fn pre_restore_backup_makes_restore_undoable() {
+        let repo = init_repo("undo");
+        fs::write(repo.join("f.txt"), "committed").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+
+        // Snapshot A — the "good" state we'll later wind back to.
+        fs::write(repo.join("f.txt"), "good").unwrap();
+        let a = create(&repo, "A").unwrap().unwrap();
+
+        // A tracked edit past A — exactly the post-snapshot work a restore destroys.
+        fs::write(repo.join("f.txt"), "later-work").unwrap();
+
+        // Back up the CURRENT tree, then restore A (destructive: "later-work" gone).
+        let backup = create(&repo, "pre-restore").unwrap().unwrap();
+        restore(&repo, &a.commit_sha).unwrap();
+        assert_eq!(
+            fs::read_to_string(repo.join("f.txt")).unwrap(),
+            "good",
+            "restore wound the tracked edit back to A"
+        );
+
+        // Undo = restore the backup → the post-A edit comes back, nothing lost.
+        restore(&repo, &backup.commit_sha).unwrap();
+        assert_eq!(
+            fs::read_to_string(repo.join("f.txt")).unwrap(),
+            "later-work",
+            "undo brings back the work the restore had wound past"
+        );
+
+        let _ = fs::remove_dir_all(&repo);
+    }
 }

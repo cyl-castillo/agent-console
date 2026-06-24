@@ -59,8 +59,10 @@ export const ipc = {
   paletteIndexFiles: (limit?: number) =>
     invoke<string[]>("palette_index_files", { limit: limit ?? null }),
 
+  // Returns the "pre-restore" snapshot sha (a backup of the tree taken right
+  // before the destructive restore), or null if the repo couldn't be snapshotted.
   snapshotRestore: (commitSha: string) =>
-    invoke<void>("snapshot_restore", { commitSha }),
+    invoke<string | null>("snapshot_restore", { commitSha }),
   snapshotDelete: (id: string) => invoke<void>("snapshot_delete", { id }),
 
   projectsRecent: () => invoke<RecentProject[]>("projects_recent"),

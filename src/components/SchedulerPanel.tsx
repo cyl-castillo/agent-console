@@ -381,7 +381,11 @@ export function SchedulerPanel() {
                       onRun={() => void runNow(job.id)}
                       onToggle={() => void setEnabled(job.id, !job.enabled)}
                       onEdit={() => startEdit(job)}
-                      onDelete={() => void deleteJob(job.id)}
+                      onDelete={() => {
+                        if (confirm(`Delete the scheduled job "${job.name}"?\n\nThis can't be undone.`)) {
+                          void deleteJob(job.id);
+                        }
+                      }}
                     />
                   ))}
                 </div>

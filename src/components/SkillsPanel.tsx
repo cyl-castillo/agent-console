@@ -309,9 +309,13 @@ function EventRow({ event, onRestore }: {
       {event.snapshotCommitSha && (
         <button
           className="wb-event-restore"
-          title="Restore working tree to before this turn"
+          title="Restore the working tree to before this turn (a backup is taken first)"
           onClick={() => {
-            if (event.snapshotCommitSha && confirm("Restore to before this turn? Uncommitted changes will be lost.")) {
+            if (event.snapshotCommitSha && confirm(
+              "Restore the working tree to before this turn?\n\n" +
+              "This discards ALL changes made after this point — not just this turn's. " +
+              "A backup is taken first, so you can undo from the command palette.",
+            )) {
               onRestore(event.snapshotCommitSha);
             }
           }}

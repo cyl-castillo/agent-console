@@ -7,6 +7,7 @@ import { useChangesStore } from "./changesStore";
 import { useLearningStore } from "./learningStore";
 import { useOnboardingStore } from "./onboardingStore";
 import { fireSchedulerEvent } from "./schedulerStore";
+import { useToastStore } from "./toastStore";
 import { useTerminalsStore } from "./terminalsStore";
 
 /// What the user (or agent in the terminal) has been doing — captured from
@@ -54,6 +55,8 @@ interface SkillsState {
   hooks: HooksStatus | null;
   selected: Skill | null;
   selectedMarkdown: string;
+  /** Backup taken before the last restore, so "undo last restore" can re-apply it. */
+  undoRestoreSha: string | null;
 
   refresh: () => Promise<void>;
   install: () => Promise<void>;
@@ -71,6 +74,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   hooks: null,
   selected: null,
   selectedMarkdown: "",
+  undoRestoreSha: null,
 
   refresh: async () => {
     try {
@@ -113,9 +117,20 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
 
   restoreSnapshot: async (commitSha) => {
     try {
-      await ipc.snapshotRestore(commitSha);
+      // The backend captures a pre-restore backup and returns its sha, so the
+      // destructive restore is itself undoable. Stash it for "undo last restore".
+      const undoSha = await ipc.snapshotRestore(commitSha);
+      set({ undoRestoreSha: undoSha ?? null });
       await useChangesStore.getState().refresh();
-    } catch { /* ignore */ }
+      useToastStore.getState().show(
+        undoSha
+          ? "Restored. Undo via ⌘P → Undo last restore"
+          : "Restored",
+        "success",
+      );
+    } catch (e) {
+      useToastStore.getState().show(`Restore failed: ${e}`, "error");
+    }
   },
 
   _onPrompt: (e) => {
