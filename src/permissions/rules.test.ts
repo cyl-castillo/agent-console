@@ -116,12 +116,26 @@ describe("assessCommand", () => {
     expect(assessCommand("docker system prune")?.level).toBe("caution");
   });
 
+  it("flags working-tree discards and other irreversible git/file ops", () => {
+    expect(assessCommand("git restore src/app.tsx")?.level).toBe("caution");
+    expect(assessCommand("git checkout -- src/app.tsx")?.level).toBe("caution");
+    expect(assessCommand("git checkout .")?.level).toBe("caution");
+    expect(assessCommand("git branch -D feature")?.level).toBe("caution");
+    expect(assessCommand("truncate -s 0 app.log")?.level).toBe("caution");
+    expect(assessCommand("find . -name '*.tmp' -delete")?.level).toBe("caution");
+    expect(assessCommand("mkfs.ext4 /dev/sdb1")?.level).toBe("dangerous");
+  });
+
   it("stays quiet for everyday commands", () => {
     expect(assessCommand("npm test")).toBeNull();
     expect(assessCommand("git status")).toBeNull();
     expect(assessCommand("cargo build --release")).toBeNull();
     // `rm` without -r/-f is an ordinary delete.
     expect(assessCommand("rm notes.txt")).toBeNull();
+    // Switching branches / creating a branch are not working-tree discards.
+    expect(assessCommand("git checkout main")).toBeNull();
+    expect(assessCommand("git checkout -b feature")).toBeNull();
+    expect(assessCommand("git branch -d merged")).toBeNull();
   });
 });
 

@@ -2635,8 +2635,8 @@ select:focus-visible,
 .risk { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.6px; }
 .risk-safe      { background: var(--ok-12); color: var(--ok); }
 .risk-moderate  { background: var(--accent-12); color: var(--accent); }
-.risk-broad     { background: rgba(255, 180, 80, 0.14); color: #ffb450; }
-.risk-caution   { background: rgba(255, 180, 80, 0.14); color: #ffb450; }
+.risk-broad     { background: var(--warn-12); color: var(--warn); }
+.risk-caution   { background: var(--warn-12); color: var(--warn); }
 .risk-dangerous { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
 
 .approval-blocked {
@@ -2680,6 +2680,43 @@ select:focus-visible,
   margin: 0; padding: 4px 0;
   font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
   background: var(--bg);
+}
+.approval-diff-body.expanded { max-height: 420px; }
+.approval-diff-toggle {
+  margin: 6px 0 0; padding: 0; font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+/* Deny/keys hint under the primary approval actions. */
+.approval-hint {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-faint);
+  font-size: 11px; color: var(--text-dim); flex-wrap: wrap;
+}
+.approval-hint strong { color: var(--text); font-weight: 600; }
+.approval-hint-keys { color: var(--text-faint); white-space: nowrap; }
+.approval-hint-keys kbd {
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  border-radius: 3px; padding: 0 5px; color: var(--text-dim);
+}
+
+/* Whole-tool ("ANY") grants are separated from the exact/prefix rules. */
+.approval-sug-divider {
+  list-style: none; padding: 8px 2px 2px; margin: 2px 0 0;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--text-faint); cursor: default;
+  border-top: 1px solid var(--border-faint);
+}
+.approval-suggestions li.broad { border-color: var(--warn-25); }
+.approval-suggestions li.broad.selected {
+  border-color: var(--warn); background: var(--warn-12);
+}
+.sug-warn {
+  margin-left: auto; font-family: var(--font-mono); font-size: 9px;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  color: var(--warn); background: var(--warn-12);
+  padding: 1px 6px; border-radius: 3px;
 }
 
 /* --- Permissions panel --- */
