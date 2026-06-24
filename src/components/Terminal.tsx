@@ -166,19 +166,19 @@ export function Terminal({ session, visible }: Props) {
       });
     })();
 
-    // Refit conservatively. ResizeObserver fires for any sub-pixel layout
-    // change (window blur/focus, compositor redraws, Claude UI redraws). To
-    // avoid jumping:
-    //   1. ignore changes smaller than 4px,
-    //   2. debounce to coalesce rapid drags into one fit at the end,
-    //   3. skip while the window isn't focused (we'll catch up on focus).
     // Conservative resize handling. ResizeObserver fires for any sub-pixel
-    // layout change. To keep Claude's TUI from redrawing visibly while the
-    // user drags the window:
-    //   - ignore tiny deltas (<16px ≈ 2 char cols),
-    //   - require 800ms of quiet before calling fit(), so a drag only
-    //     reflows the terminal once the user stops,
+    // layout change (window blur/focus, compositor redraws, agent UI redraws).
+    // To keep the agent's TUI from redrawing visibly while the user drags the
+    // window:
+    //   - require 800ms of quiet before calling fit(), so a drag only reflows
+    //     the terminal once the user stops,
     //   - skip while the window has no focus, and refit on focus return.
+    // The delta gate only suppresses true sub-pixel jitter, so it must stay
+    // BELOW one character cell (~8px wide, ~16px tall). A larger gate (it was
+    // 16px) lets xterm's grid drift 1–2 columns off the real pane without ever
+    // refitting; the agent then draws its full-width footer onto a grid that's
+    // a couple columns too narrow and the text overlaps itself. 4px is under a
+    // cell, so any change that can shift a row/column still triggers a refit.
     let debounceTimer: number | null = null;
     let lastW = 0;
     let lastH = 0;
@@ -194,7 +194,7 @@ export function Terminal({ session, visible }: Props) {
       const rect = host.getBoundingClientRect();
       if (rect.width < 8 || rect.height < 8) return;
       if (!document.hasFocus()) return;
-      if (Math.abs(rect.width - lastW) < 16 && Math.abs(rect.height - lastH) < 16) return;
+      if (Math.abs(rect.width - lastW) < 4 && Math.abs(rect.height - lastH) < 4) return;
       lastW = rect.width; lastH = rect.height;
       scheduleFit();
     });
