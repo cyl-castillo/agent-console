@@ -80,6 +80,31 @@ export function ChangesView() {
   }
 
   const allChanges = status.changes;
+
+  // Reverting is irreversible, but in two different ways: a tracked file is
+  // reset to its last commit (uncommitted edits lost), while an UNTRACKED file
+  // is deleted from disk outright (git can't bring it back). Make the confirm
+  // honest about which one is about to happen.
+  const confirmRevert = (path: string) => {
+    const change = allChanges.find((c) => c.path === path);
+    const msg = change?.untracked
+      ? `Delete the new file "${path}"?\n\n` +
+        `It isn't tracked by git, so this permanently removes it from disk and can't be undone.`
+      : `Discard uncommitted changes in "${path}"?\n\n` +
+        `The file returns to its last committed state. This can't be undone.`;
+    if (confirm(msg)) revert(path);
+  };
+
+  const confirmRevertAll = () => {
+    const untracked = allChanges.filter((c) => c.untracked).length;
+    const tracked = allChanges.length - untracked;
+    const lines = [`Discard all ${allChanges.length} change(s)?`, ""];
+    if (tracked) lines.push(`• Revert ${tracked} edited file(s) to their last commit`);
+    if (untracked) lines.push(`• Permanently DELETE ${untracked} new file(s) from disk`);
+    lines.push("", "This can't be undone.");
+    if (confirm(lines.join("\n"))) revertAll();
+  };
+
   const canCommit = (amend || stagedCount > 0) && commitMessage.trim().length > 0 && !committing;
   const subjectLine = commitMessage.split("\n", 1)[0] ?? "";
   const subjectOver = subjectLine.length > SUBJECT_LIMIT;
@@ -103,11 +128,7 @@ export function ChangesView() {
             <button onClick={refresh} title="Refresh status">↻</button>
             {allChanges.length > 0 && (
               <button
-                onClick={() => {
-                  if (confirm(`Discard ALL ${allChanges.length} change(s)? This cannot be undone.`)) {
-                    revertAll();
-                  }
-                }}
+                onClick={confirmRevertAll}
                 title="Discard all changes"
               >Discard all</button>
             )}
@@ -137,9 +158,7 @@ export function ChangesView() {
                   onSelect={setSelected}
                   fileAction={{ label: "−", title: "Unstage", run: unstage }}
                   folderAction={{ title: "Unstage folder", run: unstageMany }}
-                  onRevert={(p) => {
-                    if (confirm(`Discard changes in "${p}"? This cannot be undone.`)) revert(p);
-                  }}
+                  onRevert={confirmRevert}
                 />
               </div>
             )}
@@ -159,9 +178,7 @@ export function ChangesView() {
                   onSelect={setSelected}
                   fileAction={{ label: "+", title: "Stage", run: stage }}
                   folderAction={{ title: "Stage folder", run: stageMany }}
-                  onRevert={(p) => {
-                    if (confirm(`Discard changes in "${p}"? This cannot be undone.`)) revert(p);
-                  }}
+                  onRevert={confirmRevert}
                 />
               </div>
             )}

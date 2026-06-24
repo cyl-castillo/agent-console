@@ -212,15 +212,31 @@ const ACTIONS: PaletteAction[] = [
   {
     id: "snapshot.restore_latest",
     label: "Restore Latest Snapshot",
-    hint: "Restore to before the latest captured turn",
+    hint: "Discard ALL changes since the latest captured turn (a backup is taken first)",
     keywords: ["undo", "rollback", "restore"],
     available: () => useSkillsStore.getState().recent.some((e) => !!e.snapshotCommitSha),
     run: async () => {
       const event = useSkillsStore.getState().recent.find((e) => !!e.snapshotCommitSha);
       if (!event?.snapshotCommitSha) return;
-      if (!confirm("Restore to before the latest turn? Uncommitted changes will be lost.")) return;
+      if (!confirm(
+        "Restore to before the latest turn?\n\n" +
+        "This discards ALL changes made since that turn — not just the last one. " +
+        "A backup is taken first, so you can undo from the command palette.",
+      )) return;
+      // restoreSnapshot handles the success/error toast and the undo backup.
       await useSkillsStore.getState().restoreSnapshot(event.snapshotCommitSha);
-      useToastStore.getState().show("Snapshot restored", "success");
+    },
+  },
+  {
+    id: "snapshot.undo_restore",
+    label: "Undo Last Restore",
+    hint: "Re-apply the working tree from just before the last restore",
+    keywords: ["undo", "redo", "restore", "snapshot", "revert"],
+    available: () => !!useSkillsStore.getState().undoRestoreSha,
+    run: async () => {
+      const sha = useSkillsStore.getState().undoRestoreSha;
+      if (!sha) return;
+      await useSkillsStore.getState().restoreSnapshot(sha);
     },
   },
   {
