@@ -59,6 +59,24 @@ export function Terminal({ session, visible }: Props) {
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
+    // The synchronous fit() above runs before the layout has settled AND before
+    // the web font has loaded, so FitAddon measures the wrong height and/or the
+    // wrong cell height — it then reports one row too many to the PTY. The agent
+    // draws that extra row below the host's content-box, where overflow:hidden
+    // clips it flush against the status bar (it reads as the bar "covering" the
+    // last line). Nothing ever corrects it because no resize follows. So refit
+    // (a) on the next frame, once the grid row has its real height, and (b) once
+    // the terminal font is ready, so the cell metrics — and thus the row count —
+    // match what's actually visible.
+    const rafFit = requestAnimationFrame(() => {
+      try { fit.fit(); } catch { /* host not mounted yet */ }
+    });
+    let fontsDone = false;
+    document.fonts.ready.then(() => {
+      if (disposed || fontsDone) return;
+      fontsDone = true;
+      try { fit.fit(); } catch { /* host not mounted yet */ }
+    });
 
     // Replay saved scrollback from a previous run, dimmed, with a divider.
     if (session.initialScrollback) {
@@ -250,6 +268,7 @@ export function Terminal({ session, visible }: Props) {
 
     return () => {
       disposed = true;
+      cancelAnimationFrame(rafFit);
       if (debounceTimer !== null) window.clearTimeout(debounceTimer);
       ro.disconnect();
       unlistenOutput?.();
@@ -267,10 +286,15 @@ export function Terminal({ session, visible }: Props) {
   }, [session.id]);
 
   // Re-fit when becoming visible (xterm needs a real size at layout time).
+  // Defer to the next frame so the tab-pane has its laid-out height before we
+  // measure — fitting against a stale height over-counts rows and clips the
+  // last line behind the status bar.
   useEffect(() => {
-    if (visible) {
+    if (!visible) return;
+    const raf = requestAnimationFrame(() => {
       try { fitRef.current?.fit(); } catch { /* ignore */ }
-    }
+    });
+    return () => cancelAnimationFrame(raf);
   }, [visible]);
 
   // Live-swap xterm theme on toggle so it matches the rest of the UI.

@@ -2133,9 +2133,11 @@ select:focus-visible,
   min-height: 0;
   /* Extra bottom padding gives the last grid row clearance so the fit() row
      count leaves a gap above the status bar instead of butting against it.
-     overflow:hidden then guarantees a stray sub-pixel row can never spill
-     down over the status bar (the center panel doesn't clip). */
-  padding: 8px 4px 12px 8px;
+     Keep it ≥ one text cell (~17px at fontSize 13) so even a marginal row is
+     dropped by fit() rather than rendered flush against the bar. overflow:
+     hidden then guarantees a stray sub-pixel row can never spill down over the
+     status bar (the center panel doesn't clip). */
+  padding: 8px 4px 18px 8px;
   overflow: hidden;
   background: #0d0f12;
 }
