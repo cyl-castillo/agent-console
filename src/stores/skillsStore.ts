@@ -8,6 +8,7 @@ import { useLearningStore } from "./learningStore";
 import { useOnboardingStore } from "./onboardingStore";
 import { fireSchedulerEvent } from "./schedulerStore";
 import { useToastStore } from "./toastStore";
+import { useAgentStatusStore } from "./agentStatusStore";
 import { useTerminalsStore } from "./terminalsStore";
 
 /// What the user (or agent in the terminal) has been doing — captured from
@@ -142,6 +143,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     };
     set((s) => ({ recent: [entry, ...s.recent].slice(0, MAX_RECENT) }));
     useOnboardingStore.getState().markPromptedClaude();
+    // A submitted prompt means a turn just started — light the "working" pill.
+    useAgentStatusStore.getState().markActive();
     // Feed the learning auto-trigger: enough new activity reflects on its own.
     useLearningStore.getState().noteActivity();
     // Notify scheduler jobs watching for prompts.

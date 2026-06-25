@@ -4617,13 +4617,30 @@ select:focus-visible,
 .sb-sub { color: var(--text-faint); margin-left: 2px; }
 .sb-spacer { flex: 1 1 auto; }
 .sb-muted { color: var(--text-faint); }
-.sb-warn { color: #fbbf24; }
+.sb-warn { color: var(--warn); }
 .sb-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--text-faint);
 }
-.sb-dot-live { background: #22c55e; box-shadow: 0 0 4px rgba(34,197,94,0.6); }
+.sb-dot-live { background: var(--ok); box-shadow: 0 0 4px color-mix(in srgb, var(--ok) 60%, transparent); }
 .sb-dot-stopped { background: var(--text-faint); }
+
+/* --- Agent activity pill --- */
+.sb-agent { gap: 5px; }
+.sb-agent-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.sb-agent-working { color: var(--accent); }
+.sb-agent-working .sb-agent-dot { background: var(--accent); }
+.sb-agent-blocked { color: var(--warn); font-weight: 600; }
+.sb-agent-blocked .sb-agent-dot {
+  background: var(--warn);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 70%, transparent);
+  animation: sb-agent-pulse 1.4s ease-out infinite;
+}
+@keyframes sb-agent-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 60%, transparent); }
+  70%  { box-shadow: 0 0 0 5px color-mix(in srgb, var(--warn) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 0%, transparent); }
+}
 
 /* Context-usage indicator. Tabular numerals so the percentage doesn't jitter
    as it ticks; amber once the context is ≥80% full. */
