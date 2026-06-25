@@ -6,6 +6,8 @@ import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStor
 import { useUIStore } from "../stores/uiStore";
 import { useModelStore, modelLabel } from "../stores/modelStore";
 import { useVoiceStore } from "../stores/voiceStore";
+import { useApprovalStore } from "../stores/approvalStore";
+import { useAgentStatusStore } from "../stores/agentStatusStore";
 import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
 import type { TermInputDetail } from "./Terminal";
@@ -74,6 +76,7 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
           <span>{activeSession.name}</span>
         </button>
       )}
+      <AgentStatePill onShowTerminal={() => setTab("terminal")} />
       {activeSession && <ModelPill session={activeSession} projectRoot={project.root} />}
       {activeSession?.claudeSessionId && (
         <UsagePill
@@ -99,6 +102,52 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
         <span className="sb-item sb-muted" title="Agent Console version">v{appVersion}</span>
       )}
     </footer>
+  );
+}
+
+/// Glanceable agent activity. "waiting on you" (an approval is pending) is the
+/// reliable state; "working…" is a best-effort recent-activity hint that decays,
+/// since the CLI gives us no turn-completion signal (see agentStatusStore). Idle
+/// renders nothing — the live session dot already says the agent is up.
+function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
+  const blocked = useApprovalStore((s) => s.queue.length);
+  const workingUntil = useAgentStatusStore((s) => s.workingUntil);
+  const [, force] = useState(0);
+
+  // Re-render when the recent-activity window elapses so it falls back to idle.
+  useEffect(() => {
+    const left = workingUntil - Date.now();
+    if (left <= 0) return;
+    const t = setTimeout(() => force((n) => n + 1), left + 50);
+    return () => clearTimeout(t);
+  }, [workingUntil]);
+
+  const state: "blocked" | "working" | "idle" =
+    blocked > 0 ? "blocked" : Date.now() < workingUntil ? "working" : "idle";
+
+  if (state === "idle") return null;
+
+  if (state === "blocked") {
+    return (
+      <button
+        className="sb-item sb-clickable sb-agent sb-agent-blocked"
+        onClick={onShowTerminal}
+        title={`Agent is waiting for you to approve ${blocked} action${blocked === 1 ? "" : "s"}`}
+      >
+        <span className="sb-agent-dot" />
+        <span>waiting on you{blocked > 1 ? ` (${blocked})` : ""}</span>
+      </button>
+    );
+  }
+
+  return (
+    <span
+      className="sb-item sb-agent sb-agent-working"
+      title="The agent was active in the last few seconds. The CLI doesn't report turn completion, so this is best-effort."
+    >
+      <span className="sb-agent-dot" />
+      <span>working…</span>
+    </span>
   );
 }
 
