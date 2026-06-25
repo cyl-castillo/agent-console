@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useMcpStore } from "../stores/mcpStore";
+import { PanelError } from "./PanelError";
 import type { McpServer } from "../types/domain";
 
 type Transport = "stdio" | "http" | "sse";
@@ -39,9 +40,13 @@ export function McpPanel() {
       <div className="workbench-body">
         {adding && <AddForm onDone={() => setAdding(false)} />}
 
-        {error && <div className="plugins-error">{error}</div>}
+        {error && <PanelError message={error} onRetry={refresh} />}
 
         <section className="wb-section">
+          <p className="wb-hint wb-trust">
+            An MCP server can supply tools and data to the agent — only add ones
+            you trust.
+          </p>
           <div className="wb-section-title">
             configured
             {servers.length > 0 && <span className="wb-count">{servers.length}</span>}

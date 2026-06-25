@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { usePermissionsStore } from "../stores/permissionsStore";
 import { classify, parseRaw, buildRaw, isHardDenyAllow } from "../permissions/rules";
+import { PanelError } from "./PanelError";
 import type { StoredRule } from "../types/domain";
 
 type Scope = "project" | "global";
@@ -91,6 +92,7 @@ export function PermissionsPanel() {
   return (
     <div className="permissions-panel">
       <div className="workbench-header workbench-header-slim">
+        <span className="workbench-title">permissions</span>
         <span className="spacer" />
         {lastOp && (
           <button className="workbench-action" onClick={undo} title="Undo last change">↶</button>
@@ -103,10 +105,14 @@ export function PermissionsPanel() {
         >+ add</button>
       </div>
 
+      <p className="wb-hint wb-trust" style={{ margin: "0 10px 4px" }}>
+        Rules edit only your local <code>settings.json</code> — every change is
+        reversible and nothing here runs the agent.
+      </p>
+
       {error && (
-        <div className="modal-error" style={{ margin: "0 10px" }}>
-          {error}
-          <button className="btn btn-link" style={{ marginLeft: 8 }} onClick={clearError}>dismiss</button>
+        <div style={{ margin: "0 10px" }}>
+          <PanelError message={error} onRetry={refresh} onDismiss={clearError} />
         </div>
       )}
 

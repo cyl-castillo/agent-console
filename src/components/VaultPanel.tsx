@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useVaultStore } from "../stores/vaultStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { PanelError } from "./PanelError";
 import type { VaultEntryView } from "../types/domain";
 
 type Scope = "project" | "global";
@@ -48,13 +49,15 @@ export function VaultPanel() {
             <code> .claude/vault.json</code>. A companion <code>VAULT.md</code>
             lists key names + descriptions so Claude knows what's available.
           </p>
+          <p className="wb-hint wb-trust">
+            Values stay on your machine and are never sent to the model — the
+            agent sees only the key names.
+          </p>
         </section>
 
         {error && (
           <section className="wb-section">
-            <p className="wb-hint" style={{ color: "#ff8585", whiteSpace: "pre-wrap" }}>
-              {error}
-            </p>
+            <PanelError message={error} onRetry={refresh} />
           </section>
         )}
 
@@ -89,7 +92,9 @@ export function VaultPanel() {
             </div>
           )}
 
-          {entries.length === 0 ? (
+          {entries.length === 0 && loading ? (
+            <p className="wb-hint">Loading…</p>
+          ) : entries.length === 0 ? (
             <p className="wb-hint">
               No entries yet. Click <strong>＋</strong> to add a password, token,
               URL, or any default the agent should reuse.
