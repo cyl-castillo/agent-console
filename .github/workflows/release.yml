@@ -95,6 +95,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          # No token configured → skip cleanly instead of failing the release.
+          # The npm launcher is an optional install path (npx); the platform
+          # release assets above are unaffected by it.
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "NPM_TOKEN secret not set — skipping launcher publish."
+            exit 0
+          fi
           # The published version always matches the release tag, so the launcher
           # fetches the assets from its own release. The committed version is just
           # a dev default.
@@ -110,4 +117,3 @@ jobs:
           else
             npm publish --access public
           fi
-          args: ${{ matrix.args }}
