@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useContextStore } from "../stores/contextStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { PanelError } from "./PanelError";
 import type { ContextFileStat, MemoryEntry } from "../types/domain";
 import { MarkdownText } from "./MarkdownText";
 
@@ -32,7 +33,7 @@ export function ContextPanel() {
       <div className="workbench-body">
         {error && (
           <section className="wb-section">
-            <p className="wb-hint" style={{ color: "#ff8585", whiteSpace: "pre-wrap" }}>{error}</p>
+            <PanelError message={error} onRetry={refresh} />
           </section>
         )}
 

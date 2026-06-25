@@ -81,6 +81,7 @@ export function SkillsPanel() {
   return (
     <div className="workbench">
       <div className="workbench-header workbench-header-slim">
+        <span className="workbench-title">skills</span>
         <span className="spacer" />
         <button className="workbench-action" onClick={refresh} title="Refresh">↻</button>
       </div>
@@ -185,13 +186,13 @@ export function SkillsPanel() {
           {installed.length === 0 ? (
             <div className="wb-empty">
               <p className="wb-hint">
-                Sin skills todavía. Las skills viven en
-                {" "}<code>.claude/skills</code>, <code>.claude/commands</code> y
-                {" "}<code>.claude/agents</code> y se invocan desde Claude en la terminal.
+                No skills yet. Skills live in
+                {" "}<code>.claude/skills</code>, <code>.claude/commands</code>, and
+                {" "}<code>.claude/agents</code>, and are invoked from Claude in the terminal.
               </p>
               <p className="wb-hint">
-                ¿Lo más rápido? Abrí el tab <strong>Advisor</strong>: analiza tu
-                proyecto y te propone skills concretas con un click.
+                Fastest way in? Open the <strong>Advisor</strong> tab — it analyzes
+                your project and proposes concrete skills in one click.
               </p>
             </div>
           ) : filtered.length === 0 ? (

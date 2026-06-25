@@ -58,102 +58,68 @@ export function WorkbenchTabs({
     }, 0);
   }, [permsRules]);
 
+  // Descriptor per tab so the strip can be rendered in labeled groups (below)
+  // rather than as one flat wall of 11 equal buttons.
+  const tabs: Record<WorkbenchTab, Omit<StripProps, "active" | "onClick">> = {
+    skills: { icon: "puzzle", label: "Skills", title: "Skills", count: skillsCount },
+    context: { icon: "file-text", label: "Context", title: "Context", count: memoriesCount },
+    advisor: {
+      icon: "lightbulb",
+      label: advisorAnalyzing ? "…" : "Advisor",
+      title: advisorAnalyzing ? "Advisor (analyzing)" : "Advisor",
+      count: advisorPending,
+    },
+    learning: {
+      icon: "sparkles",
+      label: learningReflecting ? "…" : "Learning",
+      title: learningReflecting ? "Learning (reflecting)" : "Learning — reflect on your activity and suggest improvements",
+      count: learningPending,
+    },
+    roundtable: {
+      icon: "users",
+      label: rtActive ? "Room…" : "Room",
+      title: rtActive ? "Room (running)" : "Agent Room — you + N agents converse on a problem",
+    },
+    schedule: {
+      icon: "clock",
+      label: schedulerRunning ? "Sched…" : "Schedule",
+      title: schedulerRunning ? "Schedule (a job is running)" : "Schedule — run skills/prompts/pipelines on a clock (suggest-only)",
+      count: scheduledCount,
+    },
+    permissions: { icon: "key", label: "Perms", title: "Permissions", count: permsCount, flagged },
+    vault: { icon: "lock", label: "Vault", title: "Vault", count: vaultCount },
+    plugins: { icon: "plug", label: "Plugins", title: "Plugins", count: pluginsCount },
+    mcp: { icon: "server", label: "MCP", title: "MCP servers", count: mcpCount },
+    feedback: { icon: "message-square", label: "Feedback", title: "Feedback (dev only)" },
+  };
+
+  const groups: { label: string; tabs: WorkbenchTab[] }[] = [
+    { label: "Workspace", tabs: ["skills", "context", "advisor", "learning"] },
+    { label: "Agents", tabs: ["roundtable", "schedule"] },
+    { label: "Config", tabs: ["permissions", "vault", "plugins", "mcp"] },
+  ];
+  if (feedbackEnabled) groups.push({ label: "Dev", tabs: ["feedback"] });
+
   return (
     <div className="workbench-strip">
-      <StripButton
-        icon="puzzle"
-        label="Skills"
-        title="Skills"
-        count={skillsCount}
-        active={active === "skills"}
-        onClick={() => onChange("skills")}
-      />
-      <StripButton
-        icon="key"
-        label="Perms"
-        title="Permissions"
-        count={permsCount}
-        flagged={flagged}
-        active={active === "permissions"}
-        onClick={() => onChange("permissions")}
-      />
-      <StripButton
-        icon="lightbulb"
-        label={advisorAnalyzing ? "…" : "Advisor"}
-        title={advisorAnalyzing ? "Advisor (analyzing)" : "Advisor"}
-        count={advisorPending}
-        active={active === "advisor"}
-        onClick={() => onChange("advisor")}
-      />
-      <StripButton
-        icon="sparkles"
-        label={learningReflecting ? "…" : "Learning"}
-        title={learningReflecting ? "Learning (reflecting)" : "Learning — reflect on your activity and suggest improvements"}
-        count={learningPending}
-        active={active === "learning"}
-        onClick={() => onChange("learning")}
-      />
-      <StripButton
-        icon="users"
-        label={rtActive ? "Room…" : "Room"}
-        title={rtActive ? "Room (running)" : "Agent Room — you + N agents converse on a problem"}
-        active={active === "roundtable"}
-        onClick={() => onChange("roundtable")}
-      />
-      <StripButton
-        icon="clock"
-        label={schedulerRunning ? "Sched…" : "Schedule"}
-        title={schedulerRunning ? "Schedule (a job is running)" : "Schedule — run skills/prompts/pipelines on a clock (suggest-only)"}
-        count={scheduledCount}
-        active={active === "schedule"}
-        onClick={() => onChange("schedule")}
-      />
-      <StripButton
-        icon="lock"
-        label="Vault"
-        title="Vault"
-        count={vaultCount}
-        active={active === "vault"}
-        onClick={() => onChange("vault")}
-      />
-      <StripButton
-        icon="file-text"
-        label="Context"
-        title="Context"
-        count={memoriesCount}
-        active={active === "context"}
-        onClick={() => onChange("context")}
-      />
-      <StripButton
-        icon="plug"
-        label="Plugins"
-        title="Plugins"
-        count={pluginsCount}
-        active={active === "plugins"}
-        onClick={() => onChange("plugins")}
-      />
-      <StripButton
-        icon="server"
-        label="MCP"
-        title="MCP servers"
-        count={mcpCount}
-        active={active === "mcp"}
-        onClick={() => onChange("mcp")}
-      />
-      {feedbackEnabled && (
-        <StripButton
-          icon="message-square"
-          label="Feedback"
-          title="Feedback (dev only)"
-          active={active === "feedback"}
-          onClick={() => onChange("feedback")}
-        />
-      )}
+      {groups.map((g) => (
+        <div className="wb-strip-group" key={g.label}>
+          <div className="wb-strip-group-label" aria-hidden="true">{g.label}</div>
+          {g.tabs.map((t) => (
+            <StripButton
+              key={t}
+              {...tabs[t]}
+              active={active === t}
+              onClick={() => onChange(t)}
+            />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
 
-function StripButton({ icon, label, title, count, flagged, active, onClick }: {
+interface StripProps {
   icon: IconName;
   label: string;
   title: string;
@@ -161,7 +127,9 @@ function StripButton({ icon, label, title, count, flagged, active, onClick }: {
   flagged?: number;
   active: boolean;
   onClick: () => void;
-}) {
+}
+
+function StripButton({ icon, label, title, count, flagged, active, onClick }: StripProps) {
   const tooltip = flagged
     ? `${title} — ${flagged} rule${flagged === 1 ? "" : "s"} need review`
     : title;

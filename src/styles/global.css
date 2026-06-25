@@ -4242,6 +4242,25 @@ select:focus-visible,
 .toast-msg { flex: 1; }
 .toast-dismiss { color: var(--text-faint); flex: none; }
 
+/* --- Shared panel error (PanelError component) --- */
+.panel-error {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 0 0 8px; padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  background: var(--danger-08);
+  border-radius: var(--r-1);
+  font-size: 12px; color: var(--danger);
+}
+.panel-error-icon { flex: none; line-height: 1.4; }
+.panel-error-msg { flex: 1; white-space: pre-wrap; color: var(--text); }
+.panel-error .btn-link { flex: none; padding: 0; font-size: 11px; }
+.panel-error-dismiss { color: var(--text-faint); }
+
+/* Trust one-liner shared by sensitive panels (Vault / MCP / Permissions). */
+.wb-trust { color: var(--text-dim); }
+.wb-trust::before { content: "🛈 "; opacity: 0.7; }
+
 /* --- Shortcuts modal --- */
 .shortcuts-modal {
   width: 620px;
@@ -4538,6 +4557,14 @@ select:focus-visible,
 .wb-strip-btn.active .wb-strip-count {
   background: var(--accent-soft, rgba(96,165,250,0.25));
   color: var(--accent);
+}
+
+/* Grouped strip sections — so the 11 tabs read as 3 clusters, not a flat wall. */
+.wb-strip-group { display: flex; flex-direction: column; gap: 2px; }
+.wb-strip-group + .wb-strip-group { margin-top: 6px; }
+.wb-strip-group-label {
+  font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px;
+  color: var(--text-faint); text-align: center; padding: 3px 0 2px;
 }
 .wb-strip-flag {
   position: absolute;
