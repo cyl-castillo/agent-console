@@ -2131,13 +2131,19 @@ select:focus-visible,
 .terminal-host {
   flex: 1;
   min-height: 0;
-  /* Extra bottom padding gives the last grid row clearance so the fit() row
-     count leaves a gap above the status bar instead of butting against it.
-     Keep it ≥ one text cell (~17px at fontSize 13) so even a marginal row is
-     dropped by fit() rather than rendered flush against the bar. overflow:
-     hidden then guarantees a stray sub-pixel row can never spill down over the
-     status bar (the center panel doesn't clip). */
-  padding: 8px 4px 18px 8px;
+  /* content-box is load-bearing, not cosmetic. FitAddon sizes the grid from
+     getComputedStyle(host).height, and under box-sizing:border-box WebKitGTK
+     returns the *border-box* height (padding included). FitAddon only subtracts
+     the .xterm element's own padding (0) — never the parent's — so it counts
+     this padding as usable space and reports ~2 rows too many. The agent then
+     draws those extra rows below the content box, where overflow:hidden clips
+     them flush against the status bar. content-box makes that computed height
+     report the real content height, so the row count matches what fits. */
+  box-sizing: content-box;
+  /* Bottom padding then becomes a genuine gap above the status bar (the row
+     count already excludes it); overflow:hidden still guards against a stray
+     sub-pixel row spilling over the bar. */
+  padding: 8px 4px 12px 8px;
   overflow: hidden;
   background: #0d0f12;
 }
