@@ -231,6 +231,14 @@ export default function App() {
 
   useEffect(() => {
     checkForUpdates({ silentIfNone: true });
+    // Re-check periodically: this app commonly stays open for days, so a
+    // startup-only check means a long-running session never learns about a new
+    // release. Silent unless something's actually available.
+    const id = window.setInterval(
+      () => checkForUpdates({ silentIfNone: true }),
+      6 * 60 * 60 * 1000,
+    );
+    return () => window.clearInterval(id);
   }, [checkForUpdates]);
 
   useEffect(() => { void initFeedback(); }, [initFeedback]);
