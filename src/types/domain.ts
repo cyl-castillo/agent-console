@@ -526,3 +526,64 @@ export interface VoiceModelProgress {
   downloaded: number;
   total: number | null;
 }
+
+/// Which blocks of "work" to bundle into an exported workspace archive.
+export interface ExportOptions {
+  sessions: boolean;
+  rooms: boolean;
+  schedules: boolean;
+  learning: boolean;
+  /// Include the raw activity ledger inside the learning block (off by default).
+  includeActivity: boolean;
+}
+
+/// What an `exportWork` call wrote — a summary for the confirmation toast.
+export interface ExportResult {
+  path: string;
+  bytes: number;
+  sessions: number;
+  rooms: number;
+  schedules: number;
+  skills: number;
+  memory: number;
+}
+
+/// Per-block import decision: skip it, merge (keep existing on collision), or
+/// replace (overwrite colliding items). Mirrors the Rust `Decision` enum.
+export type ImportDecision = "skip" | "merge" | "replace";
+
+/// One decision per block, sent to `importWorkApply`.
+export interface ImportDecisions {
+  sessions: ImportDecision;
+  rooms: ImportDecision;
+  schedules: ImportDecision;
+  skills: ImportDecision;
+  memory: ImportDecision;
+}
+
+/// What one block of an archive contains and how it overlaps the destination.
+export interface BlockManifest {
+  present: boolean;
+  total: number;
+  collisions: number;
+}
+
+/// Preview of an archive against the current project (from `importWorkPreview`).
+export interface ImportManifest {
+  sourceProjectName: string;
+  createdAtMs: number;
+  sessions: BlockManifest;
+  rooms: BlockManifest;
+  schedules: BlockManifest;
+  skills: BlockManifest;
+  memory: BlockManifest;
+}
+
+/// What an import actually applied (from `importWorkApply`).
+export interface ImportResult {
+  sessions: number;
+  rooms: number;
+  schedules: number;
+  skills: number;
+  memory: number;
+}

@@ -14,7 +14,7 @@ import { useSchedulerStore } from "../stores/schedulerStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "schedule" | "vault" | "context" | "plugins" | "mcp" | "feedback";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "schedule" | "vault" | "context" | "plugins" | "mcp" | "transfer" | "feedback";
 
 export function WorkbenchTabs({
   active,
@@ -90,13 +90,18 @@ export function WorkbenchTabs({
     vault: { icon: "lock", label: "Vault", title: "Vault", count: vaultCount },
     plugins: { icon: "plug", label: "Plugins", title: "Plugins", count: pluginsCount },
     mcp: { icon: "server", label: "MCP", title: "MCP servers", count: mcpCount },
+    transfer: {
+      icon: "archive",
+      label: "Transfer",
+      title: "Export / Import — move your work to or from another installation",
+    },
     feedback: { icon: "message-square", label: "Feedback", title: "Feedback (dev only)" },
   };
 
   const groups: { label: string; tabs: WorkbenchTab[] }[] = [
     { label: "Workspace", tabs: ["skills", "context", "advisor", "learning"] },
     { label: "Agents", tabs: ["roundtable", "schedule"] },
-    { label: "Config", tabs: ["permissions", "vault", "plugins", "mcp"] },
+    { label: "Config", tabs: ["permissions", "vault", "plugins", "mcp", "transfer"] },
   ];
   if (feedbackEnabled) groups.push({ label: "Dev", tabs: ["feedback"] });
 
