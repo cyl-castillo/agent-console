@@ -861,4 +861,143 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&base);
     }
+
+    /// The full app flow, through a REAL file on disk and all four blocks:
+    /// seed a source project → build_archive → to_json → write `.acwork` → read
+    /// it back → parse_archive → build_manifest → apply_archive into a different
+    /// destination. This is what export-to-file then import-from-file does in the
+    /// UI, minus the dialog/State plumbing.
+    #[test]
+    fn full_file_flow_all_blocks_export_then_import() {
+        use crate::services::scheduler_service::{Action, Job, OnMissed, Trigger};
+
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-wsa-file-{}-{}", std::process::id(), nanos));
+        let home = base.join("home");
+        let data = base.join("data");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_DATA_HOME", &data);
+
+        let src = home.join("src-proj");
+        let dest = home.join("dest-proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        let src_s = src.to_string_lossy().to_string();
+        let dest_s = dest.to_string_lossy().to_string();
+
+        let state = AppState::default();
+
+        // --- Seed all four kinds of work in the source project.
+        state.sessions.save(&src_s, vec![session("s1")]).unwrap();
+
+        let room = PersistedRoom {
+            version: 1,
+            id: "room-1".into(),
+            problem: "should we ship?".into(),
+            participants: Vec::new(),
+            transcript: Vec::new(),
+            resume: std::collections::HashMap::new(),
+            last_seen: std::collections::HashMap::new(),
+            total_tokens: 1234,
+            updated_at_ms: 10,
+        };
+        state.roundtable.rooms().save_room(&room, &src).unwrap();
+
+        let job = Job {
+            id: "job-1".into(),
+            name: "nightly review".into(),
+            enabled: true,
+            trigger: Trigger::Daily { hour: 3, minute: 0 },
+            action: Action::Skill {
+                name: "code-review".into(),
+                args: None,
+            },
+            on_missed: OnMissed::Catchup,
+            cooldown_ms: 0,
+            created_at_ms: 5,
+            last_run_ms: Some(9),
+            next_due_ms: Some(99),
+            consecutive_failures: 2,
+            backoff_until_ms: Some(50),
+        };
+        state.scheduler.create(&src_s, job).unwrap();
+
+        skills_service::write(&src, "demo-skill", "---\nname: demo-skill\n---\n\nbody").unwrap();
+        memory_service::write(&src, "fact-a.md", "remembered").unwrap();
+
+        // --- Export everything to a real file.
+        let opts = ExportOptions {
+            sessions: true,
+            rooms: true,
+            schedules: true,
+            learning: true,
+            include_activity: false,
+        };
+        let archive = build_archive(&state, &src_s, opts).unwrap();
+        let json = to_json(&archive).unwrap();
+        let file = base.join("bundle.acwork");
+        std::fs::write(&file, json.as_bytes()).unwrap();
+
+        // The file on disk must not leak the source machine path anywhere.
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            !on_disk.contains(&src_s),
+            "the exported file must not contain the source project path"
+        );
+
+        // --- Read the file back and preview against the (empty) destination.
+        let parsed = parse_archive(&on_disk).unwrap();
+        let manifest = build_manifest(&state, &dest_s, &parsed).unwrap();
+        assert_eq!(manifest.sessions.total, 1);
+        assert_eq!(manifest.rooms.total, 1);
+        assert_eq!(manifest.schedules.total, 1);
+        assert_eq!(manifest.skills.total, 1);
+        assert_eq!(manifest.memory.total, 1);
+        assert_eq!(manifest.sessions.collisions, 0, "dest is empty, no overlap");
+
+        // --- Apply everything into the destination.
+        let decide = ImportDecisions {
+            sessions: Decision::Merge,
+            rooms: Decision::Merge,
+            schedules: Decision::Merge,
+            skills: Decision::Merge,
+            memory: Decision::Merge,
+        };
+        let r = apply_archive(&state, &dest_s, &parsed, decide).unwrap();
+        assert_eq!(
+            (r.sessions, r.rooms, r.schedules, r.skills, r.memory),
+            (1, 1, 1, 1, 1),
+            "every block must import"
+        );
+
+        // --- Verify each block landed in the destination, re-keyed.
+        let ds = state.sessions.list(&dest_s).unwrap();
+        assert_eq!(ds.len(), 1);
+        assert_eq!(ds[0].cwd, dest_s, "session re-keyed to destination project");
+
+        let drooms = state.roundtable.rooms().summaries(&dest_s).unwrap();
+        assert_eq!(drooms.len(), 1);
+        assert_eq!(drooms[0].id, "room-1");
+        assert_eq!(drooms[0].total_tokens, 1234, "transcript work preserved");
+
+        let djobs = state.scheduler.list(&dest_s).unwrap();
+        assert_eq!(djobs.len(), 1);
+        assert!(!djobs[0].enabled, "imported job must be disabled");
+
+        assert!(dest.join(".claude/skills/demo-skill/SKILL.md").exists());
+        assert!(dest_memory_names(&dest).contains("fact-a.md"));
+
+        // Source project is completely untouched by the import.
+        assert_eq!(state.sessions.list(&src_s).unwrap().len(), 1);
+        assert_eq!(state.scheduler.list(&src_s).unwrap().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
