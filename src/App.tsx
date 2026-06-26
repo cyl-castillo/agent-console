@@ -27,6 +27,7 @@ import { ContextPanel } from "./components/ContextPanel";
 import { FeedbackPanel } from "./components/FeedbackPanel";
 import { PluginsPanel } from "./components/PluginsPanel";
 import { McpPanel } from "./components/McpPanel";
+import { ExportImportPanel } from "./components/ExportImportPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
 import { WorkbenchTabs, type WorkbenchTab } from "./components/WorkbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
@@ -181,7 +182,7 @@ export default function App() {
     };
     const onOpenWb = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "schedule" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "feedback") {
+      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "schedule" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "transfer" || d === "feedback") {
         setWorkbenchTab(d);
       }
     };
@@ -275,7 +276,7 @@ export default function App() {
       const saved = localStorage.getItem(`agent-console:workbench-tab:${project.root}`);
       if (saved === "skills" || saved === "permissions" || saved === "advisor"
           || saved === "learning" || saved === "roundtable" || saved === "schedule" || saved === "vault" || saved === "context"
-          || saved === "plugins" || saved === "mcp" || saved === "feedback") {
+          || saved === "plugins" || saved === "mcp" || saved === "transfer" || saved === "feedback") {
         setWorkbenchTabState(saved);
       }
     } catch { /* ignore */ }
@@ -469,6 +470,7 @@ export default function App() {
                 {workbenchTab === "context" && <ContextPanel />}
                 {workbenchTab === "plugins" && <PluginsPanel />}
                 {workbenchTab === "mcp" && <McpPanel />}
+                {workbenchTab === "transfer" && <ExportImportPanel />}
                 {workbenchTab === "feedback" && <FeedbackPanel />}
               </div>
             </div>

@@ -5357,3 +5357,83 @@ select:focus-visible,
 .ct-file-revert:focus-visible,
 .vault-actions :focus-visible,
 .rule-actions :focus-visible { opacity: 1; }
+
+/* ---- Export / Import (Transfer) panel ---- */
+.wb-ei-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.wb-ei-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elev-1);
+  cursor: pointer;
+}
+.wb-ei-check:hover { border-color: var(--hover-border); }
+.wb-ei-check input { margin-top: 2px; accent-color: var(--accent); }
+.wb-ei-check-body { display: flex; flex-direction: column; gap: 2px; }
+.wb-ei-check-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+.wb-ei-check-desc {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+.wb-ei-advanced { margin-top: 6px; border-style: dashed; }
+
+.wb-ei-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elev-1);
+}
+.wb-ei-row.disabled { opacity: 0.5; }
+.wb-ei-row-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  min-width: 76px;
+}
+.wb-ei-row-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  flex: 1;
+}
+.wb-ei-collide { color: var(--danger); }
+.wb-ei-src { color: var(--accent); text-transform: none; }
+
+.wb-ei-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.wb-ei-seg-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 3px 9px;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+.wb-ei-seg-btn:last-child { border-right: none; }
+.wb-ei-seg-btn:hover { background: var(--hover); }
+.wb-ei-seg-btn.active { background: var(--accent-soft); color: var(--accent); }
+
+.wb-ei-actions { display: flex; align-items: center; gap: 8px; }
