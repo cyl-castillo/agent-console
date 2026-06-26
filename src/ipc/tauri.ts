@@ -1,13 +1,14 @@
 // Typed wrappers around `invoke()`. One place to map Rust commands -> TS.
 
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   ActivityEvent,
   AdvisorAnalysisResult,
   BranchInfo,
   ContextFileStat, ContextStatus,
   CurationResult,
+  ExportOptions, ExportResult,
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, Job, McpServer, McpAddInput,
@@ -213,11 +214,26 @@ export const ipc = {
   voicePttStop: () => invoke<string>("voice_ptt_stop"),
   voiceSpeak: (text: string) => invoke<void>("voice_speak", { text }),
   voiceListen: (seconds: number) => invoke<string>("voice_listen", { seconds }),
+
+  // Bundle the chosen blocks of work for `projectRoot` and write the archive to
+  // `destPath` (a path from the save dialog). Returns counts for a confirmation.
+  exportWork: (projectRoot: string, options: ExportOptions, destPath: string) =>
+    invoke<ExportResult>("export_work", { projectRoot, options, destPath }),
 };
 
 export async function pickFolder(): Promise<string | null> {
   const result = await openDialog({ directory: true, multiple: false });
   if (Array.isArray(result)) return result[0] ?? null;
+  return result ?? null;
+}
+
+/// Save-file picker for an export archive. Defaults the name and `.acwork`
+/// extension; returns the chosen path or null if cancelled.
+export async function pickSaveFile(defaultName: string): Promise<string | null> {
+  const result = await saveDialog({
+    defaultPath: defaultName,
+    filters: [{ name: "Agent Console workspace", extensions: ["acwork"] }],
+  });
   return result ?? null;
 }
 

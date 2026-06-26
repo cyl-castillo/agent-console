@@ -526,3 +526,24 @@ export interface VoiceModelProgress {
   downloaded: number;
   total: number | null;
 }
+
+/// Which blocks of "work" to bundle into an exported workspace archive.
+export interface ExportOptions {
+  sessions: boolean;
+  rooms: boolean;
+  schedules: boolean;
+  learning: boolean;
+  /// Include the raw activity ledger inside the learning block (off by default).
+  includeActivity: boolean;
+}
+
+/// What an `exportWork` call wrote — a summary for the confirmation toast.
+export interface ExportResult {
+  path: string;
+  bytes: number;
+  sessions: number;
+  rooms: number;
+  schedules: number;
+  skills: number;
+  memory: number;
+}
