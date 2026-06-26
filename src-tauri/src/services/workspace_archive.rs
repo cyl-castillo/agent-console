@@ -16,6 +16,7 @@
 //!    also drop runtime-only handles (Claude resume ids, engine resume refs, job
 //!    backoff/next-due state) that are valid only in the session that wrote them.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, AppResult};
 use crate::services::activity_service::ActivityEvent;
 use crate::services::context_service;
+use crate::services::memory_service;
 use crate::services::roundtable_service::PersistedRoom;
 use crate::services::scheduler_service::Job;
 use crate::services::sessions_service::PersistedSession;
@@ -286,6 +288,318 @@ pub fn to_json(archive: &WorkspaceArchive) -> AppResult<String> {
         .map_err(|e| AppError::Other(format!("serialize archive: {e}")))
 }
 
+// ---------------------------------------------------------------------------
+// Import
+// ---------------------------------------------------------------------------
+
+/// Per-block decision the importing user makes after seeing the manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Decision {
+    /// Don't import this block at all (the default — importing is opt-in).
+    #[default]
+    Skip,
+    /// Add the archive's items, keeping anything already in the destination
+    /// (collisions by id/name are left untouched — re-importing is idempotent).
+    Merge,
+    /// Overwrite colliding items with the archive's version and add new ones.
+    /// Never deletes destination-only items (importing is additive, not a wipe).
+    Replace,
+}
+
+/// One decision per block. Absent fields default to `Skip`.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportDecisions {
+    #[serde(default)]
+    pub sessions: Decision,
+    #[serde(default)]
+    pub rooms: Decision,
+    #[serde(default)]
+    pub schedules: Decision,
+    #[serde(default)]
+    pub skills: Decision,
+    #[serde(default)]
+    pub memory: Decision,
+}
+
+/// What one block contains and how it overlaps the destination, so the UI can
+/// show "12 sessions (3 already here)" before the user picks merge/replace/skip.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockManifest {
+    /// The block was chosen at export time (present in the file), even if empty.
+    pub present: bool,
+    pub total: usize,
+    /// How many items collide with something already in the destination project.
+    pub collisions: usize,
+}
+
+/// Preview of an archive against a specific destination project.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportManifest {
+    pub source_project_name: String,
+    pub created_at_ms: u64,
+    pub sessions: BlockManifest,
+    pub rooms: BlockManifest,
+    pub schedules: BlockManifest,
+    pub skills: BlockManifest,
+    pub memory: BlockManifest,
+}
+
+/// What an import actually applied, for the confirmation toast.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub sessions: usize,
+    pub rooms: usize,
+    pub schedules: usize,
+    pub skills: usize,
+    pub memory: usize,
+}
+
+/// Parse and validate an archive: reject files that aren't ours, and refuse a
+/// `version` newer than we understand rather than silently mis-reading it.
+pub fn parse_archive(json: &str) -> AppResult<WorkspaceArchive> {
+    let archive: WorkspaceArchive = serde_json::from_str(json)
+        .map_err(|e| AppError::InvalidArgument(format!("not a valid workspace archive: {e}")))?;
+    if archive.format != ARCHIVE_FORMAT {
+        return Err(AppError::InvalidArgument(format!(
+            "unrecognized file format: '{}'",
+            archive.format
+        )));
+    }
+    if archive.version > ARCHIVE_VERSION {
+        return Err(AppError::InvalidArgument(format!(
+            "archive version {} is newer than this app supports ({}); update the app",
+            archive.version, ARCHIVE_VERSION
+        )));
+    }
+    Ok(archive)
+}
+
+/// Count how many of `incoming` ids/names already exist in `existing`.
+fn count_collisions(existing: &HashSet<String>, incoming: impl Iterator<Item = String>) -> usize {
+    incoming.filter(|k| existing.contains(k)).count()
+}
+
+/// Existing project skill folder names in the destination (for collision counts).
+fn dest_skill_names(dest_root: &Path) -> HashSet<String> {
+    skills_service::list(Some(dest_root))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| s.source == "project" && s.kind == "skill")
+        .map(|s| s.name)
+        .collect()
+}
+
+/// Existing memory entry file names in the destination (excluding the index).
+fn dest_memory_names(dest_root: &Path) -> HashSet<String> {
+    memory_service::list(dest_root)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| !m.is_index)
+        .map(|m| m.name)
+        .collect()
+}
+
+/// Build the preview of `archive` against `dest_root`.
+pub fn build_manifest(
+    state: &AppState,
+    dest_root: &str,
+    archive: &WorkspaceArchive,
+) -> AppResult<ImportManifest> {
+    let dest_path = Path::new(dest_root);
+    let b = &archive.blocks;
+
+    let sessions = match &b.sessions {
+        Some(items) => {
+            let existing: HashSet<String> =
+                state.sessions.list(dest_root)?.into_iter().map(|s| s.id).collect();
+            BlockManifest {
+                present: true,
+                total: items.len(),
+                collisions: count_collisions(&existing, items.iter().map(|s| s.id.clone())),
+            }
+        }
+        None => BlockManifest::default(),
+    };
+
+    let rooms = match &b.rooms {
+        Some(items) => {
+            let existing: HashSet<String> = state
+                .roundtable
+                .rooms()
+                .summaries(dest_root)?
+                .into_iter()
+                .map(|s| s.id)
+                .collect();
+            BlockManifest {
+                present: true,
+                total: items.len(),
+                collisions: count_collisions(&existing, items.iter().map(|r| r.id.clone())),
+            }
+        }
+        None => BlockManifest::default(),
+    };
+
+    let schedules = match &b.schedules {
+        Some(items) => {
+            let existing: HashSet<String> =
+                state.scheduler.list(dest_root)?.into_iter().map(|j| j.id).collect();
+            BlockManifest {
+                present: true,
+                total: items.len(),
+                collisions: count_collisions(&existing, items.iter().map(|j| j.id.clone())),
+            }
+        }
+        None => BlockManifest::default(),
+    };
+
+    let (skills, memory) = match &b.learning {
+        Some(l) => {
+            let skill_names = dest_skill_names(dest_path);
+            let mem_names = dest_memory_names(dest_path);
+            (
+                BlockManifest {
+                    present: true,
+                    total: l.skills.len(),
+                    collisions: count_collisions(
+                        &skill_names,
+                        l.skills.iter().map(|d| d.name.clone()),
+                    ),
+                },
+                BlockManifest {
+                    present: true,
+                    total: l.memory.len(),
+                    collisions: count_collisions(
+                        &mem_names,
+                        l.memory.iter().map(|d| d.name.clone()),
+                    ),
+                },
+            )
+        }
+        None => (BlockManifest::default(), BlockManifest::default()),
+    };
+
+    Ok(ImportManifest {
+        source_project_name: archive.source_project_name.clone(),
+        created_at_ms: archive.created_at_ms,
+        sessions,
+        rooms,
+        schedules,
+        skills,
+        memory,
+    })
+}
+
+/// Apply an archive to `dest_root` according to `decisions`. Every block is
+/// re-keyed to the destination project: session `cwd`s become `dest_root`, and
+/// per-project store keys are the destination's, never the source's.
+pub fn apply_archive(
+    state: &AppState,
+    dest_root: &str,
+    archive: &WorkspaceArchive,
+    decisions: ImportDecisions,
+) -> AppResult<ImportResult> {
+    let dest_path = Path::new(dest_root);
+    let b = &archive.blocks;
+    let mut result = ImportResult::default();
+
+    // --- Sessions: rewrite cwd to the destination project, save the whole bucket.
+    if let (Some(items), d) = (&b.sessions, decisions.sessions) {
+        if d != Decision::Skip {
+            let mut bucket = if d == Decision::Replace {
+                Vec::new()
+            } else {
+                state.sessions.list(dest_root)?
+            };
+            let mut ids: HashSet<String> = bucket.iter().map(|s| s.id.clone()).collect();
+            for src in items {
+                // Merge keeps an existing session untouched; Replace overwrites it.
+                if ids.contains(&src.id) {
+                    if d == Decision::Merge {
+                        continue;
+                    }
+                    bucket.retain(|s| s.id != src.id);
+                }
+                let mut s = src.clone();
+                s.cwd = dest_root.to_string();
+                ids.insert(s.id.clone());
+                bucket.push(s);
+                result.sessions += 1;
+            }
+            state.sessions.save(dest_root, bucket)?;
+        }
+    }
+
+    // --- Rooms: upsert each under the destination key.
+    if let (Some(items), d) = (&b.rooms, decisions.rooms) {
+        if d != Decision::Skip {
+            let store = state.roundtable.rooms();
+            let existing: HashSet<String> = store
+                .summaries(dest_root)?
+                .into_iter()
+                .map(|s| s.id)
+                .collect();
+            for room in items {
+                if existing.contains(&room.id) && d == Decision::Merge {
+                    continue;
+                }
+                store.save_room(room, dest_path)?;
+                result.rooms += 1;
+            }
+        }
+    }
+
+    // --- Schedules: create() upserts by id and recomputes next_due; jobs stay
+    //     disabled (scrubbed at export), so nothing fires on import.
+    if let (Some(items), d) = (&b.schedules, decisions.schedules) {
+        if d != Decision::Skip {
+            let existing: HashSet<String> =
+                state.scheduler.list(dest_root)?.into_iter().map(|j| j.id).collect();
+            for job in items {
+                if existing.contains(&job.id) && d == Decision::Merge {
+                    continue;
+                }
+                state.scheduler.create(dest_root, job.clone())?;
+                result.schedules += 1;
+            }
+        }
+    }
+
+    // --- Learning skills + memory: write each doc; Merge skips colliding names,
+    //     Replace overwrites them. `write` guards against path-traversal in the
+    //     untrusted doc name.
+    if let Some(l) = &b.learning {
+        if decisions.skills != Decision::Skip {
+            let existing = dest_skill_names(dest_path);
+            for doc in &l.skills {
+                if existing.contains(&doc.name) && decisions.skills == Decision::Merge {
+                    continue;
+                }
+                if skills_service::write(dest_path, &doc.name, &doc.content).is_ok() {
+                    result.skills += 1;
+                }
+            }
+        }
+        if decisions.memory != Decision::Skip {
+            let existing = dest_memory_names(dest_path);
+            for doc in &l.memory {
+                if existing.contains(&doc.name) && decisions.memory == Decision::Merge {
+                    continue;
+                }
+                if memory_service::write(dest_path, &doc.name, &doc.content).is_ok() {
+                    result.memory += 1;
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,5 +759,106 @@ mod tests {
         assert_eq!(docs[0].content, "fact A");
 
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn parse_archive_rejects_foreign_and_future_files() {
+        // Not our format.
+        assert!(parse_archive(r#"{"format":"something-else","version":1,"createdAtMs":0,"sourceProjectName":"x","blocks":{}}"#).is_err());
+        // A version from the future we can't safely read.
+        let future = format!(
+            r#"{{"format":"{ARCHIVE_FORMAT}","version":{},"createdAtMs":0,"sourceProjectName":"x","blocks":{{}}}}"#,
+            ARCHIVE_VERSION + 1
+        );
+        assert!(parse_archive(&future).is_err());
+        // Plain garbage.
+        assert!(parse_archive("not json").is_err());
+        // A well-formed current archive parses.
+        let ok = format!(
+            r#"{{"format":"{ARCHIVE_FORMAT}","version":{ARCHIVE_VERSION},"createdAtMs":0,"sourceProjectName":"x","blocks":{{}}}}"#
+        );
+        assert!(parse_archive(&ok).is_ok());
+    }
+
+    /// End-to-end: export from a source project, import into a *different*
+    /// destination, and confirm everything is re-keyed to the destination — and
+    /// that a second import (Merge) is idempotent (no duplicates).
+    #[test]
+    fn export_import_roundtrip_rekeys_to_destination() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-wsa-rt-{}-{}", std::process::id(), nanos));
+        let home = base.join("home");
+        let data = base.join("data");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_DATA_HOME", &data);
+
+        let src = home.join("src-proj");
+        let dest = home.join("dest-proj");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        let src_s = src.to_string_lossy().to_string();
+        let dest_s = dest.to_string_lossy().to_string();
+
+        let state = AppState::default();
+
+        // Seed source: a session, a project skill, a memory entry.
+        state
+            .sessions
+            .save(&src_s, vec![session("s1"), session("s2")])
+            .unwrap();
+        skills_service::write(&src, "demo-skill", "---\nname: demo-skill\n---\n\nbody").unwrap();
+        memory_service::write(&src, "fact-a.md", "remembered").unwrap();
+
+        // Export sessions + learning.
+        let opts = ExportOptions {
+            sessions: true,
+            rooms: false,
+            schedules: false,
+            learning: true,
+            include_activity: false,
+        };
+        let archive = build_archive(&state, &src_s, opts).unwrap();
+        assert_eq!(archive.blocks.sessions.as_ref().unwrap().len(), 2);
+        assert_eq!(archive.blocks.learning.as_ref().unwrap().skills.len(), 1);
+
+        // Import into the (empty) destination, taking everything.
+        let decide = ImportDecisions {
+            sessions: Decision::Merge,
+            rooms: Decision::Skip,
+            schedules: Decision::Skip,
+            skills: Decision::Merge,
+            memory: Decision::Merge,
+        };
+        let r = apply_archive(&state, &dest_s, &archive, decide).unwrap();
+        assert_eq!(r.sessions, 2);
+        assert_eq!(r.skills, 1);
+        assert_eq!(r.memory, 1);
+
+        // Sessions landed under the destination key, re-keyed to its path.
+        let dest_sessions = state.sessions.list(&dest_s).unwrap();
+        assert_eq!(dest_sessions.len(), 2);
+        assert!(
+            dest_sessions.iter().all(|s| s.cwd == dest_s),
+            "imported sessions must point at the destination project"
+        );
+        // Source is untouched.
+        assert_eq!(state.sessions.list(&src_s).unwrap().len(), 2);
+        // Skill + memory materialized under the destination.
+        assert!(dest.join(".claude/skills/demo-skill/SKILL.md").exists());
+        assert!(dest_memory_names(&dest).contains("fact-a.md"));
+
+        // Idempotency: a second Merge import adds nothing.
+        let r2 = apply_archive(&state, &dest_s, &archive, decide).unwrap();
+        assert_eq!(r2.sessions, 0, "merge re-import must not duplicate sessions");
+        assert_eq!(state.sessions.list(&dest_s).unwrap().len(), 2);
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

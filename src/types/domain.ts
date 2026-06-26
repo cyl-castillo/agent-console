@@ -547,3 +547,43 @@ export interface ExportResult {
   skills: number;
   memory: number;
 }
+
+/// Per-block import decision: skip it, merge (keep existing on collision), or
+/// replace (overwrite colliding items). Mirrors the Rust `Decision` enum.
+export type ImportDecision = "skip" | "merge" | "replace";
+
+/// One decision per block, sent to `importWorkApply`.
+export interface ImportDecisions {
+  sessions: ImportDecision;
+  rooms: ImportDecision;
+  schedules: ImportDecision;
+  skills: ImportDecision;
+  memory: ImportDecision;
+}
+
+/// What one block of an archive contains and how it overlaps the destination.
+export interface BlockManifest {
+  present: boolean;
+  total: number;
+  collisions: number;
+}
+
+/// Preview of an archive against the current project (from `importWorkPreview`).
+export interface ImportManifest {
+  sourceProjectName: string;
+  createdAtMs: number;
+  sessions: BlockManifest;
+  rooms: BlockManifest;
+  schedules: BlockManifest;
+  skills: BlockManifest;
+  memory: BlockManifest;
+}
+
+/// What an import actually applied (from `importWorkApply`).
+export interface ImportResult {
+  sessions: number;
+  rooms: number;
+  schedules: number;
+  skills: number;
+  memory: number;
+}

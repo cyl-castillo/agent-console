@@ -5,7 +5,9 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
-use crate::services::workspace_archive::{self, ExportOptions};
+use crate::services::workspace_archive::{
+    self, ExportOptions, ImportDecisions, ImportManifest, ImportResult,
+};
 use crate::state::AppState;
 
 /// What the export wrote, so the UI can confirm ("exported 12 sessions, 3 rooms…
@@ -56,4 +58,33 @@ pub fn export_work(
         skills: learning.map(|l| l.skills.len()).unwrap_or(0),
         memory: learning.map(|l| l.memory.len()).unwrap_or(0),
     })
+}
+
+/// Read an archive file, validate it, and preview what importing it into
+/// `project_root` would do (counts + collisions per block). No mutation.
+#[tauri::command]
+pub fn import_work_preview(
+    project_root: String,
+    src_path: String,
+    state: State<'_, AppState>,
+) -> AppResult<ImportManifest> {
+    let json = fs::read_to_string(Path::new(&src_path))
+        .map_err(|e| AppError::Other(format!("read import file: {e}")))?;
+    let archive = workspace_archive::parse_archive(&json)?;
+    workspace_archive::build_manifest(&state, &project_root, &archive)
+}
+
+/// Apply an archive file to `project_root` with the user's per-block decisions,
+/// re-keying everything to the destination project.
+#[tauri::command]
+pub fn import_work_apply(
+    project_root: String,
+    src_path: String,
+    decisions: ImportDecisions,
+    state: State<'_, AppState>,
+) -> AppResult<ImportResult> {
+    let json = fs::read_to_string(Path::new(&src_path))
+        .map_err(|e| AppError::Other(format!("read import file: {e}")))?;
+    let archive = workspace_archive::parse_archive(&json)?;
+    workspace_archive::apply_archive(&state, &project_root, &archive, decisions)
 }

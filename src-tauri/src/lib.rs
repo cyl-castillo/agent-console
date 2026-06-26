@@ -135,6 +135,8 @@ pub fn run() {
             commands::voice::voice_speak,
             commands::voice::voice_listen,
             commands::workspace_archive::export_work,
+            commands::workspace_archive::import_work_preview,
+            commands::workspace_archive::import_work_apply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
