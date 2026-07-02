@@ -276,7 +276,7 @@ function fuzzyScore(query: string, target: string): number {
     if (found === lastMatch + 1) { streak++; score += 5 + streak * 2; }
     else { streak = 0; score += 1; }
     // boost on word boundaries
-    if (found === 0 || /[\/_\-. ]/.test(t[found - 1])) score += 8;
+    if (found === 0 || /[/_\-. ]/.test(t[found - 1])) score += 8;
     lastMatch = found;
   }
   // shorter targets win ties

@@ -41,7 +41,7 @@ export function PermissionsPanel() {
   });
   const [onlyFlagged, setOnlyFlagged] = useState(false);
 
-  const allRules = snapshot?.rules ?? [];
+  const allRules = useMemo(() => snapshot?.rules ?? [], [snapshot]);
 
   const counts = useMemo(() => ({
     total: allRules.length,

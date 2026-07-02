@@ -10,7 +10,7 @@ const PATH_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"
 // Patterns that are NEVER allowed, regardless of confirmation. Allow rules
 // matching any of these are refused by the UI. Deny rules are fine.
 const HARD_DENY_ALLOW_PATTERNS: Array<{ test: (raw: string) => boolean; reason: string }> = [
-  { test: (r) => /^Bash\(rm\s+-rf?\s+[\/*~]/.test(r), reason: "matches recursive delete from root or home" },
+  { test: (r) => /^Bash\(rm\s+-rf?\s+[/*~]/.test(r), reason: "matches recursive delete from root or home" },
   { test: (r) => /^Bash\(sudo(\s|:)/.test(r) && !r.includes("AGENT_CONSOLE"), reason: "sudo cannot be auto-allowed" },
   { test: (r) => /^Bash\(:\(\)/.test(r), reason: "fork bomb pattern" },
   { test: (r) => /^Bash\(dd\s/.test(r), reason: "raw disk write" },
