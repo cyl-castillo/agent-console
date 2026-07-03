@@ -32,6 +32,10 @@ pub struct PersistedSession {
     /// `claude --model <model>` when the terminal spawns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Isolated worktree this session runs in (path + branch + base). Absent =
+    /// the session runs directly in the project checkout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<crate::services::worktree_service::WorktreeInfo>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -214,6 +218,7 @@ mod tests {
             claude_session_id: None,
             name_suggested: None,
             model: None,
+            worktree: None,
         }
     }
 

@@ -617,6 +617,7 @@ mod tests {
             claude_session_id: Some("resume-handle-xyz".into()),
             name_suggested: Some(true),
             model: Some("opus".into()),
+            worktree: None,
         }
     }
 

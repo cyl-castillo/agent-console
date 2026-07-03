@@ -14,6 +14,7 @@ import { ProjectPicker } from "./components/ProjectPicker";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { useRoundtableStore } from "./stores/roundtableStore";
 import { Terminal } from "./components/Terminal";
+import { WorktreeBar } from "./components/WorktreeBar";
 import { ChangesView } from "./components/ChangesView";
 import { Preview } from "./components/Preview";
 import { SkillsPanel } from "./components/SkillsPanel";
@@ -112,6 +113,19 @@ export default function App() {
     setTab("terminal");
     void persistTerminals();
   };
+
+  // Keep the backend's notion of "the checkout being worked on" in sync with
+  // the active session: git/snapshot commands and the change watcher follow
+  // the session's isolated worktree (or the project root). Refresh Changes
+  // after the switch so the view never shows the previous checkout's status.
+  const activeWorktreePath =
+    terminalSessions.find((s) => s.id === activeTerminalId)?.worktree?.path ?? null;
+  useEffect(() => {
+    if (!project) return;
+    ipc.setActiveRepo(activeWorktreePath)
+      .then(() => refreshChanges())
+      .catch(() => { /* stale session referencing a removed worktree — root stays */ });
+  }, [project, activeWorktreePath, refreshChanges]);
 
   const copyProjectPath = () => {
     if (!project) return;
@@ -290,8 +304,23 @@ export default function App() {
       if (st.ready && st.sessions.length === 0) {
         addTerminal(project.root);
       }
+      // Clean up managed worktree checkouts no session references any more
+      // (branches are kept). Only when hydrate succeeded — a failed load must
+      // not be allowed to orphan every live worktree.
+      if (st.ready) {
+        const keep = st.sessions
+          .map((s) => s.worktree?.path)
+          .filter((p): p is string => Boolean(p));
+        ipc.worktreePruneOrphans(keep)
+          .then((removed) => {
+            if (removed.length > 0) {
+              showToast(`Cleaned ${removed.length} orphaned worktree${removed.length === 1 ? "" : "s"} (branches kept)`, "info");
+            }
+          })
+          .catch(() => { /* best-effort */ });
+      }
     })();
-  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal, resetPaletteForProject]);
+  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal, resetPaletteForProject, showToast]);
 
   // Persist sessions on tab close / app unload.
   useEffect(() => {
@@ -434,15 +463,18 @@ export default function App() {
                 <button className="btn btn-primary" onClick={newSession}>+ New session</button>
               </div>
             ) : (
-              <div className="terminals-stack">
-                {liveTerminals.map((s) => (
-                  <Terminal
-                    key={s.id}
-                    session={s}
-                    visible={tab === "terminal" && s.id === activeTerminalId}
-                  />
-                ))}
-              </div>
+              <>
+                <WorktreeBar />
+                <div className="terminals-stack">
+                  {liveTerminals.map((s) => (
+                    <Terminal
+                      key={s.id}
+                      session={s}
+                      visible={tab === "terminal" && s.id === activeTerminalId}
+                    />
+                  ))}
+                </div>
+              </>
             )}
           </div>
           <div className="tab-pane" style={{ display: tab === "changes" ? "flex" : "none" }}>

@@ -3,8 +3,17 @@ import { useEffect, useState } from "react";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useUIStore } from "../stores/uiStore";
+import { useToastStore } from "../stores/toastStore";
 import { useModelStore, isValidModel, modelLabel } from "../stores/modelStore";
 import { AGENT_PROFILES, profileFor, DEFAULT_AGENT, type AgentKind } from "../agents/profiles";
+import { ipc } from "../ipc/tauri";
+import type { BranchInfo } from "../types/domain";
+
+/// The worktree opt-in from the chooser: branch-name component + base branch.
+export interface WorktreePick {
+  name: string;
+  base: string;
+}
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -44,11 +53,25 @@ export function SessionList() {
 
   // Always go through the chooser so the agent and model are explicit, visible
   // choices (no silent fall-back to a default). `undefined` model = account
-  // default; agent defaults to Claude.
-  const createSession = (agent: AgentKind, model?: string) => {
+  // default; agent defaults to Claude. With a worktree pick, the session runs
+  // in its own checkout on an `agent/<name>` branch instead of the project root.
+  const createSession = async (agent: AgentKind, model?: string, wt?: WorktreePick) => {
     if (!project) return;
     const m = isValidModel(model) ? model : undefined;
-    add(project.root, undefined, m, agent);
+    if (wt) {
+      try {
+        const created = await ipc.worktreeCreate(wt.name, wt.base);
+        add(created.info.path, wt.name, m, agent, created.info, created.setupCommand ?? undefined);
+        const copies = created.copied.length ? ` · copied ${created.copied.join(", ")}` : "";
+        useToastStore.getState().show(`Worktree ready on ${created.info.branch}${copies}`, "success");
+      } catch (e) {
+        // Keep the chooser open so the user can fix the name/base and retry.
+        useToastStore.getState().show(`Couldn't create worktree: ${e}`, "error");
+        return;
+      }
+    } else {
+      add(project.root, undefined, m, agent);
+    }
     setDefaultFor(project.root, agent, m);
     setDefaultAgentFor(project.root, agent);
     setChoosing(false);
@@ -121,20 +144,42 @@ export function SessionList() {
 function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
   projectRoot: string;
   lastAgent: AgentKind;
-  onPick: (agent: AgentKind, model?: string) => void;
+  onPick: (agent: AgentKind, model?: string, wt?: WorktreePick) => void;
   onCancel: () => void;
 }) {
   const defaultFor = useModelStore((s) => s.defaultFor);
   const [agent, setAgent] = useState<AgentKind>(lastAgent);
   const [showCustom, setShowCustom] = useState(false);
   const [custom, setCustom] = useState("");
+  const [wtOn, setWtOn] = useState(false);
+  const [wtName, setWtName] = useState("");
+  const [wtBase, setWtBase] = useState("");
+  const [branches, setBranches] = useState<BranchInfo[] | null>(null);
 
   const profile = profileFor(agent);
   const lastModel = defaultFor(projectRoot, agent);
 
+  // Load branches on first worktree opt-in; default the base to the current one.
+  useEffect(() => {
+    if (!wtOn || branches !== null) return;
+    ipc.gitBranches()
+      .then((bs) => {
+        setBranches(bs);
+        const current = bs.find((b) => b.current);
+        if (current && !wtBase) setWtBase(current.name);
+      })
+      .catch(() => setBranches([]));
+  }, [wtOn, branches, wtBase]);
+
+  const worktreePick = (): WorktreePick | undefined => {
+    if (!wtOn) return undefined;
+    const name = wtName.trim() || `session-${Date.now().toString(36)}`;
+    return { name, base: wtBase };
+  };
+
   const commitCustom = () => {
     const v = custom.trim();
-    if (isValidModel(v)) onPick(agent, v);
+    if (isValidModel(v)) onPick(agent, v, worktreePick());
   };
 
   return (
@@ -160,7 +205,7 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
         <button
           key={p.value}
           className={`model-chooser-item ${lastModel === p.value ? "last" : ""}`}
-          onClick={() => onPick(agent, p.value)}
+          onClick={() => onPick(agent, p.value, worktreePick())}
           autoFocus={lastModel === p.value}
         >
           <span className="model-chooser-icon">{p.icon}</span>
@@ -172,8 +217,44 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
         </button>
       ))}
 
+      <div className="wt-opt">
+        <label className="wt-opt-toggle">
+          <input
+            type="checkbox"
+            checked={wtOn}
+            onChange={(e) => setWtOn(e.target.checked)}
+          />
+          <span>Isolated worktree</span>
+        </label>
+        {wtOn && (
+          <div className="wt-opt-fields">
+            <input
+              className="wb-search-input"
+              placeholder="branch name (agent/…)"
+              value={wtName}
+              onChange={(e) => setWtName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+            />
+            <select
+              className="wt-opt-base"
+              value={wtBase}
+              onChange={(e) => setWtBase(e.target.value)}
+              title="Base branch — the session branches off this and merges back into it"
+            >
+              {branches === null && <option value="">loading branches…</option>}
+              {branches?.map((b) => (
+                <option key={b.name} value={b.name}>{b.current ? `${b.name} (current)` : b.name}</option>
+              ))}
+            </select>
+            <span className="wt-opt-hint">
+              Own checkout + branch — your files stay untouched; merge or discard when done.
+            </span>
+          </div>
+        )}
+      </div>
+
       <div className="model-chooser-foot">
-        <button className="model-chooser-link btn btn-ghost" onClick={() => onPick(agent, undefined)}>
+        <button className="model-chooser-link btn btn-ghost" onClick={() => onPick(agent, undefined, worktreePick())}>
           {agent === "codex" ? "Config default" : "Account default"}
         </button>
         <span className="model-chooser-sep">·</span>
@@ -254,6 +335,12 @@ function SessionRow({ session, active, onActivate, onClose, onRename, onAcceptSu
       <span className="session-agent" title={`Agent: ${profileFor(session.agent).label}`}>
         {profileFor(session.agent).icon}
       </span>
+      {session.worktree && (
+        <span
+          className="session-branch"
+          title={`Isolated worktree · ${session.worktree.branch} → ${session.worktree.baseBranch}\n${session.worktree.path}`}
+        >⎇</span>
+      )}
       {session.model && (
         <span className="session-model" title={`${profileFor(session.agent).label} · ${modelLabel(session.model, session.agent)}`}>
           {modelLabel(session.model, session.agent)}

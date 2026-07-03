@@ -35,6 +35,11 @@ process.stdin.on("end", () => {
   const termId = process.env.AGENT_CONSOLE_TERM_ID;
   if (typeof termId === "string" && termId.length > 0) event.termId = termId;
 
+  // Where claude is actually running. Sessions in an isolated worktree have a
+  // cwd different from the project root — the auto-snapshot must capture THAT
+  // working tree, not the main checkout.
+  if (typeof input.cwd === "string" && input.cwd.length > 0) event.cwd = input.cwd;
+
   // Detect a leading slash command — likely a skill or custom command invocation.
   if (event.prompt.startsWith("/")) {
     const m = event.prompt.match(/^\/([\w.-]+)/);

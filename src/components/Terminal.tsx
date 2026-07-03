@@ -165,10 +165,16 @@ export function Terminal({ session, visible }: Props) {
             hasScrollback: Boolean(session.initialScrollback),
           });
         const tid = termId;
+        // Fresh worktree sessions may carry a one-shot install command (from
+        // .claude/worktree-setup.json). Chain it before the agent launch so it
+        // runs visibly in this terminal and the agent only starts if it succeeds.
+        const setup = session.setupCmd?.trim();
+        const cmd = setup ? `${setup} && ${launchCmd}` : launchCmd;
         setTimeout(() => {
           if (disposed) return;
+          if (setup) term.write(`\x1b[90m── workspace setup: ${setup} ──\x1b[0m\r\n`);
           term.write(`\x1b[90m── ${launchNote} ${launchLabel} ──\x1b[0m\r\n`);
-          ipc.termWrite(tid, `${launchCmd}\r`).catch(() => {});
+          ipc.termWrite(tid, `${cmd}\r`).catch(() => {});
         }, 600);
       }
 

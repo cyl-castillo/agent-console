@@ -26,3 +26,4 @@ pub mod usage_service;
 pub mod vault_service;
 pub mod voice_service;
 pub mod workspace_archive;
+pub mod worktree_service;

@@ -20,6 +20,8 @@ import type {
   SessionUsage, Skill, StoredRule, VaultEntryView,
   VoiceStatus,
   WorkspaceContext,
+  WorktreeCreated, WorktreeRef, WorktreeSetupConfig, WorktreeStatusInfo,
+  MergeOutcome,
 } from "../types/domain";
 
 export const ipc = {
@@ -68,6 +70,32 @@ export const ipc = {
   snapshotDelete: (id: string) => invoke<void>("snapshot_delete", { id }),
 
   preflightCheck: () => invoke<Preflight>("preflight_check"),
+
+  // Per-session isolated worktrees. Destructive ops (merge/discard) validate
+  // on the Rust side that the path is a registered worktree of the repo.
+  worktreeCreate: (name: string, base?: string) =>
+    invoke<WorktreeCreated>("worktree_create", { name, base: base ?? null }),
+  worktreeStatus: (wt: WorktreeRef) =>
+    invoke<WorktreeStatusInfo>("worktree_status", {
+      path: wt.path, branch: wt.branch, baseBranch: wt.baseBranch,
+    }),
+  worktreeMerge: (wt: WorktreeRef, deleteAfter: boolean) =>
+    invoke<MergeOutcome>("worktree_merge", {
+      path: wt.path, branch: wt.branch, baseBranch: wt.baseBranch, deleteAfter,
+    }),
+  worktreeDiscard: (wt: WorktreeRef, deleteBranch: boolean) =>
+    invoke<void>("worktree_discard", {
+      path: wt.path, branch: wt.branch, deleteBranch,
+    }),
+  worktreeSetupGet: () => invoke<WorktreeSetupConfig>("worktree_setup_get"),
+  worktreeSetupSet: (config: WorktreeSetupConfig) =>
+    invoke<void>("worktree_setup_set", { config }),
+  // Aim git/snapshot commands + the change watcher at the active session's
+  // checkout (null = back to the project root).
+  setActiveRepo: (path: string | null) =>
+    invoke<void>("set_active_repo", { path }),
+  worktreePruneOrphans: (keep: string[]) =>
+    invoke<string[]>("worktree_prune_orphans", { keep }),
 
   projectsRecent: () => invoke<RecentProject[]>("projects_recent"),
   projectsLast: () => invoke<RecentProject | null>("projects_last"),
