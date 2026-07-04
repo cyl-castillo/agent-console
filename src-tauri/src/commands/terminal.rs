@@ -32,7 +32,6 @@ pub fn term_spawn(
     let project_root = state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone());

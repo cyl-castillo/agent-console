@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use crate::services::activity_service::ActivityService;
 use crate::services::git_watcher::GitWatcher;

@@ -15,7 +15,6 @@ fn repo(state: &AppState) -> AppResult<PathBuf> {
     state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone())
@@ -156,7 +155,7 @@ pub fn set_active_repo(
         }
     };
     let watch_root = target.clone().unwrap_or_else(|| repo.clone());
-    state.inner.lock().unwrap().active_repo = target;
+    state.inner.lock().active_repo = target;
     // Re-aim the debounced fs watcher so `git://changed` events (and the
     // Changes auto-refresh they drive) follow the same checkout.
     state.git_watcher.watch(app, watch_root);

@@ -2,7 +2,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Mutex};
+use std::sync::mpsc;
+use parking_lot::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -72,7 +73,7 @@ impl HooksRuntime {
 
     /// Start the events.jsonl watcher (idempotent).
     pub fn start_watcher(&self, app: AppHandle) {
-        let mut started = self.watcher_started.lock().unwrap();
+        let mut started = self.watcher_started.lock();
         if !*started {
             *started = true;
             let dir = self.session_dir.clone();
@@ -81,7 +82,7 @@ impl HooksRuntime {
         }
         drop(started);
 
-        let mut started2 = self.approvals_watcher_started.lock().unwrap();
+        let mut started2 = self.approvals_watcher_started.lock();
         if !*started2 {
             *started2 = true;
             let dir = self.session_dir.join("approvals");
@@ -396,7 +397,7 @@ fn handle_event(v: &Value, app: &AppHandle) {
 
     if kind == "user_prompt" {
         let state = app.state::<AppState>();
-        let project = state.inner.lock().unwrap().project.clone();
+        let project = state.inner.lock().project.clone();
         if let Some(p) = project {
             // Persist the prompt to the durable per-project ledger that
             // "learning mode" reflects over. Best-effort: a failed append must

@@ -7,7 +7,7 @@ use crate::state::AppState;
 #[tauri::command]
 pub async fn advisor_analyze(state: State<'_, AppState>) -> AppResult<AnalysisResult> {
     let root = {
-        let s = state.inner.lock().unwrap();
+        let s = state.inner.lock();
         s.project
             .as_ref()
             .map(|p| p.root.clone())
@@ -29,7 +29,6 @@ pub fn advisor_create_skill(
     let root = state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone())

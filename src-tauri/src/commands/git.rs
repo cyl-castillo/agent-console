@@ -8,7 +8,7 @@ use crate::state::AppState;
 /// worktree when one is active (set via `set_active_repo`), else the project
 /// root. This is what makes the Changes view follow the active session.
 fn current_repo(state: &AppState) -> AppResult<std::path::PathBuf> {
-    let s = state.inner.lock().unwrap();
+    let s = state.inner.lock();
     if let Some(wt) = &s.active_repo {
         return Ok(wt.clone());
     }

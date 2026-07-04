@@ -10,7 +10,7 @@ use crate::state::AppState;
 /// (its isolated worktree when set, else the project root) — restoring a
 /// worktree-session snapshot into the main checkout would wreck the wrong tree.
 fn repo(state: &AppState) -> AppResult<PathBuf> {
-    let s = state.inner.lock().unwrap();
+    let s = state.inner.lock();
     if let Some(wt) = &s.active_repo {
         return Ok(wt.clone());
     }

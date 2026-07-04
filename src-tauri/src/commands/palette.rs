@@ -14,7 +14,6 @@ pub fn palette_index_files(
     let root = state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone())

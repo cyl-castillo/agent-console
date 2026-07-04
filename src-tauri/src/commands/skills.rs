@@ -11,7 +11,6 @@ pub fn skill_list(state: State<'_, AppState>) -> AppResult<Vec<Skill>> {
     let project_root = state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone());
