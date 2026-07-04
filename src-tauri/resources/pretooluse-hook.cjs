@@ -45,6 +45,11 @@ process.stdin.on("end", () => {
     tool: input.tool_name || "Unknown",
     input: input.tool_input || {},
   };
+  // The PTY that launched this claude tags itself via AGENT_CONSOLE_TERM_ID
+  // (same binding the userprompt hook uses), so the UI can mark exactly which
+  // session is blocked waiting on this approval.
+  const termId = process.env.AGENT_CONSOLE_TERM_ID;
+  if (typeof termId === "string" && termId.length > 0) req.termId = termId;
 
   const reqPath = path.join(approvalsDir, `${id}.req.json`);
   const resPath = path.join(approvalsDir, `${id}.res.json`);
