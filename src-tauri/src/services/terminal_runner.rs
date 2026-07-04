@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::thread;
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -44,11 +44,12 @@ impl TerminalRegistry {
         Self::default()
     }
 
-    /// Recover from a poisoned mutex (a panicked thread) instead of cascading
-    /// the panic into every later terminal operation. The map itself stays
-    /// consistent: each handle is only touched under the lock.
-    fn lock_terms(&self) -> std::sync::MutexGuard<'_, HashMap<String, TerminalHandle>> {
-        self.terms.lock().unwrap_or_else(|p| p.into_inner())
+    /// Central lock accessor for the terminal map. Uses parking_lot, so a panic
+    /// while the lock is held does not poison it and cascade into every later
+    /// terminal operation. The map stays consistent: each handle is only touched
+    /// under the lock.
+    fn lock_terms(&self) -> parking_lot::MutexGuard<'_, HashMap<String, TerminalHandle>> {
+        self.terms.lock()
     }
 
     /// Spawn a new PTY in `cwd` running the user's default shell.

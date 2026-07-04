@@ -28,7 +28,7 @@ pub fn open_project(
     let path_buf = PathBuf::from(&path);
     let project = project_manager::open_project(&path_buf)?;
     {
-        let mut s = state.inner.lock().unwrap();
+        let mut s = state.inner.lock();
         s.project = Some(project.clone());
     }
     // Record in recents — best effort, never fails the open.
@@ -46,7 +46,7 @@ pub fn read_tree(path: String, depth: Option<usize>) -> AppResult<FileNode> {
 
 #[tauri::command]
 pub fn current_project(state: State<'_, AppState>) -> Option<Project> {
-    state.inner.lock().unwrap().project.clone()
+    state.inner.lock().project.clone()
 }
 
 #[tauri::command]
@@ -54,7 +54,6 @@ pub fn workspace_context(state: State<'_, AppState>) -> AppResult<WorkspaceConte
     let root = state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone())

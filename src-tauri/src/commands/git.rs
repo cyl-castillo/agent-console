@@ -8,7 +8,6 @@ fn current_repo(state: &AppState) -> AppResult<std::path::PathBuf> {
     state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone())

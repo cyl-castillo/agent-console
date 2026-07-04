@@ -10,7 +10,6 @@ fn repo(state: &AppState) -> AppResult<PathBuf> {
     state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone())

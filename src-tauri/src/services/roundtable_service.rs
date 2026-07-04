@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -188,9 +189,9 @@ impl RunControl {
     /// only long enough to clone, so the caller can write to disk without holding
     /// any of this room's locks (and never serializes while a turn is mutating).
     fn snapshot(&self, id: &str) -> PersistedRoom {
-        let transcript = self.transcript.lock().unwrap().clone();
-        let resume = self.resume.lock().unwrap().clone();
-        let last_seen = self.last_seen.lock().unwrap().clone();
+        let transcript = self.transcript.lock().clone();
+        let resume = self.resume.lock().clone();
+        let last_seen = self.last_seen.lock().clone();
         PersistedRoom {
             version: ROOM_SCHEMA_VERSION,
             id: id.to_string(),
@@ -375,7 +376,7 @@ impl RoomsStore {
     /// Upsert one room under its project, prune to the most-recent
     /// `MAX_ROOMS_PER_PROJECT`, and write atomically.
     pub fn save_room(&self, room: &PersistedRoom, project_root: &Path) -> AppResult<()> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let mut file = Self::load_file()?;
         let key = project_root.display().to_string();
         let list = file.by_project.entry(key).or_default();
@@ -404,7 +405,7 @@ impl RoomsStore {
 
     /// Lightweight summaries for the sidebar, most-recently-updated first.
     pub fn summaries(&self, project_root: &str) -> AppResult<Vec<RoomSummary>> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         Ok(Self::load_sorted(project_root)?
             .iter()
             .map(RoomSummary::of)
@@ -413,7 +414,7 @@ impl RoomsStore {
 
     /// The full persisted state of one room, for read-only re-hydration.
     pub fn get(&self, project_root: &str, room_id: &str) -> AppResult<Option<PersistedRoom>> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         Ok(Self::load_sorted(project_root)?
             .into_iter()
             .find(|r| r.id == room_id))
@@ -421,7 +422,7 @@ impl RoomsStore {
 
     /// Drop one room from a project's history. Idempotent.
     pub fn delete_room(&self, project_root: &str, room_id: &str) -> AppResult<()> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let mut file = Self::load_file()?;
         if let Some(list) = file.by_project.get_mut(project_root) {
             list.retain(|r| r.id != room_id);
@@ -549,7 +550,6 @@ impl RoundtableService {
         });
         self.runs
             .lock()
-            .unwrap()
             .insert(id.clone(), control.clone());
 
         let driver_id = id.clone();
@@ -590,7 +590,7 @@ impl RoundtableService {
         }
 
         let id = room.id.clone();
-        if self.runs.lock().unwrap().contains_key(&id) {
+        if self.runs.lock().contains_key(&id) {
             return Ok(id);
         }
 
@@ -623,7 +623,7 @@ impl RoundtableService {
             rooms: self.rooms.clone(),
             notice: None,
         });
-        self.runs.lock().unwrap().insert(id.clone(), control);
+        self.runs.lock().insert(id.clone(), control);
         Ok(id)
     }
 
@@ -635,7 +635,6 @@ impl RoundtableService {
         let control = self
             .runs
             .lock()
-            .unwrap()
             .get(id)
             .cloned()
             .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
@@ -690,7 +689,6 @@ impl RoundtableService {
         let control = self
             .runs
             .lock()
-            .unwrap()
             .get(id)
             .cloned()
             .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
@@ -704,7 +702,7 @@ impl RoundtableService {
             turn,
         };
         let total_tokens = {
-            let mut t = control.transcript.lock().unwrap();
+            let mut t = control.transcript.lock();
             t.push(msg.clone());
             // tokens are unchanged by a human message; report the running total
             // so the UI's cumulative counter stays monotonic.
@@ -718,7 +716,7 @@ impl RoundtableService {
     /// Signal stop. The driver exits at the next turn boundary; the run record is
     /// kept so the finished transcript stays inspectable until `discard`.
     pub fn stop(&self, id: &str) -> AppResult<()> {
-        if let Some(c) = self.runs.lock().unwrap().get(id).cloned() {
+        if let Some(c) = self.runs.lock().get(id).cloned() {
             c.stopped.store(true, Ordering::SeqCst);
         }
         Ok(())
@@ -729,7 +727,7 @@ impl RoundtableService {
     /// — and so every per-turn commit — stays in the repo for the human to merge
     /// or delete later.
     pub fn discard(&self, id: &str) -> AppResult<()> {
-        if let Some(c) = self.runs.lock().unwrap().remove(id) {
+        if let Some(c) = self.runs.lock().remove(id) {
             c.stopped.store(true, Ordering::SeqCst);
             if let Some(wt) = &c.worktree {
                 remove_room_worktree(&c.repo, wt);
@@ -742,7 +740,6 @@ impl RoundtableService {
         let control = self
             .runs
             .lock()
-            .unwrap()
             .get(id)
             .cloned()
             .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
@@ -808,11 +805,10 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         // Snapshot the transcript and take everything this participant has not
         // seen yet, minus its own messages (it remembers those via its session).
         let (delta, seen_to): (Vec<Message>, usize) = {
-            let t = control.transcript.lock().unwrap();
+            let t = control.transcript.lock();
             let start = *control
                 .last_seen
                 .lock()
-                .unwrap()
                 .get(&participant.id)
                 .unwrap_or(&0);
             let delta = t[start..]
@@ -840,7 +836,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         let tools = control.tools;
         let model = participant.model.clone();
         let engine = participant.engine;
-        let resume_id = control.resume.lock().unwrap().get(&participant.id).cloned();
+        let resume_id = control.resume.lock().get(&participant.id).cloned();
         let app_t = app.clone();
         let id_t = id.clone();
         let author_t = participant.id.clone();
@@ -884,7 +880,6 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             control
                 .resume
                 .lock()
-                .unwrap()
                 .insert(participant.id.clone(), sid);
         }
 
@@ -896,7 +891,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             text: outcome.text,
             turn,
         };
-        control.transcript.lock().unwrap().push(msg.clone());
+        control.transcript.lock().push(msg.clone());
         // Advance only to what we had read (seen_to), NOT the current length:
         // anything the human injected while this turn ran sits past seen_to and
         // must surface on our next turn. Our own message is excluded by the
@@ -904,7 +899,6 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         control
             .last_seen
             .lock()
-            .unwrap()
             .insert(participant.id.clone(), seen_to);
         autosave(&control, &id);
         // Working room: checkpoint whatever this turn edited as one commit on the

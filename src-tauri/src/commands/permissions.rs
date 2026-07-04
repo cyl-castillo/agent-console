@@ -6,7 +6,7 @@ use crate::state::AppState;
 
 #[tauri::command]
 pub fn permissions_snapshot(state: State<'_, AppState>) -> AppResult<PermissionsSnapshot> {
-    let project = state.inner.lock().unwrap().project.clone();
+    let project = state.inner.lock().project.clone();
     permissions_service::snapshot(project.as_ref().map(|p| p.root.as_path()))
 }
 
@@ -17,7 +17,7 @@ pub fn permissions_add(
     raw: String,
     state: State<'_, AppState>,
 ) -> AppResult<StoredRule> {
-    let project = state.inner.lock().unwrap().project.clone();
+    let project = state.inner.lock().project.clone();
     permissions_service::add_rule(
         project.as_ref().map(|p| p.root.as_path()),
         scope,
@@ -33,7 +33,7 @@ pub fn permissions_remove(
     raw: String,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
-    let project = state.inner.lock().unwrap().project.clone();
+    let project = state.inner.lock().project.clone();
     permissions_service::remove_rule(
         project.as_ref().map(|p| p.root.as_path()),
         scope,

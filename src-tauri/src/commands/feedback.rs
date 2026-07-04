@@ -11,7 +11,7 @@ pub fn feedback_dev_enabled() -> bool {
 
 #[tauri::command]
 pub fn feedback_context(state: State<'_, AppState>) -> FeedbackContext {
-    let s = state.inner.lock().unwrap();
+    let s = state.inner.lock();
     let project = s.project.as_ref();
     feedback_service::context(
         project.map(|p| p.root.as_path()),
@@ -22,7 +22,7 @@ pub fn feedback_context(state: State<'_, AppState>) -> FeedbackContext {
 #[tauri::command]
 pub fn feedback_submit(input: FeedbackInput, state: State<'_, AppState>) -> AppResult<String> {
     let ctx = {
-        let s = state.inner.lock().unwrap();
+        let s = state.inner.lock();
         let project = s.project.as_ref();
         feedback_service::context(
             project.map(|p| p.root.as_path()),
