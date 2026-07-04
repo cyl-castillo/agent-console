@@ -164,6 +164,10 @@ export interface ApprovalRequest {
   cwd: string;
   tool: string;
   input: Record<string, unknown>;
+  /// Terminal-session id of the PTY that launched the agent (from
+  /// AGENT_CONSOLE_TERM_ID). Missing for claudes launched before the hook
+  /// captured it — the UI then falls back to cwd matching.
+  termId?: string;
 }
 
 export interface StoredRule {

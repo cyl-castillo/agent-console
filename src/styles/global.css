@@ -2316,6 +2316,28 @@ select:focus-visible,
 }
 .session-row.stopped .session-model { color: var(--text-faint); background: transparent; }
 
+/* "This session is waiting on your approval" — mirrors the StatusBar
+   "waiting on you" pill (same --warn family) so the two signals read as one. */
+.session-blocked {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-12);
+  border-radius: 3px;
+  padding: 0 5px;
+  line-height: 16px;
+  animation: sb-agent-pulse-soft 1.4s ease-out infinite;
+}
+@keyframes sb-agent-pulse-soft {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.55; }
+  100% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-blocked { animation: none; }
+}
+
 /* Per-session isolated-worktree badge (branch glyph next to the agent). */
 .session-branch {
   flex-shrink: 0;

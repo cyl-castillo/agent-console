@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
+import { useApprovalStore, blockedSessionIds } from "../stores/approvalStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useUIStore } from "../stores/uiStore";
 import { useToastStore } from "../stores/toastStore";
@@ -48,6 +49,8 @@ export function SessionList() {
   const defaultAgentFor = useModelStore((s) => s.defaultAgentFor);
   const setDefaultAgentFor = useModelStore((s) => s.setDefaultAgentFor);
   const [choosing, setChoosing] = useState(false);
+  const approvalQueue = useApprovalStore((s) => s.queue);
+  const blocked = blockedSessionIds(approvalQueue, sessions);
 
   const lastAgent = project ? defaultAgentFor(project.root) : undefined;
 
@@ -119,6 +122,7 @@ export function SessionList() {
               key={s.id}
               session={s}
               active={s.id === activeId}
+              blocked={blocked.has(s.id)}
               onActivate={() => onActivate(s)}
               onClose={async () => {
                 if (s.status === "live" && !confirm(`Close session "${s.name}"? Process will be killed.`)) return;
@@ -284,9 +288,11 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
   );
 }
 
-function SessionRow({ session, active, onActivate, onClose, onRename, onAcceptSuggestion, onDismissSuggestion }: {
+function SessionRow({ session, active, blocked, onActivate, onClose, onRename, onAcceptSuggestion, onDismissSuggestion }: {
   session: TerminalSession;
   active: boolean;
+  /// A queued approval is attributed to this session — it's waiting on you.
+  blocked: boolean;
   onActivate: () => void;
   onClose: () => void;
   onRename: (name: string) => void;
@@ -345,6 +351,12 @@ function SessionRow({ session, active, onActivate, onClose, onRename, onAcceptSu
         <span className="session-model" title={`${profileFor(session.agent).label} · ${modelLabel(session.model, session.agent)}`}>
           {modelLabel(session.model, session.agent)}
         </span>
+      )}
+      {blocked && (
+        <span
+          className="session-blocked"
+          title="Waiting for you to approve an action"
+        >waiting</span>
       )}
       <span className="session-meta">{meta}</span>
       <button
