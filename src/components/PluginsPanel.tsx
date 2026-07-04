@@ -39,8 +39,9 @@ export function PluginsPanel() {
   }), [available, installedIds, q]);
 
   return (
-    <div className="plugins-panel">
-      <div className="plugins-header">
+    <div className="workbench">
+      <div className="workbench-header workbench-header-slim">
+        <span className="workbench-title">plugins</span>
         <input
           className="plugins-search"
           value={query}
@@ -49,12 +50,13 @@ export function PluginsPanel() {
           spellCheck={false}
         />
         <button
-          className="plugins-refresh"
+          className="workbench-action"
           onClick={() => { void refreshInstalled(); void refreshAvailable(); }}
           title="Refresh"
         >↻</button>
       </div>
 
+      <div className="workbench-body">
       {error && <div className="plugins-error">{error}</div>}
 
       <Section
@@ -136,6 +138,7 @@ export function PluginsPanel() {
             ? <>Marketplaces: <code>{marketplaces.join(", ")}</code></>
             : "No marketplaces configured"}
         </span>
+      </div>
       </div>
     </div>
   );

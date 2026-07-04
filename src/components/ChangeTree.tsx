@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { GitFileChange } from "../types/domain";
+import { badgeFor } from "./changeBadge";
 
 interface Props {
   changes: GitFileChange[];
@@ -148,7 +149,7 @@ function FileRow({
         onClick={(e) => { e.stopPropagation(); onAction(); }}
         title={actionTitle}
       >{actionLabel}</button>
-      <span className={`change-badge ${badge.cls}`}>{badge.label}</span>
+      <span className={`change-badge ${badge.kind}`}>{badge.label}</span>
       <span className="ct-name">{name}</span>
       <button
         className="ct-file-revert"
@@ -233,16 +234,3 @@ function initialOpenDirs(root: TreeNode, selected: string | null): Set<string> {
   return open;
 }
 
-function badgeFor(c: GitFileChange): { label: string; cls: string } {
-  if (c.untracked) return { label: "U", cls: "untracked" };
-  const x = c.code[0];
-  const y = c.code[1];
-  const ch = y !== " " ? y : x;
-  switch (ch) {
-    case "M": return { label: "M", cls: "modified" };
-    case "A": return { label: "A", cls: "added" };
-    case "D": return { label: "D", cls: "deleted" };
-    case "R": return { label: "R", cls: "modified" };
-    default:  return { label: ch ?? "?", cls: "modified" };
-  }
-}
