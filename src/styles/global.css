@@ -675,6 +675,7 @@ select:focus-visible,
 .change-badge.modified  { color: #e2c562; background: rgba(226, 197, 98, 0.12); }
 .change-badge.added     { color: var(--ok); background: var(--ok-12); }
 .change-badge.deleted   { color: var(--danger); background: var(--danger-12); }
+.change-badge.renamed   { color: #a78bfa; background: rgba(167, 139, 250, 0.12); }
 .change-badge.untracked { color: #8a93a0; background: rgba(138, 147, 160, 0.12); }
 
 .changes-diff {
@@ -4841,19 +4842,6 @@ select:focus-visible,
 :root[data-theme="light"] .session-suggestion-dismiss:hover { background: rgba(0,0,0,0.06); }
 
 /* ===== Plugins panel ===== */
-.plugins-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  overflow-y: auto;
-  height: 100%;
-}
-.plugins-header {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
 .plugins-search {
   flex: 1;
   background: var(--bg-elev-2);
@@ -4865,16 +4853,6 @@ select:focus-visible,
   font-family: inherit;
 }
 .plugins-search:focus { outline: 1px solid var(--accent); }
-.plugins-refresh {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-dim);
-  padding: 4px 8px;
-  cursor: pointer;
-  font-size: 14px;
-}
-.plugins-refresh:hover { color: var(--text); border-color: var(--accent); }
 .plugins-flash {
   font-size: 11px;
   color: var(--ok);

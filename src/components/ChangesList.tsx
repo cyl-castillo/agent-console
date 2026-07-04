@@ -1,6 +1,7 @@
 import { useChangesStore } from "../stores/changesStore";
 import { useUIStore } from "../stores/uiStore";
 import type { GitFileChange } from "../types/domain";
+import { badgeFor } from "./changeBadge";
 
 export function ChangesList() {
   const status = useChangesStore((s) => s.status);
@@ -52,7 +53,7 @@ function ChangeRow({ change, active, onPick }: {
   active: boolean;
   onPick: () => void;
 }) {
-  const { tag, kind } = describe(change);
+  const { label: tag, kind } = badgeFor(change);
   const idx = change.path.lastIndexOf("/");
   const dir = idx >= 0 ? change.path.slice(0, idx) : "";
   const name = idx >= 0 ? change.path.slice(idx + 1) : change.path;
@@ -68,13 +69,4 @@ function ChangeRow({ change, active, onPick }: {
       {dir && <span className="change-dir">{dir}</span>}
     </li>
   );
-}
-
-function describe(c: GitFileChange): { tag: string; kind: string } {
-  if (c.untracked) return { tag: "U", kind: "untracked" };
-  const code = c.code?.trim();
-  if (code === "A" || code?.startsWith("A")) return { tag: "A", kind: "added" };
-  if (code === "D" || code?.startsWith("D")) return { tag: "D", kind: "deleted" };
-  if (code === "R" || code?.startsWith("R")) return { tag: "R", kind: "renamed" };
-  return { tag: "M", kind: "modified" };
 }
