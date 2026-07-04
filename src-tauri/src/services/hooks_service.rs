@@ -417,9 +417,16 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 },
             );
 
-            // Auto-snapshot in the active project's working tree.
+            // Auto-snapshot the working tree the prompt ran in. Worktree
+            // sessions report their own cwd — snapshotting the project root
+            // there would checkpoint the wrong checkout. Fall back to the
+            // project root for events without a cwd (older hook script).
+            let snap_repo = str_field(v, "cwd")
+                .map(PathBuf::from)
+                .filter(|c| c.is_dir())
+                .unwrap_or_else(|| p.root.clone());
             let id = uuid::Uuid::new_v4().to_string();
-            if let Ok(Some(snap)) = snapshot_service::create(&p.root, &id) {
+            if let Ok(Some(snap)) = snapshot_service::create(&snap_repo, &id) {
                 // Record the snapshot too, so reflection can correlate a prompt
                 // with the working-tree checkpoint it produced.
                 let _ = state.activity.record(

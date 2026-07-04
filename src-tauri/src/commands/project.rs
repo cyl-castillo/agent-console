@@ -30,6 +30,9 @@ pub fn open_project(
     {
         let mut s = state.inner.lock();
         s.project = Some(project.clone());
+        // A stale worktree override from the previous project must never leak
+        // into the new one's git/snapshot commands.
+        s.active_repo = None;
     }
     // Record in recents — best effort, never fails the open.
     let _ = crate::services::projects_service::remember(&path_buf);

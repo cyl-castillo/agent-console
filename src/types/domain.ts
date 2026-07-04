@@ -95,6 +95,41 @@ export interface Skill {
   allowedTools: string[];
 }
 
+/// Isolated worktree a session runs in: its checkout path, the `agent/<name>`
+/// branch, and the base branch it merges back into.
+export interface WorktreeRef {
+  path: string;
+  branch: string;
+  baseBranch: string;
+}
+
+export interface WorktreeStatusInfo {
+  dirtyFiles: number;
+  ahead: number;
+  behind: number;
+}
+
+export interface MergeOutcome {
+  merged: boolean;
+  mergeCommit: string | null;
+  conflictFiles: string[];
+  detail: string;
+}
+
+export interface WorktreeCreated {
+  info: WorktreeRef;
+  /// Untracked files copied in from the main checkout (.env etc.).
+  copied: string[];
+  /// Configured install command; the UI runs it visibly in the session
+  /// terminal — the backend never runs it implicitly.
+  setupCommand: string | null;
+}
+
+export interface WorktreeSetupConfig {
+  copy: string[];
+  setup: string | null;
+}
+
 export interface PersistedSession {
   id: string;
   name: string;
@@ -108,6 +143,8 @@ export interface PersistedSession {
   /// Model alias / tuning value last chosen for this session, encoded by the
   /// agent profile on launch. Undefined = account/config default.
   model?: string;
+  /// Isolated worktree this session runs in. Undefined = runs in the project checkout.
+  worktree?: WorktreeRef;
 }
 
 export interface HooksStatus {

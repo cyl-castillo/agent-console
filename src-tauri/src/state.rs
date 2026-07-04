@@ -48,4 +48,9 @@ impl Default for AppState {
 #[derive(Default)]
 pub struct SessionState {
     pub project: Option<Project>,
+    /// When the active terminal session runs in an isolated worktree, git and
+    /// snapshot commands operate on this checkout instead of the project root.
+    /// None = the project root. Reset on project open and validated on set
+    /// (must be a registered worktree of the open project).
+    pub active_repo: Option<std::path::PathBuf>,
 }

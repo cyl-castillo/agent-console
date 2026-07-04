@@ -6,11 +6,15 @@ use crate::error::{AppError, AppResult};
 use crate::services::snapshot_service;
 use crate::state::AppState;
 
+/// Snapshots are taken/restored in the checkout the active session runs in
+/// (its isolated worktree when set, else the project root) — restoring a
+/// worktree-session snapshot into the main checkout would wreck the wrong tree.
 fn repo(state: &AppState) -> AppResult<PathBuf> {
-    state
-        .inner
-        .lock()
-        .project
+    let s = state.inner.lock();
+    if let Some(wt) = &s.active_repo {
+        return Ok(wt.clone());
+    }
+    s.project
         .as_ref()
         .map(|p| p.root.clone())
         .ok_or_else(|| AppError::InvalidArgument("no project open".into()))

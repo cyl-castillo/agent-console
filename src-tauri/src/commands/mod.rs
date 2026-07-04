@@ -21,3 +21,4 @@ pub mod usage;
 pub mod vault;
 pub mod voice;
 pub mod workspace_archive;
+pub mod worktree;

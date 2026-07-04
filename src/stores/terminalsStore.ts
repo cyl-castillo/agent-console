@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { ipc } from "../ipc/tauri";
-import type { PersistedSession } from "../types/domain";
+import type { PersistedSession, WorktreeRef } from "../types/domain";
 import { asAgentKind, type AgentKind } from "../agents/profiles";
 
 const MAX_SCROLLBACK = 50_000;
@@ -32,6 +32,13 @@ export interface TerminalSession {
   /// Model alias or full id chosen for this session. Passed as
   /// `claude --model <model>` on launch; undefined = account default.
   model?: string;
+  /// Isolated worktree this session runs in (cwd === worktree.path).
+  /// Undefined = the session runs directly in the project checkout.
+  worktree?: WorktreeRef;
+  /// One-shot workspace install command (from .claude/worktree-setup.json),
+  /// typed into the terminal before the agent launches on the FIRST spawn
+  /// only. Never persisted — resumed sessions are already set up.
+  setupCmd?: string;
 }
 
 interface TerminalsState {
@@ -46,7 +53,14 @@ interface TerminalsState {
   hydrate: (projectRoot: string) => Promise<void>;
   clear: () => void;
   /// Adds a new session (status "live"). Caller is responsible for spawning the PTY.
-  add: (cwd: string, name?: string, model?: string, agent?: AgentKind) => string;
+  add: (
+    cwd: string,
+    name?: string,
+    model?: string,
+    agent?: AgentKind,
+    worktree?: WorktreeRef,
+    setupCmd?: string,
+  ) => string;
   /// Marks a stopped session as live again so Terminal mounts and spawns.
   resume: (id: string) => void;
   setActive: (id: string) => void;
@@ -111,6 +125,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       agent: asAgentKind(p.agent),
       claudeSessionId: p.claudeSessionId,
       model: p.model,
+      worktree: p.worktree,
     }));
     set({ projectRoot, sessions, activeId: null, ready: true });
   },
@@ -119,7 +134,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     set({ projectRoot: null, sessions: [], activeId: null, ready: false });
   },
 
-  add: (cwd, name, model, agent) => {
+  add: (cwd, name, model, agent, worktree, setupCmd) => {
     const id = genId();
     const { sessions } = get();
     const session: TerminalSession = {
@@ -132,6 +147,8 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       status: "live",
       agent,
       model,
+      worktree,
+      setupCmd,
     };
     set({ sessions: [...sessions, session], activeId: id });
     return id;
@@ -265,6 +282,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         claudeSessionId: s.claudeSessionId,
         nameSuggested: s.nameSuggested,
         model: s.model,
+        worktree: s.worktree,
       };
     });
     try {

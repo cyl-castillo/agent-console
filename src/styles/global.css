@@ -2315,6 +2315,112 @@ select:focus-visible,
 }
 .session-row.stopped .session-model { color: var(--text-faint); background: transparent; }
 
+/* Per-session isolated-worktree badge (branch glyph next to the agent). */
+.session-branch {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--accent);
+  line-height: 16px;
+}
+.session-row.stopped .session-branch { color: var(--text-faint); }
+
+/* "Isolated worktree" opt-in inside the agent/model chooser. */
+.wt-opt {
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  padding: 6px 2px 0;
+}
+.wt-opt-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.wt-opt-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 6px;
+}
+.wt-opt-base {
+  width: 100%;
+  background: var(--bg-elev-1);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 4px 6px;
+}
+.wt-opt-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+/* Worktree lifecycle bar above the terminal stack. */
+.worktree-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-1);
+  font-size: 11px;
+}
+.worktree-bar .spacer { flex: 1; }
+.wt-glyph { color: var(--accent); font-size: 11px; }
+.wt-branch {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--accent);
+}
+.wt-base { color: var(--text-muted); font-size: 10.5px; }
+.wt-state {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+.wt-merge-btn, .wt-discard-btn { font-size: 11px; }
+
+/* Merge / discard dialogs. */
+.wt-modal h3 { margin: 0 0 10px; font-size: 14px; }
+.wt-modal-line { margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--text); }
+.wt-modal-meta { margin: 6px 0 0; font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.wt-modal-error { margin: 8px 0 0; font-size: 11.5px; color: var(--danger); line-height: 1.4; }
+.wt-modal-check {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12px;
+  margin: 0 0 12px;
+  cursor: pointer;
+  line-height: 1.45;
+}
+.wt-modal-conflicts {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.wt-modal-conflicts p { margin: 0 0 6px; }
+.wt-modal-conflicts ul { margin: 0 0 6px; padding-left: 18px; }
+.wt-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.wt-modal-actions .spacer { flex: 1; }
+.wt-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
 /* StatusBar model pill + its upward menu (statusbar isn't overflow-clipped). */
 .model-pill-wrap { position: relative; display: inline-flex; }
 .model-pill-glyph { color: var(--accent); font-size: 8px; }

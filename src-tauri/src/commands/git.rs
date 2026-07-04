@@ -4,11 +4,15 @@ use crate::error::{AppError, AppResult};
 use crate::services::git_service::{self, BranchInfo, GitCommitInfo, GitStatus};
 use crate::state::AppState;
 
+/// The checkout git commands operate on: the active session's isolated
+/// worktree when one is active (set via `set_active_repo`), else the project
+/// root. This is what makes the Changes view follow the active session.
 fn current_repo(state: &AppState) -> AppResult<std::path::PathBuf> {
-    state
-        .inner
-        .lock()
-        .project
+    let s = state.inner.lock();
+    if let Some(wt) = &s.active_repo {
+        return Ok(wt.clone());
+    }
+    s.project
         .as_ref()
         .map(|p| p.root.clone())
         .ok_or_else(|| AppError::InvalidArgument("no project open".into()))
