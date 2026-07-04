@@ -30,7 +30,7 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -291,7 +291,7 @@ impl SchedulerService {
     // ---- public API (called by commands) ---------------------------------
 
     pub fn list(&self, project_root: &str) -> AppResult<Vec<Job>> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let file = Self::load_file()?;
         Ok(file.by_project.get(project_root).cloned().unwrap_or_default())
     }
@@ -299,7 +299,7 @@ impl SchedulerService {
     /// Create (or replace, if the id already exists) a job. Fills id/created_at
     /// when absent and computes the first `next_due` from the trigger.
     pub fn create(&self, project_root: &str, mut job: Job) -> AppResult<Job> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let now = now_ms();
         if job.id.trim().is_empty() {
             job.id = uuid::Uuid::new_v4().to_string();
@@ -320,7 +320,7 @@ impl SchedulerService {
     /// Update a job in place. Recomputes `next_due` from now using the (possibly
     /// changed) trigger, and preserves run history fields.
     pub fn update(&self, project_root: &str, mut job: Job) -> AppResult<Job> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let mut file = Self::load_file()?;
         let bucket = file
             .by_project
@@ -340,7 +340,7 @@ impl SchedulerService {
     }
 
     pub fn delete(&self, project_root: &str, id: &str) -> AppResult<()> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let mut file = Self::load_file()?;
         if let Some(bucket) = file.by_project.get_mut(project_root) {
             bucket.retain(|j| j.id != id);
@@ -353,7 +353,7 @@ impl SchedulerService {
 
     /// Pause/resume a job. A re-enabled time-based job is rescheduled from now.
     pub fn set_enabled(&self, project_root: &str, id: &str, enabled: bool) -> AppResult<Job> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let mut file = Self::load_file()?;
         let bucket = file
             .by_project
@@ -435,7 +435,7 @@ impl SchedulerService {
     /// Run a job immediately by id (UI "run now"). Honors the cap-of-1 run lock.
     pub fn run_now(&self, app: &AppHandle, project_root: &str, id: &str) -> AppResult<RunRecord> {
         let job = {
-            let _g = self.lock.lock().unwrap();
+            let _g = self.lock.lock();
             Self::load_file()?
                 .by_project
                 .get(project_root)
@@ -490,7 +490,7 @@ impl SchedulerService {
 
     /// Run a job's action under the global run lock, record + emit the result.
     fn execute(&self, app: &AppHandle, project_root: &str, job: &Job) -> RunRecord {
-        let _run = self.run_lock.lock().unwrap();
+        let _run = self.run_lock.lock();
         let started = now_ms();
         let _ = app.emit(
             "scheduler://run_started",
@@ -516,7 +516,7 @@ impl SchedulerService {
     /// failure/backoff state: an error grows the backoff window exponentially; a
     /// success clears it.
     fn mark_ran(&self, project_root: &str, job: &Job, rec: &RunRecord) -> AppResult<()> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let mut file = Self::load_file()?;
         if let Some(bucket) = file.by_project.get_mut(project_root) {
             if let Some(j) = bucket.iter_mut().find(|j| j.id == job.id) {
@@ -555,7 +555,7 @@ impl SchedulerService {
     /// Start the scheduler tick loop (idempotent). Runs a one-time reconcile of
     /// firings missed while the app was closed, then polls on a calm interval.
     pub fn start(&self, app: AppHandle) {
-        let mut started = self.started.lock().unwrap();
+        let mut started = self.started.lock();
         if *started {
             return;
         }
@@ -583,7 +583,7 @@ impl SchedulerService {
     fn reconcile(&self, app: &AppHandle) {
         let now = now_ms();
         let projects: Vec<String> = {
-            let _g = self.lock.lock().unwrap();
+            let _g = self.lock.lock();
             match Self::load_file() {
                 Ok(f) => f.by_project.keys().cloned().collect(),
                 Err(_) => return,
@@ -627,7 +627,7 @@ impl SchedulerService {
     }
 
     fn set_next_due(&self, project_root: &str, id: &str, next: Option<u64>) -> AppResult<()> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let mut file = Self::load_file()?;
         if let Some(bucket) = file.by_project.get_mut(project_root) {
             if let Some(j) = bucket.iter_mut().find(|j| j.id == id) {
@@ -647,7 +647,7 @@ impl SchedulerService {
         }
         let now = now_ms();
         let projects: Vec<String> = {
-            let _g = self.lock.lock().unwrap();
+            let _g = self.lock.lock();
             match Self::load_file() {
                 Ok(f) => f.by_project.keys().cloned().collect(),
                 Err(_) => return,

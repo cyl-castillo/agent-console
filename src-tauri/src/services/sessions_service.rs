@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -158,7 +158,7 @@ impl SessionsService {
     }
 
     pub fn list(&self, project_root: &str) -> AppResult<Vec<PersistedSession>> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let file = Self::load_file()?;
         if let Some(v) = file.by_project.get(project_root) {
             return Ok(v.clone());
@@ -178,7 +178,7 @@ impl SessionsService {
     }
 
     pub fn save(&self, project_root: &str, sessions: Vec<PersistedSession>) -> AppResult<()> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         // If the existing file can't be read, abort rather than clobbering the
         // other projects' history with a blind overwrite.
         let mut file = Self::load_file()?;

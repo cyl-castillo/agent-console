@@ -6,7 +6,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -116,8 +117,8 @@ pub async fn ensure_model(app: &AppHandle) -> AppResult<PathBuf> {
 impl VoiceService {
     pub fn status(&self) -> VoiceStatus {
         VoiceStatus {
-            enabled: self.ctx.lock().unwrap().is_some(),
-            capturing: self.capture.lock().unwrap().is_some(),
+            enabled: self.ctx.lock().is_some(),
+            capturing: self.capture.lock().is_some(),
             model_present: model_path().map(|p| p.exists()).unwrap_or(false),
             model_file: model_file(),
             language: model_language(),
@@ -126,7 +127,7 @@ impl VoiceService {
 
     /// Blocking: load whisper weights into memory (no-op when already loaded).
     pub fn load_model(&self, path: &Path) -> AppResult<()> {
-        let mut guard = self.ctx.lock().unwrap();
+        let mut guard = self.ctx.lock();
         if guard.is_some() {
             return Ok(());
         }
@@ -141,19 +142,19 @@ impl VoiceService {
 
     /// Drop the model and stop any in-flight capture; frees all voice memory.
     pub fn disable(&self) {
-        if let Some(cap) = self.capture.lock().unwrap().take() {
+        if let Some(cap) = self.capture.lock().take() {
             cap.stop.store(true, Ordering::Relaxed);
             let _ = cap.join.join();
         }
-        *self.ctx.lock().unwrap() = None;
+        *self.ctx.lock() = None;
     }
 
     /// Blocking: open the default input device and start accumulating samples.
     pub fn start_capture(&self) -> AppResult<()> {
-        if self.ctx.lock().unwrap().is_none() {
+        if self.ctx.lock().is_none() {
             return Err(AppError::Other("voice mode is not enabled".into()));
         }
-        let mut slot = self.capture.lock().unwrap();
+        let mut slot = self.capture.lock();
         if slot.is_some() {
             return Ok(()); // already listening (key-repeat safety)
         }
@@ -187,16 +188,14 @@ impl VoiceService {
         let cap = self
             .capture
             .lock()
-            .unwrap()
             .take()
             .ok_or_else(|| AppError::Other("not capturing".into()))?;
         cap.stop.store(true, Ordering::Relaxed);
         let _ = cap.join.join();
-        let raw = std::mem::take(&mut *cap.samples.lock().unwrap());
+        let raw = std::mem::take(&mut *cap.samples.lock());
         let ctx = self
             .ctx
             .lock()
-            .unwrap()
             .clone()
             .ok_or_else(|| AppError::Other("voice mode is not enabled".into()))?;
 
@@ -211,7 +210,7 @@ impl VoiceService {
     /// Blocking: open the mic for a fixed window (voice confirmations like
     /// "sí"/"no" after an announcement), then transcribe what was heard.
     pub fn listen_window(&self, seconds: f32) -> AppResult<String> {
-        if self.capture.lock().unwrap().is_some() {
+        if self.capture.lock().is_some() {
             return Err(AppError::Other("already capturing".into()));
         }
         let secs = if seconds.is_finite() { seconds.clamp(1.0, 10.0) } else { 4.0 };
@@ -311,7 +310,7 @@ fn capture_thread(
             device.build_input_stream(
                 config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    sink.lock().unwrap().extend_from_slice(data);
+                    sink.lock().extend_from_slice(data);
                 },
                 |e| eprintln!("voice: stream error: {e}"),
                 None,
@@ -323,7 +322,6 @@ fn capture_thread(
                 config,
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
                     sink.lock()
-                        .unwrap()
                         .extend(data.iter().map(|&v| v as f32 / 32768.0));
                 },
                 |e| eprintln!("voice: stream error: {e}"),
@@ -336,7 +334,6 @@ fn capture_thread(
                 config,
                 move |data: &[u16], _: &cpal::InputCallbackInfo| {
                     sink.lock()
-                        .unwrap()
                         .extend(data.iter().map(|&v| (v as f32 - 32768.0) / 32768.0));
                 },
                 |e| eprintln!("voice: stream error: {e}"),

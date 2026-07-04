@@ -12,7 +12,6 @@ fn project_root(state: &State<'_, AppState>) -> AppResult<String> {
     state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.display().to_string())
@@ -28,7 +27,6 @@ pub fn roundtable_start(
     let repo = state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone())

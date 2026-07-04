@@ -10,7 +10,6 @@ fn project_root(state: &AppState) -> Option<std::path::PathBuf> {
     state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.clone())

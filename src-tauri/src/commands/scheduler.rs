@@ -11,7 +11,6 @@ fn project_root(state: &State<'_, AppState>) -> AppResult<String> {
     state
         .inner
         .lock()
-        .unwrap()
         .project
         .as_ref()
         .map(|p| p.root.to_string_lossy().to_string())

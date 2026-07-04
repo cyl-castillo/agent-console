@@ -3,7 +3,7 @@ use std::fs::{self, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -92,7 +92,7 @@ impl ActivityService {
     /// mid-append is tolerated by `list` (it skips unparseable lines), so we
     /// favor a cheap append over a full atomic rewrite on every event.
     pub fn record(&self, project_root: &str, event: &ActivityEvent) -> AppResult<()> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let path = Self::path(project_root)?;
         let mut line = serde_json::to_string(event)
             .map_err(|e| AppError::Other(format!("serialize activity: {e}")))?;
@@ -130,7 +130,7 @@ impl ActivityService {
     /// `limit` when given. Unparseable lines (e.g. a crash-torn tail) are
     /// skipped rather than failing the whole read.
     pub fn list(&self, project_root: &str, limit: Option<usize>) -> AppResult<Vec<ActivityEvent>> {
-        let _g = self.lock.lock().unwrap();
+        let _g = self.lock.lock();
         let path = Self::path(project_root)?;
         if !path.exists() {
             return Ok(Vec::new());

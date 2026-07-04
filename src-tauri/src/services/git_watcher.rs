@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use notify::RecursiveMode;
@@ -59,11 +60,11 @@ struct Active {
     root: PathBuf,
 }
 
-/// Recover from a poisoned mutex (a panicked setup thread) instead of
-/// poisoning every later watch()/stop() call. Worst case we re-install a
-/// watcher, which is idempotent.
-fn lock_inner(inner: &Mutex<Option<Active>>) -> std::sync::MutexGuard<'_, Option<Active>> {
-    inner.lock().unwrap_or_else(|p| p.into_inner())
+/// Central lock accessor for the watcher state. Uses parking_lot, so a panic
+/// while the lock is held does not poison it — later watch()/stop() calls keep
+/// working (worst case we re-install a watcher, which is idempotent).
+fn lock_inner(inner: &Mutex<Option<Active>>) -> parking_lot::MutexGuard<'_, Option<Active>> {
+    inner.lock()
 }
 
 impl Default for GitWatcher {

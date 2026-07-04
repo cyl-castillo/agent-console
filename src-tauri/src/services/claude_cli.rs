@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 /// Caches successfully-resolved absolute paths, keyed by binary base name.
 /// Failures are NOT cached, so a binary installed after a failed lookup is
@@ -95,7 +95,7 @@ fn spawn_command(program: String, args: &[&str], stdin: Stdio) -> Command {
 }
 
 fn resolve_cached(agent: &AgentBin) -> String {
-    if let Some(map) = CACHED.lock().unwrap().as_ref() {
+    if let Some(map) = CACHED.lock().as_ref() {
         if let Some(p) = map.get(agent.base) {
             return p.clone();
         }
@@ -104,7 +104,6 @@ fn resolve_cached(agent: &AgentBin) -> String {
         Some(p) => {
             CACHED
                 .lock()
-                .unwrap()
                 .get_or_insert_with(HashMap::new)
                 .insert(agent.base.to_string(), p.clone());
             p

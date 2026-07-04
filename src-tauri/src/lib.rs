@@ -147,16 +147,17 @@ pub fn run() {
 /// by real items).
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::sync::{Mutex, MutexGuard};
+    use parking_lot::{Mutex, MutexGuard};
 
     /// Serializes tests that mutate the process-global `XDG_DATA_HOME` (the
     /// persistence crash-safety tests in sessions/roundtable/activity all isolate
     /// their data dir that way). Without this they race: one test's set_var swaps
     /// the dir out from under another mid-assertion. Hold the guard for the whole
-    /// test body. Poison is recovered — a panic in one test must not cascade.
+    /// test body. parking_lot does not poison, so a panic in one test does not
+    /// cascade into the others still waiting on this lock.
     pub static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     pub fn lock_env() -> MutexGuard<'static, ()> {
-        ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+        ENV_LOCK.lock()
     }
 }
