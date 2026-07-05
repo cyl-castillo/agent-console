@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
+import { useChangesStore } from "./changesStore";
 import { profileFor } from "../agents/profiles";
 import type {
   RoomSummary,
@@ -72,6 +73,19 @@ interface RoundtableState {
   activities: RoundtableActivity[];
 
   injectDraft: string;
+  /// True when the displayed room is a working room (agents edit a room/<id>
+  /// branch) — drives the cowork bar. Tracked separately from `draft.allowEdits`
+  /// (the config form) so it's correct for a reopened room too: set from the
+  /// launched config on start and from the persisted flag on open.
+  workingRoom: boolean;
+  /// Cowork (share/sync with human colleagues over the git remote). `busy` marks
+  /// an in-flight share/sync so the buttons disable; `result` holds the last
+  /// outcome to show inline (PR link on share, conflicts on sync).
+  coworkBusy: "share" | "sync" | null;
+  coworkResult:
+    | { kind: "share"; message: string; prUrl: string | null }
+    | { kind: "sync"; message: string; conflicts: string[] }
+    | null;
   /// Wall-clock (ms) the current live AI turn began. Drives the per-turn clock.
   liveStartedAt: number | null;
   /// Wall-clock (ms) of the most recent activity event — the staleness signal.
@@ -94,6 +108,12 @@ interface RoundtableState {
   setInjectDraft: (v: string) => void;
   inject: () => Promise<void>;
   continueRoom: () => Promise<void>;
+  /// Push this working room's branch to the remote and hand back an MR/PR link.
+  share: () => Promise<void>;
+  /// Pull a colleague's commits from the remote room branch into the worktree.
+  sync: () => Promise<void>;
+  /// Dismiss the inline cowork result banner.
+  clearCowork: () => void;
   stop: () => Promise<void>;
   reset: () => Promise<void>;
   loadRooms: () => Promise<void>;
@@ -125,6 +145,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   activities: [],
 
   injectDraft: "",
+  workingRoom: false,
+  coworkBusy: null,
+  coworkResult: null,
   liveStartedAt: null,
   lastActivityAt: null,
 
@@ -176,18 +199,24 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       model: p.model,
       role: p.role,
     }));
+    // Honest working-room flag: editing needs a git repo to branch + review
+    // against. Match the config toggle's own `!noRepo` guard (RoundtablePanel)
+    // and the backend's `allow_edits = branch.is_some()`, so we never light up
+    // the CoworkBar (Share) on a room that silently degraded to read-only.
+    const allowEdits = d.allowEdits && useChangesStore.getState().status?.isRepo !== false;
     const config: RoundtableConfig = {
       problem: d.problem.trim(),
       participants,
       maxTurns: Math.max(1, Math.min(60, d.maxTurns)),
       tokenBudget: Math.max(0, d.tokenBudget),
-      allowEdits: d.allowEdits,
+      allowEdits,
     };
     set({
       turns: [],
       activities: [],
       message: null,
       readOnly: false,
+      workingRoom: allowEdits,
       problem: config.problem,
       totalTokens: 0,
       approxCostUsd: 0,
@@ -261,6 +290,40 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     }
   },
 
+  /// Share the room with colleagues: push its branch to the remote (transcript
+  /// committed alongside) and surface the MR/PR link inline.
+  share: async () => {
+    const id = get().runId;
+    if (!id || get().coworkBusy) return;
+    set({ coworkBusy: "share", coworkResult: null });
+    try {
+      const r = await ipc.roundtableShare(id);
+      set({ coworkResult: { kind: "share", message: r.message, prUrl: r.prUrl } });
+    } catch (err) {
+      set({ message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      set({ coworkBusy: null });
+    }
+  },
+
+  /// Bring a colleague's commits into the live worktree so the next turn builds
+  /// on top. Surfaces any conflicts inline (the backend aborts cleanly on them).
+  sync: async () => {
+    const id = get().runId;
+    if (!id || get().coworkBusy) return;
+    set({ coworkBusy: "sync", coworkResult: null });
+    try {
+      const r = await ipc.roundtableSync(id);
+      set({ coworkResult: { kind: "sync", message: r.message, conflicts: r.conflicts } });
+    } catch (err) {
+      set({ message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      set({ coworkBusy: null });
+    }
+  },
+
+  clearCowork: () => set({ coworkResult: null }),
+
   stop: async () => {
     const id = get().runId;
     if (!id) return;
@@ -295,6 +358,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       turns: [],
       activities: [],
       injectDraft: "",
+      workingRoom: false,
+      coworkBusy: null,
+      coworkResult: null,
       liveStartedAt: null,
       lastActivityAt: null,
       roster: [],
@@ -336,6 +402,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       set({
         runId: room.id,
         readOnly: true,
+        workingRoom: room.allowEdits,
         phase: "done",
         problem: room.problem,
         roster: room.participants,

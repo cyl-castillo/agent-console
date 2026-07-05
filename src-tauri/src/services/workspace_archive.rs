@@ -679,6 +679,7 @@ mod tests {
         last_seen.insert("claude".to_string(), 5usize);
         let room = PersistedRoom {
             version: 1,
+            allow_edits: false,
             id: "r1".into(),
             problem: "debate".into(),
             participants: Vec::new(),
@@ -900,6 +901,7 @@ mod tests {
 
         let room = PersistedRoom {
             version: 1,
+            allow_edits: false,
             id: "room-1".into(),
             problem: "should we ship?".into(),
             participants: Vec::new(),

@@ -538,6 +538,9 @@ export interface PersistedRoom {
   /// Per-participant opaque engine resume references (not used until Fase B).
   resume: Record<string, string>;
   lastSeen: Record<string, number>;
+  /// True if this was a working room (agents edited a room/<id> branch) — drives
+  /// whether the reopened room can Share/Sync. Defaults false for older rooms.
+  allowEdits: boolean;
   totalTokens: number;
   updatedAtMs: number;
 }
@@ -627,4 +630,24 @@ export interface ImportResult {
   schedules: number;
   skills: number;
   memory: number;
+}
+
+/** Outcome of sharing a working room's branch with collaborators (push + MR/PR
+ * link). Mirrors `ShareResult` in roundtable_service.rs. */
+export interface ShareResult {
+  branch: string;
+  remote: string;
+  prUrl: string | null;
+  message: string;
+}
+
+/** Outcome of syncing a colleague's commits into a live working room. Mirrors
+ * `SyncResult` in roundtable_service.rs. `conflicts` is non-empty exactly when
+ * the merge was aborted and needs human resolution. */
+export interface SyncResult {
+  branch: string;
+  remote: string;
+  mergedCommits: number;
+  conflicts: string[];
+  message: string;
 }
