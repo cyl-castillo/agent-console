@@ -10,6 +10,7 @@ import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStor
 import { useThemeStore } from "../stores/themeStore";
 import { useToastStore } from "../stores/toastStore";
 import { profileFor } from "../agents/profiles";
+import { clipboardActionFor } from "./terminalClipboard";
 
 /// Detail for the `ac:term-input` window event: write `data` into the PTY of
 /// the session whose id matches. Used by the StatusBar model pill to send
@@ -20,8 +21,10 @@ export interface TermInputDetail {
 }
 
 const TERM_THEMES = {
-  dark:  { background: "#0d0f12", foreground: "#d9dde3", cursor: "#6aa9ff" },
-  light: { background: "#fbfcfd", foreground: "#1a1d23", cursor: "#2563eb" },
+  // selectionBackground is explicit so the highlight is clearly visible in both
+  // themes — an invisible selection reads as "copy is broken".
+  dark:  { background: "#0d0f12", foreground: "#d9dde3", cursor: "#6aa9ff", selectionBackground: "rgba(106, 169, 255, 0.35)" },
+  light: { background: "#fbfcfd", foreground: "#1a1d23", cursor: "#2563eb", selectionBackground: "rgba(37, 99, 235, 0.25)" },
 } as const;
 
 interface Props {
@@ -54,6 +57,32 @@ export function Terminal({ session, visible }: Props) {
       scrollback: 5000,
     });
     termRef.current = term;
+
+    // Copy/paste: xterm's selection is internal (no native DOM selection), so
+    // without this the app has NO copy path at all — Ctrl+C goes to the PTY as
+    // SIGINT and the webview context menu never offers Copy. Policy lives in
+    // clipboardActionFor (terminalClipboard.ts): Ctrl/Cmd+Shift+C copies,
+    // plain Ctrl/Cmd+C copies only when a selection is active (then clears it,
+    // so the next Ctrl+C is SIGINT again), Ctrl/Cmd+Shift+V pastes.
+    term.attachCustomKeyEventHandler((e) => {
+      const action = clipboardActionFor(e, term.hasSelection());
+      if (!action) return true;
+      if (action === "paste") {
+        navigator.clipboard.readText()
+          .then((text) => { if (text) term.paste(text); })
+          .catch(() => {});
+        return false;
+      }
+      const sel = term.getSelection();
+      if (sel) {
+        navigator.clipboard.writeText(sel).catch(() => {
+          useToastStore.getState().show("Copy failed — clipboard unavailable", "error");
+        });
+        if (action === "copy-and-clear") term.clearSelection();
+      }
+      return false;
+    });
+
     const fit = new FitAddon();
     fitRef.current = fit;
     term.loadAddon(fit);
