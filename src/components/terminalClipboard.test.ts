@@ -26,8 +26,8 @@ describe("clipboardActionFor (terminal copy/paste policy)", () => {
     expect(clipboardActionFor(key(), false)).toBeNull();
   });
 
-  it("Ctrl+Shift+C without a selection passes through (nothing to copy)", () => {
-    expect(clipboardActionFor(key({ key: "C", shiftKey: true }), false)).toBeNull();
+  it("Ctrl+Shift+C without a live selection is still handled (never leaks ^C to the PTY; may copy the snapshot)", () => {
+    expect(clipboardActionFor(key({ key: "C", shiftKey: true }), false)).toBe("copy");
   });
 
   it("Ctrl+Shift+V pastes", () => {
