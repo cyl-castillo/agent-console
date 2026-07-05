@@ -9,6 +9,7 @@ import { useTerminalsStore } from "./terminalsStore";
 import { useThemeStore } from "./themeStore";
 import { useToastStore } from "./toastStore";
 import { useUpdaterStore } from "./updaterStore";
+import { reportProblem } from "../lib/reportProblem";
 
 export type PaletteItemKind = "file" | "action" | "session" | "branch";
 
@@ -208,6 +209,13 @@ const ACTIONS: PaletteAction[] = [
       const phase = useUpdaterStore.getState().phase;
       if (phase === "uptodate") useToastStore.getState().show("Agent Console is up to date", "success");
     },
+  },
+  {
+    id: "app.report_problem",
+    label: "Report a Problem",
+    hint: "Open a prefilled GitHub issue (version and platform included)",
+    keywords: ["bug", "issue", "feedback", "broken", "help"],
+    run: () => reportProblem(),
   },
   {
     id: "snapshot.restore_latest",

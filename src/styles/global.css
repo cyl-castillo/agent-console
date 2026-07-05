@@ -4424,6 +4424,19 @@ select:focus-visible,
 .toast-error .toast-glyph { color: var(--danger); }
 .toast-info .toast-glyph { color: var(--accent); }
 .toast-msg { flex: 1; }
+.toast { cursor: pointer; }
+.toast-report {
+  flex: none;
+  padding: 1px 7px;
+  background: transparent;
+  border: 1px solid var(--danger);
+  border-radius: 3px;
+  color: var(--danger);
+  font-size: 10.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.toast-report:hover { background: var(--danger-12); }
 .toast-dismiss { color: var(--text-faint); flex: none; }
 
 /* --- Shared panel error (PanelError component) --- */
