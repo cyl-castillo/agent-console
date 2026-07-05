@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -11,6 +11,10 @@ import { useThemeStore } from "../stores/themeStore";
 import { useToastStore } from "../stores/toastStore";
 import { profileFor } from "../agents/profiles";
 import { clipboardActionFor } from "./terminalClipboard";
+import {
+  readText as clipboardReadText,
+  writeText as clipboardWriteText,
+} from "@tauri-apps/plugin-clipboard-manager";
 
 /// Detail for the `ac:term-input` window event: write `data` into the PTY of
 /// the session whose id matches. Used by the StatusBar model pill to send
@@ -18,6 +22,15 @@ import { clipboardActionFor } from "./terminalClipboard";
 export interface TermInputDetail {
   sessionId: string;
   data: string;
+}
+
+/// Clipboard IO: the native Tauri plugin first (WebKitGTK rejects
+/// navigator.clipboard writes on Linux), the web API as fallback elsewhere.
+function writeClip(text: string): Promise<void> {
+  return clipboardWriteText(text).catch(() => navigator.clipboard.writeText(text));
+}
+function readClip(): Promise<string> {
+  return clipboardReadText().catch(() => navigator.clipboard.readText());
 }
 
 const TERM_THEMES = {
@@ -42,6 +55,15 @@ export function Terminal({ session, visible }: Props) {
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<XTerm | null>(null);
   const theme = useThemeStore((s) => s.theme);
+  // Right-click context menu: users reach for right-click → Copy before any
+  // keyboard shortcut, and the webview's own menu can't see xterm's internal
+  // selection (it always shows Copy disabled). hasSelection is snapshotted at
+  // open time so the Copy item enables/disables correctly.
+  const [menu, setMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null);
+  // Last non-empty selection, captured the moment it's made (onSelectionChange)
+  // — not at click time. xterm clears its selection on the next pointer event,
+  // so any click-time read races against that; this never loses.
+  const selSnapshotRef = useRef<{ text: string; ts: number }>({ text: "", ts: 0 });
 
   // Spawn once per session id.
   useEffect(() => {
@@ -64,18 +86,25 @@ export function Terminal({ session, visible }: Props) {
     // clipboardActionFor (terminalClipboard.ts): Ctrl/Cmd+Shift+C copies,
     // plain Ctrl/Cmd+C copies only when a selection is active (then clears it,
     // so the next Ctrl+C is SIGINT again), Ctrl/Cmd+Shift+V pastes.
+    // The clipboard itself goes through the native Tauri plugin — WebKitGTK
+    // (Linux webview) rejects navigator.clipboard writes, which made the first
+    // version of this fix silently do nothing. navigator.clipboard stays as
+    // the fallback for platforms where the plugin call fails.
     term.attachCustomKeyEventHandler((e) => {
       const action = clipboardActionFor(e, term.hasSelection());
       if (!action) return true;
       if (action === "paste") {
-        navigator.clipboard.readText()
+        readClip()
           .then((text) => { if (text) term.paste(text); })
           .catch(() => {});
         return false;
       }
-      const sel = term.getSelection();
+      // Ctrl+Shift+C may fall back to the last-selection snapshot; plain
+      // Ctrl+C only ever gets here with a live selection (policy above).
+      const sel = term.getSelection() ||
+        (action === "copy" ? selSnapshotRef.current.text : "");
       if (sel) {
-        navigator.clipboard.writeText(sel).catch(() => {
+        writeClip(sel).catch(() => {
           useToastStore.getState().show("Copy failed — clipboard unavailable", "error");
         });
         if (action === "copy-and-clear") term.clearSelection();
@@ -301,6 +330,25 @@ export function Terminal({ session, visible }: Props) {
     };
     host.addEventListener("paste", onPaste, true);
 
+    // Capture every non-empty selection the moment it's made. Reading the
+    // selection at click time is a lost race — xterm clears it on the next
+    // pointerdown (which fires before mousedown), and the agent TUI's
+    // repaints can clear it even earlier. This way Copy always has the last
+    // thing the user selected.
+    const selDisposable = term.onSelectionChange(() => {
+      const text = term.getSelection();
+      if (text) selSnapshotRef.current = { text, ts: Date.now() };
+    });
+
+    // Right-clicks must never reach xterm (pointerdown AND mousedown — v6
+    // listens on pointer events, which fire first): its press handling
+    // clears the active selection right as the user reaches for Copy.
+    const onRightDown = (e: PointerEvent | MouseEvent) => {
+      if (e.button === 2) e.stopPropagation();
+    };
+    host.addEventListener("pointerdown", onRightDown, true);
+    host.addEventListener("mousedown", onRightDown, true);
+
     return () => {
       disposed = true;
       cancelAnimationFrame(rafFit);
@@ -313,6 +361,9 @@ export function Terminal({ session, visible }: Props) {
       window.removeEventListener("ac:clear-terminal", onClear);
       window.removeEventListener("ac:term-input", onTermInput as EventListener);
       host.removeEventListener("paste", onPaste, true);
+      host.removeEventListener("pointerdown", onRightDown, true);
+      host.removeEventListener("mousedown", onRightDown, true);
+      selDisposable.dispose();
       window.removeEventListener("focus", onFocus);
       term.dispose();
     };
@@ -339,11 +390,90 @@ export function Terminal({ session, visible }: Props) {
     t.options.theme = TERM_THEMES[theme];
   }, [theme]);
 
+  // Close the context menu on any outside press or Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement | null)?.closest?.(".term-menu")) setMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  const menuCopy = () => {
+    const t = termRef.current;
+    // Prefer the live selection; fall back to the snapshot taken at
+    // right-mousedown (xterm may have cleared the visual selection since).
+    const sel = t?.getSelection() || selSnapshotRef.current.text;
+    if (sel) {
+      writeClip(sel)
+        .then(() => useToastStore.getState().show("Copied", "success"))
+        .catch(() => {
+          useToastStore.getState().show("Copy failed — clipboard unavailable", "error");
+        });
+    }
+    setMenu(null);
+    t?.focus();
+  };
+  const menuPaste = () => {
+    const t = termRef.current;
+    readClip()
+      .then((text) => { if (text && t) t.paste(text); })
+      .catch(() => {});
+    setMenu(null);
+    t?.focus();
+  };
+  const menuSelectAll = () => {
+    termRef.current?.selectAll();
+    setMenu(null);
+  };
+
   return (
-    <div
-      ref={hostRef}
-      className="terminal-host"
-      style={{ display: visible ? "block" : "none" }}
-    />
+    <>
+      <div
+        ref={hostRef}
+        className="terminal-host"
+        style={{ display: visible ? "block" : "none" }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const live = termRef.current?.hasSelection() ?? false;
+          // A recent snapshot counts: the selection was made moments ago even
+          // if something (repaint, pointerdown) already cleared the visual.
+          const snap = selSnapshotRef.current.text.length > 0 &&
+            Date.now() - selSnapshotRef.current.ts < 15_000;
+          setMenu({
+            // Clamp so the menu never opens off-screen near the edges.
+            x: Math.min(e.clientX, window.innerWidth - 190),
+            y: Math.min(e.clientY, window.innerHeight - 130),
+            hasSelection: live || snap,
+          });
+        }}
+      />
+      {menu && (
+        <div className="term-menu" style={{ left: menu.x, top: menu.y }} role="menu">
+          <button role="menuitem" disabled={!menu.hasSelection} onClick={menuCopy}>
+            <span>Copy</span><kbd>Ctrl+Shift+C</kbd>
+          </button>
+          <button role="menuitem" onClick={menuPaste}>
+            <span>Paste</span><kbd>Ctrl+Shift+V</kbd>
+          </button>
+          <div className="term-menu-sep" />
+          <button role="menuitem" onClick={menuSelectAll}>
+            <span>Select all</span>
+          </button>
+          {!menu.hasSelection && (
+            // Agent TUIs turn on mouse tracking (plain drag goes to the app,
+            // not to selection) — teach the standard escape hatch right where
+            // the user hits the wall.
+            <div className="term-menu-hint">Tip: Shift+drag selects text</div>
+          )}
+        </div>
+      )}
+    </>
   );
 }

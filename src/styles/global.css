@@ -2149,6 +2149,53 @@ select:focus-visible,
   background: #0d0f12;
 }
 :root[data-theme="light"] .terminal-host { background: #fbfcfd; }
+
+/* Terminal right-click menu. Fixed positioning (viewport coords from the
+   click) so it can't be clipped by the terminal's overflow:hidden. */
+.term-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--bg-elev-1, #1a1c20);
+  border: 1px solid var(--border, color-mix(in srgb, var(--text) 10%, transparent));
+  border-radius: 6px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+}
+.term-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 5px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.term-menu button:hover:not(:disabled) { background: var(--accent-soft); }
+.term-menu button:disabled { color: var(--text-faint); cursor: default; }
+.term-menu kbd {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.term-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border, color-mix(in srgb, var(--text) 10%, transparent));
+}
+.term-menu-hint {
+  padding: 5px 8px 3px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
 .terminal-host .xterm {
   height: 100%;
 }

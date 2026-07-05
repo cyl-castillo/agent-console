@@ -29,7 +29,10 @@ export function clipboardActionFor(e: KeyLike, hasSelection: boolean): Clipboard
   if (!mod) return null;
   const key = e.key.toLowerCase();
   if (key === "c") {
-    if (e.shiftKey) return hasSelection ? "copy" : null;
+    // Ctrl+Shift+C is always ours (it must never leak to the PTY as ^C); the
+    // handler no-ops when there's nothing to copy. Plain Ctrl+C only copies
+    // on a LIVE selection — without one it passes through as SIGINT, sacred.
+    if (e.shiftKey) return "copy";
     return hasSelection ? "copy-and-clear" : null;
   }
   if (key === "v" && e.shiftKey) return "paste";
