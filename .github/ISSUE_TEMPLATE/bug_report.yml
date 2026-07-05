@@ -1,0 +1,37 @@
+name: Bug report
+description: Something in Agent Console is broken or behaving oddly
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the exact error text if you saw one.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+  - type: input
+    id: version
+    attributes:
+      label: Agent Console version
+      description: About dialog (top-right menu) or the update banner.
+      placeholder: v0.39.2
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / platform
+      placeholder: Ubuntu 24.04 (Wayland) · macOS 15 · Windows 11
+    validations:
+      required: true

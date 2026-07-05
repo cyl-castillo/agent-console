@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { Modal } from "./Modal";
+import { reportProblem } from "../lib/reportProblem";
 
 const REPO_URL = "https://github.com/cyl-castillo/agent-console";
 const SPONSORS_URL = "https://github.com/sponsors/cyl-castillo";
@@ -39,6 +40,10 @@ export function AboutModal({ onClose }: Props) {
 
         <div className="about-links">
           <a href={REPO_URL} target="_blank" rel="noopener">↗ GitHub</a>
+          <a
+            href="#report"
+            onClick={(e) => { e.preventDefault(); void reportProblem(); }}
+          >⚑ Report a problem</a>
           <a href={SPONSORS_URL} target="_blank" rel="noopener">♥ Sponsor</a>
           <a href={BMC_URL} target="_blank" rel="noopener">☕ Buy me a coffee</a>
         </div>
