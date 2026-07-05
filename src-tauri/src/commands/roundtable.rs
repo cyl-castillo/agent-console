@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
-use crate::services::roundtable_service::{PersistedRoom, RoomSummary, RoundtableConfig};
+use crate::services::roundtable_service::{
+    PersistedRoom, RoomSummary, RoundtableConfig, ShareResult, SyncResult,
+};
 use crate::state::AppState;
 
 /// The open project's root, or an error if none is open. Persisted rooms are
@@ -72,6 +74,21 @@ pub fn roundtable_stop(state: State<'_, AppState>, id: String) -> AppResult<()> 
 #[tauri::command]
 pub fn roundtable_discard(state: State<'_, AppState>, id: String) -> AppResult<()> {
     state.roundtable.discard(&id)
+}
+
+/// Share a working room with collaborators: push its `room/<id>` branch to the
+/// shared remote and return an MR/PR link the human can hand to a colleague.
+#[tauri::command]
+pub fn roundtable_share(state: State<'_, AppState>, id: String) -> AppResult<ShareResult> {
+    state.roundtable.share(&id)
+}
+
+/// Sync a colleague's commits into a live working room: fetch its `room/<id>`
+/// branch from the remote and merge them into the worktree so the next turn
+/// builds on top. The inbound mirror of `roundtable_share`.
+#[tauri::command]
+pub fn roundtable_sync(state: State<'_, AppState>, id: String) -> AppResult<SyncResult> {
+    state.roundtable.sync(&id)
 }
 
 /// Persisted rooms for the open project (lightweight, for the sidebar list).
