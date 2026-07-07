@@ -267,6 +267,59 @@ pub fn update_marketplaces() -> AppResult<String> {
     Ok(out.trim().to_string())
 }
 
+/// Scaffold a plugin in the user's skills dir (`~/.claude/skills/<name>/`),
+/// which Claude Code auto-loads as `<name>@skills-dir` on the next session —
+/// the documented "start standalone, convert to a plugin when it's worth
+/// sharing" path. Single-skill layout: a `.claude-plugin/plugin.json` manifest
+/// plus a starter `SKILL.md` at the plugin root.
+pub fn scaffold_plugin(name: &str, description: &str, skill_md: &str) -> AppResult<std::path::PathBuf> {
+    let base = dirs::home_dir()
+        .ok_or_else(|| AppError::Other("no home dir".into()))?
+        .join(".claude")
+        .join("skills");
+    scaffold_plugin_at(&base, name, description, skill_md)
+}
+
+fn scaffold_plugin_at(
+    base: &std::path::Path,
+    name: &str,
+    description: &str,
+    skill_md: &str,
+) -> AppResult<std::path::PathBuf> {
+    // Plugin names become directory names AND skill namespaces: strict kebab-case.
+    if name.is_empty()
+        || name.starts_with('-')
+        || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(AppError::InvalidArgument(format!(
+            "plugin name must be kebab-case (got '{name}')"
+        )));
+    }
+    if skill_md.trim().is_empty() {
+        return Err(AppError::InvalidArgument("empty SKILL.md content".into()));
+    }
+    let dir = base.join(name);
+    if dir.exists() {
+        return Err(AppError::Other(format!(
+            "plugin '{name}' already exists at {}",
+            dir.display()
+        )));
+    }
+    let manifest_dir = dir.join(".claude-plugin");
+    std::fs::create_dir_all(&manifest_dir)?;
+    let manifest = serde_json::json!({
+        "name": name,
+        "description": description,
+        "version": "0.1.0",
+    });
+    std::fs::write(
+        manifest_dir.join("plugin.json"),
+        serde_json::to_string_pretty(&manifest).map_err(|e| AppError::Other(e.to_string()))?,
+    )?;
+    std::fs::write(dir.join("SKILL.md"), skill_md)?;
+    Ok(dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +351,37 @@ mod tests {
             ("name".to_string(), Some("mk".to_string()))
         );
         assert_eq!(split_id("solo"), ("solo".to_string(), None));
+    }
+
+    #[test]
+    fn scaffold_plugin_writes_manifest_and_skill_and_refuses_bad_names() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("ac-plugin-scaffold-{nanos}"));
+
+        let dir = scaffold_plugin_at(&base, "my-tool", "does things", "---\nname: my-tool\n---\n\nBody")
+            .expect("scaffold ok");
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join(".claude-plugin/plugin.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["name"], "my-tool");
+        assert_eq!(manifest["description"], "does things");
+        assert_eq!(manifest["version"], "0.1.0");
+        assert!(dir.join("SKILL.md").exists());
+
+        // Re-scaffolding the same name must refuse, not overwrite.
+        assert!(scaffold_plugin_at(&base, "my-tool", "x", "y").is_err());
+        // Bad names: uppercase, spaces, leading dash, empty.
+        assert!(scaffold_plugin_at(&base, "MyTool", "x", "y").is_err());
+        assert!(scaffold_plugin_at(&base, "my tool", "x", "y").is_err());
+        assert!(scaffold_plugin_at(&base, "-tool", "x", "y").is_err());
+        assert!(scaffold_plugin_at(&base, "", "x", "y").is_err());
+        // Empty skill body refused.
+        assert!(scaffold_plugin_at(&base, "other", "x", "   ").is_err());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

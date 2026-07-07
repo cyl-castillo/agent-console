@@ -12,6 +12,12 @@ use crate::services::activity_service::ActivityEvent;
 /// `kind` drives what the UI offers:
 /// - "skill"    → a repeated workflow worth a reusable skill (carries skillName + skillMdContent)
 /// - "memory"   → a convention/fact worth persisting so Claude recalls it (carries memoryName + memoryContent)
+/// - "plugin"   → a workflow/skill-cluster reusable beyond this project, worth
+///   packaging as a shareable Claude Code plugin (carries pluginName +
+///   pluginDescription + pluginSkillMd; applied via `create_plugin`)
+/// - "hook"     → a rule the user keeps enforcing by hand that a Claude Code
+///   hook could enforce automatically; report-only (hooks mutate settings —
+///   too trust-sensitive to auto-apply)
 /// - "friction" → a recurring pain point (repeated rewinds, repeated failures); report-only, no payload
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +37,14 @@ pub struct LearningSuggestion {
     pub memory_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_content: Option<String>,
+    /// kind = "plugin": kebab-case plugin name to scaffold in ~/.claude/skills/.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_description: Option<String>,
+    /// Starter SKILL.md for the plugin (single-skill layout at the plugin root).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_skill_md: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +75,8 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
     let digest = build_digest(events);
     let existing_skills = list_existing_skills(project_root);
     let existing_memories = list_existing_memories(project_root);
-    let prompt = build_prompt(&digest, &existing_skills, &existing_memories);
+    let installed_plugins = list_installed_plugins();
+    let prompt = build_prompt(&digest, &existing_skills, &existing_memories, &installed_plugins);
 
     // Same resolver/flags as the Advisor: a GUI launch doesn't inherit the
     // login-shell PATH, so the bare `claude` name would fail to spawn.
@@ -193,7 +208,27 @@ fn list_existing_memories(root: &Path) -> String {
     }
 }
 
-fn build_prompt(digest: &str, existing_skills: &str, existing_memories: &str) -> String {
+/// Installed plugins as a one-line list for the prompt, so reflection doesn't
+/// propose packaging something the user already has. Best-effort — an empty
+/// list just means the model gets no dedup signal.
+fn list_installed_plugins() -> String {
+    let plugins = crate::services::plugins_service::list_installed();
+    if plugins.is_empty() {
+        return "(none)".to_string();
+    }
+    plugins
+        .iter()
+        .map(|p| p.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn build_prompt(
+    digest: &str,
+    existing_skills: &str,
+    existing_memories: &str,
+    installed_plugins: &str,
+) -> String {
     format!(
         r#"You analyze a developer's recent activity in a project and propose concrete,
 high-leverage improvements to how Claude Code assists them. You are given a
@@ -203,17 +238,30 @@ Propose 3 to 6 suggestions, each of ONE of these kinds:
 
 - "skill": a workflow they clearly repeat by hand that a reusable Claude Code
   skill would automate. Only propose when the repetition is real and specific.
+  Project-specific skills beat generic ones — that's where the value is.
 - "memory": a durable fact, convention, or decision worth persisting so Claude
   recalls it in future sessions (e.g. "tests are run with X", "deploys go through Y").
+- "plugin": ONLY when a workflow (or a cluster of related existing skills) is
+  clearly valuable BEYOND this project — reusable across repos, or worth
+  sharing with a team. A plugin is the shareable, versioned package form of
+  skills. Do not suggest a plugin for a workflow that only makes sense here;
+  that's a "skill". Do not duplicate an installed plugin listed below.
+- "hook": a rule the user keeps enforcing BY HAND in their prompts (the same
+  correction or prohibition repeated — "don't touch X", "always run Y after
+  editing") that a Claude Code hook could enforce automatically. Report-only:
+  describe the event and the check, the user wires it themselves.
 - "friction": a recurring pain point (repeated rewinds/snapshots around the same
   area, repeated failed attempts, the same question asked many ways). Report-only.
 
 Ground EVERY suggestion in the actual activity — cite specific prompts as evidence.
 Do NOT invent generic best-practice advice that isn't supported by what they did.
-Do NOT re-propose something already covered by existing skills or memories below.
-If the activity is too thin to support a kind, return fewer suggestions.
+Do NOT re-propose something already covered by existing skills, memories, or
+installed plugins below. If the activity is too thin to support a kind, return
+fewer suggestions.
 
 EXISTING SKILLS: {existing_skills}
+
+INSTALLED PLUGINS: {installed_plugins}
 
 EXISTING MEMORIES:
 {existing_memories}
@@ -230,22 +278,26 @@ Respond with ONLY a JSON object, no prose, no markdown code fences. Shape:
 {{
   "suggestions": [
     {{
-      "kind": "skill" | "memory" | "friction",
+      "kind": "skill" | "memory" | "plugin" | "hook" | "friction",
       "title": "short imperative title",
       "rationale": "why this helps, grounded in the activity, 1-2 sentences",
       "evidence": ["specific prompt or pattern observed", "..."],
       "skillName": "kebab-case-name (only for kind=skill)",
       "skillMdContent": "---\nname: kebab-case-name\ndescription: ...\n---\n\nBody... (only for kind=skill)",
       "memoryName": "kebab-case-name.md (only for kind=memory)",
-      "memoryContent": "---\nname: kebab-case-name\ndescription: one-line\nmetadata:\n  type: project\n---\n\nThe fact. (only for kind=memory)"
+      "memoryContent": "---\nname: kebab-case-name\ndescription: one-line\nmetadata:\n  type: project\n---\n\nThe fact. (only for kind=memory)",
+      "pluginName": "kebab-case-name (only for kind=plugin)",
+      "pluginDescription": "one-line description for the plugin manifest (only for kind=plugin)",
+      "pluginSkillMd": "---\nname: kebab-case-name\ndescription: what it does AND when to use it\n---\n\nInstructions... (only for kind=plugin; the plugin's starter SKILL.md)"
     }}
   ]
 }}
 
-Omit the skill* fields for non-skill kinds and the memory* fields for non-memory kinds.
+Omit the skill*/memory*/plugin* fields for kinds they don't belong to.
 "#,
         existing_skills = existing_skills,
         existing_memories = existing_memories,
+        installed_plugins = installed_plugins,
         digest = digest,
     )
 }

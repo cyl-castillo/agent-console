@@ -188,6 +188,8 @@ export const ipc = {
     invoke<ActivityEvent[]>("activity_list", { limit: limit ?? null }),
   learningCreateSkill: (name: string, skillMdContent: string) =>
     invoke<string>("learning_create_skill", { name, skillMdContent }),
+  learningCreatePlugin: (name: string, description: string, skillMd: string) =>
+    invoke<string>("learning_create_plugin", { name, description, skillMd }),
   learningSaveMemory: (name: string, content: string) =>
     invoke<string>("learning_save_memory", { name, content }),
   learningCurate: () => invoke<CurationResult>("learning_curate", {}),

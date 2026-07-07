@@ -78,6 +78,18 @@ pub fn learning_create_skill(
     Ok(path.display().to_string())
 }
 
+/// Materialize an accepted "plugin" suggestion: scaffold a shareable plugin in
+/// the user's skills dir (auto-loads as `<name>@skills-dir` next session).
+#[tauri::command]
+pub fn learning_create_plugin(
+    name: String,
+    description: String,
+    skill_md: String,
+) -> AppResult<String> {
+    let path = crate::services::plugins_service::scaffold_plugin(&name, &description, &skill_md)?;
+    Ok(path.display().to_string())
+}
+
 /// Materialize an accepted "memory" suggestion into the project's memory dir.
 #[tauri::command]
 pub fn learning_save_memory(

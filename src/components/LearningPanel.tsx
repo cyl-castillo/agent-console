@@ -336,11 +336,20 @@ function LearningRow({ item }: { item: LearningItem }) {
   const [open, setOpen] = useState(false);
 
   const dimmed = item.status === "skipped" || item.status === "applied";
-  const canApply = item.kind !== "friction";
+  const canApply = item.kind !== "friction" && item.kind !== "hook";
   const previewContent =
-    item.kind === "skill" ? item.skillMdContent : item.kind === "memory" ? item.memoryContent : undefined;
-  const previewLabel = item.kind === "skill" ? "SKILL.md preview" : "memory preview";
-  const applyLabel = item.kind === "skill" ? "Create skill" : "Save memory";
+    item.kind === "skill" ? item.skillMdContent
+    : item.kind === "plugin" ? item.pluginSkillMd
+    : item.kind === "memory" ? item.memoryContent
+    : undefined;
+  const previewLabel =
+    item.kind === "plugin" ? "plugin SKILL.md preview"
+    : item.kind === "skill" ? "SKILL.md preview"
+    : "memory preview";
+  const applyLabel =
+    item.kind === "skill" ? "Create skill"
+    : item.kind === "plugin" ? "Scaffold plugin"
+    : "Save memory";
 
   return (
     <li className={`wb-advisor ${dimmed ? "dimmed" : ""}`}>
@@ -370,9 +379,13 @@ function LearningRow({ item }: { item: LearningItem }) {
             <span className="wb-hint" style={{ margin: 0 }}>
               {item.kind === "friction"
                 ? "Report only — nothing to apply."
-                : item.kind === "skill"
-                  ? "Writes to .claude/skills/"
-                  : "Writes to this project's memory"}
+                : item.kind === "hook"
+                  ? "Report only — wire the hook yourself in settings (hooks run commands; keep that decision human)."
+                  : item.kind === "skill"
+                    ? "Writes to .claude/skills/"
+                    : item.kind === "plugin"
+                      ? "Scaffolds ~/.claude/skills/<name>/ — auto-loads next session, shareable via marketplace"
+                      : "Writes to this project's memory"}
             </span>
 
             <div className="wb-advisor-actions">

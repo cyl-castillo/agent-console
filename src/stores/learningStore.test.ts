@@ -8,6 +8,7 @@ vi.mock("../ipc/tauri", () => ({
   ipc: {
     learningReflect: vi.fn(),
     learningCreateSkill: vi.fn(),
+    learningCreatePlugin: vi.fn(),
     learningSaveMemory: vi.fn(),
     learningCurate: vi.fn(),
     learningApplyMerge: vi.fn(),
@@ -250,6 +251,55 @@ describe("apply / skip", () => {
     expect(item.status).toBe("error");
     expect(item.errorMessage).toBe("disk full");
     expect(useLearningStore.getState().status).toBe("results");
+  });
+
+  it("apply scaffolds a plugin suggestion via learningCreatePlugin", async () => {
+    mockReflect.mockResolvedValue({
+      ...REFLECTION,
+      suggestions: [{
+        kind: "plugin",
+        title: "Package release helpers",
+        rationale: "used across repos",
+        evidence: ["release flow in 3 projects"],
+        pluginName: "release-helpers",
+        pluginDescription: "Release workflow helpers",
+        pluginSkillMd: "---\nname: release-helpers\n---\n\nBody",
+      }],
+    });
+    await useLearningStore.getState().reflect();
+    const id = useLearningStore.getState().items[0].id;
+    vi.mocked(ipc.learningCreatePlugin).mockResolvedValue("/home/u/.claude/skills/release-helpers");
+
+    await useLearningStore.getState().apply(id);
+
+    const item = useLearningStore.getState().items[0];
+    expect(item.status).toBe("applied");
+    expect(item.appliedPath).toContain("release-helpers");
+    expect(ipc.learningCreatePlugin).toHaveBeenCalledWith(
+      "release-helpers",
+      "Release workflow helpers",
+      "---\nname: release-helpers\n---\n\nBody",
+    );
+  });
+
+  it("hook suggestions are report-only: apply is a no-op", async () => {
+    mockReflect.mockResolvedValue({
+      ...REFLECTION,
+      suggestions: [{
+        kind: "hook",
+        title: "Enforce no direct pushes",
+        rationale: "user repeats this rule",
+        evidence: ["'no pushees a main' x4"],
+      }],
+    });
+    await useLearningStore.getState().reflect();
+    const id = useLearningStore.getState().items[0].id;
+
+    await useLearningStore.getState().apply(id);
+
+    expect(useLearningStore.getState().items[0].status).toBe("proposed");
+    expect(ipc.learningCreatePlugin).not.toHaveBeenCalled();
+    expect(ipc.learningCreateSkill).not.toHaveBeenCalled();
   });
 
   it("skip marks the item without touching the backend", async () => {
