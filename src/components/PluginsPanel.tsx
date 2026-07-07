@@ -11,11 +11,16 @@ export function PluginsPanel() {
   const availableLoading = usePluginsStore((s) => s.availableLoading);
   const installing = usePluginsStore((s) => s.installing);
   const installErrors = usePluginsStore((s) => s.installErrors);
+  const updating = usePluginsStore((s) => s.updating);
+  const updateErrors = usePluginsStore((s) => s.updateErrors);
+  const updatingAll = usePluginsStore((s) => s.updatingAll);
   const error = usePluginsStore((s) => s.error);
   const setQuery = usePluginsStore((s) => s.setQuery);
   const refreshInstalled = usePluginsStore((s) => s.refreshInstalled);
   const refreshAvailable = usePluginsStore((s) => s.refreshAvailable);
   const install = usePluginsStore((s) => s.install);
+  const update = usePluginsStore((s) => s.update);
+  const updateAll = usePluginsStore((s) => s.updateAll);
 
   useEffect(() => {
     void refreshInstalled();
@@ -63,23 +68,48 @@ export function PluginsPanel() {
         title={`Installed${installed.length ? ` (${installed.length})` : ""}`}
         loading={installedLoading}
         empty={installed.length === 0 ? "No plugins installed yet." : undefined}
+        action={
+          installed.length > 0 ? (
+            <button
+              className="plugin-update"
+              onClick={() => void updateAll()}
+              disabled={updatingAll}
+              title="Refresh marketplaces and update every installed plugin"
+            >
+              {updatingAll ? <span className="plugin-spinner" aria-label="updating" /> : "Update all"}
+            </button>
+          ) : undefined
+        }
       >
-        {filteredInstalled.map((p) => (
-          <div key={p.id} className="plugin-row installed">
-            <div className="plugin-row-main">
-              <div className="plugin-name">
-                {p.name}
-                {p.version && <span className="plugin-version">v{p.version}</span>}
-                {!p.enabled && <span className="plugin-version">disabled</span>}
+        {filteredInstalled.map((p) => {
+          const busy = !!updating[p.id];
+          const err = updateErrors[p.id];
+          return (
+            <div key={p.id} className="plugin-row installed">
+              <div className="plugin-row-main">
+                <div className="plugin-name">
+                  {p.name}
+                  {p.version && <span className="plugin-version">v{p.version}</span>}
+                  {!p.enabled && <span className="plugin-version">disabled</span>}
+                </div>
+                <div className="plugin-meta">
+                  {p.marketplace && <span>{p.marketplace}</span>}
+                  {p.scope && <span> · {p.scope}</span>}
+                </div>
+                {err && <div className="plugin-install-error">{err}</div>}
               </div>
-              <div className="plugin-meta">
-                {p.marketplace && <span>{p.marketplace}</span>}
-                {p.scope && <span> · {p.scope}</span>}
-              </div>
+              <button
+                className="plugin-update"
+                onClick={() => void update(p.id)}
+                disabled={busy || updatingAll}
+                title={`Update ${p.id} to the latest version (restart sessions to apply)`}
+              >
+                {busy ? <span className="plugin-spinner" aria-label="updating" /> : "Update"}
+              </button>
+              <span className="plugin-badge installed">{p.enabled ? "installed" : "off"}</span>
             </div>
-            <span className="plugin-badge installed">{p.enabled ? "installed" : "off"}</span>
-          </div>
-        ))}
+          );
+        })}
         {installed.length > 0 && filteredInstalled.length === 0 && (
           <div className="plugins-empty-sub">No matches in installed.</div>
         )}
@@ -144,10 +174,12 @@ export function PluginsPanel() {
   );
 }
 
-function Section({ title, loading, empty, children }: {
+function Section({ title, loading, empty, action, children }: {
   title: string;
   loading: boolean;
   empty?: string;
+  /// Optional right-aligned action in the section title row (e.g. Update all).
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -155,6 +187,7 @@ function Section({ title, loading, empty, children }: {
       <div className="plugins-section-title">
         {title}
         {loading && <span className="plugins-loading"> · loading…</span>}
+        {action && <span className="plugins-section-action">{action}</span>}
       </div>
       <div className="plugins-section-body">
         {empty && !loading ? <div className="plugins-empty">{empty}</div> : children}

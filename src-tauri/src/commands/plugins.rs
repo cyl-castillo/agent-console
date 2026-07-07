@@ -22,3 +22,18 @@ pub async fn plugins_install(install_id: String, scope: Option<String>) -> AppRe
         .await
         .map_err(|e| AppError::Other(format!("plugin install task panicked: {e}")))?
 }
+
+#[tauri::command]
+pub async fn plugins_update(id: String, scope: Option<String>) -> AppResult<String> {
+    let scope = scope.unwrap_or_else(|| "user".to_string());
+    tokio::task::spawn_blocking(move || plugins_service::update_plugin(&id, &scope))
+        .await
+        .map_err(|e| AppError::Other(format!("plugin update task panicked: {e}")))?
+}
+
+#[tauri::command]
+pub async fn plugins_update_marketplaces() -> AppResult<String> {
+    tokio::task::spawn_blocking(plugins_service::update_marketplaces)
+        .await
+        .map_err(|e| AppError::Other(format!("marketplace update task panicked: {e}")))?
+}

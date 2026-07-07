@@ -216,26 +216,87 @@ pub fn list_available() -> AvailableSnapshot {
     }
 }
 
-/// Install a plugin via `claude plugin install <id> --scope <scope>`.
-/// Returns the CLI's stdout (a short success line) on success.
-pub fn install_plugin(install_id: &str, scope: &str) -> AppResult<String> {
-    if install_id.trim().is_empty() {
+/// Ids come from our own catalogue / the CLI's own list, but validate
+/// defensively before anything reaches a subprocess argument.
+fn validate_plugin_id(id: &str) -> AppResult<()> {
+    if id.trim().is_empty() {
         return Err(AppError::InvalidArgument("empty plugin id".into()));
     }
-    // install_id comes from our own catalogue; validate defensively before it
-    // reaches a subprocess argument.
-    if !install_id
+    if !id
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '/'))
     {
-        return Err(AppError::InvalidArgument(format!(
-            "invalid plugin id: {install_id}"
-        )));
+        return Err(AppError::InvalidArgument(format!("invalid plugin id: {id}")));
     }
-    let scope = match scope {
+    // A leading '-' would be parsed by the CLI as a flag, not an id.
+    if id.starts_with('-') {
+        return Err(AppError::InvalidArgument(format!("invalid plugin id: {id}")));
+    }
+    Ok(())
+}
+
+fn normalize_scope(scope: &str) -> &str {
+    match scope {
         "user" | "project" | "local" => scope,
         _ => "user",
-    };
+    }
+}
+
+/// Install a plugin via `claude plugin install <id> --scope <scope>`.
+/// Returns the CLI's stdout (a short success line) on success.
+pub fn install_plugin(install_id: &str, scope: &str) -> AppResult<String> {
+    validate_plugin_id(install_id)?;
+    let scope = normalize_scope(scope);
     let out = run_claude(&["plugin", "install", install_id, "--scope", scope])?;
     Ok(out.trim().to_string())
+}
+
+/// Update an installed plugin via `claude plugin update <id> --scope <scope>`.
+/// The CLI notes a restart is required to apply — callers surface that.
+pub fn update_plugin(id: &str, scope: &str) -> AppResult<String> {
+    validate_plugin_id(id)?;
+    let scope = normalize_scope(scope);
+    let out = run_claude(&["plugin", "update", id, "--scope", scope])?;
+    Ok(out.trim().to_string())
+}
+
+/// Refresh every configured marketplace from its source so the catalogue (and
+/// the versions `plugin update` resolves against) is current.
+pub fn update_marketplaces() -> AppResult<String> {
+    let out = run_claude(&["plugin", "marketplace", "update"])?;
+    Ok(out.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_id_validation_accepts_real_ids_and_rejects_injection() {
+        assert!(validate_plugin_id("code-review@anthropic-skills").is_ok());
+        assert!(validate_plugin_id("my_plugin.v2").is_ok());
+        assert!(validate_plugin_id("org/repo@mk").is_ok());
+        assert!(validate_plugin_id("").is_err());
+        assert!(validate_plugin_id("   ").is_err());
+        assert!(validate_plugin_id("evil; rm -rf /").is_err());
+        // Valid charset but would be parsed by the CLI as a flag, not an id.
+        assert!(validate_plugin_id("--scope").is_err());
+    }
+
+    #[test]
+    fn unknown_scopes_fall_back_to_user() {
+        assert_eq!(normalize_scope("project"), "project");
+        assert_eq!(normalize_scope("local"), "local");
+        assert_eq!(normalize_scope("managed"), "user");
+        assert_eq!(normalize_scope("anything"), "user");
+    }
+
+    #[test]
+    fn split_id_separates_marketplace() {
+        assert_eq!(
+            split_id("name@mk"),
+            ("name".to_string(), Some("mk".to_string()))
+        );
+        assert_eq!(split_id("solo"), ("solo".to_string(), None));
+    }
 }
