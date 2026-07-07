@@ -251,8 +251,9 @@ export const useLearningStore = create<LearningState>((set, get) => ({
   apply: async (id) => {
     const item = get().items.find((it) => it.id === id);
     if (!item) return;
-    // Only skill/memory suggestions can be materialized; friction is report-only.
-    if (item.kind === "friction") return;
+    // Only skill/memory/plugin suggestions can be materialized; friction and
+    // hook are report-only (hooks mutate settings — the user wires those).
+    if (item.kind === "friction" || item.kind === "hook") return;
 
     set((s) => ({
       items: s.items.map((it) =>
@@ -267,6 +268,15 @@ export const useLearningStore = create<LearningState>((set, get) => ({
         }
         path = await ipc.learningCreateSkill(item.skillName, item.skillMdContent);
         useSkillsStore.getState().refresh();
+      } else if (item.kind === "plugin") {
+        if (!item.pluginName || !item.pluginSkillMd) {
+          throw new Error("suggestion is missing plugin content");
+        }
+        path = await ipc.learningCreatePlugin(
+          item.pluginName,
+          item.pluginDescription ?? "",
+          item.pluginSkillMd,
+        );
       } else {
         if (!item.memoryName || !item.memoryContent) {
           throw new Error("suggestion is missing memory content");

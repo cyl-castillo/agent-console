@@ -90,6 +90,7 @@ pub fn run() {
             commands::learning::learning_curate,
             commands::learning::activity_list,
             commands::learning::learning_create_skill,
+            commands::learning::learning_create_plugin,
             commands::learning::learning_save_memory,
             commands::learning::learning_apply_refactor,
             commands::learning::learning_apply_merge,

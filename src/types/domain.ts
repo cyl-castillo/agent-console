@@ -242,9 +242,11 @@ export interface AdvisorAnalysisResult {
 }
 
 /// One improvement proposed by "learning mode" from observed daily activity.
-/// kind: "skill" | "memory" | "friction".
+/// kind: "skill" | "memory" | "plugin" | "hook" | "friction".
+/// plugin = package a cross-project workflow as a shareable plugin (applyable);
+/// hook = a hand-enforced rule a Claude Code hook could automate (report-only).
 export interface LearningSuggestion {
-  kind: "skill" | "memory" | "friction";
+  kind: "skill" | "memory" | "plugin" | "hook" | "friction";
   title: string;
   rationale: string;
   evidence: string[];
@@ -252,6 +254,9 @@ export interface LearningSuggestion {
   skillMdContent?: string;
   memoryName?: string;
   memoryContent?: string;
+  pluginName?: string;
+  pluginDescription?: string;
+  pluginSkillMd?: string;
 }
 
 export interface ReflectionResult {

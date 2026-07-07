@@ -3472,6 +3472,8 @@ select:focus-visible,
 }
 .wb-learning-kind.kind-skill { background: rgba(120,150,255,0.18); color: #9db0ff; }
 .wb-learning-kind.kind-memory { background: rgba(180,140,255,0.18); color: #c4a6ff; }
+.wb-learning-kind.kind-plugin { background: var(--ok-12); color: var(--ok); }
+.wb-learning-kind.kind-hook { background: rgba(255,140,90,0.18); color: #ffab85; }
 .wb-learning-kind.kind-friction { background: var(--warn-12); color: var(--warn); }
 /* Curation action tags reuse the kind-tag shell. */
 .wb-learning-kind.action-merge { background: rgba(120,200,160,0.18); color: #8fe0b6; }
