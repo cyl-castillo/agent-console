@@ -160,6 +160,9 @@ export const ipc = {
   pluginsListAvailable: () => invoke<AvailableSnapshot>("plugins_list_available"),
   pluginsInstall: (installId: string, scope?: "user" | "project" | "local") =>
     invoke<string>("plugins_install", { installId, scope: scope ?? null }),
+  pluginsUpdate: (id: string, scope?: "user" | "project" | "local") =>
+    invoke<string>("plugins_update", { id, scope: scope ?? null }),
+  pluginsUpdateMarketplaces: () => invoke<string>("plugins_update_marketplaces"),
 
   mcpList: () => invoke<McpServer[]>("mcp_list"),
   mcpAdd: (input: McpAddInput) => invoke<string>("mcp_add", { input }),
