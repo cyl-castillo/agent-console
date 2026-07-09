@@ -17,6 +17,7 @@ pub mod sessions;
 pub mod skills;
 pub mod snapshot;
 pub mod terminal;
+pub mod jira;
 pub mod usage;
 pub mod vault;
 pub mod voice;

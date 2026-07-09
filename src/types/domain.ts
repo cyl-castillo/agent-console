@@ -156,6 +156,29 @@ export interface HooksStatus {
   settingsPath: string;
 }
 
+/// Whether Jira is connected, and the non-secret config (token never leaves
+/// the backend/keychain). Mirrors the Rust JiraStatus.
+export interface JiraStatus {
+  configured: boolean;
+  siteUrl: string;
+  email: string;
+}
+
+/// One assigned Jira issue, flattened for the UI. Mirrors the Rust JiraIssue.
+export interface JiraIssue {
+  key: string;
+  summary: string;
+  status: string;
+  /// statusCategory key: "new" | "indeterminate" | "done".
+  statusCategory: string;
+  priority: string | null;
+  issueType: string;
+  dueDate: string | null;
+  project: string;
+  updated: string | null;
+  url: string;
+}
+
 /// A PreToolUse approval request emitted by the bridge hook.
 export interface ApprovalRequest {
   id: string;

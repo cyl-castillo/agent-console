@@ -8,13 +8,14 @@ import { useVaultStore } from "../stores/vaultStore";
 import { useContextStore } from "../stores/contextStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
 import { usePluginsStore } from "../stores/pluginsStore";
+import { useJiraStore } from "../stores/jiraStore";
 import { useMcpStore } from "../stores/mcpStore";
 import { useRoundtableStore } from "../stores/roundtableStore";
 import { useSchedulerStore } from "../stores/schedulerStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "schedule" | "vault" | "context" | "plugins" | "mcp" | "transfer" | "feedback";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "schedule" | "vault" | "context" | "plugins" | "mcp" | "transfer" | "feedback" | "jira" | "agenda";
 
 export function WorkbenchTabs({
   active,
@@ -37,6 +38,7 @@ export function WorkbenchTabs({
   const vaultCount = useVaultStore((s) => s.entries.length);
   const memoriesCount = useContextStore((s) => s.memories.length);
   const pluginsCount = usePluginsStore((s) => s.installed.length);
+  const jiraCount = useJiraStore((s) => s.issues.length);
   const mcpCount = useMcpStore((s) => s.servers.length);
   const feedbackEnabled = useFeedbackStore((s) => s.devEnabled === true);
   const rtActive = useRoundtableStore(
@@ -62,6 +64,8 @@ export function WorkbenchTabs({
   // rather than as one flat wall of 11 equal buttons.
   const tabs: Record<WorkbenchTab, Omit<StripProps, "active" | "onClick">> = {
     skills: { icon: "puzzle", label: "Skills", title: "Skills", count: skillsCount },
+    jira: { icon: "check", label: "Tasks", title: "Tasks — your assigned Jira issues", count: jiraCount },
+    agenda: { icon: "calendar", label: "Agenda", title: "Agenda — task due dates + scheduled jobs" },
     context: { icon: "file-text", label: "Context", title: "Context", count: memoriesCount },
     advisor: {
       icon: "lightbulb",
@@ -99,7 +103,7 @@ export function WorkbenchTabs({
   };
 
   const groups: { label: string; tabs: WorkbenchTab[] }[] = [
-    { label: "Workspace", tabs: ["skills", "context", "advisor", "learning"] },
+    { label: "Workspace", tabs: ["skills", "jira", "agenda", "context", "advisor", "learning"] },
     { label: "Agents", tabs: ["roundtable", "schedule"] },
     { label: "Config", tabs: ["permissions", "vault", "plugins", "mcp", "transfer"] },
   ];

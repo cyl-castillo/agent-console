@@ -12,7 +12,7 @@ import type {
   ImportDecisions, ImportManifest, ImportResult,
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
-  InstalledPlugin, AvailableSnapshot, Job, McpServer, McpAddInput,
+  InstalledPlugin, AvailableSnapshot, JiraStatus, JiraIssue, Job, McpServer, McpAddInput,
   MemoryEntry, PermissionsSnapshot, Preflight,
   PersistedRoom, PersistedSession, Project, RecentProject,
   RoomSummary, RoundtableConfig, RunRecord, ShareResult, SyncResult,
@@ -163,6 +163,12 @@ export const ipc = {
   pluginsUpdate: (id: string, scope?: "user" | "project" | "local") =>
     invoke<string>("plugins_update", { id, scope: scope ?? null }),
   pluginsUpdateMarketplaces: () => invoke<string>("plugins_update_marketplaces"),
+
+  jiraStatus: () => invoke<JiraStatus>("jira_status"),
+  jiraConnect: (siteUrl: string, email: string, token: string) =>
+    invoke<string>("jira_connect", { siteUrl, email, token }),
+  jiraDisconnect: () => invoke<void>("jira_disconnect"),
+  jiraListIssues: () => invoke<JiraIssue[]>("jira_list_issues"),
 
   mcpList: () => invoke<McpServer[]>("mcp_list"),
   mcpAdd: (input: McpAddInput) => invoke<string>("mcp_add", { input }),
