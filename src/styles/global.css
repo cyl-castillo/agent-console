@@ -5740,3 +5740,22 @@ select:focus-visible,
 }
 .agenda-item:hover .agenda-act, .agenda-act:focus-visible { opacity: 1; }
 .agenda-act:hover { color: var(--accent); border-color: var(--accent); }
+
+/* --- Jira: group-by-status sections --- */
+.jira-group { margin-bottom: 10px; }
+.jira-group-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-faint); padding: 4px 0 5px;
+  border-bottom: 1px solid var(--border); margin-bottom: 6px;
+}
+.jira-group-title.cat-new { color: var(--accent); }
+.jira-group-title.cat-indeterminate { color: var(--warn); }
+.jira-group-title.cat-done { color: var(--ok); }
+.jira-group-count {
+  margin-left: auto;
+  font-weight: 600; font-size: 10px; letter-spacing: 0;
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 8px; padding: 0 6px; line-height: 15px;
+}

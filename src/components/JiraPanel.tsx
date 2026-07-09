@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { useJiraStore } from "../stores/jiraStore";
 import { startSessionForIssue } from "../lib/startSessionForIssue";
+import { groupIssuesByStatus, intentForIssue, intentVerb } from "../lib/jira";
 import { PanelError } from "./PanelError";
 import type { JiraIssue } from "../types/domain";
 
@@ -149,9 +150,17 @@ function IssueList() {
       ) : issues.length === 0 && !issuesError ? (
         <div className="wb-empty">No open issues assigned to you. Nice.</div>
       ) : (
-        <ul className="jira-issues">
-          {issues.map((it) => <IssueRow key={it.key} issue={it} />)}
-        </ul>
+        groupIssuesByStatus(issues).map((g) => (
+          <section key={g.status} className="jira-group">
+            <div className={`jira-group-title cat-${g.statusCategory}`}>
+              {g.status}
+              <span className="jira-group-count">{g.issues.length}</span>
+            </div>
+            <ul className="jira-issues">
+              {g.issues.map((it) => <IssueRow key={it.key} issue={it} />)}
+            </ul>
+          </section>
+        ))
       )}
     </div>
   );
@@ -166,7 +175,6 @@ function IssueRow({ issue }: { issue: JiraIssue }) {
           onClick={() => void openUrl(issue.url)}
           title={`Open ${issue.key} in Jira`}
         >{issue.key}</button>
-        <span className={`jira-status cat-${issue.statusCategory}`}>{issue.status}</span>
         {issue.dueDate && <span className="jira-due" title="Due date">⏱ {issue.dueDate}</span>}
       </div>
       <div className="jira-summary">{issue.summary}</div>
@@ -179,7 +187,7 @@ function IssueRow({ issue }: { issue: JiraIssue }) {
         <button
           className="jira-start"
           onClick={() => startSessionForIssue(issue)}
-          title={`Start an agent session for ${issue.key}, seeded with the ticket`}
+          title={`Start a ${intentVerb(intentForIssue(issue))} session for ${issue.key}`}
         >▸ Start session</button>
       </div>
     </li>
