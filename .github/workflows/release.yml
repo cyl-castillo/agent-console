@@ -7,7 +7,47 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  # Stage 1: create (or reuse) ONE draft release up front and expose its id.
+  # The build matrix then uploads to this fixed id instead of each job racing to
+  # create/update the release for the tag — that race dropped Windows assets on
+  # v0.41.0/v0.41.1. A draft stays invisible (and off the updater feed) until
+  # stage 3 publishes it, so users never see a half-uploaded release.
+  create-release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+    steps:
+      - name: Create draft release
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = process.env.GITHUB_REF_NAME;
+            const { owner, repo } = context.repo;
+            // Idempotent: reuse the release if the tag already has one (a re-cut
+            // tag), else create a fresh draft. Force draft so the matrix uploads
+            // land before anyone can see the release.
+            try {
+              const { data } = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+              await github.rest.repos.updateRelease({ owner, repo, release_id: data.id, draft: true });
+              return data.id;
+            } catch (e) {
+              const { data } = await github.rest.repos.createRelease({
+                owner, repo,
+                tag_name: tag,
+                name: `Agent Console ${tag}`,
+                draft: true,
+                prerelease: false,
+              });
+              return data.id;
+            }
+
+  # Stage 2: build every platform and upload its bundles to the release created
+  # above (releaseId is fixed, so no create/clobber race between jobs).
+  build-tauri:
+    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -67,17 +107,40 @@ jobs:
           # compile ggml-backend-reg.cpp. Harmless on Linux/Windows.
           MACOSX_DEPLOYMENT_TARGET: '10.15'
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Agent Console ${{ github.ref_name }}'
-          releaseDraft: false
-          prerelease: false
+          # Upload into the pre-created draft. tauri-action merges each platform
+          # into the release's existing latest.json, so the updater feed ends up
+          # complete regardless of job finish order.
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: ${{ matrix.args }}
 
-  # Publish the npm launcher (launcher/) AFTER every platform's release assets
-  # are uploaded — the launcher fetches those assets at runtime, so it must not
-  # go out ahead of them. Only runs for real version tags; skips cleanly if the
-  # version is already on npm (e.g. a re-cut tag).
+  # Stage 3: every platform uploaded — flip the draft to published so the release
+  # (and its updater feed) go live all at once, complete.
+  publish-release:
+    needs: [create-release, build-tauri]
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Publish release
+        uses: actions/github-script@v7
+        env:
+          release_id: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            await github.rest.repos.updateRelease({
+              owner, repo,
+              release_id: Number(process.env.release_id),
+              draft: false,
+              prerelease: false,
+            });
+
+  # Publish the npm launcher (launcher/) AFTER the release is live — the launcher
+  # fetches those assets at runtime, so it must not go out ahead of them. Only
+  # runs for real version tags; skips cleanly if the version is already on npm
+  # (e.g. a re-cut tag).
   publish-launcher:
-    needs: build
+    needs: publish-release
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
     steps:
