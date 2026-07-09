@@ -4,24 +4,12 @@ import { useTerminalsStore } from "../stores/terminalsStore";
 import { useModelStore } from "../stores/modelStore";
 import { useUIStore } from "../stores/uiStore";
 import { useToastStore } from "../stores/toastStore";
+import { seedForIssue, intentForIssue, intentVerb } from "./jira";
 import type { JiraIssue } from "../types/domain";
 
-/// The prompt the agent's input is seeded with. Kept short and factual — the
-/// user reviews and extends it before sending (it's typed without a newline).
-export function seedForIssue(issue: JiraIssue): string {
-  const bits = [issue.issueType, issue.priority ? `${issue.priority} priority` : null]
-    .filter(Boolean)
-    .join(", ");
-  return (
-    `I'm working on Jira issue ${issue.key}: ${issue.summary}` +
-    (bits ? ` (${bits}).` : ".") +
-    ` Ref: ${issue.url}\n\nHelp me plan and implement this. Start by exploring the relevant code.`
-  );
-}
-
 /// The bridge: turn an assigned ticket into a new agent session in the current
-/// project, named after the ticket and seeded with its context. Reuses the last
-/// agent/model chosen for this project so it's one click, not a chooser.
+/// project, named after the ticket and seeded with a stage-aware prompt. Reuses
+/// the last agent/model chosen for this project so it's one click, not a chooser.
 export function startSessionForIssue(issue: JiraIssue): void {
   const project = useSessionStore.getState().project;
   if (!project) {
@@ -37,7 +25,8 @@ export function startSessionForIssue(issue: JiraIssue): void {
   terminals.persist();
 
   useUIStore.getState().setTab("terminal");
+  const verb = intentVerb(intentForIssue(issue));
   useToastStore
     .getState()
-    .show(`Session ${issue.key} started — review the prompt, then send`, "success");
+    .show(`Session ${issue.key} started (${verb}) — review the prompt, then send`, "success");
 }

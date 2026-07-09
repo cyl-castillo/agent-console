@@ -1,0 +1,88 @@
+import { describe, expect, it } from "vitest";
+
+import { intentForIssue, seedForIssue, groupIssuesByStatus } from "./jira";
+import type { JiraIssue } from "../types/domain";
+
+function issue(over: Partial<JiraIssue> = {}): JiraIssue {
+  return {
+    key: "ABC-1",
+    summary: "Fix the login redirect",
+    status: "To Do",
+    statusCategory: "new",
+    priority: "High",
+    issueType: "Story",
+    dueDate: null,
+    project: "Acme",
+    updated: null,
+    url: "https://acme.atlassian.net/browse/ABC-1",
+    ...over,
+  };
+}
+
+describe("intentForIssue", () => {
+  it("a fresh (To Do) story is 'implement'", () => {
+    expect(intentForIssue(issue())).toBe("implement");
+  });
+  it("any status containing 'review' is 'review' (the reported bug)", () => {
+    expect(intentForIssue(issue({ status: "Code Review", statusCategory: "indeterminate" }))).toBe("review");
+    expect(intentForIssue(issue({ status: "In Review", statusCategory: "indeterminate" }))).toBe("review");
+    // Review wins even for a bug — you review the fix, not re-debug it.
+    expect(intentForIssue(issue({ status: "Peer Review", issueType: "Bug" }))).toBe("review");
+  });
+  it("testing/QA statuses are 'test'", () => {
+    expect(intentForIssue(issue({ status: "QA", statusCategory: "indeterminate" }))).toBe("test");
+    expect(intentForIssue(issue({ status: "Testing", statusCategory: "indeterminate" }))).toBe("test");
+  });
+  it("a bug (not in review/test) is 'debug' regardless of stage", () => {
+    expect(intentForIssue(issue({ issueType: "Bug", statusCategory: "new" }))).toBe("debug");
+    expect(intentForIssue(issue({ issueType: "Defect", status: "In Progress", statusCategory: "indeterminate" }))).toBe("debug");
+  });
+  it("a non-bug already in progress is 'continue'", () => {
+    expect(intentForIssue(issue({ status: "In Progress", statusCategory: "indeterminate" }))).toBe("continue");
+  });
+});
+
+describe("seedForIssue", () => {
+  it("a review ticket asks for a review, not an implementation", () => {
+    const s = seedForIssue(issue({ status: "Code Review", statusCategory: "indeterminate" }));
+    expect(s).toMatch(/review/i);
+    expect(s).not.toMatch(/plan and implement/i);
+    expect(s).toContain("ABC-1");
+    expect(s).toContain("https://acme.atlassian.net/browse/ABC-1");
+  });
+  it("a fresh story asks to plan and implement", () => {
+    expect(seedForIssue(issue())).toMatch(/plan and implement/i);
+  });
+  it("a bug asks to reproduce and diagnose before fixing", () => {
+    expect(seedForIssue(issue({ issueType: "Bug" }))).toMatch(/reproduce and diagnose/i);
+  });
+  it("always carries the key and browse ref", () => {
+    for (const status of ["To Do", "In Progress", "Code Review", "QA"]) {
+      const s = seedForIssue(issue({ status }));
+      expect(s).toContain("ABC-1");
+      expect(s).toContain("browse/ABC-1");
+    }
+  });
+});
+
+describe("groupIssuesByStatus", () => {
+  it("groups by status and orders new before indeterminate", () => {
+    const groups = groupIssuesByStatus([
+      issue({ key: "A", status: "In Review", statusCategory: "indeterminate" }),
+      issue({ key: "B", status: "To Do", statusCategory: "new" }),
+      issue({ key: "C", status: "To Do", statusCategory: "new" }),
+    ]);
+    expect(groups.map((g) => g.status)).toEqual(["To Do", "In Review"]);
+    expect(groups[0].issues.map((i) => i.key)).toEqual(["B", "C"]);
+  });
+  it("preserves incoming (due-date) order within a group", () => {
+    const groups = groupIssuesByStatus([
+      issue({ key: "first", status: "To Do" }),
+      issue({ key: "second", status: "To Do" }),
+    ]);
+    expect(groups[0].issues.map((i) => i.key)).toEqual(["first", "second"]);
+  });
+  it("empty in, empty out", () => {
+    expect(groupIssuesByStatus([])).toEqual([]);
+  });
+});
