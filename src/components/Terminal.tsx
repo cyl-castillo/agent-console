@@ -234,6 +234,18 @@ export function Terminal({ session, visible }: Props) {
           term.write(`\x1b[90m── ${launchNote} ${launchLabel} ──\x1b[0m\r\n`);
           ipc.termWrite(tid, `${cmd}\r`).catch(() => {});
         }, 600);
+
+        // First-spawn prompt seed (e.g. a Jira ticket): typed into the agent's
+        // input once its TUI has had time to boot, and WITHOUT a trailing
+        // newline so the human reviews and submits it. A setup command runs
+        // first and takes longer, so wait more when one is present.
+        const seed = session.seedPrompt?.trim();
+        if (seed) {
+          setTimeout(() => {
+            if (disposed) return;
+            ipc.termWrite(tid, seed).catch(() => {});
+          }, setup ? 6000 : 3000);
+        }
       }
 
       term.onData((data) => {
