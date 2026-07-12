@@ -73,8 +73,10 @@ export const ipc = {
 
   // Per-session isolated worktrees. Destructive ops (merge/discard) validate
   // on the Rust side that the path is a registered worktree of the repo.
-  worktreeCreate: (name: string, base?: string) =>
-    invoke<WorktreeCreated>("worktree_create", { name, base: base ?? null }),
+  worktreeCreate: (name: string, base?: string, branch?: string) =>
+    invoke<WorktreeCreated>("worktree_create", { name, base: base ?? null, branch: branch ?? null }),
+  worktreeSuggestBranch: (key: string, summary: string, issueType: string) =>
+    invoke<string>("worktree_suggest_branch", { key, summary, issueType }),
   worktreeStatus: (wt: WorktreeRef) =>
     invoke<WorktreeStatusInfo>("worktree_status", {
       path: wt.path, branch: wt.branch, baseBranch: wt.baseBranch,

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { ipc } from "../ipc/tauri";
 import { useJiraStore } from "../stores/jiraStore";
+import { useChangesStore } from "../stores/changesStore";
 import { startSessionForIssue } from "../lib/startSessionForIssue";
 import { groupIssuesByStatus, intentForIssue, intentVerb } from "../lib/jira";
 import { PanelError } from "./PanelError";
@@ -132,6 +134,8 @@ function IssueList() {
   const refreshIssues = useJiraStore((s) => s.refreshIssues);
   const disconnect = useJiraStore((s) => s.disconnect);
   const status = useJiraStore((s) => s.status);
+  // The worktree action only makes sense in a git repo.
+  const isRepo = useChangesStore((s) => s.status?.isRepo ?? false);
 
   return (
     <div className="jira-list">
@@ -157,7 +161,7 @@ function IssueList() {
               <span className="jira-group-count">{g.issues.length}</span>
             </div>
             <ul className="jira-issues">
-              {g.issues.map((it) => <IssueRow key={it.key} issue={it} />)}
+              {g.issues.map((it) => <IssueRow key={it.key} issue={it} isRepo={isRepo} />)}
             </ul>
           </section>
         ))
@@ -166,7 +170,33 @@ function IssueList() {
   );
 }
 
-function IssueRow({ issue }: { issue: JiraIssue }) {
+function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
+  const verb = intentVerb(intentForIssue(issue));
+  // null = editor closed. A string = open, holding the (editable) branch name.
+  const [branch, setBranch] = useState<string | null>(null);
+  const [proposing, setProposing] = useState(false);
+
+  const openWorktreeEditor = async () => {
+    setProposing(true);
+    try {
+      // Pre-fill from the project/skill convention (backend-resolved). Nothing
+      // is created yet — the user confirms or edits first.
+      const suggested = await ipc.worktreeSuggestBranch(issue.key, issue.summary, issue.issueType);
+      setBranch(suggested || issue.key);
+    } catch {
+      setBranch(issue.key);
+    } finally {
+      setProposing(false);
+    }
+  };
+
+  const createWorktree = () => {
+    const b = (branch ?? "").trim();
+    if (!b) return;
+    setBranch(null);
+    void startSessionForIssue(issue, { worktree: true, branch: b });
+  };
+
   return (
     <li className="jira-issue" title={issue.summary}>
       <div className="jira-issue-top">
@@ -178,18 +208,48 @@ function IssueRow({ issue }: { issue: JiraIssue }) {
         {issue.dueDate && <span className="jira-due" title="Due date">⏱ {issue.dueDate}</span>}
       </div>
       <div className="jira-summary">{issue.summary}</div>
-      <div className="jira-issue-bottom">
-        <div className="jira-meta">
-          <span>{issue.issueType}</span>
-          {issue.priority && <span> · {issue.priority}</span>}
-          <span> · {issue.project}</span>
+
+      {branch !== null ? (
+        <div className="jira-wt-editor" onClick={(e) => e.stopPropagation()}>
+          <span className="jira-wt-label">branch</span>
+          <input
+            className="jira-wt-input"
+            value={branch}
+            autoFocus
+            spellCheck={false}
+            onChange={(e) => setBranch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") createWorktree();
+              if (e.key === "Escape") setBranch(null);
+            }}
+          />
+          <button className="jira-start" onClick={createWorktree} title="Create the worktree on this branch and start the session">Create</button>
+          <button className="jira-wt-cancel" onClick={() => setBranch(null)} title="Cancel">✕</button>
         </div>
-        <button
-          className="jira-start"
-          onClick={() => startSessionForIssue(issue)}
-          title={`Start a ${intentVerb(intentForIssue(issue))} session for ${issue.key}`}
-        >▸ Start session</button>
-      </div>
+      ) : (
+        <div className="jira-issue-bottom">
+          <div className="jira-meta">
+            <span>{issue.issueType}</span>
+            {issue.priority && <span> · {issue.priority}</span>}
+            <span> · {issue.project}</span>
+          </div>
+          <div className="jira-issue-actions">
+            {isRepo && (
+              <button
+                className="jira-start jira-start-wt"
+                onClick={() => void openWorktreeEditor()}
+                disabled={proposing}
+                title={`Start a ${verb} session in an isolated worktree for ${issue.key} (you name the branch)`}
+              >{proposing ? "…" : "⎇ worktree"}</button>
+            )}
+            <button
+              className="jira-start"
+              onClick={() => void startSessionForIssue(issue)}
+              title={`Start a ${verb} session for ${issue.key} in the project checkout`}
+            >▸ Start session</button>
+          </div>
+        </div>
+      )}
     </li>
   );
 }

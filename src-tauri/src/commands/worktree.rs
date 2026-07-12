@@ -55,11 +55,19 @@ pub struct WorktreeCreated {
 pub fn worktree_create(
     name: String,
     base: Option<String>,
+    branch: Option<String>,
     state: State<'_, AppState>,
 ) -> AppResult<WorktreeCreated> {
     let repo = repo(&state)?;
+    // `name` drives the worktree folder (a flat slug); `branch` is the git
+    // branch. An explicit branch is used verbatim (the caller's/team's
+    // convention, slashes preserved) — we only fall back to the imposed
+    // `agent/<slug>` when no branch is given (the legacy SessionList flow).
     let slug = worktree_service::sanitize_branch_component(&name);
-    let branch = format!("agent/{slug}");
+    let branch = match branch {
+        Some(b) if !b.trim().is_empty() => worktree_service::sanitize_branch_ref(&b),
+        _ => format!("agent/{slug}"),
+    };
     let dest = worktree_root(&repo)?.join(&slug);
     if dest.exists() {
         return Err(AppError::InvalidArgument(format!(
@@ -74,6 +82,20 @@ pub fn worktree_create(
         copied,
         setup_command: config.setup,
     })
+}
+
+/// The branch name to propose for a ticket worktree — from a skill's
+/// `branch-template`, else the project's worktree-setup.json, else "{key}".
+/// The UI shows it pre-filled and editable; nothing is imposed.
+#[tauri::command]
+pub fn worktree_suggest_branch(
+    key: String,
+    summary: String,
+    issue_type: String,
+    state: State<'_, AppState>,
+) -> AppResult<String> {
+    let repo = repo(&state)?;
+    Ok(worktree_service::suggest_branch(&repo, &key, &summary, &issue_type))
 }
 
 #[tauri::command]

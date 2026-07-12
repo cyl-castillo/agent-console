@@ -58,6 +58,7 @@ pub fn run() {
             commands::snapshot::snapshot_restore,
             commands::snapshot::snapshot_delete,
             commands::worktree::worktree_create,
+            commands::worktree::worktree_suggest_branch,
             commands::worktree::worktree_status,
             commands::worktree::worktree_merge,
             commands::worktree::worktree_discard,

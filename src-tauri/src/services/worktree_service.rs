@@ -57,6 +57,11 @@ pub struct MergeOutcome {
 pub struct SetupConfig {
     pub copy: Vec<String>,
     pub setup: Option<String>,
+    /// The team's branch-naming convention for ticket worktrees, e.g.
+    /// "feature/{key}" or "{key}-{slug}". Placeholders: {key} {slug} {type}.
+    /// None = no project convention (we fall back to a skill's, else "{key}").
+    #[serde(default)]
+    pub branch_template: Option<String>,
 }
 
 impl Default for SetupConfig {
@@ -64,6 +69,7 @@ impl Default for SetupConfig {
         Self {
             copy: vec![".env".into(), ".env.*".into()],
             setup: None,
+            branch_template: None,
         }
     }
 }
@@ -392,6 +398,92 @@ fn setup_config_path(repo: &Path) -> PathBuf {
 
 /// Missing or unreadable config falls back to the default (copy `.env*`, no
 /// setup command) — a broken JSON file must not block creating sessions.
+/// Sanitize a full branch ref, preserving '/' separators (so "feature/ABC-123"
+/// survives) while cleaning each segment with `sanitize_branch_component`.
+/// Empty → "session".
+pub fn sanitize_branch_ref(name: &str) -> String {
+    let cleaned = name
+        .trim()
+        .trim_matches('/')
+        .split('/')
+        .map(sanitize_branch_component)
+        .filter(|s| !s.is_empty() && s != "session")
+        .collect::<Vec<_>>()
+        .join("/");
+    if cleaned.is_empty() {
+        "session".to_string()
+    } else {
+        cleaned
+    }
+}
+
+/// Turn a summary into a short kebab slug for a branch name.
+fn summary_slug(summary: &str) -> String {
+    let words: Vec<String> = summary
+        .split_whitespace()
+        .take(6)
+        .map(|w| {
+            w.chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect::<String>()
+                .to_lowercase()
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.join("-")
+}
+
+/// Interpolate a branch template's placeholders. {key} {slug} {type}.
+pub fn apply_branch_template(template: &str, key: &str, summary: &str, issue_type: &str) -> String {
+    template
+        .replace("{key}", key)
+        .replace("{slug}", &summary_slug(summary))
+        .replace("{type}", &issue_type.to_lowercase())
+}
+
+/// The branch-naming convention to propose, in priority order:
+/// 1. a skill declaring `branch-template:` in its frontmatter (team convention
+///    encoded as a skill; project skills before user skills),
+/// 2. the project's `.claude/worktree-setup.json` `branchTemplate`,
+/// 3. None — the caller defaults to just the ticket key.
+pub fn resolve_branch_template(repo: &Path) -> Option<String> {
+    if let Ok(skills) = crate::services::skills_service::list(Some(repo)) {
+        // Project skills win over user skills; list() returns project first.
+        for skill in &skills {
+            if let Some(t) = skill_branch_template(&skill.path) {
+                return Some(t);
+            }
+        }
+    }
+    load_setup_config(repo).branch_template
+}
+
+/// Read a `branch-template:` value from a SKILL.md's YAML frontmatter, if any.
+fn skill_branch_template(path: &Path) -> Option<String> {
+    let content = fs::read_to_string(path).ok()?;
+    if !content.starts_with("---") {
+        return None;
+    }
+    let after = &content[3..];
+    let end = after.find("\n---")?;
+    for line in after[..end].lines() {
+        if let Some(rest) = line.trim().strip_prefix("branch-template:") {
+            let v = rest.trim().trim_matches(['"', '\'']).trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// The full proposed branch name for a ticket: resolved template (or "{key}"),
+/// interpolated and sanitized. The UI shows this pre-filled and editable.
+pub fn suggest_branch(repo: &Path, key: &str, summary: &str, issue_type: &str) -> String {
+    let template = resolve_branch_template(repo).unwrap_or_else(|| "{key}".to_string());
+    sanitize_branch_ref(&apply_branch_template(&template, key, summary, issue_type))
+}
+
 pub fn load_setup_config(repo: &Path) -> SetupConfig {
     let path = setup_config_path(repo);
     match fs::read_to_string(&path) {
@@ -577,6 +669,7 @@ mod tests {
         let cfg = SetupConfig {
             copy: vec![".env".into(), "config/*.local".into()],
             setup: Some("npm ci".into()),
+            ..Default::default()
         };
         save_setup_config(&repo, &cfg).unwrap();
         assert_eq!(load_setup_config(&repo), cfg);
@@ -600,6 +693,7 @@ mod tests {
                 "/etc/passwd".into(),      // absolute → ignored
             ],
             setup: None,
+            ..Default::default()
         };
         let copied = copy_setup_files(&repo, &dest, &cfg);
         assert_eq!(copied, vec!["config/db.local".to_string()]);
@@ -628,5 +722,57 @@ mod tests {
         assert_eq!(sanitize_branch_component("  weird//name?! "), "weird--name");
         assert_eq!(sanitize_branch_component("---"), "session");
         assert_eq!(sanitize_branch_component(""), "session");
+    }
+
+    #[test]
+    fn sanitize_branch_ref_preserves_slashes() {
+        assert_eq!(sanitize_branch_ref("feature/ABC-123"), "feature/ABC-123");
+        assert_eq!(sanitize_branch_ref("feature/fix login"), "feature/fix-login");
+        assert_eq!(sanitize_branch_ref("/leading/trailing/"), "leading/trailing");
+        assert_eq!(sanitize_branch_ref("bad??/name!!"), "bad/name");
+        assert_eq!(sanitize_branch_ref(""), "session");
+    }
+
+    #[test]
+    fn apply_branch_template_fills_placeholders() {
+        assert_eq!(
+            apply_branch_template("feature/{key}", "ABC-123", "Fix the login redirect", "Story"),
+            "feature/ABC-123"
+        );
+        // {slug} takes up to the first 6 summary words.
+        assert_eq!(
+            apply_branch_template("{key}-{slug}", "ABC-1", "Fix the login redirect bug now please", "Bug"),
+            "ABC-1-fix-the-login-redirect-bug-now"
+        );
+        assert_eq!(
+            apply_branch_template("{type}/{key}", "ABC-1", "x", "Bug"),
+            "bug/ABC-1"
+        );
+    }
+
+    #[test]
+    fn suggest_branch_defaults_to_key_without_convention() {
+        // No skills, no setup config → template defaults to "{key}".
+        let repo = init_repo("br-default");
+        assert_eq!(
+            suggest_branch(&repo, "PROJ-42", "Whatever summary", "Task"),
+            "PROJ-42"
+        );
+        cleanup(&[&repo]);
+    }
+
+    #[test]
+    fn suggest_branch_uses_project_setup_template() {
+        let repo = init_repo("br-config");
+        save_setup_config(
+            &repo,
+            &SetupConfig { branch_template: Some("feature/{key}-{slug}".into()), ..Default::default() },
+        )
+        .unwrap();
+        assert_eq!(
+            suggest_branch(&repo, "ABC-9", "Add dark mode toggle", "Story"),
+            "feature/ABC-9-add-dark-mode-toggle"
+        );
+        cleanup(&[&repo]);
     }
 }

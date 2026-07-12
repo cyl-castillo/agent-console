@@ -5692,6 +5692,7 @@ select:focus-visible,
 .jira-summary { font-size: 12.5px; color: var(--text); margin: 4px 0 2px; line-height: 1.35; }
 .jira-meta { font-size: 10px; color: var(--text-faint); }
 .jira-issue-bottom { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.jira-issue-actions { display: flex; gap: 4px; flex: none; }
 .jira-start {
   flex: none;
   background: transparent;
@@ -5708,6 +5709,33 @@ select:focus-visible,
 .jira-issue:hover .jira-start,
 .jira-start:focus-visible { opacity: 1; }
 .jira-start:hover { background: var(--accent-soft); }
+/* The worktree variant reads as the quieter, more-advanced option: muted
+   border until hover. */
+.jira-start-wt { border-color: var(--border); color: var(--text-dim); }
+.jira-start-wt:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: transparent; }
+.jira-start:disabled { opacity: 0.6; cursor: default; }
+
+/* Inline branch-name editor revealed by "⎇ worktree" — you always see and can
+   edit the branch before anything is created. */
+.jira-wt-editor { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
+.jira-wt-label { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-faint); flex: none; }
+.jira-wt-input {
+  flex: 1; min-width: 0;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+.jira-wt-input:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+.jira-wt-editor .jira-start { opacity: 1; }
+.jira-wt-cancel {
+  flex: none; background: transparent; border: none; color: var(--text-faint);
+  font-size: 12px; cursor: pointer; padding: 2px 4px;
+}
+.jira-wt-cancel:hover { color: var(--danger); }
 
 /* --- Agenda panel --- */
 .agenda-group { margin-bottom: 12px; }
