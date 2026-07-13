@@ -34,6 +34,11 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_codex_autoinstalled() {
                 eprintln!("hooks: codex auto-install failed: {e}");
             }
+            // Turn-completed observer for both engines (own marker so it
+            // reaches installs that predate it).
+            if let Err(e) = state.hooks.ensure_stop_autoinstalled() {
+                eprintln!("hooks: stop auto-install failed: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
