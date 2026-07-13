@@ -20,6 +20,7 @@ use crate::state::AppState;
 /// Bundled hook scripts written to disk at runtime.
 const USERPROMPT_HOOK: &str = include_str!("../../resources/userprompt-hook.cjs");
 const PRETOOLUSE_HOOK: &str = include_str!("../../resources/pretooluse-hook.cjs");
+const STOP_HOOK: &str = include_str!("../../resources/stop-hook.cjs");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +44,7 @@ pub struct HooksRuntime {
     session_dir: PathBuf,
     script_path: PathBuf,
     pretooluse_script_path: PathBuf,
+    stop_script_path: PathBuf,
     watcher_started: Mutex<bool>,
     approvals_watcher_started: Mutex<bool>,
 }
@@ -61,10 +63,12 @@ impl HooksRuntime {
         let script_path = ensure_hook_script(&cache, "userprompt-hook.cjs", USERPROMPT_HOOK)?;
         let pretooluse_script_path =
             ensure_hook_script(&cache, "pretooluse-hook.cjs", PRETOOLUSE_HOOK)?;
+        let stop_script_path = ensure_hook_script(&cache, "stop-hook.cjs", STOP_HOOK)?;
         Ok(Self {
             session_dir,
             script_path,
             pretooluse_script_path,
+            stop_script_path,
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
         })
@@ -147,6 +151,7 @@ impl HooksRuntime {
 
         upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
         upsert_hook(&mut settings, "PreToolUse", &self.pretooluse_script_path);
+        upsert_hook(&mut settings, "Stop", &self.stop_script_path);
 
         write_settings_atomic(&settings_path, &settings)?;
 
@@ -154,6 +159,7 @@ impl HooksRuntime {
             self.install_codex(&[
                 ("UserPromptSubmit", &self.script_path),
                 ("PreToolUse", &self.pretooluse_script_path),
+                ("Stop", &self.stop_script_path),
             ])?;
         }
         Ok(self.status())
@@ -233,6 +239,37 @@ impl HooksRuntime {
         Ok(())
     }
 
+    /// Auto-install the Stop (turn-completed) observer for both engines, under
+    /// its OWN marker — the userprompt markers already exist on installed
+    /// machines, so bundling Stop with them would never reach existing users.
+    /// Observer-class like the prompt hook (writes an event, changes no
+    /// behavior), so it's safe to enable by default.
+    pub fn ensure_stop_autoinstalled(&self) -> AppResult<()> {
+        let marker = self.script_path.with_file_name(".stop-autoinstalled");
+        if marker.exists() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = if settings_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
+        } else {
+            json!({})
+        };
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        upsert_hook(&mut settings, "Stop", &self.stop_script_path);
+        write_settings_atomic(&settings_path, &settings)?;
+        if codex_available() {
+            self.install_codex(&[("Stop", &self.stop_script_path)])?;
+        }
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
     /// Remove our hook entries from settings.json and ~/.codex/hooks.json.
     /// Other hooks/settings untouched.
     pub fn uninstall(&self) -> AppResult<HooksStatus> {
@@ -243,12 +280,11 @@ impl HooksRuntime {
             let txt = fs::read_to_string(&path)?;
             let mut settings: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
             if let Some(hooks) = settings.get_mut("hooks").and_then(|v| v.as_object_mut()) {
-                for key in ["UserPromptSubmit", "PreToolUse"] {
-                    let target = if key == "UserPromptSubmit" {
-                        &self.script_path
-                    } else {
-                        &self.pretooluse_script_path
-                    };
+                for (key, target) in [
+                    ("UserPromptSubmit", &self.script_path),
+                    ("PreToolUse", &self.pretooluse_script_path),
+                    ("Stop", &self.stop_script_path),
+                ] {
                     if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
                         arr.retain(|e| !has_command_path(e, target));
                     }

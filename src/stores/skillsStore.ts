@@ -193,5 +193,10 @@ export async function attachSkillsListeners(): Promise<UnlistenFn> {
   const offs: UnlistenFn[] = [];
   offs.push(await listen<HookUserPromptEvent>("hook://user_prompt", (e) => s._onPrompt(e.payload)));
   offs.push(await listen<Snapshot>("snapshot://created", (e) => s._onSnapshot(e.payload)));
+  // The Stop hook (both engines) gives a REAL turn-completed signal — flip the
+  // status pill to idle immediately instead of waiting out the decay window.
+  offs.push(await listen("hook://turn_end", () => {
+    useAgentStatusStore.getState().markIdle();
+  }));
   return () => { for (const off of offs) off(); };
 }
