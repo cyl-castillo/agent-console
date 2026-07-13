@@ -154,6 +154,11 @@ export interface HooksStatus {
   installed: boolean;
   pretooluseInstalled: boolean;
   settingsPath: string;
+  /// Codex mirror: same bridge scripts, wired via ~/.codex/hooks.json.
+  codexAvailable: boolean;
+  codexInstalled: boolean;
+  codexPretooluseInstalled: boolean;
+  codexHooksPath: string;
 }
 
 /// Whether Jira is connected, and the non-secret config (token never leaves

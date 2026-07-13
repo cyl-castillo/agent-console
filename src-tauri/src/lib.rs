@@ -30,6 +30,10 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_autoinstalled() {
                 eprintln!("hooks: auto-install failed: {e}");
             }
+            // Codex twin (own marker; no-op when the codex CLI isn't installed).
+            if let Err(e) = state.hooks.ensure_codex_autoinstalled() {
+                eprintln!("hooks: codex auto-install failed: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
