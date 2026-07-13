@@ -104,7 +104,7 @@ export function SkillsPanel() {
             <div className="wb-integration-body">
               {integrationActive ? (
                 <p className="wb-hint">
-                  Hook installed. Claude sessions inside this terminal trigger
+                  Hook installed. Agent sessions inside this terminal trigger
                   snapshots and feed the activity stream below.
                   <button className="wb-link" onClick={uninstall}>disable</button>
                 </p>
@@ -114,6 +114,13 @@ export function SkillsPanel() {
                   {" "}<code>~/.claude/settings.json</code>. It only activates when claude runs
                   inside Agent Console (gated by env var).
                   <button className="wb-cta" onClick={install}>enable</button>
+                </p>
+              )}
+              {hooks?.codexAvailable && hooks.codexInstalled && (
+                <p className="wb-hint">
+                  Codex too: wired via <code>~/.codex/hooks.json</code>. Codex asks you to
+                  trust the hook once — run <code>/hooks</code> inside a codex session to
+                  review and approve it.
                 </p>
               )}
             </div>

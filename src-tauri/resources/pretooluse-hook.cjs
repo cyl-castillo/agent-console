@@ -84,9 +84,14 @@ process.stdin.on("end", () => {
   try { fs.unlinkSync(reqPath); } catch { /* ignore */ }
   try { fs.unlinkSync(resPath); } catch { /* ignore */ }
 
-  if (!decision || !["allow", "deny", "ask"].includes(decision)) {
-    decision = "ask";
-    reason = reason || "Agent Console: no response within timeout — falling back to Claude's native prompt";
+  // "ask" (or timeout/garbage) defers to the agent's own permission prompt.
+  // Emit empty JSON for that: it means "no decision" to BOTH Claude and Codex
+  // (Codex documents {} as the defer shape and doesn't know "ask"), so one
+  // script serves both engines. allow/deny use the identical schema both
+  // engines share.
+  if (!decision || !["allow", "deny"].includes(decision)) {
+    process.stdout.write("{}");
+    process.exit(0);
   }
 
   const out = {

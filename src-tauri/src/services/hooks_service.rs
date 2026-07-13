@@ -30,6 +30,13 @@ pub struct HooksStatus {
     pub installed: bool,
     pub pretooluse_installed: bool,
     pub settings_path: PathBuf,
+    /// Codex mirror (same bridge scripts, wired via ~/.codex/hooks.json).
+    /// codex_available=false ⇒ the codex CLI isn't installed; the other two
+    /// then just report the file state.
+    pub codex_available: bool,
+    pub codex_installed: bool,
+    pub codex_pretooluse_installed: bool,
+    pub codex_hooks_path: PathBuf,
 }
 
 pub struct HooksRuntime {
@@ -97,6 +104,13 @@ impl HooksRuntime {
         let pretooluse_installed =
             is_hook_installed(&settings_path, "PreToolUse", &self.pretooluse_script_path)
                 .unwrap_or(false);
+        let codex_hooks_path = codex_hooks_path();
+        let codex_installed =
+            is_hook_installed(&codex_hooks_path, "UserPromptSubmit", &self.script_path)
+                .unwrap_or(false);
+        let codex_pretooluse_installed =
+            is_hook_installed(&codex_hooks_path, "PreToolUse", &self.pretooluse_script_path)
+                .unwrap_or(false);
         HooksStatus {
             session_dir: self.session_dir.clone(),
             script_path: self.script_path.clone(),
@@ -104,10 +118,17 @@ impl HooksRuntime {
             installed,
             pretooluse_installed,
             settings_path,
+            codex_available: codex_available(),
+            codex_installed,
+            codex_pretooluse_installed,
+            codex_hooks_path,
         }
     }
 
-    /// Merge UserPromptSubmit + PreToolUse hooks into ~/.claude/settings.json.
+    /// Merge UserPromptSubmit + PreToolUse hooks into ~/.claude/settings.json —
+    /// and, when the codex CLI is present, into ~/.codex/hooks.json too (Codex
+    /// adopted the same hooks table shape and PreToolUse decision schema, so the
+    /// same bridge scripts serve both engines).
     pub fn install(&self) -> AppResult<HooksStatus> {
         let settings_path = settings_path();
         if let Some(parent) = settings_path.parent() {
@@ -128,7 +149,35 @@ impl HooksRuntime {
         upsert_hook(&mut settings, "PreToolUse", &self.pretooluse_script_path);
 
         write_settings_atomic(&settings_path, &settings)?;
+
+        if codex_available() {
+            self.install_codex(&[
+                ("UserPromptSubmit", &self.script_path),
+                ("PreToolUse", &self.pretooluse_script_path),
+            ])?;
+        }
         Ok(self.status())
+    }
+
+    /// Merge the given hook entries into ~/.codex/hooks.json (created if
+    /// missing; other content preserved; idempotent).
+    fn install_codex(&self, hooks: &[(&str, &PathBuf)]) -> AppResult<()> {
+        let path = codex_hooks_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut root: Value = if path.exists() {
+            serde_json::from_str(&fs::read_to_string(&path)?).unwrap_or(json!({}))
+        } else {
+            json!({})
+        };
+        if !root.is_object() {
+            root = json!({});
+        }
+        for (event, script) in hooks {
+            upsert_hook(&mut root, event, script);
+        }
+        write_settings_atomic(&path, &root)
     }
 
     /// Auto-install the lightweight UserPromptSubmit observer on first run, so
@@ -168,27 +217,45 @@ impl HooksRuntime {
         Ok(())
     }
 
-    /// Remove our hook entries from settings.json. Other hooks/settings untouched.
-    pub fn uninstall(&self) -> AppResult<HooksStatus> {
-        let settings_path = settings_path();
-        if !settings_path.exists() {
-            return Ok(self.status());
+    /// Codex twin of `ensure_autoinstalled`, with its OWN marker: existing
+    /// installs already carry the claude marker, and without a separate one the
+    /// codex observer would never get wired for them. Only runs when the codex
+    /// CLI is present (an installed hook triggers codex's one-time trust
+    /// prompt — noise for people who never use codex). Observer only; the
+    /// PreToolUse bridge stays opt-in, exactly like Claude's.
+    pub fn ensure_codex_autoinstalled(&self) -> AppResult<()> {
+        let marker = self.script_path.with_file_name(".userprompt-codex-autoinstalled");
+        if marker.exists() || !codex_available() {
+            return Ok(());
         }
-        let txt = fs::read_to_string(&settings_path)?;
-        let mut settings: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
-        if let Some(hooks) = settings.get_mut("hooks").and_then(|v| v.as_object_mut()) {
-            for key in ["UserPromptSubmit", "PreToolUse"] {
-                let target = if key == "UserPromptSubmit" {
-                    &self.script_path
-                } else {
-                    &self.pretooluse_script_path
-                };
-                if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
-                    arr.retain(|e| !has_command_path(e, target));
+        self.install_codex(&[("UserPromptSubmit", &self.script_path)])?;
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
+    /// Remove our hook entries from settings.json and ~/.codex/hooks.json.
+    /// Other hooks/settings untouched.
+    pub fn uninstall(&self) -> AppResult<HooksStatus> {
+        for path in [settings_path(), codex_hooks_path()] {
+            if !path.exists() {
+                continue;
+            }
+            let txt = fs::read_to_string(&path)?;
+            let mut settings: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
+            if let Some(hooks) = settings.get_mut("hooks").and_then(|v| v.as_object_mut()) {
+                for key in ["UserPromptSubmit", "PreToolUse"] {
+                    let target = if key == "UserPromptSubmit" {
+                        &self.script_path
+                    } else {
+                        &self.pretooluse_script_path
+                    };
+                    if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
+                        arr.retain(|e| !has_command_path(e, target));
+                    }
                 }
             }
+            write_settings_atomic(&path, &settings)?;
         }
-        write_settings_atomic(&settings_path, &settings)?;
         Ok(self.status())
     }
 
@@ -252,6 +319,26 @@ fn settings_path() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(".claude/settings.json"))
         .unwrap_or_else(|| PathBuf::from(".claude/settings.json"))
+}
+
+/// Codex reads hooks from ~/.codex/hooks.json — same top-level `hooks` table
+/// shape as Claude's settings.json, so the upsert/lookup helpers are shared.
+fn codex_hooks_path() -> PathBuf {
+    dirs::home_dir()
+        .map(|h| h.join(".codex/hooks.json"))
+        .unwrap_or_else(|| PathBuf::from(".codex/hooks.json"))
+}
+
+/// Only wire Codex hooks when the codex CLI is actually present: an installed
+/// hook makes codex show a one-time trust prompt, which would be spooky noise
+/// for users who never use codex.
+fn codex_available() -> bool {
+    crate::services::claude_cli::codex_command_with_stdin(&["--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn ensure_hook_script(runtime_dir: &Path, filename: &str, body: &str) -> AppResult<PathBuf> {

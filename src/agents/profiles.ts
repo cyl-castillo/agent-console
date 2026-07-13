@@ -34,7 +34,8 @@ export interface AgentLaunch {
 /// Minimal session shape buildLaunch needs — kept structural to avoid a cyclic
 /// import with terminalsStore (which imports AgentKind from here).
 export interface LaunchContext {
-  /// Captured agent session id (Claude only, via the UserPromptSubmit hook).
+  /// Captured agent session id, via the UserPromptSubmit hook (both Claude and
+  /// Codex emit it — Codex since the hooks bridge landed).
   agentSessionId?: string;
   /// Chosen model/tuning value, or undefined for the account/config default.
   model?: string;
@@ -93,7 +94,7 @@ const CLAUDE: AgentProfile = {
     let cmd: string;
     let label: string;
     let note: string;
-    if (ctx.agentSessionId) {
+    if (isSafeSessionId(ctx.agentSessionId)) {
       cmd = `claude --resume ${ctx.agentSessionId}`;
       label = `claude (${ctx.agentSessionId.slice(0, 8)}…)`;
       note = "auto-resuming";
@@ -120,15 +121,24 @@ const CODEX: AgentProfile = {
   // takes effect on (re)launch.
   supportsLiveModelSwitch: false,
   buildLaunch: (ctx) => {
-    // We can't auto-resume by id: capturing it needs a UserPromptSubmit-style
-    // hook, which Codex doesn't expose to us yet. Start fresh — the user can run
-    // `codex resume` inside the TUI to pick a prior session. (Avoid
+    // Precise resume by id, mirroring Claude: the session id is captured by the
+    // UserPromptSubmit hook (Codex ships the same hooks system now). Never
     // `codex resume --last`: like `claude --continue` it's global and would make
-    // several terminals converge on the same conversation.)
-    let cmd = "codex";
-    let label = "codex";
-    const note = ctx.hasScrollback ? "starting fresh" : "starting";
-    // Encode the chosen effort as a config override rather than a model id.
+    // several stopped terminals converge on the same conversation.
+    let cmd: string;
+    let label: string;
+    let note: string;
+    if (isSafeSessionId(ctx.agentSessionId)) {
+      cmd = `codex resume ${ctx.agentSessionId}`;
+      label = `codex (${ctx.agentSessionId.slice(0, 8)}…)`;
+      note = "auto-resuming";
+    } else {
+      cmd = "codex";
+      label = "codex";
+      note = ctx.hasScrollback ? "starting fresh (no session id)" : "starting";
+    }
+    // Encode the chosen effort as a config override rather than a model id
+    // (Codex tunes one model — currently GPT-5.x — via reasoning effort).
     if (isValidModel(ctx.model)) {
       cmd += ` -c model_reasoning_effort=${ctx.model}`;
       label += ` · ${ctx.model}`;
@@ -162,6 +172,15 @@ const MODEL_RE = /^[A-Za-z0-9._-]+$/;
 
 export function isValidModel(model: string | undefined | null): model is string {
   return typeof model === "string" && model.length > 0 && model.length <= 64 && MODEL_RE.test(model);
+}
+
+/// Session ids also end up interpolated into the PTY launch command
+/// (`claude --resume <id>` / `codex resume <id>`). They come from our own hook
+/// events, but the events file is world-writable state — validate before the
+/// shell ever sees one. Claude and Codex ids are UUID-ish; same charset as
+/// models is exactly right.
+export function isSafeSessionId(id: string | undefined | null): id is string {
+  return typeof id === "string" && id.length > 0 && id.length <= 128 && MODEL_RE.test(id);
 }
 
 /// Human-facing label for a model value within a given agent. Known presets get
