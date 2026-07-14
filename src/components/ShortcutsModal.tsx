@@ -27,6 +27,7 @@ const GROUPS = [
   {
     title: "Workflows",
     rows: [
+      ["Ctrl+E", "Toggle the prompt composer (draft multi-line, Ctrl+Enter sends)"],
       ["Ctrl+L", "Clear terminal"],
       ["Ctrl+V", "Paste clipboard image into the agent"],
       ["Ctrl+Shift+V", "Toggle voice input on/off"],

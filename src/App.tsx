@@ -31,6 +31,7 @@ import { PluginsPanel } from "./components/PluginsPanel";
 import { JiraPanel } from "./components/JiraPanel";
 import { AgendaPanel } from "./components/AgendaPanel";
 import { NotesPanel } from "./components/NotesPanel";
+import { Composer } from "./components/Composer";
 import { McpPanel } from "./components/McpPanel";
 import { ExportImportPanel } from "./components/ExportImportPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
@@ -90,6 +91,7 @@ export default function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [showGettingStarted, setShowGettingStarted] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
   type WbTab = WorkbenchTab;
@@ -220,6 +222,11 @@ export default function App() {
     const onToggleRight = () => setRightOpen((v) => !v);
     const onNewSession = () => newSession();
     const onCopyProjectPath = () => copyProjectPath();
+    const onToggleComposer = () => {
+      setTab("terminal");
+      setComposerOpen((v) => !v);
+    };
+    window.addEventListener("ac:toggle-composer", onToggleComposer);
     window.addEventListener("ac:open-tab", onOpenTab);
     window.addEventListener("ac:open-workbench-tab", onOpenWb);
     window.addEventListener("ac:open-getting-started", onGettingStarted);
@@ -237,6 +244,7 @@ export default function App() {
       window.removeEventListener("ac:toggle-right-panel", onToggleRight);
       window.removeEventListener("ac:new-session", onNewSession);
       window.removeEventListener("ac:copy-project-path", onCopyProjectPath);
+      window.removeEventListener("ac:toggle-composer", onToggleComposer);
     };
   }, [project, setTab, addTerminal, persistTerminals, showToast]);
 
@@ -489,6 +497,9 @@ export default function App() {
                     />
                   ))}
                 </div>
+                {composerOpen && project && (
+                  <Composer projectRoot={project.root} onClose={() => setComposerOpen(false)} />
+                )}
               </>
             )}
           </div>

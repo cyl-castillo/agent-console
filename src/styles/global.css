@@ -5841,3 +5841,25 @@ select:focus-visible,
 .note-act:hover:not(:disabled) { color: var(--accent); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .note-act:disabled { opacity: 0.4; cursor: default; }
 .note-del:hover { color: var(--danger); }
+
+/* --- Prompt composer (terminal pane) --- */
+.composer {
+  flex: none;
+  display: flex; flex-direction: column; gap: 6px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev-1);
+  padding: 8px 10px;
+}
+.composer-text {
+  min-height: 84px; max-height: 220px;
+  resize: vertical;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: inherit; font-size: 12.5px; line-height: 1.45;
+}
+.composer-text:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+.composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.composer-hint { font-size: 10.5px; color: var(--text-faint); }

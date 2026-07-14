@@ -10,6 +10,7 @@ import { useThemeStore } from "./themeStore";
 import { useToastStore } from "./toastStore";
 import { useUpdaterStore } from "./updaterStore";
 import { reportProblem } from "../lib/reportProblem";
+import { typeIntoActiveSession } from "../lib/termInput";
 
 export type PaletteItemKind = "file" | "action" | "session" | "branch";
 
@@ -216,6 +217,24 @@ const ACTIONS: PaletteAction[] = [
     hint: "Open a prefilled GitHub issue (version and platform included)",
     keywords: ["bug", "issue", "feedback", "broken", "help"],
     run: () => reportProblem(),
+  },
+  {
+    id: "prompt.rerun_last",
+    label: "Re-run Last Prompt",
+    hint: "Type your most recent prompt into the active session (review, then send)",
+    keywords: ["repeat", "again", "retry", "prompt", "history"],
+    available: () => useSkillsStore.getState().recent.length > 0,
+    run: async () => {
+      const last = useSkillsStore.getState().recent[0];
+      if (last?.prompt) await typeIntoActiveSession(last.prompt);
+    },
+  },
+  {
+    id: "prompt.composer",
+    label: "Toggle Prompt Composer",
+    hint: "Draft a multi-line prompt comfortably, then send it (Ctrl+E)",
+    keywords: ["draft", "write", "multiline", "compose", "editor"],
+    run: () => emit("ac:toggle-composer", null),
   },
   {
     id: "snapshot.restore_latest",
