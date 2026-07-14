@@ -105,21 +105,32 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
   );
 }
 
+/// Format elapsed working time compactly: 42s / 2m 05s / 1h 12m.
+function formatWorking(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${(s % 60).toString().padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${(m % 60).toString().padStart(2, "0")}m`;
+}
+
 /// Glanceable agent activity. "waiting on you" (an approval is pending) is the
-/// reliable state; "working…" is a best-effort recent-activity hint that decays,
-/// since the CLI gives us no turn-completion signal (see agentStatusStore). Idle
-/// renders nothing — the live session dot already says the agent is up.
+/// reliable state; "working… N" shows elapsed time since the turn started and
+/// ends precisely on the Stop hook (activity decay stays as the fallback for
+/// hooks not yet installed/trusted). Idle renders nothing — the live session
+/// dot already says the agent is up.
 function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
   const blocked = useApprovalStore((s) => s.queue.length);
   const workingUntil = useAgentStatusStore((s) => s.workingUntil);
+  const workingSince = useAgentStatusStore((s) => s.workingSince);
   const [, force] = useState(0);
 
-  // Re-render when the recent-activity window elapses so it falls back to idle.
+  // Tick every second while working: keeps the elapsed readout live and also
+  // catches the decay-window fallback when no Stop hook fires.
   useEffect(() => {
-    const left = workingUntil - Date.now();
-    if (left <= 0) return;
-    const t = setTimeout(() => force((n) => n + 1), left + 50);
-    return () => clearTimeout(t);
+    if (workingUntil - Date.now() <= 0) return;
+    const t = setInterval(() => force((n) => n + 1), 1000);
+    return () => clearInterval(t);
   }, [workingUntil]);
 
   const state: "blocked" | "working" | "idle" =
@@ -140,13 +151,14 @@ function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
     );
   }
 
+  const elapsed = workingSince > 0 ? formatWorking(Date.now() - workingSince) : null;
   return (
     <span
       className="sb-item sb-agent sb-agent-working"
-      title="The agent was active in the last few seconds. The CLI doesn't report turn completion, so this is best-effort."
+      title="Working since the last prompt. Ends on the agent's turn-completed signal (Stop hook); falls back to an activity window where the hook isn't installed."
     >
       <span className="sb-agent-dot" />
-      <span>working…</span>
+      <span>working…{elapsed ? ` ${elapsed}` : ""}</span>
     </span>
   );
 }

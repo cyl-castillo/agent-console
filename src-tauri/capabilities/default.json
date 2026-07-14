@@ -12,6 +12,7 @@
     "updater:default",
     "process:allow-restart",
     "clipboard-manager:allow-write-text",
+    "notification:default",
     "clipboard-manager:allow-read-text"
   ]
 }

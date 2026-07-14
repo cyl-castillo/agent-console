@@ -10,6 +10,7 @@ import { fireSchedulerEvent } from "./schedulerStore";
 import { useToastStore } from "./toastStore";
 import { useAgentStatusStore } from "./agentStatusStore";
 import { useTerminalsStore } from "./terminalsStore";
+import { notify, windowIsFocused } from "../lib/notify";
 
 /// What the user (or agent in the terminal) has been doing — captured from
 /// the UserPromptSubmit hook stream.
@@ -194,9 +195,17 @@ export async function attachSkillsListeners(): Promise<UnlistenFn> {
   offs.push(await listen<HookUserPromptEvent>("hook://user_prompt", (e) => s._onPrompt(e.payload)));
   offs.push(await listen<Snapshot>("snapshot://created", (e) => s._onSnapshot(e.payload)));
   // The Stop hook (both engines) gives a REAL turn-completed signal — flip the
-  // status pill to idle immediately instead of waiting out the decay window.
-  offs.push(await listen("hook://turn_end", () => {
+  // status pill to idle immediately instead of waiting out the decay window,
+  // and let the user know if they're in another window.
+  offs.push(await listen<{ termId?: string }>("hook://turn_end", (e) => {
     useAgentStatusStore.getState().markIdle();
+    if (!windowIsFocused()) {
+      const termId = e.payload?.termId;
+      const name = termId
+        ? useTerminalsStore.getState().sessions.find((t) => t.id === termId)?.name
+        : undefined;
+      notify("Agent Console — turn finished", name ? `${name} is ready for you` : "The agent finished its turn");
+    }
   }));
   return () => { for (const off of offs) off(); };
 }

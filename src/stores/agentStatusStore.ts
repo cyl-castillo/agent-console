@@ -16,13 +16,24 @@ export const WORKING_WINDOW_MS = 8000;
 interface AgentStatusState {
   /// Epoch ms until which the agent counts as "recently active".
   workingUntil: number;
+  /// When the current stretch of work started (first markActive after idle);
+  /// drives the "working… 2m 34s" elapsed readout. 0 = not working.
+  workingSince: number;
   markActive: () => void;
   /// A turn finished (Stop hook) — drop to idle now, don't wait out the decay.
   markIdle: () => void;
 }
 
-export const useAgentStatusStore = create<AgentStatusState>((set) => ({
+export const useAgentStatusStore = create<AgentStatusState>((set, get) => ({
   workingUntil: 0,
-  markActive: () => set({ workingUntil: Date.now() + WORKING_WINDOW_MS }),
-  markIdle: () => set({ workingUntil: 0 }),
+  workingSince: 0,
+  markActive: () => {
+    const now = Date.now();
+    const wasWorking = now < get().workingUntil;
+    set({
+      workingUntil: now + WORKING_WINDOW_MS,
+      workingSince: wasWorking && get().workingSince > 0 ? get().workingSince : now,
+    });
+  },
+  markIdle: () => set({ workingUntil: 0, workingSince: 0 }),
 }));

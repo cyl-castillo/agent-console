@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
 import { useAgentStatusStore } from "./agentStatusStore";
+import { notify, windowIsFocused } from "../lib/notify";
 import type { ApprovalRequest } from "../types/domain";
 
 interface ApprovalState {
@@ -22,11 +23,18 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
   },
 
   _enqueue: (req) => {
+    let added = false;
     set((s) => {
       if (s.queue.some((r) => r.id === req.id)) return s;
+      added = true;
       return { queue: [...s.queue, req] };
     });
     useAgentStatusStore.getState().markActive();
+    // You're in another window and the agent just blocked on you — the one
+    // moment a system notification earns its interruption.
+    if (added && !windowIsFocused()) {
+      notify("Agent Console — approval needed", `${req.tool} is waiting for your decision`);
+    }
   },
 }));
 
