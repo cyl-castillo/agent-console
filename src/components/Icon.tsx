@@ -17,6 +17,7 @@ export type IconName =
   | "sparkles"
   | "users"
   | "calendar"
+  | "sticky-note"
   | "clock"
   | "command"
   | "help-circle"
@@ -152,6 +153,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
       <path d="M9 3v18" />
+    </>
+  ),
+  // Lucide: sticky-note
+  "sticky-note": (
+    <>
+      <path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z" />
+      <path d="M15 21v-4a2 2 0 0 1 2-2h4" />
     </>
   ),
   // Lucide: calendar

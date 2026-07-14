@@ -29,6 +29,7 @@ import { FeedbackPanel } from "./components/FeedbackPanel";
 import { PluginsPanel } from "./components/PluginsPanel";
 import { JiraPanel } from "./components/JiraPanel";
 import { AgendaPanel } from "./components/AgendaPanel";
+import { NotesPanel } from "./components/NotesPanel";
 import { McpPanel } from "./components/McpPanel";
 import { ExportImportPanel } from "./components/ExportImportPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
@@ -198,7 +199,7 @@ export default function App() {
     };
     const onOpenWb = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "schedule" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "transfer" || d === "feedback" || d === "jira" || d === "agenda") {
+      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "schedule" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "transfer" || d === "feedback" || d === "jira" || d === "agenda" || d === "notes") {
         setWorkbenchTab(d);
       }
     };
@@ -293,7 +294,7 @@ export default function App() {
       if (saved === "skills" || saved === "permissions" || saved === "advisor"
           || saved === "learning" || saved === "roundtable" || saved === "schedule" || saved === "vault" || saved === "context"
           || saved === "plugins" || saved === "mcp" || saved === "transfer" || saved === "feedback"
-          || saved === "jira" || saved === "agenda") {
+          || saved === "jira" || saved === "agenda" || saved === "notes") {
         setWorkbenchTabState(saved);
       }
     } catch { /* ignore */ }
@@ -505,6 +506,7 @@ export default function App() {
                 {workbenchTab === "context" && <ContextPanel />}
                 {workbenchTab === "jira" && <JiraPanel />}
                 {workbenchTab === "agenda" && <AgendaPanel />}
+                {workbenchTab === "notes" && <NotesPanel />}
                 {workbenchTab === "plugins" && <PluginsPanel />}
                 {workbenchTab === "mcp" && <McpPanel />}
                 {workbenchTab === "transfer" && <ExportImportPanel />}
