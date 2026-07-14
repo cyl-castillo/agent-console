@@ -2,10 +2,7 @@ import { useEffect } from "react";
 
 import { useNotesStore, NOTE_COLORS } from "../stores/notesStore";
 import { useSessionStore } from "../stores/sessionStore";
-import { useTerminalsStore } from "../stores/terminalsStore";
-import { useUIStore } from "../stores/uiStore";
-import { useToastStore } from "../stores/toastStore";
-import { ipc } from "../ipc/tauri";
+import { typeIntoActiveSession } from "../lib/termInput";
 import { PanelError } from "./PanelError";
 import type { StickyNote } from "../types/domain";
 
@@ -98,18 +95,5 @@ function NoteCard({ note }: { note: StickyNote }) {
 /// Note → prompt: type the note into the active session's agent input. Same
 /// contract as the Jira seed — never auto-sends; the human reviews and submits.
 async function sendToAgent(text: string): Promise<void> {
-  const trimmed = text.trim();
-  if (!trimmed) return;
-  const { activeId } = useTerminalsStore.getState();
-  useUIStore.getState().setTab("terminal");
-  if (!activeId) {
-    try { await navigator.clipboard.writeText(trimmed); } catch { /* ignore */ }
-    useToastStore.getState().show("No active session — note copied instead", "info");
-    return;
-  }
-  try {
-    await ipc.termWrite(activeId, trimmed);
-  } catch {
-    useToastStore.getState().show("Couldn't reach the session terminal", "error");
-  }
+  await typeIntoActiveSession(text);
 }

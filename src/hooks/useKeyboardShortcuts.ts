@@ -92,6 +92,14 @@ export function useKeyboardShortcuts({ setTab }: Args) {
           newSession();
           e.preventDefault();
           break;
+        case "e":
+        case "E":
+          // Ctrl+E is readline end-of-line inside the terminal — don't steal it
+          // there; anywhere else it toggles the prompt composer.
+          if (inTerminal || inField) return;
+          window.dispatchEvent(new CustomEvent("ac:toggle-composer"));
+          e.preventDefault();
+          break;
         case "]":
           // Ctrl+] is a terminal control sequence — leave it to the PTY.
           if (inTerminal) return;
