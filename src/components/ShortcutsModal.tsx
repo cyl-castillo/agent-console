@@ -36,6 +36,7 @@ const GROUPS = [
       ["Ctrl+W", "Close active session"],
       ["Esc", "Deny pending agent action or close modal"],
       ["Ctrl+Enter", "Approve pending agent action"],
+      ["Ctrl+D", "Deny pending agent action"],
       ["Enter", "Send chat message"],
       ["Shift+Enter", "New line in chat input"],
     ],
