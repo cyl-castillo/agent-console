@@ -163,24 +163,40 @@ export function ApprovalModal() {
     setBusy(false);
   }, [req?.id]);
 
+  // After the LAST pending decision, hand focus back to the terminal so the
+  // keyboard flow continues where the interruption started.
+  const decideAndRefocus = (id: string, decision: "allow" | "deny" | "ask", reason: string) => {
+    const wasLast = queue.length <= 1;
+    void decide(id, decision, reason).then(() => {
+      if (wasLast) window.dispatchEvent(new CustomEvent("ac:focus-terminal"));
+    });
+  };
+
   useEffect(() => {
     if (!req) return;
     const onKey = (e: KeyboardEvent) => {
       if (busy) return;
       if (e.key === "Escape") {
-        decide(req.id, "ask", "user dismissed");
+        decideAndRefocus(req.id, "ask", "user dismissed");
+      } else if ((e.key === "d" || e.key === "D") && (e.ctrlKey || e.metaKey) && !showAlways) {
+        // Denying is always safe — no danger-gate needed on this shortcut.
+        e.preventDefault();
+        setBusy(true);
+        decideAndRefocus(req.id, "deny", "user denied");
       } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !showAlways) {
         // Block the fast-approval shortcut when the command is dangerous — a
         // deliberate click is required so muscle memory can't bypass the badge.
         if (cmdAssessment?.level === "dangerous") return;
         e.preventDefault();
         setBusy(true);
-        void decide(req.id, "allow", "approved once");
+        decideAndRefocus(req.id, "allow", "approved once");
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [req, busy, showAlways, decide, cmdAssessment]);
+    // decideAndRefocus is stable enough per render; queue.length feeds wasLast.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [req, busy, showAlways, decide, cmdAssessment, queue.length]);
 
   const suggestions: RuleSuggestion[] = useMemo(
     () => (req ? suggestRules(req, scope) : []),
@@ -198,7 +214,7 @@ export function ApprovalModal() {
           <span className={`approval-tool tool-${req.tool.toLowerCase()}`}>{req.tool}</span>
           <span className="approval-cwd" title={req.cwd}>{shortenPath(req.cwd)}</span>
           {queue.length > 1 && (
-            <span className="approval-queue-depth">{queue.length} queued</span>
+            <span className="approval-queue-depth">1 of {queue.length}</span>
           )}
         </div>
 
@@ -231,7 +247,7 @@ export function ApprovalModal() {
             <button
               className="btn btn-danger"
               disabled={busy}
-              onClick={async () => { setBusy(true); await decide(req.id, "deny", "user denied"); }}
+              onClick={() => { setBusy(true); decideAndRefocus(req.id, "deny", "user denied"); }}
             >
               Deny
             </button>
@@ -246,7 +262,7 @@ export function ApprovalModal() {
               className="btn btn-success"
               disabled={busy}
               title={cmdAssessment?.level === "dangerous" ? "Click required — keyboard shortcut disabled for dangerous commands" : "Ctrl+Enter"}
-              onClick={async () => { setBusy(true); await decide(req.id, "allow", "approved once"); }}
+              onClick={() => { setBusy(true); decideAndRefocus(req.id, "allow", "approved once"); }}
             >
               Approve once
             </button>
@@ -256,7 +272,7 @@ export function ApprovalModal() {
         {!showAlways && (
           <div className="approval-hint">
             <strong>Deny</strong> tells the agent no — it keeps going without running this.
-            <span className="approval-hint-keys"><kbd>Esc</kbd> dismiss · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> approve</span>
+            <span className="approval-hint-keys"><kbd>Esc</kbd> dismiss · <kbd>Ctrl</kbd>+<kbd>D</kbd> deny · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> approve</span>
           </div>
         )}
 
@@ -301,6 +317,22 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
   const selected = suggestions[selectedIdx];
 
   useEffect(() => { setConfirmText(""); }, [selectedIdx, scope, denyMode]);
+
+  // ↑/↓ cycle through the rule suggestions — the list was click-only before,
+  // stranding keyboard users. Arrows are harmless in the single-line confirm
+  // input, so no focus carve-out is needed.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      setSelectedIdx((i) => {
+        const next = e.key === "ArrowDown" ? i + 1 : i - 1;
+        return Math.max(0, Math.min(suggestions.length - 1, next));
+      });
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [suggestions.length]);
 
   if (!selected) return <div className="placeholder">No suggestions.</div>;
 

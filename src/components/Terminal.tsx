@@ -312,6 +312,14 @@ export function Terminal({ session, visible }: Props) {
     };
     window.addEventListener("ac:term-input", onTermInput as EventListener);
 
+    // Refocus the terminal keyboard (e.g. after the last pending approval is
+    // decided) so the flow continues where the interruption started. Only the
+    // active session answers.
+    const onFocusTerminal = () => {
+      if (useTerminalsStore.getState().activeId === session.id) term.focus();
+    };
+    window.addEventListener("ac:focus-terminal", onFocusTerminal);
+
     // Image-only paste. The webview fires `paste` with no text, so xterm
     // writes nothing. Forwarding the keystroke to the agent is a dead end:
     // Claude on Windows binds image paste to alt+v, which ConPTY input can't
@@ -372,6 +380,7 @@ export function Terminal({ session, visible }: Props) {
       if (termId) ipc.termKill(termId).catch(() => {});
       window.removeEventListener("ac:clear-terminal", onClear);
       window.removeEventListener("ac:term-input", onTermInput as EventListener);
+      window.removeEventListener("ac:focus-terminal", onFocusTerminal);
       host.removeEventListener("paste", onPaste, true);
       host.removeEventListener("pointerdown", onRightDown, true);
       host.removeEventListener("mousedown", onRightDown, true);
