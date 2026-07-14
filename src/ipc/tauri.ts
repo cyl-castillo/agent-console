@@ -13,6 +13,7 @@ import type {
   FeedbackContext, FeedbackInput,
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, JiraStatus, JiraIssue, Job, McpServer, McpAddInput,
+  StickyNote,
   MemoryEntry, PermissionsSnapshot, Preflight,
   PersistedRoom, PersistedSession, Project, RecentProject,
   RoomSummary, RoundtableConfig, RunRecord, ShareResult, SyncResult,
@@ -171,6 +172,10 @@ export const ipc = {
     invoke<string>("jira_connect", { siteUrl, email, token }),
   jiraDisconnect: () => invoke<void>("jira_disconnect"),
   jiraListIssues: () => invoke<JiraIssue[]>("jira_list_issues"),
+
+  notesList: (projectRoot: string) => invoke<StickyNote[]>("notes_list", { projectRoot }),
+  notesSave: (projectRoot: string, notes: StickyNote[]) =>
+    invoke<void>("notes_save", { projectRoot, notes }),
 
   mcpList: () => invoke<McpServer[]>("mcp_list"),
   mcpAdd: (input: McpAddInput) => invoke<string>("mcp_add", { input }),

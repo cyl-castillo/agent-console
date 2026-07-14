@@ -161,6 +161,16 @@ export interface HooksStatus {
   codexHooksPath: string;
 }
 
+/// One per-project sticky note (mirrors the Rust Note).
+export interface StickyNote {
+  id: string;
+  text: string;
+  /// Preset color key; unknown values render as yellow.
+  color: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
 /// Whether Jira is connected, and the non-secret config (token never leaves
 /// the backend/keychain). Mirrors the Rust JiraStatus.
 export interface JiraStatus {
