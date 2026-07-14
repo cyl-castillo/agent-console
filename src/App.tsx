@@ -6,7 +6,8 @@ import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { attachSchedulerListeners, useSchedulerStore } from "./stores/schedulerStore";
-import { attachApprovalListener } from "./stores/approvalStore";
+import { attachApprovalListener, useApprovalStore } from "./stores/approvalStore";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { attachVoiceListeners, attachVoiceApprovalWatcher } from "./stores/voiceStore";
 import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
@@ -109,6 +110,16 @@ export default function App() {
   const checkForUpdates = useUpdaterStore((s) => s.check);
   const resetPaletteForProject = usePaletteStore((s) => s.resetForProject);
   const showToast = useToastStore((s) => s.show);
+  const blockedCount = useApprovalStore((s) => s.queue.length);
+
+  // Mirror the "waiting on you" state into the window title, so the taskbar /
+  // Alt-Tab entry says it even when the app isn't visible.
+  useEffect(() => {
+    const title = blockedCount > 0
+      ? `● waiting (${blockedCount}) — Agent Console`
+      : "Agent Console";
+    getCurrentWindow().setTitle(title).catch(() => { /* cosmetic — never break on it */ });
+  }, [blockedCount]);
 
   const newSession = () => {
     if (!project) return;
