@@ -145,7 +145,7 @@ ProofEvent {
   (fallback para worktrees si se pierde el estado del turno).
   *Demo: un turno cuenta qué cambió.*
 - **F3 — Packet + verificador** ✅ (2026-07-15, la insignia): `testigo_export.rs` — in-toto
-  Statement v1 (predicado `https://testigo.dev/attestation/v0.1`) firmado como DSSE ed25519
+  Statement v1 (predicado `https://github.com/cyl-castillo/testigo/attestation/v0.1`) firmado como DSSE ed25519
   (clave en keychain, keyid = sha256 del pubkey); case export con poda tipo Merkle (eventos
   fuera del case = stubs seq/hashes → linkage verifica entero); redacción conservadora de
   secretos (token-shaped patterns; evento redactado conserva hashes = linkage sí, contenido no,
