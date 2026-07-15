@@ -161,6 +161,31 @@ export interface HooksStatus {
   codexHooksPath: string;
 }
 
+/// One link in the Testigo evidence chain (mirrors the Rust ProofEvent):
+/// hash-chained, append-only record of a prompt, approval, snapshot, or turn
+/// boundary, grouped by case (intent thread, e.g. "jira:FIXY-1").
+export interface ProofEvent {
+  seq: number;
+  ts: number;
+  caseId: string;
+  turnId?: string;
+  kind: string;
+  termId?: string;
+  sessionId?: string;
+  actor: string;
+  payload: Record<string, unknown>;
+  prevHash: string;
+  hash: string;
+}
+
+/// Result of walking a project's Testigo chain (mirrors the Rust VerifyReport).
+export interface TestigoVerifyReport {
+  ok: boolean;
+  total: number;
+  brokenAtSeq?: number;
+  tornTail: boolean;
+}
+
 /// One per-project sticky note (mirrors the Rust Note).
 export interface StickyNote {
   id: string;

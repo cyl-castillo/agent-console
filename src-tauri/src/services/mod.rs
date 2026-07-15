@@ -22,6 +22,7 @@ pub mod sessions_service;
 pub mod skills_service;
 pub mod snapshot_service;
 pub mod terminal_runner;
+pub mod testigo_service;
 pub mod jira_service;
 pub mod notes_service;
 pub mod usage_service;

@@ -116,6 +116,25 @@ export function SkillsPanel() {
                   <button className="wb-cta" onClick={install}>enable</button>
                 </p>
               )}
+              {/* The observer auto-installs on first run, so the enable button
+                  above never shows on a normal install — but the approvals
+                  bridge (PreToolUse) is opt-in and needs its own path in, or
+                  approvals stay in-terminal and the Testigo approval trail
+                  never records. install() upserts all hooks, idempotently. */}
+              {integrationActive && hooks && !hooks.pretooluseInstalled && (
+                <p className="wb-hint">
+                  Approvals bridge off: permission prompts stay inside the
+                  terminal and are not recorded. Enable it to approve from the
+                  console UI (and audit-trail every decision).
+                  <button className="wb-cta" onClick={install}>enable approvals bridge</button>
+                </p>
+              )}
+              {integrationActive && hooks?.pretooluseInstalled && (
+                <p className="wb-hint">
+                  Approvals bridge active: permission requests surface in the
+                  console and every decision is recorded.
+                </p>
+              )}
               {hooks?.codexAvailable && hooks.codexInstalled && (
                 <p className="wb-hint">
                   Codex too: wired via <code>~/.codex/hooks.json</code>. Codex asks you to

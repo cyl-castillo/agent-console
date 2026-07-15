@@ -32,5 +32,21 @@ pub fn approval_respond(
     reason: Option<String>,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
-    state.hooks.respond(&id, &decision, reason.as_deref())
+    state.hooks.respond(&id, &decision, reason.as_deref())?;
+    // Testigo: the human half of the approval audit trail. The res file the
+    // hook polls is deleted after pickup; this ledger line is what remains.
+    // Best-effort: a ledger failure must never turn a granted approval into
+    // an error toast.
+    let project = state.inner.lock().project.clone();
+    if let Some(p) = project {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let root = p.root.to_string_lossy();
+        let _ = state
+            .testigo
+            .on_approval_decision(root.as_ref(), ts, &id, &decision, reason.as_deref());
+    }
+    Ok(())
 }
