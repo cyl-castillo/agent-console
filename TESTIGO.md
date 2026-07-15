@@ -160,7 +160,13 @@ ProofEvent {
   cambiados; export del case desde la vista); commit trailers `Testigo-Case:` en `git_commit` —
   atribución **por evidencia del ledger** (el turn_end más reciente ≤24h cuyo filesChanged
   intersecta los staged), nunca por sesión activa; best-effort, no bloquea el commit.
-- **F5 — Spec público + caso Fixy**: repo del protocolo con el nombre definitivo, predicado
-  versionado, packets reales de Fixy como ejemplos.
+- **F5 — Spec público** ✅ (2026-07-15): **https://github.com/cyl-castillo/testigo** — SPEC.md
+  v0.1 (ledger, hash chain, turnos/cases, packet DSSE, algoritmo de verificación, security
+  considerations honestas, mapping EU AI Act art. 12/14), JSON Schema del predicado, verificador
+  standalone, ejemplo sintético auto-verificado (con redacted + stub), MIT.
+  Pendientes de F5: ⏳ **dominio testigo.dev** (el predicado ya usa esa URI — no necesita
+  resolver para ser identificador válido, pero conviene poseerlo antes de difundir) y
+  ⏳ **caso de estudio Fixy** (primer deploy de Fixy trabajado vía console → packet real como
+  ejemplo canónico).
 
 Cadencia estándar: plan → fase → commit → release por fase (`/phased-feature-build`).
