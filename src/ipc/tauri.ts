@@ -14,6 +14,7 @@ import type {
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, JiraStatus, JiraIssue, Job, McpServer, McpAddInput,
   StickyNote,
+  ProofEvent, TestigoVerifyReport,
   MemoryEntry, PermissionsSnapshot, Preflight,
   PersistedRoom, PersistedSession, Project, RecentProject,
   RoomSummary, RoundtableConfig, RunRecord, ShareResult, SyncResult,
@@ -176,6 +177,17 @@ export const ipc = {
   notesList: (projectRoot: string) => invoke<StickyNote[]>("notes_list", { projectRoot }),
   notesSave: (projectRoot: string, notes: StickyNote[]) =>
     invoke<void>("notes_save", { projectRoot, notes }),
+
+  testigoList: (projectRoot: string, caseId?: string, limit?: number) =>
+    invoke<ProofEvent[]>("testigo_list", {
+      projectRoot,
+      caseId: caseId ?? null,
+      limit: limit ?? null,
+    }),
+  testigoVerify: (projectRoot: string) =>
+    invoke<TestigoVerifyReport>("testigo_verify", { projectRoot }),
+  testigoLinkCase: (projectRoot: string, termId: string, ticket: string) =>
+    invoke<void>("testigo_link_case", { projectRoot, termId, ticket }),
 
   mcpList: () => invoke<McpServer[]>("mcp_list"),
   mcpAdd: (input: McpAddInput) => invoke<string>("mcp_add", { input }),

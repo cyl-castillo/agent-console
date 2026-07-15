@@ -540,6 +540,18 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 },
             );
 
+            // Testigo: the prompt is the intent — it opens a turn in the
+            // evidence chain. Best-effort like the activity append.
+            let _ = state.testigo.on_prompt(
+                root.as_ref(),
+                ts,
+                str_field(v, "termId").as_deref(),
+                str_field(v, "sessionId").as_deref(),
+                str_field(v, "prompt").as_deref(),
+                str_field(v, "skill").as_deref(),
+                str_field(v, "cwd").as_deref(),
+            );
+
             // Auto-snapshot the working tree the prompt ran in. Worktree
             // sessions report their own cwd — snapshotting the project root
             // there would checkpoint the wrong checkout. Fall back to the
@@ -564,8 +576,29 @@ fn handle_event(v: &Value, app: &AppHandle) {
                         snapshot_sha: Some(snap.commit_sha.clone()),
                     },
                 );
+                let _ = state.testigo.on_snapshot(
+                    root.as_ref(),
+                    ts,
+                    str_field(v, "termId").as_deref(),
+                    str_field(v, "sessionId").as_deref(),
+                    &snap.commit_sha,
+                );
                 let _ = app.emit("snapshot://created", &snap);
             }
+        }
+    } else if kind == "turn_end" {
+        // Testigo: the Stop hook closes the open turn for that terminal.
+        let state = app.state::<AppState>();
+        let project = state.inner.lock().project.clone();
+        if let Some(p) = project {
+            let root = p.root.to_string_lossy();
+            let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            let _ = state.testigo.on_turn_end(
+                root.as_ref(),
+                ts,
+                str_field(v, "termId").as_deref(),
+                str_field(v, "sessionId").as_deref(),
+            );
         }
     }
 }
@@ -604,6 +637,17 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
                 continue;
             };
             let _ = app.emit("approval://request", &v);
+            // Testigo: the request half of the approval audit trail. The raw
+            // req/res files are polled and deleted by the hook; this line is
+            // the durable record. Best-effort, never blocks the UI event.
+            {
+                let state = app.state::<AppState>();
+                let project = state.inner.lock().project.clone();
+                if let Some(p) = project {
+                    let root = p.root.to_string_lossy();
+                    let _ = state.testigo.on_approval_request(root.as_ref(), &v);
+                }
+            }
             seen.insert(name);
         }
         // Drop ids that disappeared (hook cleaned them up).

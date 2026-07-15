@@ -17,6 +17,7 @@ pub mod sessions;
 pub mod skills;
 pub mod snapshot;
 pub mod terminal;
+pub mod testigo;
 pub mod jira;
 pub mod notes;
 pub mod usage;

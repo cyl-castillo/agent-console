@@ -8,6 +8,7 @@ use crate::services::roundtable_service::RoundtableService;
 use crate::services::scheduler_service::SchedulerService;
 use crate::services::sessions_service::SessionsService;
 use crate::services::terminal_runner::TerminalRegistry;
+use crate::services::testigo_service::TestigoService;
 use crate::services::voice_service::VoiceService;
 
 pub struct AppState {
@@ -17,6 +18,10 @@ pub struct AppState {
     pub sessions: SessionsService,
     pub notes: crate::services::notes_service::NotesService,
     pub activity: ActivityService,
+    /// Testigo: the hash-chained intent-to-proof ledger (prompts, approvals,
+    /// snapshots, turn boundaries) — evidence, unlike `activity` which is a
+    /// trimmed learning substrate.
+    pub testigo: TestigoService,
     pub git_watcher: GitWatcher,
     pub roundtable: RoundtableService,
     pub scheduler: SchedulerService,
@@ -33,6 +38,7 @@ impl AppState {
             sessions: SessionsService::new(),
             notes: crate::services::notes_service::NotesService::new(),
             activity: ActivityService::new(),
+            testigo: TestigoService::new(),
             git_watcher: GitWatcher::new(),
             roundtable: RoundtableService::new(),
             scheduler: SchedulerService::new(),

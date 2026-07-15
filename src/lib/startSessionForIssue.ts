@@ -43,7 +43,7 @@ export async function startSessionForIssue(
       // Explicit, user-confirmed branch (convention-aware); base defaults to
       // the current branch on the backend.
       const created = await ipc.worktreeCreate(issue.key, undefined, opts.branch);
-      terminals.add(
+      const termId = terminals.add(
         created.info.path,
         issue.key,
         model,
@@ -52,6 +52,7 @@ export async function startSessionForIssue(
         created.setupCommand ?? undefined,
         seed,
       );
+      linkTestigoCase(project.root, termId, issue.key);
       const copies = created.copied.length ? ` · copied ${created.copied.join(", ")}` : "";
       toast.show(
         `${issue.key} (${verb}) on ${created.info.branch}${copies} — review the prompt, then send`,
@@ -62,10 +63,18 @@ export async function startSessionForIssue(
       return;
     }
   } else {
-    terminals.add(project.root, issue.key, model, agent, undefined, undefined, seed);
+    const termId = terminals.add(project.root, issue.key, model, agent, undefined, undefined, seed);
+    linkTestigoCase(project.root, termId, issue.key);
     toast.show(`Session ${issue.key} started (${verb}) — review the prompt, then send`, "success");
   }
 
   terminals.persist();
   useUIStore.getState().setTab("terminal");
+}
+
+/// Record the ticket→session lineage in the Testigo evidence chain, so every
+/// prompt/approval in this terminal lands under the "jira:<KEY>" case.
+/// Best-effort: the ledger must never block starting a session.
+function linkTestigoCase(projectRoot: string, termId: string, ticket: string): void {
+  void ipc.testigoLinkCase(projectRoot, termId, ticket).catch(() => {});
 }
