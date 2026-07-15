@@ -25,7 +25,7 @@ use crate::services::testigo_service::TestigoService;
 /// - A case export includes non-case events in range as stubs (seq/hashes
 ///   only): linkage verifies end-to-end, content verifies for what's shared.
 const PACKET_FORMAT: &str = "testigo-proofpack/v0.1";
-const PREDICATE_TYPE: &str = "https://testigo.dev/attestation/v0.1";
+const PREDICATE_TYPE: &str = "https://github.com/cyl-castillo/testigo/attestation/v0.1";
 const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
 const PAYLOAD_TYPE: &str = "application/vnd.in-toto+json";
 
