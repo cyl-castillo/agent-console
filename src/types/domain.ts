@@ -153,6 +153,7 @@ export interface HooksStatus {
   pretooluseScriptPath: string;
   installed: boolean;
   pretooluseInstalled: boolean;
+  posttooluseInstalled: boolean;
   settingsPath: string;
   /// Codex mirror: same bridge scripts, wired via ~/.codex/hooks.json.
   codexAvailable: boolean;

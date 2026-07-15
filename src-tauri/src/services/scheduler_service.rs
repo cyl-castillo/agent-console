@@ -508,6 +508,17 @@ impl SchedulerService {
             output_excerpt: truncate(&output, OUTPUT_EXCERPT_MAX),
         };
         let _ = Self::append_history(project_root, &rec);
+        // Testigo: scheduled runs are agentic actions too — their outcome
+        // belongs in the evidence chain (case "job:<id>"). Best-effort.
+        let state = app.state::<AppState>();
+        let _ = state.testigo.on_job_run(
+            project_root,
+            finished as i64,
+            &job.id,
+            &job.name,
+            &rec.status,
+            &rec.summary,
+        );
         let _ = app.emit("scheduler://run_finished", &rec);
         rec
     }

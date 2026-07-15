@@ -138,7 +138,11 @@ ProofEvent {
   `approval_respond`); turnos prompt→stop por termId; case_id con rebind desde el ledger;
   vínculo Jira en `startSessionForIssue` (`testigo_link_case`). Comandos: `testigo_list`,
   `testigo_verify`, `testigo_link_case`. *Demo: timeline crudo de un case en JSON.*
-- **F2 — Resultado**: posttooluse-hook, stop-hook con diff pre/post, job_runs a disco.
+- **F2 — Resultado** ✅ (2026-07-15): `posttooluse-hook.cjs` (observer auto-instalado, excerpt
+  acotado 1KB) → eventos `tool_result` atados al turno; turn_end enriquecido con snapshot
+  post-turno + `git diff --name-status` pre→post (cap 500 archivos, `filesTruncated` explícito);
+  runs del scheduler al ledger como `job_run` bajo case `job:<id>`. stop-hook ahora pasa cwd
+  (fallback para worktrees si se pierde el estado del turno).
   *Demo: un turno cuenta qué cambió.*
 - **F3 — Packet + verificador** (la insignia): redacción, export DSSE/in-toto, verificador
   standalone, commit trailers. *Demo: PR de agent-console con packet verificable por un tercero.*
