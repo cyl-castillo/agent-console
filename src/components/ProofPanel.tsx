@@ -1,11 +1,22 @@
 import { useEffect } from "react";
 
-import { useProofStore, summarizeCases } from "../stores/proofStore";
+import { useProofStore, summarizeCases, buildTimeline } from "../stores/proofStore";
 import { useSessionStore } from "../stores/sessionStore";
 
-/// F3 surface for the Testigo ledger: chain health, cases, one-click signed
-/// packet export. The full per-turn timeline is F4; this panel stays the
-/// export/verify home.
+function fmtTime(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/// The Testigo surface: chain health + case list, and per-case a timeline of
+/// turns (intent → approvals → results → files changed). Export from either
+/// level produces the signed packet + standalone verifier.
 export function ProofPanel() {
   const project = useSessionStore((s) => s.project);
   const events = useProofStore((s) => s.events);
@@ -13,19 +24,39 @@ export function ProofPanel() {
   const exporting = useProofStore((s) => s.exporting);
   const lastExport = useProofStore((s) => s.lastExport);
   const error = useProofStore((s) => s.error);
+  const selectedCase = useProofStore((s) => s.selectedCase);
   const load = useProofStore((s) => s.load);
   const exportPack = useProofStore((s) => s.exportPack);
+  const selectCase = useProofStore((s) => s.selectCase);
 
   useEffect(() => {
     if (project) void load(project.root);
   }, [project, load]);
 
   const cases = summarizeCases(events);
+  const timeline = selectedCase
+    ? buildTimeline(events.filter((e) => e.caseId === selectedCase))
+    : [];
 
   return (
     <div className="workbench">
       <div className="workbench-header workbench-header-slim">
-        <span className="workbench-title">proof</span>
+        {selectedCase ? (
+          <>
+            <button
+              className="workbench-action"
+              onClick={() => selectCase(null)}
+              title="Back to case list"
+            >
+              ←
+            </button>
+            <span className="workbench-title" title={selectedCase}>
+              {selectedCase}
+            </span>
+          </>
+        ) : (
+          <span className="workbench-title">proof</span>
+        )}
         {report && (
           <span
             className={`wb-status ${report.ok ? "ok" : "off"}`}
@@ -39,6 +70,16 @@ export function ProofPanel() {
           </span>
         )}
         <span className="spacer" />
+        {selectedCase && (
+          <button
+            className="workbench-action"
+            disabled={exporting !== null}
+            onClick={() => void exportPack(selectedCase)}
+            title="Export a signed proof packet for this case"
+          >
+            {exporting === selectedCase ? "…" : "⇩"}
+          </button>
+        )}
         <button
           className="workbench-action"
           onClick={() => project && void load(project.root)}
@@ -60,17 +101,21 @@ export function ProofPanel() {
           </section>
         )}
 
-        {cases.length > 0 && (
+        {!selectedCase && cases.length > 0 && (
           <section className="wb-section">
             <div className="wb-section-title">cases</div>
             {cases.map((c) => (
               <div className="wb-row" key={c.caseId}>
-                <span className="wb-row-main" title={c.caseId}>
+                <button
+                  className="wb-row-main wb-link"
+                  onClick={() => selectCase(c.caseId)}
+                  title={`Open the ${c.caseId} timeline`}
+                >
                   <code>{c.caseId}</code>
                   <span className="wb-hint">
                     {" "}· {c.turns} turns · {c.approvals} approvals · {c.events} events
                   </span>
-                </span>
+                </button>
                 <button
                   className="wb-link"
                   disabled={exporting !== null}
@@ -91,6 +136,52 @@ export function ProofPanel() {
                 {exporting === "__ledger__" ? "signing…" : "export full ledger"}
               </button>
             </p>
+          </section>
+        )}
+
+        {selectedCase && (
+          <section className="wb-section">
+            {timeline.length === 0 && (
+              <p className="wb-hint">No turns recorded in this case yet.</p>
+            )}
+            {timeline.map((t) => (
+              <div className="wb-section proof-turn" key={t.turnId ?? t.ts}>
+                <p>
+                  <span className="wb-hint">{fmtTime(t.ts)}</span>
+                  {t.endTs === null && (
+                    <span className="wb-hint"> · turn still open</span>
+                  )}
+                  <br />
+                  <span title={t.prompt}>
+                    {t.prompt.length > 160 ? `${t.prompt.slice(0, 160)}…` : t.prompt}
+                  </span>
+                </p>
+                {t.approvals.length > 0 && (
+                  <p className="wb-hint">
+                    {t.approvals.map((a, i) => (
+                      <span key={i}>
+                        {i > 0 && " · "}
+                        <code>{a.tool ?? "?"}</code> {a.decision}
+                        {a.reason ? ` — ${a.reason}` : ""}
+                      </span>
+                    ))}
+                  </p>
+                )}
+                {(t.toolResults > 0 || t.files.length > 0) && (
+                  <p className="wb-hint">
+                    {t.toolResults > 0 && `${t.toolResults} tool calls`}
+                    {t.toolResults > 0 && t.files.length > 0 && " · "}
+                    {t.files.length > 0 &&
+                      t.files
+                        .slice(0, 8)
+                        .map((f) => `${f.status} ${f.path}`)
+                        .join(", ")}
+                    {t.files.length > 8 && ` … +${t.files.length - 8} more`}
+                    {t.filesTruncated && " (list capped at 500)"}
+                  </p>
+                )}
+              </div>
+            ))}
           </section>
         )}
 

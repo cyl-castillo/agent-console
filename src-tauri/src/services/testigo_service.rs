@@ -519,6 +519,40 @@ impl TestigoService {
         )
     }
 
+    /// The case that produced these files, per the ledger: the most recent
+    /// turn_end (within `max_age_ms`) whose filesChanged intersects `files`.
+    /// Used to stamp console-made commits with a `Testigo-Case:` trailer —
+    /// attribution comes from recorded evidence (which turn touched which
+    /// files), never from "whatever session is active".
+    pub fn case_for_files(
+        &self,
+        project_root: &str,
+        files: &[String],
+        now_ms: i64,
+        max_age_ms: i64,
+    ) -> AppResult<Option<String>> {
+        if files.is_empty() {
+            return Ok(None);
+        }
+        let events = self.list(project_root, None, None)?;
+        for ev in events.iter().rev() {
+            if ev.kind != "turn_end" || now_ms - ev.ts > max_age_ms {
+                continue;
+            }
+            let Some(changed) = ev.payload.get("filesChanged").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            let touched = changed
+                .iter()
+                .filter_map(|f| f.get("path").and_then(|p| p.as_str()))
+                .any(|p| files.iter().any(|f| f == p));
+            if touched {
+                return Ok(Some(ev.case_id.clone()));
+            }
+        }
+        Ok(None)
+    }
+
     /// Events in chronological order, optionally filtered by case and capped
     /// at the most recent `limit`.
     pub fn list(
@@ -696,12 +730,34 @@ mod tests {
                 7,
                 Some("t1"),
                 Some("s1"),
-                serde_json::json!({ "preSha": "abc123", "postSha": "def456" }),
+                serde_json::json!({
+                    "preSha": "abc123",
+                    "postSha": "def456",
+                    "filesChanged": [{ "status": "A", "path": "src/x.rs" }],
+                }),
             )
             .unwrap();
         assert_eq!(e.turn_id.as_deref(), Some(turn.as_str()));
         assert_eq!(e.payload["postSha"], "def456");
         assert!(svc.peek_turn("t1").is_none(), "turn closed");
+
+        // Commit-trailer attribution: the ledger names the case that touched
+        // a staged file — recency-bounded, evidence-based, no active-session
+        // guessing.
+        let hit = svc
+            .case_for_files(root, &["src/x.rs".into()], 10, 1000)
+            .unwrap();
+        assert_eq!(hit.as_deref(), Some("jira:FIXY-1"));
+        assert!(svc
+            .case_for_files(root, &["unrelated.rs".into()], 10, 1000)
+            .unwrap()
+            .is_none());
+        assert!(
+            svc.case_for_files(root, &["src/x.rs".into()], 10_000, 100)
+                .unwrap()
+                .is_none(),
+            "stale turns don't stamp"
+        );
 
         // An unlinked terminal falls back to a term case; projects isolate.
         let other = svc

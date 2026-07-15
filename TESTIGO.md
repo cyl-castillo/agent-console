@@ -155,9 +155,11 @@ ProofEvent {
   el tab de F4 introduce). Incluye hardening de approvals descubierto en la prueba GUI: la cola
   del modal ahora re-sincroniza desde disco (`approvals_pending`, attach + window focus) — un
   evento perdido ya no es un approval invisible + stall de 90s, los `.req.json` son la verdad.
-- **F4 — UI "Proof" timeline + trailers**: timeline por case (intención → aprobaciones →
-  evidencia → resultado) sobre el panel F3; commit trailers `Testigo-Case:` en commits
-  hechos desde el console.
+- **F4 — UI "Proof" timeline + trailers** ✅ (2026-07-15): timeline por case en ProofPanel
+  (click en case → turnos cronológicos: prompt, aprobaciones con razón, tool calls, archivos
+  cambiados; export del case desde la vista); commit trailers `Testigo-Case:` en `git_commit` —
+  atribución **por evidencia del ledger** (el turn_end más reciente ≤24h cuyo filesChanged
+  intersecta los staged), nunca por sesión activa; best-effort, no bloquea el commit.
 - **F5 — Spec público + caso Fixy**: repo del protocolo con el nombre definitivo, predicado
   versionado, packets reales de Fixy como ejemplos.
 

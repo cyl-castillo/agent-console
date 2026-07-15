@@ -12,6 +12,20 @@ export interface CaseSummary {
   lastTs: number;
 }
 
+/// One turn of a case timeline: intent → approvals → results, assembled from
+/// the flat event stream.
+export interface TimelineTurn {
+  turnId: string | null;
+  ts: number;
+  prompt: string;
+  skill?: string;
+  approvals: { tool?: string; decision?: string; reason?: string }[];
+  toolResults: number;
+  files: { status: string; path: string }[];
+  filesTruncated: boolean;
+  endTs: number | null;
+}
+
 interface ProofState {
   projectRoot: string | null;
   events: ProofEvent[];
@@ -19,10 +33,13 @@ interface ProofState {
   exporting: string | null;
   lastExport: TestigoExportSummary | null;
   error: string | null;
+  /// Case opened in the timeline view; null = case list.
+  selectedCase: string | null;
 
   load: (projectRoot: string) => Promise<void>;
   clear: () => void;
   exportPack: (caseId?: string) => Promise<void>;
+  selectCase: (caseId: string | null) => void;
 }
 
 export function summarizeCases(events: ProofEvent[]): CaseSummary[] {
@@ -45,6 +62,61 @@ export function summarizeCases(events: ProofEvent[]): CaseSummary[] {
   return [...by.values()].sort((a, b) => b.lastTs - a.lastTs);
 }
 
+/// Fold a case's events into turns (chronological). Events keyed by turnId;
+/// a prompt opens the turn, turn_end closes it with the diff payload. Events
+/// with no turn (case_link, job_run, post-restart strays) are skipped — the
+/// case header already shows totals.
+export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
+  const turns: TimelineTurn[] = [];
+  const byId = new Map<string, TimelineTurn>();
+  const turnFor = (e: ProofEvent): TimelineTurn | null => {
+    if (!e.turnId) return null;
+    let t = byId.get(e.turnId);
+    if (!t) {
+      t = {
+        turnId: e.turnId,
+        ts: e.ts,
+        prompt: "",
+        approvals: [],
+        toolResults: 0,
+        files: [],
+        filesTruncated: false,
+        endTs: null,
+      };
+      byId.set(e.turnId, t);
+      turns.push(t);
+    }
+    return t;
+  };
+  for (const e of events) {
+    const t = turnFor(e);
+    if (!t) continue;
+    const p = e.payload as Record<string, unknown>;
+    if (e.kind === "prompt") {
+      t.ts = e.ts;
+      t.prompt = typeof p.prompt === "string" ? p.prompt : "";
+      if (typeof p.skill === "string") t.skill = p.skill;
+    } else if (e.kind === "approval_decision") {
+      t.approvals.push({
+        tool: typeof p.tool === "string" ? p.tool : undefined,
+        decision: typeof p.decision === "string" ? p.decision : undefined,
+        reason: typeof p.reason === "string" ? p.reason : undefined,
+      });
+    } else if (e.kind === "tool_result") {
+      t.toolResults += 1;
+    } else if (e.kind === "turn_end") {
+      t.endTs = e.ts;
+      if (Array.isArray(p.filesChanged)) {
+        t.files = (p.filesChanged as { status: string; path: string }[]).filter(
+          (f) => typeof f?.path === "string",
+        );
+      }
+      t.filesTruncated = p.filesTruncated === true;
+    }
+  }
+  return turns;
+}
+
 export const useProofStore = create<ProofState>((set, get) => ({
   projectRoot: null,
   events: [],
@@ -52,6 +124,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
   exporting: null,
   lastExport: null,
   error: null,
+  selectedCase: null,
 
   load: async (projectRoot) => {
     set({ projectRoot, error: null });
@@ -67,7 +140,16 @@ export const useProofStore = create<ProofState>((set, get) => ({
   },
 
   clear: () =>
-    set({ projectRoot: null, events: [], report: null, lastExport: null, error: null }),
+    set({
+      projectRoot: null,
+      events: [],
+      report: null,
+      lastExport: null,
+      error: null,
+      selectedCase: null,
+    }),
+
+  selectCase: (caseId) => set({ selectedCase: caseId }),
 
   exportPack: async (caseId) => {
     const root = get().projectRoot;
