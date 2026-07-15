@@ -339,6 +339,27 @@ impl HooksRuntime {
         Ok(self.status())
     }
 
+    /// Approval requests currently pending on disk (<session_dir>/approvals/
+    /// *.req.json — the hook deletes each file once decided or timed out).
+    /// The frontend resyncs its queue from this on attach and window focus, so
+    /// a missed `approval://request` event (webview reload, HMR, listener not
+    /// yet attached) degrades to a short delay instead of an invisible 90s
+    /// stall on the agent.
+    pub fn pending_approvals(&self) -> Vec<Value> {
+        let dir = self.session_dir.join("approvals");
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+        let mut reqs: Vec<Value> = entries
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".req.json"))
+            .filter_map(|e| fs::read_to_string(e.path()).ok())
+            .filter_map(|txt| serde_json::from_str::<Value>(&txt).ok())
+            .collect();
+        reqs.sort_by_key(|v| v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
+        reqs
+    }
+
     /// Write a response for an in-flight approval. The hook script is polling
     /// for <session_dir>/approvals/<id>.res.json and will pick this up.
     pub fn respond(&self, id: &str, decision: &str, reason: Option<&str>) -> AppResult<()> {

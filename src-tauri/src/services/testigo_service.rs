@@ -134,7 +134,8 @@ impl TestigoService {
         format!("{clean}-{hash:016x}.jsonl")
     }
 
-    fn path(project_root: &str) -> AppResult<PathBuf> {
+    /// pub(crate): the export module reads raw ledger lines byte-exactly.
+    pub(crate) fn ledger_path(project_root: &str) -> AppResult<PathBuf> {
         Ok(Self::dir()?.join(Self::key_for(project_root)))
     }
 
@@ -159,7 +160,7 @@ impl TestigoService {
         if inner.tails.contains_key(project_root) {
             return Ok(());
         }
-        let path = Self::path(project_root)?;
+        let path = Self::ledger_path(project_root)?;
         let mut tail: Option<(u64, String)> = None;
         if path.exists() {
             let content = fs::read_to_string(&path)?;
@@ -240,7 +241,7 @@ impl TestigoService {
         };
         ev.hash = Self::event_hash(&ev);
 
-        let path = Self::path(project_root)?;
+        let path = Self::ledger_path(project_root)?;
         let mut line = serde_json::to_string(&ev)
             .map_err(|e| AppError::Other(format!("serialize proof event: {e}")))?;
         line.push('\n');
@@ -527,7 +528,7 @@ impl TestigoService {
         limit: Option<usize>,
     ) -> AppResult<Vec<ProofEvent>> {
         let _g = self.inner.lock();
-        let path = Self::path(project_root)?;
+        let path = Self::ledger_path(project_root)?;
         if !path.exists() {
             return Ok(Vec::new());
         }
@@ -551,7 +552,7 @@ impl TestigoService {
     /// inconsistent marks the chain broken at that seq.
     pub fn verify(&self, project_root: &str) -> AppResult<VerifyReport> {
         let _g = self.inner.lock();
-        let path = Self::path(project_root)?;
+        let path = Self::ledger_path(project_root)?;
         if !path.exists() {
             return Ok(VerifyReport {
                 ok: true,
@@ -739,7 +740,7 @@ mod tests {
         assert!(svc2.verify(root).unwrap().ok, "cross-restart chain intact");
 
         // Tampering with a middle line breaks verification at that seq.
-        let path = TestigoService::path(root).unwrap();
+        let path = TestigoService::ledger_path(root).unwrap();
         let tampered = fs::read_to_string(&path)
             .unwrap()
             .replace("looks safe", "totally legit");

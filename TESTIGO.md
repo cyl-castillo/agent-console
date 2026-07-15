@@ -144,10 +144,20 @@ ProofEvent {
   runs del scheduler al ledger como `job_run` bajo case `job:<id>`. stop-hook ahora pasa cwd
   (fallback para worktrees si se pierde el estado del turno).
   *Demo: un turno cuenta qué cambió.*
-- **F3 — Packet + verificador** (la insignia): redacción, export DSSE/in-toto, verificador
-  standalone, commit trailers. *Demo: PR de agent-console con packet verificable por un tercero.*
-- **F4 — UI "Proof" tab**: timeline por case (intención → aprobaciones → evidencia → resultado),
-  export con un click. Patrón workbench-panel existente.
+- **F3 — Packet + verificador** ✅ (2026-07-15, la insignia): `testigo_export.rs` — in-toto
+  Statement v1 (predicado `https://testigo.dev/attestation/v0.1`) firmado como DSSE ed25519
+  (clave en keychain, keyid = sha256 del pubkey); case export con poda tipo Merkle (eventos
+  fuera del case = stubs seq/hashes → linkage verifica entero); redacción conservadora de
+  secretos (token-shaped patterns; evento redactado conserva hashes = linkage sí, contenido no,
+  declarado); rechaza exportar cadena rota. `testigo-verifier.html` standalone (WebCrypto, cero
+  deps, cero red) escrito junto a cada packet. Panel "Proof" mínimo (verify badge + cases +
+  export). ⚠️ Commit trailers movidos a F4 (requieren noción de "case activo" por sesión que
+  el tab de F4 introduce). Incluye hardening de approvals descubierto en la prueba GUI: la cola
+  del modal ahora re-sincroniza desde disco (`approvals_pending`, attach + window focus) — un
+  evento perdido ya no es un approval invisible + stall de 90s, los `.req.json` son la verdad.
+- **F4 — UI "Proof" timeline + trailers**: timeline por case (intención → aprobaciones →
+  evidencia → resultado) sobre el panel F3; commit trailers `Testigo-Case:` en commits
+  hechos desde el console.
 - **F5 — Spec público + caso Fixy**: repo del protocolo con el nombre definitivo, predicado
   versionado, packets reales de Fixy como ejemplos.
 

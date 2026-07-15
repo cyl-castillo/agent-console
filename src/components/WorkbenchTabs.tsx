@@ -16,7 +16,7 @@ import { useSchedulerStore } from "../stores/schedulerStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "schedule" | "vault" | "context" | "plugins" | "mcp" | "transfer" | "feedback" | "jira" | "agenda" | "notes";
+export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "schedule" | "vault" | "context" | "plugins" | "mcp" | "transfer" | "feedback" | "jira" | "agenda" | "notes" | "proof";
 
 export function WorkbenchTabs({
   active,
@@ -69,6 +69,7 @@ export function WorkbenchTabs({
     jira: { icon: "check", label: "Tasks", title: "Tasks — your assigned Jira issues", count: jiraCount },
     agenda: { icon: "calendar", label: "Agenda", title: "Agenda — task due dates + scheduled jobs" },
     notes: { icon: "sticky-note", label: "Notes", title: "Notes — your per-project scratchpad", count: notesCount },
+    proof: { icon: "shield-check", label: "Proof", title: "Proof — Testigo evidence ledger, verify + signed packet export" },
     context: { icon: "file-text", label: "Context", title: "Context", count: memoriesCount },
     advisor: {
       icon: "lightbulb",
@@ -106,7 +107,7 @@ export function WorkbenchTabs({
   };
 
   const groups: { label: string; tabs: WorkbenchTab[] }[] = [
-    { label: "Workspace", tabs: ["skills", "jira", "agenda", "notes", "context", "advisor", "learning"] },
+    { label: "Workspace", tabs: ["skills", "jira", "agenda", "notes", "proof", "context", "advisor", "learning"] },
     { label: "Agents", tabs: ["roundtable", "schedule"] },
     { label: "Config", tabs: ["permissions", "vault", "plugins", "mcp", "transfer"] },
   ];

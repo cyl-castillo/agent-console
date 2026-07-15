@@ -5,6 +5,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import type {
   ActivityEvent,
   AdvisorAnalysisResult,
+  ApprovalRequest,
   BranchInfo,
   ContextFileStat, ContextStatus,
   CurationResult,
@@ -14,7 +15,7 @@ import type {
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, JiraStatus, JiraIssue, Job, McpServer, McpAddInput,
   StickyNote,
-  ProofEvent, TestigoVerifyReport,
+  ProofEvent, TestigoVerifyReport, TestigoExportSummary,
   MemoryEntry, PermissionsSnapshot, Preflight,
   PersistedRoom, PersistedSession, Project, RecentProject,
   RoomSummary, RoundtableConfig, RunRecord, ShareResult, SyncResult,
@@ -115,6 +116,7 @@ export const ipc = {
 
   approvalRespond: (id: string, decision: "allow" | "deny" | "ask", reason?: string) =>
     invoke<void>("approval_respond", { id, decision, reason: reason ?? null }),
+  approvalsPending: () => invoke<ApprovalRequest[]>("approvals_pending"),
 
   permissionsSnapshot: () => invoke<PermissionsSnapshot>("permissions_snapshot"),
   permissionsAdd: (
@@ -188,6 +190,14 @@ export const ipc = {
     invoke<TestigoVerifyReport>("testigo_verify", { projectRoot }),
   testigoLinkCase: (projectRoot: string, termId: string, ticket: string) =>
     invoke<void>("testigo_link_case", { projectRoot, termId, ticket }),
+  testigoExport: (projectRoot: string, caseId?: string, destDir?: string) =>
+    invoke<TestigoExportSummary>("testigo_export", {
+      projectRoot,
+      caseId: caseId ?? null,
+      destDir: destDir ?? null,
+    }),
+  testigoPublicKey: () =>
+    invoke<{ keyId: string; publicKey: string }>("testigo_public_key"),
 
   mcpList: () => invoke<McpServer[]>("mcp_list"),
   mcpAdd: (input: McpAddInput) => invoke<string>("mcp_add", { input }),
