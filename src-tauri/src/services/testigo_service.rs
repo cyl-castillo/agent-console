@@ -68,6 +68,18 @@ pub struct VerifyReport {
 /// bounded preview so one approval can't balloon the evidence file.
 const MAX_INPUT_BYTES: usize = 4096;
 
+/// Context of the turn currently open in a terminal: the id every in-turn
+/// event attaches to, plus what turn_end needs to compute the pre/post diff.
+#[derive(Debug, Clone)]
+pub struct TurnState {
+    pub turn_id: String,
+    /// Snapshot of the working tree taken right after the prompt (the first
+    /// snapshot of the turn) — the "before" side of the turn diff.
+    pub pre_sha: Option<String>,
+    /// Where the agent runs (worktree sessions differ from the project root).
+    pub cwd: Option<String>,
+}
+
 #[derive(Default)]
 struct Inner {
     /// project_root -> last (seq, hash); None = ledger empty. Lazily loaded
@@ -76,9 +88,9 @@ struct Inner {
     /// term_id -> case_id override (from case_link events; survives restarts
     /// because ensure_tail rebuilds it from the ledger).
     cases: HashMap<String, String>,
-    /// term_id -> currently open turn_id (in-memory only: a restart mid-turn
+    /// term_id -> currently open turn (in-memory only: a restart mid-turn
     /// loses attribution until the next prompt, which is acceptable).
-    turns: HashMap<String, String>,
+    turns: HashMap<String, TurnState>,
     /// approval id -> (term_id, tool), so the decision event can name what it
     /// approved even though the respond() path only carries the id.
     approvals: HashMap<String, (Option<String>, Option<String>)>,
@@ -259,7 +271,14 @@ impl TestigoService {
         Self::ensure_tail(&mut inner, project_root)?;
         let turn_id = uuid::Uuid::new_v4().to_string();
         if let Some(t) = term_id {
-            inner.turns.insert(t.to_string(), turn_id.clone());
+            inner.turns.insert(
+                t.to_string(),
+                TurnState {
+                    turn_id: turn_id.clone(),
+                    pre_sha: None,
+                    cwd: cwd.map(String::from),
+                },
+            );
         }
         let case = Self::case_for(&inner, term_id);
         Self::record(
@@ -276,15 +295,25 @@ impl TestigoService {
         )
     }
 
+    /// Context of the turn currently open in `term_id`, if any — what the
+    /// turn_end handler needs (pre snapshot + cwd) to compute the turn diff
+    /// BEFORE closing the turn. Read-only; `on_turn_end` does the removal.
+    pub fn peek_turn(&self, term_id: &str) -> Option<TurnState> {
+        self.inner.lock().turns.get(term_id).cloned()
+    }
+
+    /// Close the turn with the caller-built result payload (pre/post snapshot
+    /// shas and the files-changed diff, when the checkout is a git repo).
     pub fn on_turn_end(
         &self,
         project_root: &str,
         ts: i64,
         term_id: Option<&str>,
         session_id: Option<&str>,
+        payload: Value,
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
-        let turn_id = term_id.and_then(|t| inner.turns.remove(t));
+        let turn_id = term_id.and_then(|t| inner.turns.remove(t)).map(|s| s.turn_id);
         let case = Self::case_for(&inner, term_id);
         Self::record(
             &mut inner,
@@ -296,7 +325,65 @@ impl TestigoService {
             term_id.map(String::from),
             session_id.map(String::from),
             "agent",
-            json!({}),
+            payload,
+        )
+    }
+
+    /// Record what one tool call produced inside the open turn. The hook
+    /// already bounds the excerpt; `bounded_input` is a second guard.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_tool_result(
+        &self,
+        project_root: &str,
+        ts: i64,
+        term_id: Option<&str>,
+        session_id: Option<&str>,
+        tool: Option<&str>,
+        excerpt: Option<&str>,
+        truncated: bool,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        let turn_id = term_id.and_then(|t| inner.turns.get(t)).map(|s| s.turn_id.clone());
+        let case = Self::case_for(&inner, term_id);
+        let excerpt_v = bounded_input(json!(excerpt));
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case,
+            turn_id,
+            "tool_result",
+            term_id.map(String::from),
+            session_id.map(String::from),
+            "agent",
+            json!({ "tool": tool, "excerpt": excerpt_v, "truncated": truncated }),
+        )
+    }
+
+    /// Record a scheduler job run under its own "job:<id>" case — scheduled
+    /// work is agentic action too, and its outcome belongs in the evidence.
+    pub fn on_job_run(
+        &self,
+        project_root: &str,
+        ts: i64,
+        job_id: &str,
+        job_name: &str,
+        status: &str,
+        summary: &str,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            format!("job:{job_id}"),
+            None,
+            "job_run",
+            None,
+            None,
+            "system",
+            json!({ "jobId": job_id, "jobName": job_name, "status": status, "summary": summary }),
         )
     }
 
@@ -309,7 +396,15 @@ impl TestigoService {
         commit_sha: &str,
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
-        let turn_id = term_id.and_then(|t| inner.turns.get(t).cloned());
+        let turn_id = term_id.and_then(|t| {
+            let state = inner.turns.get_mut(t)?;
+            // The first snapshot of a turn (taken right after the prompt) is
+            // the "before" side of the turn diff computed at turn_end.
+            if state.pre_sha.is_none() {
+                state.pre_sha = Some(commit_sha.to_string());
+            }
+            Some(state.turn_id.clone())
+        });
         let case = Self::case_for(&inner, term_id);
         Self::record(
             &mut inner,
@@ -338,7 +433,10 @@ impl TestigoService {
         inner
             .approvals
             .insert(id.to_string(), (term_id.clone(), tool.clone()));
-        let turn_id = term_id.as_deref().and_then(|t| inner.turns.get(t).cloned());
+        let turn_id = term_id
+            .as_deref()
+            .and_then(|t| inner.turns.get(t))
+            .map(|s| s.turn_id.clone());
         let case = Self::case_for(&inner, term_id.as_deref());
         Self::record(
             &mut inner,
@@ -374,7 +472,10 @@ impl TestigoService {
         // remove(): one decision closes one request. A post-restart decision
         // (empty map) still records, just without tool/term context.
         let (term_id, tool) = inner.approvals.remove(id).unwrap_or((None, None));
-        let turn_id = term_id.as_deref().and_then(|t| inner.turns.get(t).cloned());
+        let turn_id = term_id
+            .as_deref()
+            .and_then(|t| inner.turns.get(t))
+            .map(|s| s.turn_id.clone());
         let case = Self::case_for(&inner, term_id.as_deref());
         Self::record(
             &mut inner,
@@ -573,41 +674,68 @@ mod tests {
         assert_eq!(d.payload["tool"], "write_file");
         assert_eq!(d.actor, "human");
 
-        // Snapshot inside the turn, then the turn closes carrying its id.
+        // The first snapshot of the turn becomes the "before" side of the
+        // turn diff (peek_turn exposes it to the turn_end handler).
         let s = svc.on_snapshot(root, 5, Some("t1"), Some("s1"), "abc123").unwrap();
         assert_eq!(s.turn_id.as_deref(), Some(turn.as_str()));
-        let e = svc.on_turn_end(root, 6, Some("t1"), Some("s1")).unwrap();
+        let peeked = svc.peek_turn("t1").unwrap();
+        assert_eq!(peeked.pre_sha.as_deref(), Some("abc123"));
+
+        // A tool result lands inside the same turn, excerpt preserved.
+        let tr = svc
+            .on_tool_result(root, 6, Some("t1"), Some("s1"), Some("Bash"), Some("ok\n"), false)
+            .unwrap();
+        assert_eq!(tr.turn_id.as_deref(), Some(turn.as_str()));
+        assert_eq!(tr.actor, "agent");
+
+        // The turn closes carrying its id and the caller-built result payload.
+        let e = svc
+            .on_turn_end(
+                root,
+                7,
+                Some("t1"),
+                Some("s1"),
+                serde_json::json!({ "preSha": "abc123", "postSha": "def456" }),
+            )
+            .unwrap();
         assert_eq!(e.turn_id.as_deref(), Some(turn.as_str()));
+        assert_eq!(e.payload["postSha"], "def456");
+        assert!(svc.peek_turn("t1").is_none(), "turn closed");
 
         // An unlinked terminal falls back to a term case; projects isolate.
         let other = svc
-            .on_prompt(root, 7, Some("t2"), None, Some("hi"), None, None)
+            .on_prompt(root, 8, Some("t2"), None, Some("hi"), None, None)
             .unwrap();
         assert_eq!(other.case_id, "term:t2");
         assert!(svc.list("/proj/b", None, None).unwrap().is_empty());
 
+        // Scheduler runs chain in under their own job case.
+        let jr = svc.on_job_run(root, 9, "j1", "nightly", "ok", "all good").unwrap();
+        assert_eq!(jr.case_id, "job:j1");
+        assert_eq!(jr.actor, "system");
+
         // list filters by case; limit keeps the most recent.
         let all = svc.list(root, None, None).unwrap();
-        assert_eq!(all.len(), 7);
+        assert_eq!(all.len(), 9);
         let case = svc.list(root, Some("jira:FIXY-1"), None).unwrap();
-        assert_eq!(case.len(), 6);
+        assert_eq!(case.len(), 7);
         let last2 = svc.list(root, None, Some(2)).unwrap();
         assert_eq!(last2.len(), 2);
-        assert_eq!(last2[1].seq, 6);
+        assert_eq!(last2[1].seq, 8);
 
         // Chain verifies end to end; seq/prev_hash link up.
         let v = svc.verify(root).unwrap();
         assert!(v.ok, "fresh chain must verify");
-        assert_eq!(v.total, 7);
+        assert_eq!(v.total, 9);
         assert_eq!(all[3].prev_hash, all[2].hash);
 
         // case_link bindings survive a "restart" (fresh service re-reads them).
         let svc2 = TestigoService::new();
         let p2 = svc2
-            .on_prompt(root, 8, Some("t1"), None, Some("again"), None, None)
+            .on_prompt(root, 10, Some("t1"), None, Some("again"), None, None)
             .unwrap();
         assert_eq!(p2.case_id, "jira:FIXY-1", "binding rebuilt from ledger");
-        assert_eq!(p2.seq, 7);
+        assert_eq!(p2.seq, 9);
         assert!(svc2.verify(root).unwrap().ok, "cross-restart chain intact");
 
         // Tampering with a middle line breaks verification at that seq.

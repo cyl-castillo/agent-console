@@ -21,6 +21,7 @@ use crate::state::AppState;
 const USERPROMPT_HOOK: &str = include_str!("../../resources/userprompt-hook.cjs");
 const PRETOOLUSE_HOOK: &str = include_str!("../../resources/pretooluse-hook.cjs");
 const STOP_HOOK: &str = include_str!("../../resources/stop-hook.cjs");
+const POSTTOOLUSE_HOOK: &str = include_str!("../../resources/posttooluse-hook.cjs");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +31,7 @@ pub struct HooksStatus {
     pub pretooluse_script_path: PathBuf,
     pub installed: bool,
     pub pretooluse_installed: bool,
+    pub posttooluse_installed: bool,
     pub settings_path: PathBuf,
     /// Codex mirror (same bridge scripts, wired via ~/.codex/hooks.json).
     /// codex_available=false ⇒ the codex CLI isn't installed; the other two
@@ -45,6 +47,7 @@ pub struct HooksRuntime {
     script_path: PathBuf,
     pretooluse_script_path: PathBuf,
     stop_script_path: PathBuf,
+    posttooluse_script_path: PathBuf,
     watcher_started: Mutex<bool>,
     approvals_watcher_started: Mutex<bool>,
 }
@@ -64,11 +67,14 @@ impl HooksRuntime {
         let pretooluse_script_path =
             ensure_hook_script(&cache, "pretooluse-hook.cjs", PRETOOLUSE_HOOK)?;
         let stop_script_path = ensure_hook_script(&cache, "stop-hook.cjs", STOP_HOOK)?;
+        let posttooluse_script_path =
+            ensure_hook_script(&cache, "posttooluse-hook.cjs", POSTTOOLUSE_HOOK)?;
         Ok(Self {
             session_dir,
             script_path,
             pretooluse_script_path,
             stop_script_path,
+            posttooluse_script_path,
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
         })
@@ -108,6 +114,9 @@ impl HooksRuntime {
         let pretooluse_installed =
             is_hook_installed(&settings_path, "PreToolUse", &self.pretooluse_script_path)
                 .unwrap_or(false);
+        let posttooluse_installed =
+            is_hook_installed(&settings_path, "PostToolUse", &self.posttooluse_script_path)
+                .unwrap_or(false);
         let codex_hooks_path = codex_hooks_path();
         let codex_installed =
             is_hook_installed(&codex_hooks_path, "UserPromptSubmit", &self.script_path)
@@ -121,6 +130,7 @@ impl HooksRuntime {
             pretooluse_script_path: self.pretooluse_script_path.clone(),
             installed,
             pretooluse_installed,
+            posttooluse_installed,
             settings_path,
             codex_available: codex_available(),
             codex_installed,
@@ -152,6 +162,7 @@ impl HooksRuntime {
         upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
         upsert_hook(&mut settings, "PreToolUse", &self.pretooluse_script_path);
         upsert_hook(&mut settings, "Stop", &self.stop_script_path);
+        upsert_hook(&mut settings, "PostToolUse", &self.posttooluse_script_path);
 
         write_settings_atomic(&settings_path, &settings)?;
 
@@ -160,6 +171,7 @@ impl HooksRuntime {
                 ("UserPromptSubmit", &self.script_path),
                 ("PreToolUse", &self.pretooluse_script_path),
                 ("Stop", &self.stop_script_path),
+                ("PostToolUse", &self.posttooluse_script_path),
             ])?;
         }
         Ok(self.status())
@@ -270,6 +282,37 @@ impl HooksRuntime {
         Ok(())
     }
 
+    /// Auto-install the PostToolUse (tool-result) observer for both engines,
+    /// under its OWN marker (same reasoning as Stop: existing installs carry
+    /// the older markers and would never get it otherwise). Observer-class —
+    /// it records what tools produced and changes no behavior — so it's safe
+    /// to enable by default. Feeds the Testigo turn evidence.
+    pub fn ensure_posttooluse_autoinstalled(&self) -> AppResult<()> {
+        let marker = self.script_path.with_file_name(".posttooluse-autoinstalled");
+        if marker.exists() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = if settings_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
+        } else {
+            json!({})
+        };
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        upsert_hook(&mut settings, "PostToolUse", &self.posttooluse_script_path);
+        write_settings_atomic(&settings_path, &settings)?;
+        if codex_available() {
+            self.install_codex(&[("PostToolUse", &self.posttooluse_script_path)])?;
+        }
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
     /// Remove our hook entries from settings.json and ~/.codex/hooks.json.
     /// Other hooks/settings untouched.
     pub fn uninstall(&self) -> AppResult<HooksStatus> {
@@ -284,6 +327,7 @@ impl HooksRuntime {
                     ("UserPromptSubmit", &self.script_path),
                     ("PreToolUse", &self.pretooluse_script_path),
                     ("Stop", &self.stop_script_path),
+                    ("PostToolUse", &self.posttooluse_script_path),
                 ] {
                     if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
                         arr.retain(|e| !has_command_path(e, target));
@@ -587,17 +631,70 @@ fn handle_event(v: &Value, app: &AppHandle) {
             }
         }
     } else if kind == "turn_end" {
-        // Testigo: the Stop hook closes the open turn for that terminal.
+        // Testigo: the Stop hook closes the open turn — and the close carries
+        // the turn's result: a post-turn snapshot diffed against the pre-turn
+        // one, so the event answers "what did this turn change".
         let state = app.state::<AppState>();
         let project = state.inner.lock().project.clone();
         if let Some(p) = project {
             let root = p.root.to_string_lossy();
             let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            let term_id = str_field(v, "termId");
+
+            let turn = term_id.as_deref().and_then(|t| state.testigo.peek_turn(t));
+            // Where the turn ran: turn state from the prompt, else the stop
+            // payload's cwd, else the project root (non-worktree default).
+            let repo = turn
+                .as_ref()
+                .and_then(|t| t.cwd.clone())
+                .or_else(|| str_field(v, "cwd"))
+                .map(PathBuf::from)
+                .filter(|c| c.is_dir())
+                .unwrap_or_else(|| p.root.clone());
+            let pre_sha = turn.as_ref().and_then(|t| t.pre_sha.clone());
+
+            let mut payload = json!({});
+            let post = snapshot_service::create(&repo, &uuid::Uuid::new_v4().to_string())
+                .ok()
+                .flatten();
+            if let Some(post) = &post {
+                payload["postSha"] = json!(post.commit_sha);
+            }
+            if let (Some(pre), Some(post)) = (&pre_sha, &post) {
+                payload["preSha"] = json!(pre);
+                if let Ok(files) = snapshot_service::diff_names(&repo, pre, &post.commit_sha) {
+                    payload["filesTruncated"] =
+                        json!(files.len() >= snapshot_service::DIFF_NAMES_MAX);
+                    payload["filesChanged"] = json!(files
+                        .iter()
+                        .map(|(s, f)| json!({ "status": s, "path": f }))
+                        .collect::<Vec<_>>());
+                }
+            }
+
             let _ = state.testigo.on_turn_end(
+                root.as_ref(),
+                ts,
+                term_id.as_deref(),
+                str_field(v, "sessionId").as_deref(),
+                payload,
+            );
+        }
+    } else if kind == "tool_result" {
+        // Testigo: what one tool call produced inside the open turn.
+        let state = app.state::<AppState>();
+        let project = state.inner.lock().project.clone();
+        if let Some(p) = project {
+            let root = p.root.to_string_lossy();
+            let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            let _ = state.testigo.on_tool_result(
                 root.as_ref(),
                 ts,
                 str_field(v, "termId").as_deref(),
                 str_field(v, "sessionId").as_deref(),
+                str_field(v, "tool").as_deref(),
+                str_field(v, "excerpt").as_deref(),
+                v.get("truncated").and_then(|t| t.as_bool()).unwrap_or(false),
             );
         }
     }

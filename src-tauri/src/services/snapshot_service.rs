@@ -124,6 +124,35 @@ pub fn restore(repo: &Path, commit_sha: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Files that changed between two snapshot commits, as (status, path) pairs
+/// ("M"/"A"/"D"/"R100 old\tnew"...). Capped so a huge turn (vendored deps,
+/// generated code) can't balloon the caller's record; the cap is reported by
+/// the caller, not silently here.
+pub const DIFF_NAMES_MAX: usize = 500;
+
+pub fn diff_names(repo: &Path, from_sha: &str, to_sha: &str) -> AppResult<Vec<(String, String)>> {
+    let out = proc::command("git")
+        .args(["diff", "--name-status", from_sha, to_sha])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        return Err(AppError::Other(format!(
+            "diff --name-status: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut parts = l.splitn(2, '\t');
+            let status = parts.next()?.trim().to_string();
+            let path = parts.next()?.trim().to_string();
+            (!status.is_empty() && !path.is_empty()).then_some((status, path))
+        })
+        .take(DIFF_NAMES_MAX)
+        .collect())
+}
+
 pub fn delete(repo: &Path, id: &str) -> AppResult<()> {
     let _ = proc::command("git")
         .args(["update-ref", "-d", &snapshot_ref(id)])

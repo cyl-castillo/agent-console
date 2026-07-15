@@ -28,6 +28,11 @@ process.stdin.on("end", () => {
   const termId = process.env.AGENT_CONSOLE_TERM_ID;
   if (typeof termId === "string" && termId.length > 0) event.termId = termId;
 
+  // Where the agent ran, so the post-turn snapshot (Testigo diff) captures the
+  // right checkout for worktree sessions. The prompt hook stores it too; this
+  // is the fallback when the turn state was lost (e.g. app restart mid-turn).
+  if (typeof input.cwd === "string" && input.cwd.length > 0) event.cwd = input.cwd;
+
   try {
     fs.appendFileSync(path.join(dir, "events.jsonl"), JSON.stringify(event) + "\n");
   } catch { /* ignore */ }

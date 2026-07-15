@@ -40,6 +40,11 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_stop_autoinstalled() {
                 eprintln!("hooks: stop auto-install failed: {e}");
             }
+            // Tool-result observer (Testigo turn evidence), same rollout
+            // pattern as Stop.
+            if let Err(e) = state.hooks.ensure_posttooluse_autoinstalled() {
+                eprintln!("hooks: posttooluse auto-install failed: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
