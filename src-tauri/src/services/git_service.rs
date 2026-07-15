@@ -201,6 +201,24 @@ pub fn unstage_file(repo: &Path, file: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Paths staged for the next commit (`git diff --cached --name-only`),
+/// relative to the repo root.
+pub fn staged_files(repo: &Path) -> AppResult<Vec<String>> {
+    let out = proc::command("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        return Ok(Vec::new());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect())
+}
+
 /// `git commit -m <message>`. Returns the new commit SHA.
 pub fn commit(repo: &Path, message: &str) -> AppResult<String> {
     if message.trim().is_empty() {
