@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testigo verifier</title>
+<!--
+  Standalone Testigo proof packet verifier.
+  Zero dependencies, zero network: everything runs locally via WebCrypto.
+  Verifies: (1) the DSSE Ed25519 signature over the in-toto statement,
+  (2) the subject digest over the packed events, (3) the hash-chain linkage
+  across every entry, recomputing content hashes for non-redacted events.
+  Trust note: the packet embeds its public key for convenience — compare the
+  key id with the publisher through another channel before trusting it.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+  h1 { font-size: 1.4rem; } h1 small { font-weight: normal; opacity: .6; font-size: .9rem; }
+  #drop { border: 2px dashed #888; border-radius: 10px; padding: 2.5rem 1rem; text-align: center; cursor: pointer; }
+  #drop.over { border-color: #4a9; background: rgba(68,170,153,.08); }
+  .check { padding: .45rem .7rem; border-radius: 8px; margin: .3rem 0; }
+  .ok   { background: rgba(60,160,90,.14); }
+  .warn { background: rgba(220,160,40,.16); }
+  .fail { background: rgba(220,70,70,.16); }
+  .mono { font-family: ui-monospace, monospace; font-size: .82rem; word-break: break-all; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; font-size: .85rem; }
+  td, th { padding: .3rem .5rem; border-bottom: 1px solid rgba(128,128,128,.25); text-align: left; vertical-align: top; }
+  .kind { font-family: ui-monospace, monospace; white-space: nowrap; }
+  .muted { opacity: .55; }
+  #result { display: none; }
+</style>
+</head>
+<body>
+<h1>Testigo verifier <small>— intent-to-proof, verified locally</small></h1>
+<div id="drop" tabindex="0">Drop a <b>.proofpack.json</b> here (or click to pick a file).<br>
+<span class="muted">Nothing leaves this page — verification runs entirely in your browser.</span></div>
+<input type="file" id="file" accept=".json,application/json" hidden>
+<div id="result">
+  <div id="checks"></div>
+  <h3>Packet</h3><div id="meta" class="mono"></div>
+  <h3>Events</h3><div id="events"></div>
+</div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const drop = $("drop"), file = $("file");
+drop.addEventListener("click", () => file.click());
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); });
+file.addEventListener("change", () => { if (file.files[0]) load(file.files[0]); });
+
+const b64ToBytes = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const sha256hex = async (bytes) => hex(await crypto.subtle.digest("SHA-256", bytes));
+const enc = new TextEncoder();
+
+function pae(type, payload) {
+  const head = enc.encode(`DSSEv1 ${type.length} ${type} ${payload.length} `);
+  const out = new Uint8Array(head.length + payload.length);
+  out.set(head); out.set(payload, head.length);
+  return out;
+}
+
+function check(cls, text) {
+  const d = document.createElement("div");
+  d.className = "check " + cls;
+  d.textContent = (cls === "ok" ? "✔ " : cls === "warn" ? "⚠ " : "✘ ") + text;
+  $("checks").appendChild(d);
+}
+
+async function load(f) {
+  $("checks").innerHTML = ""; $("meta").innerHTML = ""; $("events").innerHTML = "";
+  $("result").style.display = "block";
+  let packet;
+  try { packet = JSON.parse(await f.text()); } catch { check("fail", "Not valid JSON."); return; }
+  if (packet.format !== "testigo-proofpack/v0.1") { check("fail", `Unknown format: ${packet.format}`); return; }
+
+  const env = packet.envelope || {};
+  const payloadBytes = b64ToBytes(env.payload || "");
+  const sigEntry = (env.signatures || [])[0] || {};
+
+  // 1. Signature (DSSE Ed25519 over the pre-auth encoding).
+  let sigOk = false, keyId = "";
+  try {
+    const pk = b64ToBytes(packet.publicKey || "");
+    keyId = await sha256hex(pk);
+    const key = await crypto.subtle.importKey("raw", pk, "Ed25519", true, ["verify"]);
+    sigOk = await crypto.subtle.verify("Ed25519", key, b64ToBytes(sigEntry.sig || ""), pae(env.payloadType, payloadBytes));
+  } catch (e) { check("fail", `Signature check unavailable: ${e}`); }
+  if (sigOk) check("ok", `Signature valid (Ed25519 / DSSE). Key id: ${keyId.slice(0, 16)}…`);
+  else check("fail", "Signature INVALID — the packet does not match its signature.");
+  if (sigEntry.keyid && sigEntry.keyid !== keyId) check("fail", "Embedded key id does not match the public key.");
+  check("warn", "Trust note: compare the key id with the publisher out-of-band — the packet carries its own key.");
+
+  // 2. Statement + subject digest over the packed events.
+  let st;
+  try { st = JSON.parse(new TextDecoder().decode(payloadBytes)); } catch { check("fail", "Statement payload is not JSON."); return; }
+  const pred = st.predicate || {};
+  const events = pred.events || [];
+  const digestWant = ((st.subject || [])[0] || {}).digest?.sha256 || "";
+  const digestGot = await sha256hex(enc.encode(JSON.stringify(events)));
+  if (digestGot === digestWant) check("ok", `Subject digest matches the packed events (${events.length} entries).`);
+  else check("fail", "Subject digest does NOT match the packed events.");
+
+  // 3. Hash chain: linkage across every entry; content recompute for clean lines.
+  let prev = pred.range?.prevHashBefore || "genesis";
+  let linkageOk = true, recomputed = 0, redacted = 0, stubs = 0, contentFail = 0;
+  for (const e of events) {
+    let prevHash, hash, line = null, isRedacted = false;
+    if (typeof e.line === "string") {
+      let v; try { v = JSON.parse(e.line); } catch { linkageOk = false; break; }
+      prevHash = v.prevHash; hash = v.hash; line = e.line; isRedacted = !!e.redacted;
+    } else if (e.stub) { prevHash = e.stub.prevHash; hash = e.stub.hash; stubs++; }
+    else { linkageOk = false; break; }
+    if (prevHash !== prev) { linkageOk = false; break; }
+    if (line && !isRedacted) {
+      const idx = line.lastIndexOf('"hash":"');
+      const got = await sha256hex(enc.encode(line.slice(0, idx) + '"hash":""}'));
+      if (got === hash) recomputed++; else contentFail++;
+    }
+    if (isRedacted) redacted++;
+    prev = hash;
+  }
+  if (linkageOk) check("ok", `Hash chain linkage intact across all ${events.length} entries.`);
+  else check("fail", "Hash chain linkage BROKEN.");
+  if (contentFail === 0) check("ok", `Content hashes recomputed for ${recomputed} events.`);
+  else check("fail", `${contentFail} event(s) failed content hash recomputation.`);
+  if (redacted > 0) check("warn", `${redacted} event(s) redacted before export — linkage verified, content hash not recomputable (by design).`);
+  if (stubs > 0) check("warn", `${stubs} out-of-case event(s) included as linkage stubs (seq + hashes only).`);
+
+  // 4. Render.
+  $("meta").textContent =
+    `case: ${pred.caseId ?? "(full ledger)"} · project: ${pred.project} · exported: ${new Date(pred.exportedAtMs).toISOString()} · generator: ${pred.generator} · range: ${pred.range?.fromSeq}–${pred.range?.toSeq} · key id: ${keyId}`;
+  const tbl = document.createElement("table");
+  tbl.innerHTML = "<tr><th>seq</th><th>kind</th><th>actor</th><th>detail</th></tr>";
+  for (const e of events) {
+    const tr = document.createElement("tr");
+    if (e.stub) {
+      tr.innerHTML = `<td>${e.stub.seq}</td><td class="kind muted">stub</td><td class="muted">—</td><td class="muted">${e.stub.kind ?? ""} (other case, linkage only)</td>`;
+    } else {
+      let v = {}; try { v = JSON.parse(e.line); } catch {}
+      const p = v.payload || {};
+      let detail = "";
+      if (v.kind === "prompt") detail = (p.prompt || "").slice(0, 140);
+      else if (v.kind === "approval_request") detail = `tool=${p.tool ?? ""}`;
+      else if (v.kind === "approval_decision") detail = `${p.decision ?? ""}${p.reason ? " — " + p.reason : ""} (tool=${p.tool ?? ""})`;
+      else if (v.kind === "tool_result") detail = `tool=${p.tool ?? ""}`;
+      else if (v.kind === "snapshot") detail = `sha=${(p.commitSha || "").slice(0, 10)}`;
+      else if (v.kind === "turn_end") detail = (p.filesChanged || []).map((f) => `${f.status} ${f.path}`).join(", ").slice(0, 200) || "(no diff captured)";
+      else if (v.kind === "case_link") detail = v.caseId;
+      else if (v.kind === "job_run") detail = `${p.jobName ?? ""}: ${p.status ?? ""}`;
+      const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+      tr.innerHTML = `<td>${v.seq}</td><td class="kind">${esc(v.kind)}${e.redacted ? " ⚠" : ""}</td><td>${esc(v.actor ?? "")}</td><td>${esc(detail)}</td>`;
+    }
+    tbl.appendChild(tr);
+  }
+  $("events").appendChild(tbl);
+}
+</script>
+</body>
+</html>

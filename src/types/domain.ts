@@ -187,6 +187,18 @@ export interface TestigoVerifyReport {
   tornTail: boolean;
 }
 
+/// Result of exporting a signed proof packet (mirrors the Rust ExportSummary).
+export interface TestigoExportSummary {
+  path: string;
+  verifierPath: string;
+  eventCount: number;
+  stubCount: number;
+  redactionCount: number;
+  keyId: string;
+  subjectDigest: string;
+  chainOk: boolean;
+}
+
 /// One per-project sticky note (mirrors the Rust Note).
 export interface StickyNote {
   id: string;

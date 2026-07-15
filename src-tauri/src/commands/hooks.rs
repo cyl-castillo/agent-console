@@ -26,6 +26,11 @@ pub fn hooks_start_watcher(app: AppHandle, state: State<'_, AppState>) -> AppRes
 }
 
 #[tauri::command]
+pub fn approvals_pending(state: State<'_, AppState>) -> AppResult<Vec<serde_json::Value>> {
+    Ok(state.hooks.pending_approvals())
+}
+
+#[tauri::command]
 pub fn approval_respond(
     id: String,
     decision: String,
