@@ -24,6 +24,7 @@ pub mod snapshot_service;
 pub mod terminal_runner;
 pub mod testigo_export;
 pub mod testigo_service;
+pub mod testigo_timestamp;
 pub mod jira_service;
 pub mod notes_service;
 pub mod usage_service;

@@ -4,6 +4,19 @@ import { useProofStore, summarizeCases, buildTimeline } from "../stores/proofSto
 import { useSessionStore } from "../stores/sessionStore";
 import type { TestigoPreviewEntry } from "../types/domain";
 
+/// Public TSA used when the trusted-timestamp toggle is switched on. One
+/// well-known default beats a URL field nobody fills correctly; the backend
+/// takes any TSA URL if a project ever needs a different one.
+const DEFAULT_TSA = "https://freetsa.org/tsr";
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
 function fmtTime(ts: number): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -222,6 +235,23 @@ export function ProofPanel() {
                 Off by default: in shared repos this is the owner's call.
               </label>
             </p>
+            <p className="wb-hint">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!!settings.timestampTsa}
+                  onChange={(e) =>
+                    void setSettings({
+                      timestampTsa: e.target.checked ? DEFAULT_TSA : undefined,
+                    })
+                  }
+                />{" "}
+                trusted timestamp — at export, request an RFC 3161 token over
+                the packet signature from <code>{hostOf(settings.timestampTsa ?? DEFAULT_TSA)}</code>{" "}
+                (proves the packet existed at that time; sends the TSA only a
+                signature hash, never content).
+              </label>
+            </p>
           </section>
         )}
 
@@ -318,6 +348,8 @@ export function ProofPanel() {
               {lastExport.eventCount} events
               {lastExport.stubCount > 0 && ` · ${lastExport.stubCount} stubs`}
               {` · ${lastExport.redactionCount} redactions`}
+              {lastExport.timestampTsa &&
+                ` · timestamped (RFC 3161, ${hostOf(lastExport.timestampTsa)})`}
               {" · key "}
               <code title={lastExport.keyId}>{lastExport.keyId.slice(0, 16)}…</code>
               <br />

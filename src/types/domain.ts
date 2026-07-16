@@ -197,14 +197,18 @@ export interface TestigoExportSummary {
   keyId: string;
   subjectDigest: string;
   chainOk: boolean;
+  /// TSA that timestamped the packet signature (RFC 3161), when opted in.
+  timestampTsa?: string;
 }
 
 /// Per-project Testigo policy (mirrors the Rust TestigoSettings). Witnessing
 /// is local-only and on by default; repo marks (trailers + anchor ref) touch
-/// the project's git and are opt-in.
+/// the project's git and are opt-in, as is the RFC 3161 timestamp (it sends
+/// a signature hash to the TSA at export).
 export interface TestigoSettings {
   witness: boolean;
   repoMarks: boolean;
+  timestampTsa?: string;
 }
 
 /// One reviewable entry of a pending export (mirrors the Rust PreviewEntry).
