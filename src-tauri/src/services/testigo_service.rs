@@ -68,6 +68,38 @@ pub struct VerifyReport {
 /// bounded preview so one approval can't balloon the evidence file.
 const MAX_INPUT_BYTES: usize = 4096;
 
+/// Per-project Testigo policy.
+///
+/// Defaults are deliberately asymmetric: `witness` on (the ledger lives
+/// outside the repo — private, local, costless to keep), `repo_marks` OFF
+/// (trailers and the anchor ref touch the project's git — in shared repos
+/// that's a decision the owner must make, so it's opt-in per project).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestigoSettings {
+    /// Record events into the local ledger at all.
+    pub witness: bool,
+    /// Stamp commit trailers (Testigo-Case/Testigo-Head) and pin the anchor
+    /// ref in the project's checkout.
+    pub repo_marks: bool,
+}
+
+impl Default for TestigoSettings {
+    fn default() -> Self {
+        Self {
+            witness: true,
+            repo_marks: false,
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsFile {
+    #[serde(default)]
+    by_project: HashMap<String, TestigoSettings>,
+}
+
 /// Context of the turn currently open in a terminal: the id every in-turn
 /// event attaches to, plus what turn_end needs to compute the pre/post diff.
 #[derive(Debug, Clone)]
@@ -94,6 +126,8 @@ struct Inner {
     /// approval id -> (term_id, tool), so the decision event can name what it
     /// approved even though the respond() path only carries the id.
     approvals: HashMap<String, (Option<String>, Option<String>)>,
+    /// Per-project policy, lazily loaded from testigo-settings.json.
+    settings: Option<HashMap<String, TestigoSettings>>,
 }
 
 pub struct TestigoService {
@@ -137,6 +171,68 @@ impl TestigoService {
     /// pub(crate): the export module reads raw ledger lines byte-exactly.
     pub(crate) fn ledger_path(project_root: &str) -> AppResult<PathBuf> {
         Ok(Self::dir()?.join(Self::key_for(project_root)))
+    }
+
+    fn settings_path() -> AppResult<PathBuf> {
+        Ok(dirs::data_local_dir()
+            .ok_or_else(|| AppError::Other("no data_local dir".into()))?
+            .join("agent-console")
+            .join("testigo-settings.json"))
+    }
+
+    fn load_settings_file() -> SettingsFile {
+        let Ok(path) = Self::settings_path() else {
+            return SettingsFile::default();
+        };
+        let read = |p: &Path| -> Option<SettingsFile> {
+            serde_json::from_str(&fs::read_to_string(p).ok()?).ok()
+        };
+        read(&path)
+            .or_else(|| read(&path.with_extension("json.bak")))
+            .unwrap_or_default()
+    }
+
+    fn settings_map(inner: &mut Inner) -> &mut HashMap<String, TestigoSettings> {
+        inner
+            .settings
+            .get_or_insert_with(|| Self::load_settings_file().by_project)
+    }
+
+    /// This project's policy (defaults when never configured).
+    pub fn settings(&self, project_root: &str) -> TestigoSettings {
+        let mut inner = self.inner.lock();
+        Self::settings_map(&mut inner)
+            .get(project_root)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Convenience for the anchor/trailer call sites.
+    pub fn repo_marks(&self, project_root: &str) -> bool {
+        self.settings(project_root).repo_marks
+    }
+
+    /// Persist this project's policy: load-before-save merge into the shared
+    /// file, temp+rename atomic write, .bak of the previous version.
+    pub fn set_settings(&self, project_root: &str, s: TestigoSettings) -> AppResult<TestigoSettings> {
+        let mut inner = self.inner.lock();
+        Self::settings_map(&mut inner).insert(project_root.to_string(), s);
+        let mut file = Self::load_settings_file();
+        file.by_project.insert(project_root.to_string(), s);
+        drop(inner);
+        let path = Self::settings_path()?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let body = serde_json::to_string_pretty(&file)
+            .map_err(|e| AppError::Other(format!("serialize settings: {e}")))?;
+        let tmp = path.with_extension("json.tmp");
+        if path.exists() {
+            let _ = fs::copy(&path, path.with_extension("json.bak"));
+        }
+        fs::write(&tmp, body)?;
+        fs::rename(&tmp, &path)?;
+        Ok(s)
     }
 
     fn event_hash(ev: &ProofEvent) -> String {
@@ -220,6 +316,17 @@ impl TestigoService {
         actor: &str,
         payload: Value,
     ) -> AppResult<ProofEvent> {
+        // Per-project witness switch: every ledger write funnels through here,
+        // so one check covers prompts, approvals, results, jobs and links.
+        // Reads (list/verify/export of PAST evidence) are unaffected.
+        if !Self::settings_map(inner)
+            .get(project_root)
+            .copied()
+            .unwrap_or_default()
+            .witness
+        {
+            return Err(AppError::Other("testigo: witnessing disabled for this project".into()));
+        }
         Self::ensure_tail(inner, project_root)?;
         let tail = inner.tails.get(project_root).cloned().flatten();
         let (seq, prev_hash) = match tail {
@@ -873,6 +980,55 @@ mod tests {
         assert_eq!(r.seq, 1, "torn tail healed, chain continues from seq 0");
         let v = svc4.verify(root).unwrap();
         assert!(v.ok && !v.torn_tail, "healed chain verifies clean");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Per-project policy: defaults (witness on, repo marks OFF), persisted
+    /// round-trip across service instances, and the witness switch actually
+    /// blocking ledger writes while leaving reads of past evidence intact.
+    #[test]
+    fn settings_default_persist_and_gate() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-tsettings-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let svc = TestigoService::new();
+        let root = "/proj/shared";
+
+        // Defaults: local witnessing on, repo marks off (shared-repo safe).
+        let s = svc.settings(root);
+        assert!(s.witness && !s.repo_marks);
+        assert!(!svc.repo_marks(root));
+
+        // Witnessing works by default…
+        svc.on_prompt(root, 1, Some("t1"), None, Some("hi"), None, None)
+            .unwrap();
+        assert_eq!(svc.list(root, None, None).unwrap().len(), 1);
+
+        // …and stops when switched off; past evidence stays readable.
+        svc.set_settings(root, TestigoSettings { witness: false, repo_marks: false })
+            .unwrap();
+        assert!(svc
+            .on_prompt(root, 2, Some("t1"), None, Some("nope"), None, None)
+            .is_err());
+        assert_eq!(svc.list(root, None, None).unwrap().len(), 1, "no new events");
+        assert!(svc.verify(root).unwrap().ok, "reads unaffected");
+
+        // Round-trip: a fresh instance loads the persisted policy.
+        let svc2 = TestigoService::new();
+        let s2 = svc2.settings(root);
+        assert!(!s2.witness);
+        // Enabling repo marks persists too.
+        svc2.set_settings(root, TestigoSettings { witness: true, repo_marks: true })
+            .unwrap();
+        assert!(TestigoService::new().repo_marks(root));
 
         let _ = std::fs::remove_dir_all(&base);
     }

@@ -6,6 +6,7 @@ import type {
   TestigoVerifyReport,
   TestigoExportSummary,
   TestigoExportPreview,
+  TestigoSettings,
 } from "../types/domain";
 
 /// One row of the case list: an intent thread with its activity envelope.
@@ -43,6 +44,8 @@ interface ProofState {
   /// Pre-sign review in progress (null = none). `undefined` caseId inside it
   /// means "full ledger".
   review: { caseId?: string; preview: TestigoExportPreview; redactSeqs: number[] } | null;
+  /// Per-project policy (witness local / repo marks opt-in).
+  settings: TestigoSettings | null;
 
   load: (projectRoot: string) => Promise<void>;
   clear: () => void;
@@ -54,6 +57,7 @@ interface ProofState {
   confirmExport: () => Promise<void>;
   cancelExport: () => void;
   selectCase: (caseId: string | null) => void;
+  setSettings: (patch: Partial<TestigoSettings>) => Promise<void>;
 }
 
 export function summarizeCases(events: ProofEvent[]): CaseSummary[] {
@@ -140,15 +144,17 @@ export const useProofStore = create<ProofState>((set, get) => ({
   error: null,
   selectedCase: null,
   review: null,
+  settings: null,
 
   load: async (projectRoot) => {
     set({ projectRoot, error: null });
     try {
-      const [events, report] = await Promise.all([
+      const [events, report, settings] = await Promise.all([
         ipc.testigoList(projectRoot),
         ipc.testigoVerify(projectRoot),
+        ipc.testigoGetSettings(projectRoot),
       ]);
-      set({ events, report });
+      set({ events, report, settings });
     } catch (e) {
       set({ error: String(e) });
     }
@@ -211,4 +217,18 @@ export const useProofStore = create<ProofState>((set, get) => ({
   },
 
   cancelExport: () => set({ review: null }),
+
+  setSettings: async (patch) => {
+    const { projectRoot: root, settings } = get();
+    if (!root || !settings) return;
+    const next = { ...settings, ...patch };
+    // Optimistic; revert on failure.
+    set({ settings: next });
+    try {
+      const saved = await ipc.testigoSetSettings(root, next);
+      set({ settings: saved });
+    } catch (e) {
+      set({ settings, error: String(e) });
+    }
+  },
 }));

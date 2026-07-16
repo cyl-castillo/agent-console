@@ -61,6 +61,9 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
     let mut message = message;
     if !message.contains("Testigo-Case:") {
         let project = state.inner.lock().project.clone();
+        // Trailers are repo marks: per-project opt-in, off by default.
+        let project = project
+            .filter(|p| state.testigo.repo_marks(p.root.to_string_lossy().as_ref()));
         if let Some(p) = project {
             let staged = git_service::staged_files(&repo).unwrap_or_default();
             let now = std::time::SystemTime::now()

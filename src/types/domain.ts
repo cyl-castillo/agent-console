@@ -199,6 +199,14 @@ export interface TestigoExportSummary {
   chainOk: boolean;
 }
 
+/// Per-project Testigo policy (mirrors the Rust TestigoSettings). Witnessing
+/// is local-only and on by default; repo marks (trailers + anchor ref) touch
+/// the project's git and are opt-in.
+export interface TestigoSettings {
+  witness: boolean;
+  repoMarks: boolean;
+}
+
 /// One reviewable entry of a pending export (mirrors the Rust PreviewEntry).
 export interface TestigoPreviewEntry {
   seq: number;

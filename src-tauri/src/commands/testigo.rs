@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::error::AppResult;
 use crate::services::testigo_export::{self, ExportPreview, ExportSummary};
-use crate::services::testigo_service::{ProofEvent, VerifyReport};
+use crate::services::testigo_service::{ProofEvent, TestigoSettings, VerifyReport};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -56,6 +56,23 @@ pub fn testigo_export_preview(
     state: State<'_, AppState>,
 ) -> AppResult<ExportPreview> {
     testigo_export::preview(&state.testigo, &project_root, case_id.as_deref())
+}
+
+#[tauri::command]
+pub fn testigo_get_settings(
+    project_root: String,
+    state: State<'_, AppState>,
+) -> AppResult<TestigoSettings> {
+    Ok(state.testigo.settings(&project_root))
+}
+
+#[tauri::command]
+pub fn testigo_set_settings(
+    project_root: String,
+    settings: TestigoSettings,
+    state: State<'_, AppState>,
+) -> AppResult<TestigoSettings> {
+    state.testigo.set_settings(&project_root, settings)
 }
 
 /// The signing key id + public key, for sharing out-of-band with receivers.
