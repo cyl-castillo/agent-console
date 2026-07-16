@@ -67,13 +67,19 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
-            if let Ok(Some(case)) = state.testigo.case_for_files(
-                p.root.to_string_lossy().as_ref(),
-                &staged,
-                now,
-                TESTIGO_TRAILER_MAX_AGE_MS,
-            ) {
+            let root = p.root.to_string_lossy();
+            if let Ok(Some(case)) =
+                state
+                    .testigo
+                    .case_for_files(root.as_ref(), &staged, now, TESTIGO_TRAILER_MAX_AGE_MS)
+            {
                 message = format!("{}\n\nTestigo-Case: {case}", message.trim_end());
+                // V2-A: carry the ledger head into pushed history — the
+                // distributed half of the anchor (the local half lives in
+                // refs/agent-console/testigo-head).
+                if let Ok(Some((seq, hash))) = state.testigo.head(root.as_ref()) {
+                    message = format!("{message}\nTestigo-Head: {seq}:{hash}");
+                }
             }
         }
     }

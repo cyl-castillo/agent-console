@@ -176,4 +176,21 @@ ProofEvent {
   caso real: el packet del deploy de Fixy traía la IP de prod y la ruta de la clave SSH — cosas
   que la redacción por patrones correctamente no toca y que solo un humano puede juzgar.
 
+## 5. Roadmap v0.2 del protocolo
+
+- **V2-A — Anclaje git del ledger** ✅ (2026-07-16): tras cada cierre de turno (y job_run), el
+  head del ledger se ancla como blob en `refs/agent-console/testigo-head` del checkout
+  (`anchor_head`, best-effort, no-op fuera de git); los commits del console llevan
+  `Testigo-Head: <seq>:<hash>` junto al `Testigo-Case:`. Reescribir el ledger pasa a exigir
+  reescribir refs y commits pusheados. Spec §1.6 (aditivo, sin bump de predicado — a0b1eb0).
+- **V2-B — Timestamps RFC 3161**: export opcionalmente pide un timestamp token a una TSA
+  pública sobre la firma DSSE → prueba de existencia en el tiempo; campo `timestamp` en el
+  predicado y bump a `…/attestation/v0.2`; el verificador declara el token e indica cómo
+  verificarlo (openssl ts) — sin fingir verificación ASN.1 en el browser.
+- **V2-C — sigstore keyless**: modo de firma alternativo vía Fulcio/Rekor (identidad OIDC +
+  log de transparencia público). Pesado y con implicancias de privacidad (el log es público):
+  diseño en doc antes de código.
+- **V2-D — Requirements más allá de Jira + cases cross-project**: prefijos de case para otros
+  trackers (github:, linear:) y agrupación de cases entre proyectos.
+
 Cadencia estándar: plan → fase → commit → release por fase (`/phased-feature-build`).
