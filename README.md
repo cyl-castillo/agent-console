@@ -1,8 +1,16 @@
 # Agent Console
 
+[![Testigo: intent-to-proof](https://img.shields.io/badge/Testigo-intent--to--proof-2ea44f?logo=github)](https://github.com/cyl-castillo/testigo)
+
 A minimalist, AI-native console for directing agents inside a repository.
 
 Not an IDE. Not a chat client. A small terminal-first desktop app that pairs the Claude Code CLI with an integrated shell, a git diff viewer, and per-turn snapshots — so you can drive an agent through real work without losing control.
+
+Every session is witnessed: agent-console is the reference implementation of
+[**Testigo**](https://github.com/cyl-castillo/testigo), an open intent-to-proof
+protocol — prompts, human approvals, tool results and per-turn diffs land in a
+hash-chained evidence ledger, exportable as signed proof packets anyone can
+verify in a browser.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
