@@ -424,19 +424,34 @@ impl RoomsStore {
     /// Upsert one room under its project, prune to the most-recent
     /// `MAX_ROOMS_PER_PROJECT`, and write atomically.
     pub fn save_room(&self, room: &PersistedRoom, project_root: &Path) -> AppResult<()> {
-        let _g = self.lock.lock();
-        let mut file = Self::load_file()?;
-        let key = project_root.display().to_string();
-        let list = file.by_project.entry(key).or_default();
-        match list.iter_mut().find(|r| r.id == room.id) {
-            Some(existing) => *existing = room.clone(),
-            None => list.push(room.clone()),
+        let evicted_working: Vec<String> = {
+            let _g = self.lock.lock();
+            let mut file = Self::load_file()?;
+            let key = project_root.display().to_string();
+            let list = file.by_project.entry(key).or_default();
+            match list.iter_mut().find(|r| r.id == room.id) {
+                Some(existing) => *existing = room.clone(),
+                None => list.push(room.clone()),
+            }
+            let mut evicted = Vec::new();
+            if list.len() > MAX_ROOMS_PER_PROJECT {
+                list.sort_by_key(|r| std::cmp::Reverse(r.updated_at_ms));
+                evicted = list[MAX_ROOMS_PER_PROJECT..]
+                    .iter()
+                    .filter(|r| r.allow_edits)
+                    .map(|r| r.id.clone())
+                    .collect();
+                list.truncate(MAX_ROOMS_PER_PROJECT);
+            }
+            Self::write_file(&file)?;
+            evicted
+        };
+        // Retention used to evict the record but keep the branch forever —
+        // GC the merged ones now, outside the lock.
+        for id in &evicted_working {
+            gc_room_branch(project_root, id);
         }
-        if list.len() > MAX_ROOMS_PER_PROJECT {
-            list.sort_by_key(|r| std::cmp::Reverse(r.updated_at_ms));
-            list.truncate(MAX_ROOMS_PER_PROJECT);
-        }
-        Self::write_file(&file)
+        Ok(())
     }
 
     /// All persisted rooms for a project, most-recently-updated first.
@@ -470,15 +485,25 @@ impl RoomsStore {
 
     /// Drop one room from a project's history. Idempotent.
     pub fn delete_room(&self, project_root: &str, room_id: &str) -> AppResult<()> {
-        let _g = self.lock.lock();
-        let mut file = Self::load_file()?;
-        if let Some(list) = file.by_project.get_mut(project_root) {
-            list.retain(|r| r.id != room_id);
-            if list.is_empty() {
-                file.by_project.remove(project_root);
+        let was_working = {
+            let _g = self.lock.lock();
+            let mut file = Self::load_file()?;
+            let mut was_working = false;
+            if let Some(list) = file.by_project.get_mut(project_root) {
+                was_working = list.iter().any(|r| r.id == room_id && r.allow_edits);
+                list.retain(|r| r.id != room_id);
+                if list.is_empty() {
+                    file.by_project.remove(project_root);
+                }
             }
+            Self::write_file(&file)?;
+            was_working
+        };
+        // Git GC outside the lock (I/O): drop the room's merged branch.
+        if was_working {
+            gc_room_branch(Path::new(project_root), room_id);
         }
-        Self::write_file(&file)
+        Ok(())
     }
 }
 
@@ -1284,6 +1309,23 @@ fn room_worktree_path(id: &str) -> PathBuf {
 
 /// Create the working room's worktree on a fresh `room/<id>` branch off HEAD.
 /// Fails if the repo has no commits (a worktree must branch off something).
+/// Best-effort GC of a deleted/evicted working room's git leftovers: delete
+/// its `room/<id>` branch ONLY when fully merged (`git branch -d` — lowercase
+/// on purpose: unmerged review work is never destroyed), then prune stale
+/// worktree registrations. Rooms accumulated branches forever before this
+/// (the W3 gap): 50-room retention evicted the record but kept the branch.
+pub(crate) fn gc_room_branch(repo: &Path, room_id: &str) {
+    let branch = format!("room/{room_id}");
+    let _ = proc::command("git")
+        .args(["branch", "-d", &branch])
+        .current_dir(repo)
+        .output();
+    let _ = proc::command("git")
+        .args(["worktree", "prune"])
+        .current_dir(repo)
+        .output();
+}
+
 fn add_room_worktree(repo: &Path, path: &Path, branch: &str) -> AppResult<()> {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -1744,6 +1786,47 @@ fn parse_remote(url: &str) -> Option<(String, String)> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Branch GC is deliberately conservative: merged room branches go, a
+    /// branch with unreviewed commits survives (`-d`, never `-D`), and a
+    /// non-git dir is a clean no-op.
+    #[test]
+    fn gc_room_branch_deletes_merged_keeps_unmerged() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("ac-roomgc-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = proc::command("git").args(args).current_dir(&repo).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base"]);
+
+        // Merged room branch (same tip as main) → removed.
+        git(&["branch", "room/merged-1"]);
+        gc_room_branch(&repo, "merged-1");
+        let ls = proc::command("git").args(["branch", "--list", "room/merged-1"]).current_dir(&repo).output().unwrap();
+        assert!(String::from_utf8_lossy(&ls.stdout).trim().is_empty(), "merged branch gone");
+
+        // Unmerged branch (extra commit) → survives.
+        git(&["checkout", "-q", "-b", "room/wip-2"]);
+        git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "unreviewed"]);
+        git(&["checkout", "-q", "main"]);
+        gc_room_branch(&repo, "wip-2");
+        let ls = proc::command("git").args(["branch", "--list", "room/wip-2"]).current_dir(&repo).output().unwrap();
+        assert!(!String::from_utf8_lossy(&ls.stdout).trim().is_empty(), "unmerged work is never destroyed");
+
+        // Non-git dir: no panic, no error.
+        let plain = std::env::temp_dir().join(format!("ac-roomgc-plain-{nanos}"));
+        fs::create_dir_all(&plain).unwrap();
+        gc_room_branch(&plain, "x");
+
+        let _ = fs::remove_dir_all(&repo);
+        let _ = fs::remove_dir_all(&plain);
+    }
 
     fn participant(id: &str) -> Participant {
         Participant {
