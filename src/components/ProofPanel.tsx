@@ -47,6 +47,8 @@ export function ProofPanel() {
   const error = useProofStore((s) => s.error);
   const selectedCase = useProofStore((s) => s.selectedCase);
   const review = useProofStore((s) => s.review);
+  const settings = useProofStore((s) => s.settings);
+  const setSettings = useProofStore((s) => s.setSettings);
   const load = useProofStore((s) => s.load);
   const startExport = useProofStore((s) => s.startExport);
   const toggleRedact = useProofStore((s) => s.toggleRedact);
@@ -189,6 +191,36 @@ export function ProofPanel() {
             <p className="wb-hint">
               No evidence recorded yet. Every prompt, approval and turn result
               lands here automatically — work with an agent and come back.
+            </p>
+          </section>
+        )}
+
+        {!review && !selectedCase && settings && (
+          <section className="wb-section">
+            <div className="wb-section-title">this project</div>
+            <p className="wb-hint">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.witness}
+                  onChange={(e) => void setSettings({ witness: e.target.checked })}
+                />{" "}
+                witness — record prompts, approvals and turn results in the
+                local ledger (outside the repo, never pushed)
+              </label>
+            </p>
+            <p className="wb-hint">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings.repoMarks}
+                  disabled={!settings.witness}
+                  onChange={(e) => void setSettings({ repoMarks: e.target.checked })}
+                />{" "}
+                repo marks — stamp <code>Testigo-Case</code>/<code>Testigo-Head</code>{" "}
+                commit trailers and pin the anchor ref in this project's git.
+                Off by default: in shared repos this is the owner's call.
+              </label>
             </p>
           </section>
         )}

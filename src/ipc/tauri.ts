@@ -15,7 +15,7 @@ import type {
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, JiraStatus, JiraIssue, Job, McpServer, McpAddInput,
   StickyNote,
-  ProofEvent, TestigoVerifyReport, TestigoExportSummary, TestigoExportPreview,
+  ProofEvent, TestigoVerifyReport, TestigoExportSummary, TestigoExportPreview, TestigoSettings,
   MemoryEntry, PermissionsSnapshot, Preflight,
   PersistedRoom, PersistedSession, Project, RecentProject,
   RoomSummary, RoundtableConfig, RunRecord, ShareResult, SyncResult,
@@ -204,6 +204,10 @@ export const ipc = {
     }),
   testigoPublicKey: () =>
     invoke<{ keyId: string; publicKey: string }>("testigo_public_key"),
+  testigoGetSettings: (projectRoot: string) =>
+    invoke<TestigoSettings>("testigo_get_settings", { projectRoot }),
+  testigoSetSettings: (projectRoot: string, settings: TestigoSettings) =>
+    invoke<TestigoSettings>("testigo_set_settings", { projectRoot, settings }),
 
   mcpList: () => invoke<McpServer[]>("mcp_list"),
   mcpAdd: (input: McpAddInput) => invoke<string>("mcp_add", { input }),

@@ -183,6 +183,12 @@ ProofEvent {
   (`anchor_head`, best-effort, no-op fuera de git); los commits del console llevan
   `Testigo-Head: <seq>:<hash>` junto al `Testigo-Case:`. Reescribir el ledger pasa a exigir
   reescribir refs y commits pusheados. Spec §1.6 (aditivo, sin bump de predicado — a0b1eb0).
+- **V2-A.1 — Policy por proyecto** ✅ (2026-07-16): `TestigoSettings { witness, repo_marks }`
+  persistido en testigo-settings.json (atómico + .bak), toggles en el tab Proof. **Defaults:
+  witness ON (el ledger es local, fuera del repo) y repo_marks OFF** — trailers y anchor ref
+  son opt-in por proyecto: en repos compartidos la marca es decisión del dueño. El gate de
+  witness vive en `record()` (un solo punto cubre todos los kinds); las lecturas de evidencia
+  pasada no se tocan. Spec actualizado (anchoring = MAY + opt-in, 1956214).
 - **V2-B — Timestamps RFC 3161**: export opcionalmente pide un timestamp token a una TSA
   pública sobre la firma DSSE → prueba de existencia en el tiempo; campo `timestamp` en el
   predicado y bump a `…/attestation/v0.2`; el verificador declara el token e indica cómo

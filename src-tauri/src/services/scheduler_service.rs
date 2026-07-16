@@ -519,12 +519,14 @@ impl SchedulerService {
             &rec.status,
             &rec.summary,
         ) {
-            let _ = crate::services::testigo_service::anchor_head(
-                Path::new(project_root),
-                ev.seq,
-                &ev.hash,
-                ev.ts,
-            );
+            if state.testigo.repo_marks(project_root) {
+                let _ = crate::services::testigo_service::anchor_head(
+                    Path::new(project_root),
+                    ev.seq,
+                    &ev.hash,
+                    ev.ts,
+                );
+            }
         }
         let _ = app.emit("scheduler://run_finished", &rec);
         rec

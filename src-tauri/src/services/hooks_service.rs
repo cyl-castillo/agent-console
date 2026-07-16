@@ -701,10 +701,13 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 payload,
             ) {
                 // V2-A: pin the new ledger head in the checkout's git refs —
-                // best-effort, a non-git dir just skips.
-                let _ = crate::services::testigo_service::anchor_head(
-                    &repo, ev.seq, &ev.hash, ev.ts,
-                );
+                // best-effort, a non-git dir just skips. Repo marks are
+                // opt-in per project (shared repos stay untouched by default).
+                if state.testigo.repo_marks(root.as_ref()) {
+                    let _ = crate::services::testigo_service::anchor_head(
+                        &repo, ev.seq, &ev.hash, ev.ts,
+                    );
+                }
             }
         }
     } else if kind == "tool_result" {
