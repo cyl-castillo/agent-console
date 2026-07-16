@@ -693,13 +693,19 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 }
             }
 
-            let _ = state.testigo.on_turn_end(
+            if let Ok(ev) = state.testigo.on_turn_end(
                 root.as_ref(),
                 ts,
                 term_id.as_deref(),
                 str_field(v, "sessionId").as_deref(),
                 payload,
-            );
+            ) {
+                // V2-A: pin the new ledger head in the checkout's git refs —
+                // best-effort, a non-git dir just skips.
+                let _ = crate::services::testigo_service::anchor_head(
+                    &repo, ev.seq, &ev.hash, ev.ts,
+                );
+            }
         }
     } else if kind == "tool_result" {
         // Testigo: what one tool call produced inside the open turn.

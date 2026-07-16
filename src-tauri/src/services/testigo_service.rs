@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -553,6 +553,14 @@ impl TestigoService {
         Ok(None)
     }
 
+    /// The ledger's current tail: (seq, hash) of the last event, None when
+    /// empty. Cached; loads from disk on first touch.
+    pub fn head(&self, project_root: &str) -> AppResult<Option<(u64, String)>> {
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        Ok(inner.tails.get(project_root).cloned().flatten())
+    }
+
     /// Events in chronological order, optionally filtered by case and capped
     /// at the most recent `limit`.
     pub fn list(
@@ -641,6 +649,37 @@ impl TestigoService {
             torn_tail: false,
         })
     }
+}
+
+/// Anchor the ledger head in the checkout's git object store: a blob with
+/// {seq, hash, ts} pinned at `refs/agent-console/testigo-head`. Rewriting the
+/// ledger consistently now also requires rewriting this ref — and the
+/// `Testigo-Head:` commit trailers that carry the same value into pushed
+/// history. Stronger tamper-EVIDENCE, still not tamper-proof: an actor with
+/// full local control can rewrite both; distribution (pushes, clones) is what
+/// makes the anchor stick. No-op when `repo` is not a git checkout.
+pub fn anchor_head(repo: &Path, seq: u64, hash: &str, ts: i64) -> AppResult<()> {
+    use crate::services::proc;
+    let body = format!("{{\"seq\":{seq},\"hash\":\"{hash}\",\"ts\":{ts}}}\n");
+    let tmp = std::env::temp_dir().join(format!("testigo-anchor-{}-{seq}", std::process::id()));
+    fs::write(&tmp, body)?;
+    let out = proc::command("git")
+        .args(["hash-object", "-w", &tmp.to_string_lossy()])
+        .current_dir(repo)
+        .output();
+    let _ = fs::remove_file(&tmp);
+    let out = out?;
+    if !out.status.success() {
+        // Not a git repo (or object write failed): anchoring is best-effort
+        // by design — the ledger itself is unaffected.
+        return Ok(());
+    }
+    let oid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let _ = proc::command("git")
+        .args(["update-ref", "refs/agent-console/testigo-head", &oid])
+        .current_dir(repo)
+        .output()?;
+    Ok(())
 }
 
 /// Bound a tool input to MAX_INPUT_BYTES of serialized JSON, replacing it with
@@ -795,6 +834,11 @@ mod tests {
         assert_eq!(p2.seq, 9);
         assert!(svc2.verify(root).unwrap().ok, "cross-restart chain intact");
 
+        // head() reports this instance's tail (feeds the Testigo-Head trailer).
+        let (hseq, hhash) = svc2.head(root).unwrap().expect("non-empty ledger");
+        assert_eq!(hseq, 9);
+        assert_eq!(hhash, p2.hash);
+
         // Tampering with a middle line breaks verification at that seq.
         let path = TestigoService::ledger_path(root).unwrap();
         let tampered = fs::read_to_string(&path)
@@ -831,5 +875,55 @@ mod tests {
         assert!(v.ok && !v.torn_tail, "healed chain verifies clean");
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// anchor_head pins {seq, hash, ts} at refs/agent-console/testigo-head in
+    /// a real git repo, updates on re-anchor, and no-ops outside git. Separate
+    /// test fn: it doesn't touch XDG_DATA_HOME, only a scratch git repo.
+    #[test]
+    fn anchor_head_pins_and_updates_ref() {
+        use crate::services::proc;
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo =
+            std::env::temp_dir().join(format!("ac-anchor-test-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&repo).unwrap();
+        assert!(proc::command("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .output()
+            .unwrap()
+            .status
+            .success());
+
+        anchor_head(&repo, 7, "abc123", 111).unwrap();
+        let show = proc::command("git")
+            .args(["cat-file", "-p", "refs/agent-console/testigo-head"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(show.status.success(), "ref must exist and point at the blob");
+        let body = String::from_utf8_lossy(&show.stdout);
+        assert!(body.contains("\"seq\":7") && body.contains("abc123"), "{body}");
+
+        // Re-anchor moves the ref to the new head.
+        anchor_head(&repo, 8, "def456", 222).unwrap();
+        let show = proc::command("git")
+            .args(["cat-file", "-p", "refs/agent-console/testigo-head"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&show.stdout).contains("def456"));
+
+        // Non-git dir: best-effort no-op, never an error.
+        let plain =
+            std::env::temp_dir().join(format!("ac-anchor-plain-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&plain).unwrap();
+        anchor_head(&plain, 1, "x", 1).unwrap();
+
+        let _ = std::fs::remove_dir_all(&repo);
+        let _ = std::fs::remove_dir_all(&plain);
     }
 }

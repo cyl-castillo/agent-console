@@ -511,14 +511,21 @@ impl SchedulerService {
         // Testigo: scheduled runs are agentic actions too — their outcome
         // belongs in the evidence chain (case "job:<id>"). Best-effort.
         let state = app.state::<AppState>();
-        let _ = state.testigo.on_job_run(
+        if let Ok(ev) = state.testigo.on_job_run(
             project_root,
             finished as i64,
             &job.id,
             &job.name,
             &rec.status,
             &rec.summary,
-        );
+        ) {
+            let _ = crate::services::testigo_service::anchor_head(
+                Path::new(project_root),
+                ev.seq,
+                &ev.hash,
+                ev.ts,
+            );
+        }
         let _ = app.emit("scheduler://run_finished", &rec);
         rec
     }
