@@ -40,3 +40,6 @@ Thumbs.db
 
 # Claude Code per-project state (skills, vault, VAULT.md, etc.) — local only
 .claude/
+
+# Testigo proof packets are local export artifacts; PRs carry them in the body
+proofpacks/
