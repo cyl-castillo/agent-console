@@ -138,6 +138,7 @@ pub fn run() {
             commands::testigo::testigo_verify,
             commands::testigo::testigo_link_case,
             commands::testigo::testigo_export,
+            commands::testigo::testigo_export_preview,
             commands::testigo::testigo_public_key,
             commands::plugins::plugins_list_installed,
             commands::plugins::plugins_list_available,

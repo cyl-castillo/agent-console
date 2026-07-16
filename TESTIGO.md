@@ -169,4 +169,11 @@ ProofEvent {
   ⏳ **caso de estudio Fixy** (primer deploy de Fixy trabajado vía console → packet real como
   ejemplo canónico).
 
+- **F6 — Revisión de redacción pre-firma** ✅ (2026-07-15): el export pasa a dos fases —
+  `testigo_export_preview` muestra TODO lo que el packet contendría (post redacción automática)
+  y el humano marca eventos para redacción manual ANTES de firmar; la redacción manual reemplaza
+  el payload conservando seq/prevHash/hash (linkage verificable según el protocolo). Nació del
+  caso real: el packet del deploy de Fixy traía la IP de prod y la ruta de la clave SSH — cosas
+  que la redacción por patrones correctamente no toca y que solo un humano puede juzgar.
+
 Cadencia estándar: plan → fase → commit → release por fase (`/phased-feature-build`).

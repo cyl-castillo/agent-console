@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::error::AppResult;
-use crate::services::testigo_export::{self, ExportSummary};
+use crate::services::testigo_export::{self, ExportPreview, ExportSummary};
 use crate::services::testigo_service::{ProofEvent, VerifyReport};
 use crate::state::AppState;
 
@@ -32,12 +32,30 @@ pub fn testigo_export(
     project_root: String,
     case_id: Option<String>,
     dest_dir: Option<String>,
+    redact_seqs: Option<Vec<u64>>,
     state: State<'_, AppState>,
 ) -> AppResult<ExportSummary> {
     let dest = dest_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(&project_root).join("proofpacks"));
-    testigo_export::export(&state.testigo, &project_root, case_id.as_deref(), &dest)
+    testigo_export::export(
+        &state.testigo,
+        &project_root,
+        case_id.as_deref(),
+        &dest,
+        &redact_seqs.unwrap_or_default(),
+    )
+}
+
+/// The pre-sign review: what the packet WOULD contain, so the human can mark
+/// events for manual redaction before anything is signed.
+#[tauri::command]
+pub fn testigo_export_preview(
+    project_root: String,
+    case_id: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<ExportPreview> {
+    testigo_export::preview(&state.testigo, &project_root, case_id.as_deref())
 }
 
 /// The signing key id + public key, for sharing out-of-band with receivers.

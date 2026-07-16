@@ -1,7 +1,12 @@
 import { create } from "zustand";
 
 import { ipc } from "../ipc/tauri";
-import type { ProofEvent, TestigoVerifyReport, TestigoExportSummary } from "../types/domain";
+import type {
+  ProofEvent,
+  TestigoVerifyReport,
+  TestigoExportSummary,
+  TestigoExportPreview,
+} from "../types/domain";
 
 /// One row of the case list: an intent thread with its activity envelope.
 export interface CaseSummary {
@@ -35,10 +40,19 @@ interface ProofState {
   error: string | null;
   /// Case opened in the timeline view; null = case list.
   selectedCase: string | null;
+  /// Pre-sign review in progress (null = none). `undefined` caseId inside it
+  /// means "full ledger".
+  review: { caseId?: string; preview: TestigoExportPreview; redactSeqs: number[] } | null;
 
   load: (projectRoot: string) => Promise<void>;
   clear: () => void;
-  exportPack: (caseId?: string) => Promise<void>;
+  /// Step 1: open the pre-sign review for a case (or the full ledger).
+  startExport: (caseId?: string) => Promise<void>;
+  /// Toggle manual redaction of one event in the open review.
+  toggleRedact: (seq: number) => void;
+  /// Step 2: sign and write the packet with the chosen redactions.
+  confirmExport: () => Promise<void>;
+  cancelExport: () => void;
   selectCase: (caseId: string | null) => void;
 }
 
@@ -125,6 +139,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
   lastExport: null,
   error: null,
   selectedCase: null,
+  review: null,
 
   load: async (projectRoot) => {
     set({ projectRoot, error: null });
@@ -147,19 +162,53 @@ export const useProofStore = create<ProofState>((set, get) => ({
       lastExport: null,
       error: null,
       selectedCase: null,
+      review: null,
     }),
 
   selectCase: (caseId) => set({ selectedCase: caseId }),
 
-  exportPack: async (caseId) => {
+  startExport: async (caseId) => {
     const root = get().projectRoot;
     if (!root) return;
-    set({ exporting: caseId ?? "__ledger__", error: null });
+    set({ error: null });
     try {
-      const lastExport = await ipc.testigoExport(root, caseId);
-      set({ lastExport, exporting: null });
+      const preview = await ipc.testigoExportPreview(root, caseId);
+      set({ review: { caseId, preview, redactSeqs: [] } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  toggleRedact: (seq) =>
+    set((s) => {
+      if (!s.review) return s;
+      const has = s.review.redactSeqs.includes(seq);
+      return {
+        review: {
+          ...s.review,
+          redactSeqs: has
+            ? s.review.redactSeqs.filter((x) => x !== seq)
+            : [...s.review.redactSeqs, seq],
+        },
+      };
+    }),
+
+  confirmExport: async () => {
+    const { projectRoot: root, review } = get();
+    if (!root || !review) return;
+    set({ exporting: review.caseId ?? "__ledger__", error: null });
+    try {
+      const lastExport = await ipc.testigoExport(
+        root,
+        review.caseId,
+        undefined,
+        review.redactSeqs,
+      );
+      set({ lastExport, exporting: null, review: null });
     } catch (e) {
       set({ exporting: null, error: String(e) });
     }
   },
+
+  cancelExport: () => set({ review: null }),
 }));

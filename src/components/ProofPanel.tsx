@@ -2,6 +2,7 @@ import { useEffect } from "react";
 
 import { useProofStore, summarizeCases, buildTimeline } from "../stores/proofStore";
 import { useSessionStore } from "../stores/sessionStore";
+import type { TestigoPreviewEntry } from "../types/domain";
 
 function fmtTime(ts: number): string {
   if (!ts) return "";
@@ -14,9 +15,29 @@ function fmtTime(ts: number): string {
   });
 }
 
-/// The Testigo surface: chain health + case list, and per-case a timeline of
-/// turns (intent → approvals → results → files changed). Export from either
-/// level produces the signed packet + standalone verifier.
+/// Compact human summary of a preview entry's content, for the pre-sign
+/// review: enough to decide "does this leak anything", without rendering the
+/// full raw line.
+function entryExcerpt(e: TestigoPreviewEntry): string {
+  if (!e.line) return "";
+  try {
+    const v = JSON.parse(e.line) as { payload?: Record<string, unknown> };
+    const p = v.payload ?? {};
+    const s =
+      typeof p.prompt === "string"
+        ? p.prompt
+        : typeof p.excerpt === "string"
+          ? p.excerpt
+          : JSON.stringify(p);
+    return s.length > 180 ? `${s.slice(0, 180)}…` : s;
+  } catch {
+    return "";
+  }
+}
+
+/// The Testigo surface: chain health + case list, per-case turn timelines,
+/// and a pre-sign export review — every event is shown and can be manually
+/// redacted BEFORE the packet is signed. Nothing leaves unreviewed.
 export function ProofPanel() {
   const project = useSessionStore((s) => s.project);
   const events = useProofStore((s) => s.events);
@@ -25,8 +46,12 @@ export function ProofPanel() {
   const lastExport = useProofStore((s) => s.lastExport);
   const error = useProofStore((s) => s.error);
   const selectedCase = useProofStore((s) => s.selectedCase);
+  const review = useProofStore((s) => s.review);
   const load = useProofStore((s) => s.load);
-  const exportPack = useProofStore((s) => s.exportPack);
+  const startExport = useProofStore((s) => s.startExport);
+  const toggleRedact = useProofStore((s) => s.toggleRedact);
+  const confirmExport = useProofStore((s) => s.confirmExport);
+  const cancelExport = useProofStore((s) => s.cancelExport);
   const selectCase = useProofStore((s) => s.selectCase);
 
   useEffect(() => {
@@ -41,7 +66,11 @@ export function ProofPanel() {
   return (
     <div className="workbench">
       <div className="workbench-header workbench-header-slim">
-        {selectedCase ? (
+        {review ? (
+          <span className="workbench-title">
+            review before signing — {review.caseId ?? "full ledger"}
+          </span>
+        ) : selectedCase ? (
           <>
             <button
               className="workbench-action"
@@ -57,7 +86,7 @@ export function ProofPanel() {
         ) : (
           <span className="workbench-title">proof</span>
         )}
-        {report && (
+        {!review && report && (
           <span
             className={`wb-status ${report.ok ? "ok" : "off"}`}
             title={
@@ -70,29 +99,92 @@ export function ProofPanel() {
           </span>
         )}
         <span className="spacer" />
-        {selectedCase && (
+        {!review && selectedCase && (
           <button
             className="workbench-action"
             disabled={exporting !== null}
-            onClick={() => void exportPack(selectedCase)}
-            title="Export a signed proof packet for this case"
+            onClick={() => void startExport(selectedCase)}
+            title="Review and export a signed proof packet for this case"
           >
-            {exporting === selectedCase ? "…" : "⇩"}
+            ⇩
           </button>
         )}
-        <button
-          className="workbench-action"
-          onClick={() => project && void load(project.root)}
-          title="Re-verify the ledger"
-        >
-          ↻
-        </button>
+        {!review && (
+          <button
+            className="workbench-action"
+            onClick={() => project && void load(project.root)}
+            title="Re-verify the ledger"
+          >
+            ↻
+          </button>
+        )}
       </div>
 
       <div className="workbench-body">
         {error && <p className="wb-hint wb-error">{error}</p>}
 
-        {events.length === 0 && !error && (
+        {review && (
+          <section className="wb-section">
+            <p className="wb-hint">
+              This is everything the packet will contain. Token-shaped secrets
+              are already auto-redacted; mark anything else that shouldn't
+              leave this machine — redacted events keep their place in the
+              verifiable chain, content excluded.
+            </p>
+            {review.preview.entries.map((e) => {
+              const marked = review.redactSeqs.includes(e.seq);
+              return (
+                <div className="wb-row" key={e.seq}>
+                  <span className="wb-row-main">
+                    <code>
+                      {e.seq} {e.kind}
+                    </code>{" "}
+                    {e.stub ? (
+                      <span className="wb-hint">(other case — linkage stub only)</span>
+                    ) : e.autoRedacted ? (
+                      <span className="wb-hint">(auto-redacted) </span>
+                    ) : null}
+                    {!e.stub && (
+                      <span className={`wb-hint${marked ? " proof-redacted" : ""}`}>
+                        {marked ? "will be redacted" : entryExcerpt(e)}
+                      </span>
+                    )}
+                  </span>
+                  {!e.stub && (
+                    <button
+                      className="wb-link"
+                      onClick={() => toggleRedact(e.seq)}
+                      title={
+                        marked
+                          ? "Include this event's content"
+                          : "Exclude this event's content from the packet"
+                      }
+                    >
+                      {marked ? "keep" : "redact"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <p>
+              <button
+                className="wb-cta"
+                disabled={exporting !== null}
+                onClick={() => void confirmExport()}
+                title="Sign the packet with the chosen redactions"
+              >
+                {exporting !== null
+                  ? "signing…"
+                  : `sign & export${review.redactSeqs.length ? ` (${review.redactSeqs.length} redacted)` : ""}`}
+              </button>{" "}
+              <button className="wb-link" onClick={cancelExport}>
+                cancel
+              </button>
+            </p>
+          </section>
+        )}
+
+        {!review && events.length === 0 && !error && (
           <section className="wb-section">
             <p className="wb-hint">
               No evidence recorded yet. Every prompt, approval and turn result
@@ -101,7 +193,7 @@ export function ProofPanel() {
           </section>
         )}
 
-        {!selectedCase && cases.length > 0 && (
+        {!review && !selectedCase && cases.length > 0 && (
           <section className="wb-section">
             <div className="wb-section-title">cases</div>
             {cases.map((c) => (
@@ -119,10 +211,10 @@ export function ProofPanel() {
                 <button
                   className="wb-link"
                   disabled={exporting !== null}
-                  onClick={() => void exportPack(c.caseId)}
-                  title="Export a signed proof packet for this case"
+                  onClick={() => void startExport(c.caseId)}
+                  title="Review and export a signed proof packet for this case"
                 >
-                  {exporting === c.caseId ? "signing…" : "export"}
+                  export
                 </button>
               </div>
             ))}
@@ -130,16 +222,16 @@ export function ProofPanel() {
               <button
                 className="wb-link"
                 disabled={exporting !== null}
-                onClick={() => void exportPack(undefined)}
-                title="Export the full ledger as one signed packet"
+                onClick={() => void startExport(undefined)}
+                title="Review and export the full ledger as one signed packet"
               >
-                {exporting === "__ledger__" ? "signing…" : "export full ledger"}
+                export full ledger
               </button>
             </p>
           </section>
         )}
 
-        {selectedCase && (
+        {!review && selectedCase && (
           <section className="wb-section">
             {timeline.length === 0 && (
               <p className="wb-hint">No turns recorded in this case yet.</p>
@@ -185,7 +277,7 @@ export function ProofPanel() {
           </section>
         )}
 
-        {lastExport && (
+        {!review && lastExport && (
           <section className="wb-section">
             <div className="wb-section-title">last export</div>
             <p className="wb-hint">
@@ -193,8 +285,7 @@ export function ProofPanel() {
               <br />
               {lastExport.eventCount} events
               {lastExport.stubCount > 0 && ` · ${lastExport.stubCount} stubs`}
-              {lastExport.redactionCount > 0 &&
-                ` · ${lastExport.redactionCount} redactions`}
+              {` · ${lastExport.redactionCount} redactions`}
               {" · key "}
               <code title={lastExport.keyId}>{lastExport.keyId.slice(0, 16)}…</code>
               <br />
