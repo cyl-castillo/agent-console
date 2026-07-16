@@ -74,7 +74,7 @@ const MAX_INPUT_BYTES: usize = 4096;
 /// outside the repo — private, local, costless to keep), `repo_marks` OFF
 /// (trailers and the anchor ref touch the project's git — in shared repos
 /// that's a decision the owner must make, so it's opt-in per project).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestigoSettings {
     /// Record events into the local ledger at all.
@@ -82,6 +82,12 @@ pub struct TestigoSettings {
     /// Stamp commit trailers (Testigo-Case/Testigo-Head) and pin the anchor
     /// ref in the project's checkout.
     pub repo_marks: bool,
+    /// Request an RFC 3161 timestamp over the packet signature at export,
+    /// from this TSA URL (spec §2.5). None = no timestamp (default) — the
+    /// request sends the TSA a signature hash, so leaving the machine is the
+    /// owner's call, like repo marks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp_tsa: Option<String>,
 }
 
 impl Default for TestigoSettings {
@@ -89,6 +95,7 @@ impl Default for TestigoSettings {
         Self {
             witness: true,
             repo_marks: false,
+            timestamp_tsa: None,
         }
     }
 }
@@ -203,7 +210,7 @@ impl TestigoService {
         let mut inner = self.inner.lock();
         Self::settings_map(&mut inner)
             .get(project_root)
-            .copied()
+            .cloned()
             .unwrap_or_default()
     }
 
@@ -216,9 +223,9 @@ impl TestigoService {
     /// file, temp+rename atomic write, .bak of the previous version.
     pub fn set_settings(&self, project_root: &str, s: TestigoSettings) -> AppResult<TestigoSettings> {
         let mut inner = self.inner.lock();
-        Self::settings_map(&mut inner).insert(project_root.to_string(), s);
+        Self::settings_map(&mut inner).insert(project_root.to_string(), s.clone());
         let mut file = Self::load_settings_file();
-        file.by_project.insert(project_root.to_string(), s);
+        file.by_project.insert(project_root.to_string(), s.clone());
         drop(inner);
         let path = Self::settings_path()?;
         if let Some(parent) = path.parent() {
@@ -321,9 +328,7 @@ impl TestigoService {
         // Reads (list/verify/export of PAST evidence) are unaffected.
         if !Self::settings_map(inner)
             .get(project_root)
-            .copied()
-            .unwrap_or_default()
-            .witness
+            .is_none_or(|s| s.witness)
         {
             return Err(AppError::Other("testigo: witnessing disabled for this project".into()));
         }
@@ -1013,7 +1018,7 @@ mod tests {
         assert_eq!(svc.list(root, None, None).unwrap().len(), 1);
 
         // …and stops when switched off; past evidence stays readable.
-        svc.set_settings(root, TestigoSettings { witness: false, repo_marks: false })
+        svc.set_settings(root, TestigoSettings { witness: false, ..Default::default() })
             .unwrap();
         assert!(svc
             .on_prompt(root, 2, Some("t1"), None, Some("nope"), None, None)
@@ -1026,7 +1031,7 @@ mod tests {
         let s2 = svc2.settings(root);
         assert!(!s2.witness);
         // Enabling repo marks persists too.
-        svc2.set_settings(root, TestigoSettings { witness: true, repo_marks: true })
+        svc2.set_settings(root, TestigoSettings { witness: true, repo_marks: true, ..Default::default() })
             .unwrap();
         assert!(TestigoService::new().repo_marks(root));
 

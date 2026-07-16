@@ -10,6 +10,9 @@
   Verifies: (1) the DSSE Ed25519 signature over the in-toto statement,
   (2) the subject digest over the packed events, (3) the hash-chain linkage
   across every entry, recomputing content hashes for non-redacted events.
+  If the packet carries an RFC 3161 timestamp it is DECLARED with informative
+  checks only — the token's CMS signature is not validated in the browser;
+  the page hands you the token and the openssl commands instead.
   Trust note: the packet embeds its public key for convenience — compare the
   key id with the publisher through another channel before trusting it.
 -->
@@ -39,6 +42,7 @@
 <div id="result">
   <div id="checks"></div>
   <h3>Packet</h3><div id="meta" class="mono"></div>
+  <div id="tsp"></div>
   <h3>Events</h3><div id="events"></div>
 </div>
 <script>
@@ -70,8 +74,28 @@ function check(cls, text) {
   $("checks").appendChild(d);
 }
 
+function renderTimestamp(tsp, digest, tokenBytes, genTime) {
+  const d = $("tsp");
+  d.innerHTML = "<h3>Timestamp</h3>";
+  const meta = document.createElement("div");
+  meta.className = "mono";
+  meta.textContent = `type: rfc3161 · TSA: ${tsp.tsaUrl ?? "?"} · imprint (sha256 of signature): ${digest}${genTime ? ` · claimed genTime: ${genTime}` : ""}`;
+  const a = document.createElement("a");
+  a.textContent = "Download token (packet.tsr)";
+  a.href = URL.createObjectURL(new Blob([tokenBytes], { type: "application/timestamp-reply" }));
+  a.download = "packet.tsr";
+  const pre = document.createElement("pre");
+  pre.className = "mono";
+  pre.textContent = [
+    "# Full verification, outside the browser (requires the TSA's CA chain):",
+    "openssl ts -reply -in packet.tsr -text",
+    `openssl ts -verify -digest ${digest} -in packet.tsr -CAfile <tsa-chain.pem>`,
+  ].join("\n");
+  d.append(meta, a, pre);
+}
+
 async function load(f) {
-  $("checks").innerHTML = ""; $("meta").innerHTML = ""; $("events").innerHTML = "";
+  $("checks").innerHTML = ""; $("meta").innerHTML = ""; $("events").innerHTML = ""; $("tsp").innerHTML = "";
   $("result").style.display = "block";
   let packet;
   try { packet = JSON.parse(await f.text()); } catch { check("fail", "Not valid JSON."); return; }
@@ -130,7 +154,46 @@ async function load(f) {
   if (redacted > 0) check("warn", `${redacted} event(s) redacted before export — linkage verified, content hash not recomputable (by design).`);
   if (stubs > 0) check("warn", `${stubs} out-of-case event(s) included as linkage stubs (seq + hashes only).`);
 
-  // 4. Render.
+  // 4. Trusted timestamp (RFC 3161), if present. Informative only: the
+  // token's CMS signature is NOT validated here — pretending to verify ASN.1
+  // in a browser would be dishonest. We check what we can (the declared
+  // imprint is the signature's sha256 and those bytes occur inside the token
+  // DER) and hand the receiver the token plus the openssl commands.
+  const tsp = packet.timestamp;
+  if (tsp) {
+    if (tsp.type !== "rfc3161") {
+      check("warn", `Timestamp of unknown type "${tsp.type}" — ignored.`);
+    } else {
+      const sigDigest = await sha256hex(b64ToBytes(sigEntry.sig || ""));
+      let tokenBytes = null;
+      try { tokenBytes = b64ToBytes(tsp.token || ""); } catch {}
+      const imprintOk = sigDigest === String(tsp.messageImprint || "").toLowerCase();
+      const digestBytes = Uint8Array.from(sigDigest.match(/../g), (h) => parseInt(h, 16));
+      let embedded = false;
+      if (tokenBytes) {
+        outer: for (let i = 0; i + digestBytes.length <= tokenBytes.length; i++) {
+          for (let j = 0; j < digestBytes.length; j++) if (tokenBytes[i + j] !== digestBytes[j]) continue outer;
+          embedded = true; break;
+        }
+      }
+      // Scan for a GeneralizedTime — a claimed genTime, the token stays authoritative.
+      let genTime = "";
+      if (tokenBytes) {
+        for (let i = 0; i + 2 < tokenBytes.length && !genTime; i++) {
+          const len = tokenBytes[i + 1];
+          if (tokenBytes[i] !== 0x18 || len < 15 || len > 21 || i + 2 + len > tokenBytes.length) continue;
+          const s = new TextDecoder().decode(tokenBytes.slice(i + 2, i + 2 + len));
+          if (/^\d{14}(\.\d+)?Z$/.test(s)) genTime = s;
+        }
+      }
+      if (!tokenBytes) check("fail", "RFC 3161 timestamp present but its token is not decodable base64.");
+      else if (!imprintOk || !embedded) check("fail", "RFC 3161 timestamp present but its imprint does not match this packet's signature.");
+      else check("warn", `RFC 3161 timestamp present (TSA: ${tsp.tsaUrl ?? "undeclared"})${genTime ? `, claimed genTime ${genTime}` : ""}. The signature's digest matches the declared imprint and appears inside the token — the token itself is NOT cryptographically verified here (see the Timestamp section for openssl verification).`);
+      if (tokenBytes) renderTimestamp(tsp, sigDigest, tokenBytes, genTime);
+    }
+  }
+
+  // 5. Render.
   $("meta").textContent =
     `case: ${pred.caseId ?? "(full ledger)"} · project: ${pred.project} · exported: ${new Date(pred.exportedAtMs).toISOString()} · generator: ${pred.generator} · range: ${pred.range?.fromSeq}–${pred.range?.toSeq} · key id: ${keyId}`;
   const tbl = document.createElement("table");

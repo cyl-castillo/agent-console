@@ -189,10 +189,19 @@ ProofEvent {
   son opt-in por proyecto: en repos compartidos la marca es decisión del dueño. El gate de
   witness vive en `record()` (un solo punto cubre todos los kinds); las lecturas de evidencia
   pasada no se tocan. Spec actualizado (anchoring = MAY + opt-in, 1956214).
-- **V2-B — Timestamps RFC 3161**: export opcionalmente pide un timestamp token a una TSA
-  pública sobre la firma DSSE → prueba de existencia en el tiempo; campo `timestamp` en el
-  predicado y bump a `…/attestation/v0.2`; el verificador declara el token e indica cómo
-  verificarlo (openssl ts) — sin fingir verificación ASN.1 en el browser.
+- **V2-B — Timestamps RFC 3161** ✅ (2026-07-16): el export opcionalmente pide un timestamp
+  token a una TSA sobre sha256 de la firma DSSE (construcción signature-time-stamp de CAdES)
+  → prueba de existencia en el tiempo. **Corrección al plan original**: el token va a nivel
+  packet (campo `timestamp` junto a `publicKey`), NO en el predicado — el predicado se firma
+  antes de que exista la firma, así que un token sobre la firma no puede vivir dentro; y al
+  ser aditivo fuera del envelope, no hay bump de predicado (v0.1 sigue; quitarlo no rompe la
+  firma, solo pierde la prueba temporal). Spec §2.5. Implementación: `testigo_timestamp.rs`
+  (TimeStampReq DER a mano — golden test vs openssl —, POST a la TSA en thread dedicado,
+  chequeo estructural mínimo del grant: status 0/1 + digest ecoado), opt-in por proyecto
+  (`timestampTsa` en TestigoSettings, default freetsa.org en el toggle del tab Proof), TSA
+  caída = export falla (nunca packet silenciosamente sin lo pedido). El verificador declara
+  el token (imprint ✓, genTime escaneado) y entrega el .tsr + comandos `openssl ts -verify`
+  — sin fingir verificación CMS en el browser. E2E real contra freetsa en test `#[ignore]`.
 - **V2-C — sigstore keyless**: modo de firma alternativo vía Fulcio/Rekor (identidad OIDC +
   log de transparencia público). Pesado y con implicancias de privacidad (el log es público):
   diseño en doc antes de código.

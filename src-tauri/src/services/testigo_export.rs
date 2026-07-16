@@ -43,6 +43,10 @@ pub struct ExportSummary {
     pub key_id: String,
     pub subject_digest: String,
     pub chain_ok: bool,
+    /// TSA that timestamped the packet signature (RFC 3161, spec §2.5), when
+    /// the project opted in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp_tsa: Option<String>,
 }
 
 /// Load the ed25519 signing seed from the OS keychain, generating and storing
@@ -137,7 +141,16 @@ pub fn export(
     manual_redact: &[u64],
 ) -> AppResult<ExportSummary> {
     let seed = load_or_create_seed()?;
-    export_with_seed(testigo, project_root, case_id, dest_dir, &seed, manual_redact)
+    let tsa = testigo.settings(project_root).timestamp_tsa;
+    export_with_seed(
+        testigo,
+        project_root,
+        case_id,
+        dest_dir,
+        &seed,
+        manual_redact,
+        tsa.as_deref(),
+    )
 }
 
 /// One reviewable entry of a pending export: what WOULD be packed, shown to
@@ -293,7 +306,8 @@ fn redact_manually(line: &str) -> AppResult<String> {
 
 /// Keyring-free core, also the test seam (unit tests must not touch the OS
 /// keychain — headless CI has none). `manual_redact` lists the seqs the human
-/// marked in the pre-sign review.
+/// marked in the pre-sign review; `tsa` requests an RFC 3161 timestamp of the
+/// signature from that URL (None keeps tests and default exports offline).
 pub fn export_with_seed(
     testigo: &TestigoService,
     project_root: &str,
@@ -301,6 +315,7 @@ pub fn export_with_seed(
     dest_dir: &Path,
     seed: &[u8; 32],
     manual_redact: &[u64],
+    tsa: Option<&str>,
 ) -> AppResult<ExportSummary> {
     let seg = select_segment(testigo, project_root, case_id)?;
     let mut events: Vec<Value> = Vec::new();
@@ -383,7 +398,7 @@ pub fn export_with_seed(
     let sig = signing.sign(&pae(PAYLOAD_TYPE, payload.as_bytes()));
     let kid = key_id(&vk);
 
-    let packet = json!({
+    let mut packet = json!({
         "format": PACKET_FORMAT,
         "envelope": {
             "payloadType": PAYLOAD_TYPE,
@@ -392,6 +407,12 @@ pub fn export_with_seed(
         },
         "publicKey": B64.encode(vk.as_bytes()),
     });
+    // Opt-in trusted timestamp over the signature (spec §2.5). The user asked
+    // for it, so a TSA failure fails the export instead of silently producing
+    // a packet that misses what they opted into.
+    if let Some(url) = tsa {
+        packet["timestamp"] = crate::services::testigo_timestamp::obtain(url, &sig.to_bytes())?;
+    }
 
     fs::create_dir_all(dest_dir)?;
     let stem = case_id
@@ -416,6 +437,7 @@ pub fn export_with_seed(
         key_id: kid,
         subject_digest,
         chain_ok: true,
+        timestamp_tsa: tsa.map(String::from),
     })
 }
 
@@ -490,7 +512,7 @@ mod tests {
         let seed = [7u8; 32];
         let dest = base.join("out");
         let sum =
-            export_with_seed(&svc, root, Some("jira:FIXY-9"), &dest, &seed, &[]).unwrap();
+            export_with_seed(&svc, root, Some("jira:FIXY-9"), &dest, &seed, &[], None).unwrap();
         assert_eq!(sum.event_count, 3, "case_link + prompt + turn_end");
         assert_eq!(sum.stub_count, 1, "interleaved t2 prompt pruned to stub");
         assert!(sum.redaction_count >= 1, "github token redacted");
@@ -576,7 +598,7 @@ mod tests {
         // Manual redaction (pre-sign review): payload replaced, hashes and
         // linkage intact, redacted flagged, count incremented.
         let sum2 =
-            export_with_seed(&svc, root, Some("jira:FIXY-9"), &dest, &seed, &[3]).unwrap();
+            export_with_seed(&svc, root, Some("jira:FIXY-9"), &dest, &seed, &[3], None).unwrap();
         assert!(sum2.redaction_count >= 2, "auto + manual");
         let packet2: Value =
             serde_json::from_str(&fs::read_to_string(&sum2.path).unwrap()).unwrap();
@@ -606,13 +628,85 @@ mod tests {
             prev2 = h;
         }
 
+        // Timestamp opt-in with an unreachable TSA → the export FAILS instead
+        // of silently writing a packet without what the user asked for.
+        let bad_tsa = export_with_seed(
+            &svc,
+            root,
+            Some("jira:FIXY-9"),
+            &dest,
+            &seed,
+            &[],
+            Some("http://127.0.0.1:9/tsr"),
+        );
+        assert!(bad_tsa.is_err(), "unreachable TSA must fail the export");
+
         // Broken ledger → export refuses (preview too).
         let ledger = TestigoService::ledger_path(root).unwrap();
         let tampered = fs::read_to_string(&ledger).unwrap().replace("unrelated", "tampered!!");
         fs::write(&ledger, tampered).unwrap();
         let svc2 = TestigoService::new();
-        assert!(export_with_seed(&svc2, root, None, &dest, &seed, &[]).is_err());
+        assert!(export_with_seed(&svc2, root, None, &dest, &seed, &[], None).is_err());
         assert!(preview(&svc2, root, None).is_err());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// End-to-end against the real freetsa.org TSA — network, so #[ignore]:
+    /// run on demand with `cargo test export_timestamps -- --ignored`.
+    /// Exports with the timestamp opt-in and checks the packet carries a
+    /// granted token whose imprint is sha256 of this packet's signature.
+    #[test]
+    #[ignore]
+    fn export_timestamps_with_real_tsa() {
+        use crate::services::testigo_timestamp;
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "ac-testigo-tsa-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let svc = TestigoService::new();
+        let root = "/proj/tsa";
+        svc.on_prompt(root, 1, Some("t1"), None, Some("timestamp me"), None, None)
+            .unwrap();
+
+        let seed = [9u8; 32];
+        let dest = base.join("out");
+        let sum = export_with_seed(
+            &svc,
+            root,
+            None,
+            &dest,
+            &seed,
+            &[],
+            Some("https://freetsa.org/tsr"),
+        )
+        .unwrap();
+        assert_eq!(sum.timestamp_tsa.as_deref(), Some("https://freetsa.org/tsr"));
+
+        let packet: Value =
+            serde_json::from_str(&fs::read_to_string(&sum.path).unwrap()).unwrap();
+        let tsp = &packet["timestamp"];
+        assert_eq!(tsp["type"], "rfc3161");
+        assert_eq!(tsp["hashAlg"], "sha256");
+        let sig = B64
+            .decode(packet["envelope"]["signatures"][0]["sig"].as_str().unwrap())
+            .unwrap();
+        let mut h = Sha256::new();
+        h.update(&sig);
+        let digest: [u8; 32] = h.finalize().into();
+        let imprint: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(tsp["messageImprint"].as_str().unwrap(), imprint);
+        let token = B64.decode(tsp["token"].as_str().unwrap()).unwrap();
+        testigo_timestamp::check_response(&token, &digest).expect("granted token");
 
         let _ = std::fs::remove_dir_all(&base);
     }
