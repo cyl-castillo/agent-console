@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
-use crate::services::testigo_service::TestigoService;
+use crate::services::testigo_service::{ProofEvent, TestigoService};
 
 /// The proof packet: a Testigo ledger segment wrapped in an in-toto Statement,
 /// signed as a DSSE envelope, verifiable WITHOUT agent-console (standalone
@@ -134,20 +134,106 @@ pub fn export(
     project_root: &str,
     case_id: Option<&str>,
     dest_dir: &Path,
+    manual_redact: &[u64],
 ) -> AppResult<ExportSummary> {
     let seed = load_or_create_seed()?;
-    export_with_seed(testigo, project_root, case_id, dest_dir, &seed)
+    export_with_seed(testigo, project_root, case_id, dest_dir, &seed, manual_redact)
 }
 
-/// Keyring-free core, also the test seam (unit tests must not touch the OS
-/// keychain — headless CI has none).
-pub fn export_with_seed(
+/// One reviewable entry of a pending export: what WOULD be packed, shown to
+/// the human before anything is signed. `line` is the post-auto-redaction
+/// content; stubs carry no content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewEntry {
+    pub seq: u64,
+    pub ts: i64,
+    pub kind: String,
+    pub actor: String,
+    pub stub: bool,
+    /// Auto (token-pattern) redaction already hit this event.
+    pub auto_redacted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_id: Option<String>,
+    pub entries: Vec<PreviewEntry>,
+}
+
+/// The pre-sign review: exactly the entries `export` would pack (selection +
+/// auto redaction applied), so the human can mark additional events for
+/// manual redaction before the packet is signed. Nothing is written.
+pub fn preview(
     testigo: &TestigoService,
     project_root: &str,
     case_id: Option<&str>,
-    dest_dir: &Path,
-    seed: &[u8; 32],
-) -> AppResult<ExportSummary> {
+) -> AppResult<ExportPreview> {
+    let seg = select_segment(testigo, project_root, case_id)?;
+    let mut entries = Vec::new();
+    for i in seg.first..=seg.last {
+        let v = &seg.parsed[i];
+        let seq = v.get("seq").and_then(|s| s.as_u64()).unwrap_or(i as u64);
+        let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+        let kind = v.get("kind").and_then(|k| k.as_str()).unwrap_or("").to_string();
+        let actor = v.get("actor").and_then(|a| a.as_str()).unwrap_or("").to_string();
+        if seg.in_case(v) {
+            let (line, n) = redact(&seg.raw_lines[i]);
+            entries.push(PreviewEntry {
+                seq,
+                ts,
+                kind,
+                actor,
+                stub: false,
+                auto_redacted: n > 0,
+                line: Some(line),
+            });
+        } else {
+            entries.push(PreviewEntry {
+                seq,
+                ts,
+                kind,
+                actor,
+                stub: true,
+                auto_redacted: false,
+                line: None,
+            });
+        }
+    }
+    Ok(ExportPreview {
+        case_id: case_id.map(String::from),
+        entries,
+    })
+}
+
+/// Segment selection shared by preview and export: full ledger, or
+/// [first..last] event of the case (with the rest becoming stubs downstream).
+struct Segment {
+    raw_lines: Vec<String>,
+    parsed: Vec<Value>,
+    first: usize,
+    last: usize,
+    prev_hash_before: String,
+    case_id: Option<String>,
+}
+
+impl Segment {
+    fn in_case(&self, v: &Value) -> bool {
+        self.case_id
+            .as_deref()
+            .is_none_or(|c| v.get("caseId").and_then(|x| x.as_str()) == Some(c))
+    }
+}
+
+fn select_segment(
+    testigo: &TestigoService,
+    project_root: &str,
+    case_id: Option<&str>,
+) -> AppResult<Segment> {
     let report = testigo.verify(project_root)?;
     if !report.ok {
         return Err(AppError::Other(format!(
@@ -155,18 +241,10 @@ pub fn export_with_seed(
             report.broken_at_seq
         )));
     }
-
     let raw_lines = testigo.raw_lines(project_root)?;
     if raw_lines.is_empty() {
         return Err(AppError::Other("ledger is empty — nothing to export".into()));
     }
-
-    // Select the segment: full ledger, or [first..last] event of the case
-    // with non-case events reduced to linkage stubs.
-    let mut events: Vec<Value> = Vec::new();
-    let mut stub_count = 0usize;
-    let mut redaction_count = 0usize;
-    let mut included = 0usize;
     let parsed: Vec<Value> = raw_lines
         .iter()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
@@ -193,13 +271,56 @@ pub fn export_with_seed(
     } else {
         "genesis".to_string()
     };
-    for i in first..=last {
-        let v = &parsed[i];
-        if in_case(v) {
-            let (line, n) = redact(&raw_lines[i]);
+    Ok(Segment {
+        raw_lines,
+        parsed,
+        first,
+        last,
+        prev_hash_before,
+        case_id: case_id.map(String::from),
+    })
+}
+
+/// Manually redact one event line per the protocol: the payload is replaced
+/// with a marker, every other field — crucially `prevHash`/`hash` — stays
+/// intact, so chain linkage remains verifiable while the content is gone.
+fn redact_manually(line: &str) -> AppResult<String> {
+    let mut ev: ProofEvent = serde_json::from_str(line)
+        .map_err(|e| AppError::Other(format!("parse event for manual redaction: {e}")))?;
+    ev.payload = json!({ "redacted": "manual" });
+    serde_json::to_string(&ev).map_err(|e| AppError::Other(format!("serialize redacted: {e}")))
+}
+
+/// Keyring-free core, also the test seam (unit tests must not touch the OS
+/// keychain — headless CI has none). `manual_redact` lists the seqs the human
+/// marked in the pre-sign review.
+pub fn export_with_seed(
+    testigo: &TestigoService,
+    project_root: &str,
+    case_id: Option<&str>,
+    dest_dir: &Path,
+    seed: &[u8; 32],
+    manual_redact: &[u64],
+) -> AppResult<ExportSummary> {
+    let seg = select_segment(testigo, project_root, case_id)?;
+    let mut events: Vec<Value> = Vec::new();
+    let mut stub_count = 0usize;
+    let mut redaction_count = 0usize;
+    let mut included = 0usize;
+    for i in seg.first..=seg.last {
+        let v = &seg.parsed[i];
+        if seg.in_case(v) {
+            let (mut line, n) = redact(&seg.raw_lines[i]);
+            let mut redacted = n > 0;
             redaction_count += n;
+            let seq = v.get("seq").and_then(|s| s.as_u64());
+            if seq.is_some_and(|s| manual_redact.contains(&s)) {
+                line = redact_manually(&line)?;
+                redaction_count += 1;
+                redacted = true;
+            }
             included += 1;
-            events.push(json!({ "line": line, "redacted": n > 0 }));
+            events.push(json!({ "line": line, "redacted": redacted }));
         } else {
             stub_count += 1;
             events.push(json!({ "stub": {
@@ -210,6 +331,8 @@ pub fn export_with_seed(
             }}));
         }
     }
+    let (first, last) = (seg.first, seg.last);
+    let (parsed, prev_hash_before) = (seg.parsed, seg.prev_hash_before);
 
     // Subject digest: over the exported segment exactly as packed (post
     // redaction/stubbing) — what the receiver holds is what's signed.
@@ -358,10 +481,16 @@ mod tests {
         svc.on_turn_end(root, 4, Some("t1"), None, serde_json::json!({}))
             .unwrap();
 
+        // The pre-sign review lists exactly what would be packed.
+        let pv = preview(&svc, root, Some("jira:FIXY-9")).unwrap();
+        assert_eq!(pv.entries.len(), 4);
+        assert!(pv.entries[1].auto_redacted, "token prompt flagged in preview");
+        assert!(pv.entries[2].stub && pv.entries[2].line.is_none());
+
         let seed = [7u8; 32];
         let dest = base.join("out");
         let sum =
-            export_with_seed(&svc, root, Some("jira:FIXY-9"), &dest, &seed).unwrap();
+            export_with_seed(&svc, root, Some("jira:FIXY-9"), &dest, &seed, &[]).unwrap();
         assert_eq!(sum.event_count, 3, "case_link + prompt + turn_end");
         assert_eq!(sum.stub_count, 1, "interleaved t2 prompt pruned to stub");
         assert!(sum.redaction_count >= 1, "github token redacted");
@@ -444,13 +573,48 @@ mod tests {
         assert!(!prompt_entry["line"].as_str().unwrap().contains("ghp_0123"));
         assert_eq!(prompt_entry["redacted"], true);
 
-        // Broken ledger → export refuses.
+        // Manual redaction (pre-sign review): payload replaced, hashes and
+        // linkage intact, redacted flagged, count incremented.
+        let sum2 =
+            export_with_seed(&svc, root, Some("jira:FIXY-9"), &dest, &seed, &[3]).unwrap();
+        assert!(sum2.redaction_count >= 2, "auto + manual");
+        let packet2: Value =
+            serde_json::from_str(&fs::read_to_string(&sum2.path).unwrap()).unwrap();
+        let payload2 = B64
+            .decode(packet2["envelope"]["payload"].as_str().unwrap())
+            .unwrap();
+        let st2: Value = serde_json::from_slice(&payload2).unwrap();
+        let evs2 = st2["predicate"]["events"].as_array().unwrap();
+        let turn_end = evs2
+            .iter()
+            .find(|e| e["line"].as_str().is_some_and(|l| l.contains("\"turn_end\"")))
+            .unwrap();
+        assert_eq!(turn_end["redacted"], true);
+        let v2: Value = serde_json::from_str(turn_end["line"].as_str().unwrap()).unwrap();
+        assert_eq!(v2["payload"]["redacted"], "manual", "payload replaced");
+        // Linkage still holds through the manually redacted event.
+        let mut prev2 = st2["predicate"]["range"]["prevHashBefore"].as_str().unwrap().to_string();
+        for e in evs2 {
+            let (ph, h) = if let Some(line) = e["line"].as_str() {
+                let v: Value = serde_json::from_str(line).unwrap();
+                (v["prevHash"].as_str().unwrap().to_string(), v["hash"].as_str().unwrap().to_string())
+            } else {
+                let s = &e["stub"];
+                (s["prevHash"].as_str().unwrap().to_string(), s["hash"].as_str().unwrap().to_string())
+            };
+            assert_eq!(ph, prev2);
+            prev2 = h;
+        }
+
+        // Broken ledger → export refuses (preview too).
         let ledger = TestigoService::ledger_path(root).unwrap();
         let tampered = fs::read_to_string(&ledger).unwrap().replace("unrelated", "tampered!!");
         fs::write(&ledger, tampered).unwrap();
         let svc2 = TestigoService::new();
-        assert!(export_with_seed(&svc2, root, None, &dest, &seed).is_err());
+        assert!(export_with_seed(&svc2, root, None, &dest, &seed, &[]).is_err());
+        assert!(preview(&svc2, root, None).is_err());
 
         let _ = std::fs::remove_dir_all(&base);
     }
 }
+

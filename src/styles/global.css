@@ -1779,6 +1779,11 @@ select:focus-visible,
   font-size: 11px;
   color: var(--text);
 }
+/* Pre-sign export review: an event marked for manual redaction. */
+.proof-redacted {
+  color: var(--danger);
+  text-decoration: line-through;
+}
 .wb-cta {
   display: block;
   margin-top: 8px;

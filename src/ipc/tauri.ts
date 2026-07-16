@@ -15,7 +15,7 @@ import type {
   FileContent, FileNode, GitCommitInfo, GitStatus, HooksStatus,
   InstalledPlugin, AvailableSnapshot, JiraStatus, JiraIssue, Job, McpServer, McpAddInput,
   StickyNote,
-  ProofEvent, TestigoVerifyReport, TestigoExportSummary,
+  ProofEvent, TestigoVerifyReport, TestigoExportSummary, TestigoExportPreview,
   MemoryEntry, PermissionsSnapshot, Preflight,
   PersistedRoom, PersistedSession, Project, RecentProject,
   RoomSummary, RoundtableConfig, RunRecord, ShareResult, SyncResult,
@@ -190,11 +190,17 @@ export const ipc = {
     invoke<TestigoVerifyReport>("testigo_verify", { projectRoot }),
   testigoLinkCase: (projectRoot: string, termId: string, ticket: string) =>
     invoke<void>("testigo_link_case", { projectRoot, termId, ticket }),
-  testigoExport: (projectRoot: string, caseId?: string, destDir?: string) =>
+  testigoExport: (projectRoot: string, caseId?: string, destDir?: string, redactSeqs?: number[]) =>
     invoke<TestigoExportSummary>("testigo_export", {
       projectRoot,
       caseId: caseId ?? null,
       destDir: destDir ?? null,
+      redactSeqs: redactSeqs ?? null,
+    }),
+  testigoExportPreview: (projectRoot: string, caseId?: string) =>
+    invoke<TestigoExportPreview>("testigo_export_preview", {
+      projectRoot,
+      caseId: caseId ?? null,
     }),
   testigoPublicKey: () =>
     invoke<{ keyId: string; publicKey: string }>("testigo_public_key"),

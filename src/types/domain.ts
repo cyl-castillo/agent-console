@@ -199,6 +199,23 @@ export interface TestigoExportSummary {
   chainOk: boolean;
 }
 
+/// One reviewable entry of a pending export (mirrors the Rust PreviewEntry).
+export interface TestigoPreviewEntry {
+  seq: number;
+  ts: number;
+  kind: string;
+  actor: string;
+  stub: boolean;
+  autoRedacted: boolean;
+  line?: string;
+}
+
+/// The pre-sign export review (mirrors the Rust ExportPreview).
+export interface TestigoExportPreview {
+  caseId?: string;
+  entries: TestigoPreviewEntry[];
+}
+
 /// One per-project sticky note (mirrors the Rust Note).
 export interface StickyNote {
   id: string;
