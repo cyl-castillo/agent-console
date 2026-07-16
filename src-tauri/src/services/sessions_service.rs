@@ -181,7 +181,14 @@ impl SessionsService {
         Ok(Vec::new())
     }
 
-    pub fn save(&self, project_root: &str, sessions: Vec<PersistedSession>) -> AppResult<()> {
+    pub fn save(&self, project_root: &str, mut sessions: Vec<PersistedSession>) -> AppResult<()> {
+        // Scrollback is unbounded in memory (xterm keeps its own cap), but on
+        // disk it multiplies: N sessions × M projects, cloned on every list().
+        // Keep only the newest tail per session — enough to repaint a resumed
+        // terminal, without letting sessions.json grow to tens of MB.
+        for s in &mut sessions {
+            cap_scrollback(&mut s.scrollback);
+        }
         let _g = self.lock.lock();
         // If the existing file can't be read, abort rather than clobbering the
         // other projects' history with a blind overwrite.
@@ -202,10 +209,42 @@ impl SessionsService {
     }
 }
 
+/// Persisted-scrollback cap: 100 KB is several screens of history — plenty to
+/// repaint a resumed session. Trimming keeps the TAIL (newest output) and cuts
+/// at a char boundary so the stored string stays valid UTF-8.
+const SCROLLBACK_MAX_BYTES: usize = 100 * 1024;
+
+fn cap_scrollback(s: &mut String) {
+    if s.len() <= SCROLLBACK_MAX_BYTES {
+        return;
+    }
+    let mut start = s.len() - SCROLLBACK_MAX_BYTES;
+    while !s.is_char_boundary(start) {
+        start += 1;
+    }
+    s.replace_range(..start, "");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn scrollback_cap_keeps_newest_tail_at_char_boundary() {
+        let mut small = "hola".to_string();
+        cap_scrollback(&mut small);
+        assert_eq!(small, "hola", "under the cap: untouched");
+
+        // Multibyte content straddling the cut point must not panic and must
+        // keep the tail.
+        let mut big = "ñ".repeat(SCROLLBACK_MAX_BYTES); // 2 bytes each
+        big.push_str("FIN");
+        cap_scrollback(&mut big);
+        assert!(big.len() <= SCROLLBACK_MAX_BYTES);
+        assert!(big.ends_with("FIN"), "newest output survives");
+        assert!(big.starts_with('ñ'), "cut lands on a char boundary");
+    }
 
     fn sample(id: &str) -> PersistedSession {
         PersistedSession {

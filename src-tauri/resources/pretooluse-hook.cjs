@@ -65,6 +65,10 @@ process.stdin.on("end", () => {
   let decision = null;
   let reason = null;
 
+  // Real synchronous sleep between polls: Atomics.wait blocks this thread
+  // without burning CPU. The previous empty-while spin pinned a full core for
+  // the entire approval wait (up to 90s per tool call).
+  const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
   while (Date.now() < deadline) {
     if (fs.existsSync(resPath)) {
       try {
@@ -75,9 +79,7 @@ process.stdin.on("end", () => {
         break;
       } catch { /* keep polling — file may still be writing */ }
     }
-    // Busy-sleep without blocking event loop indefinitely.
-    const end = Date.now() + POLL_MS;
-    while (Date.now() < end) { /* spin */ }
+    Atomics.wait(sleepBuf, 0, 0, POLL_MS);
   }
 
   // Cleanup

@@ -52,16 +52,57 @@ pub struct HooksRuntime {
     approvals_watcher_started: Mutex<bool>,
 }
 
+/// Session dirs are keyed by PID and never reused, so every app run leaves one
+/// behind (events.jsonl + approvals/). Without GC the cache grows forever —
+/// a real install accumulated 200+ dirs in two weeks. 30 days is comfortably
+/// past any live process while keeping recent dirs for debugging.
+const SESSION_DIR_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Remove per-PID session dirs older than `cutoff` (by mtime), keeping
+/// `keep` (the current process's dir). Best-effort: a dir that fails to
+/// delete is skipped, never an error. Returns how many were removed.
+fn prune_stale_session_dirs(
+    sessions_root: &Path,
+    cutoff: std::time::SystemTime,
+    keep: &Path,
+) -> usize {
+    let Ok(entries) = fs::read_dir(sessions_root) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for e in entries.flatten() {
+        let path = e.path();
+        if !path.is_dir() || path == keep {
+            continue;
+        }
+        let stale = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t < cutoff)
+            .unwrap_or(false);
+        if stale && fs::remove_dir_all(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 impl HooksRuntime {
     pub fn new() -> AppResult<Self> {
         let cache = dirs::cache_dir()
             .ok_or_else(|| AppError::Other("no cache dir".into()))?
             .join("agent-console");
         fs::create_dir_all(&cache)?;
-        let session_dir = cache
-            .join("sessions")
-            .join(format!("{}", std::process::id()));
+        let sessions_root = cache.join("sessions");
+        let session_dir = sessions_root.join(format!("{}", std::process::id()));
         fs::create_dir_all(&session_dir)?;
+        // GC on startup: old per-PID dirs can't belong to a live process.
+        if let Some(cutoff) = std::time::SystemTime::now().checked_sub(SESSION_DIR_MAX_AGE) {
+            let n = prune_stale_session_dirs(&sessions_root, cutoff, &session_dir);
+            if n > 0 {
+                eprintln!("hooks: pruned {n} stale session dirs");
+            }
+        }
         fs::create_dir_all(session_dir.join("approvals"))?;
         let script_path = ensure_hook_script(&cache, "userprompt-hook.cjs", USERPROMPT_HOOK)?;
         let pretooluse_script_path =
@@ -787,6 +828,38 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// prune removes stale per-PID dirs, keeps the current one regardless of
+    /// age, and ignores files. Cutoff is injected so the test doesn't need to
+    /// fake mtimes: a future cutoff makes everything (except `keep`) stale.
+    #[test]
+    fn prune_removes_stale_session_dirs_keeps_current() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("ac-prune-{}-{nanos}", std::process::id()));
+        let keep = root.join("111");
+        fs::create_dir_all(&keep).unwrap();
+        fs::create_dir_all(root.join("222")).unwrap();
+        fs::create_dir_all(root.join("333/approvals")).unwrap();
+        fs::write(root.join("not-a-dir.txt"), b"x").unwrap();
+
+        let future = SystemTime::now() + Duration::from_secs(60);
+        let removed = prune_stale_session_dirs(&root, future, &keep);
+        assert_eq!(removed, 2, "both stale dirs go, nested content included");
+        assert!(keep.exists(), "current dir survives any cutoff");
+        assert!(root.join("not-a-dir.txt").exists(), "plain files untouched");
+        assert!(!root.join("222").exists() && !root.join("333").exists());
+
+        // Recent dirs survive a normal (past) cutoff.
+        fs::create_dir_all(root.join("444")).unwrap();
+        let past = SystemTime::now() - Duration::from_secs(3600);
+        assert_eq!(prune_stale_session_dirs(&root, past, &keep), 0);
+        assert!(root.join("444").exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn drain_consumes_complete_lines_incrementally() {
