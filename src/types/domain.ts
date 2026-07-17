@@ -273,6 +273,10 @@ export interface ApprovalRequest {
   /// AGENT_CONSOLE_TERM_ID). Missing for claudes launched before the hook
   /// captured it — the UI then falls back to cwd matching.
   termId?: string;
+  /// How long the hook waits for a decision before falling back to the
+  /// terminal prompt (AGENT_CONSOLE_APPROVAL_TIMEOUT_MS, default 90s).
+  /// Missing on requests from older hook scripts.
+  timeoutMs?: number;
 }
 
 export interface StoredRule {

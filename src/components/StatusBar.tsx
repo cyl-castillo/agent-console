@@ -37,6 +37,7 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
   const liveCount = sessions.filter((s) => s.status === "live").length;
   const activeSession = sessions.find((s) => s.id === activeId);
   const appVersion = __APP_VERSION__;
+  const build = useBuildInfo();
 
   return (
     <footer className="statusbar">
@@ -98,6 +99,14 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
       {workspace?.fileCount ? (
         <span className="sb-item sb-muted" title="Tracked files">{workspace.fileCount} files</span>
       ) : null}
+      {build?.debug && (
+        <span
+          className="sb-item sb-muted"
+          title={`Dev build — commit ${build.commit}, built ${build.builtAt}. If this doesn't match what you just changed, you're on a stale binary.`}
+        >
+          dev {build.commit} · {build.builtAt}
+        </span>
+      )}
       {appVersion && (
         <span className="sb-item sb-muted" title="Agent Console version">v{appVersion}</span>
       )}
@@ -119,6 +128,33 @@ function formatWorking(ms: number): string {
 /// ends precisely on the Stop hook (activity decay stays as the fallback for
 /// hooks not yet installed/trusted). Idle renders nothing — the live session
 /// dot already says the agent is up.
+/// Build provenance chip data, dev builds only. One fetch per mount; the
+/// answer never changes for a running binary — that's the point: if the chip
+/// doesn't match what you just edited, you're staring at a stale binary.
+function useBuildInfo(): { commit: string; builtAt: string; debug: boolean } | null {
+  const [info, setInfo] = useState<{ commit: string; builtAt: string; debug: boolean } | null>(
+    null,
+  );
+  useEffect(() => {
+    ipc
+      .appBuildInfo()
+      .then((b) =>
+        setInfo({
+          commit: b.commit,
+          builtAt: b.buildTimeSecs
+            ? new Date(b.buildTimeSecs * 1000).toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "?",
+          debug: b.debug,
+        }),
+      )
+      .catch(() => setInfo(null));
+  }, []);
+  return info;
+}
+
 function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
   const blocked = useApprovalStore((s) => s.queue.length);
   const workingUntil = useAgentStatusStore((s) => s.workingUntil);

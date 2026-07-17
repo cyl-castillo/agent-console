@@ -52,6 +52,18 @@ pub fn current_project(state: State<'_, AppState>) -> Option<Project> {
     state.inner.lock().project.clone()
 }
 
+/// Build provenance baked in at compile time (see build.rs): commit (+dirty
+/// marker), build timestamp, and whether this is a debug build. Ends the
+/// "which binary am I actually running?" class of dev-loop confusion.
+#[tauri::command]
+pub fn app_build_info() -> serde_json::Value {
+    serde_json::json!({
+        "commit": env!("AC_BUILD_COMMIT"),
+        "buildTimeSecs": env!("AC_BUILD_TIME").parse::<u64>().unwrap_or(0),
+        "debug": cfg!(debug_assertions),
+    })
+}
+
 #[tauri::command]
 pub fn workspace_context(state: State<'_, AppState>) -> AppResult<WorkspaceContext> {
     let root = state

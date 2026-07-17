@@ -139,6 +139,35 @@ function DiffPreview({ lines }: { lines: DiffLine[] }) {
   );
 }
 
+/// The agent is BLOCKED while this modal waits — and the hook gives up after
+/// its timeout (falling back to the in-terminal prompt). Both facts used to
+/// be invisible: users watched a "slow agent" that was actually waiting on
+/// them, then wondered why the terminal asked again. Count it down honestly.
+function ApprovalCountdown({ req }: { req: { ts: number; timeoutMs?: number } }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const deadline = req.ts + (req.timeoutMs ?? 90_000);
+  const left = Math.max(0, Math.ceil((deadline - now) / 1000));
+  if (left === 0) {
+    return (
+      <span className="approval-countdown expired" title="The hook timed out; the agent fell back to its own terminal prompt.">
+        expired — answer in the terminal
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`approval-countdown${left <= 15 ? " urgent" : ""}`}
+      title="The agent is blocked waiting for you. After this, the hook gives up and the agent falls back to its in-terminal prompt."
+    >
+      agent waiting · {left}s
+    </span>
+  );
+}
+
 export function ApprovalModal() {
   const queue = useApprovalStore((s) => s.queue);
   const req = queue[0] ?? null;
@@ -213,6 +242,7 @@ export function ApprovalModal() {
         <div className="approval-head">
           <span className={`approval-tool tool-${req.tool.toLowerCase()}`}>{req.tool}</span>
           <span className="approval-cwd" title={req.cwd}>{shortenPath(req.cwd)}</span>
+          <ApprovalCountdown req={req} />
           {queue.length > 1 && (
             <span className="approval-queue-depth">1 of {queue.length}</span>
           )}
