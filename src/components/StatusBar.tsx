@@ -28,6 +28,9 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
     if (branch && branches.length === 0) void loadBranches();
   }, [branch, branches.length, loadBranches]);
 
+  // Hooks must run unconditionally — keep this above the early return.
+  const build = useBuildInfo();
+
   if (!project) return null;
 
   const branchInfo = branches.find((b) => b.name === branch);
@@ -37,7 +40,6 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
   const liveCount = sessions.filter((s) => s.status === "live").length;
   const activeSession = sessions.find((s) => s.id === activeId);
   const appVersion = __APP_VERSION__;
-  const build = useBuildInfo();
 
   return (
     <footer className="statusbar">
