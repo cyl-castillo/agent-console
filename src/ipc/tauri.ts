@@ -32,6 +32,8 @@ export const ipc = {
   readTree: (path: string, depth = 3) =>
     invoke<FileNode>("read_tree", { path, depth }),
   currentProject: () => invoke<Project | null>("current_project"),
+  appBuildInfo: () =>
+    invoke<{ commit: string; buildTimeSecs: number; debug: boolean }>("app_build_info"),
   readFileText: (path: string) => invoke<FileContent>("read_file_text", { path }),
   workspaceContext: () => invoke<WorkspaceContext>("workspace_context"),
 

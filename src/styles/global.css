@@ -2895,6 +2895,17 @@ select:focus-visible,
   background: var(--bg-elev-2); border: 1px solid var(--border);
   padding: 1px 6px; border-radius: 3px;
 }
+/* Honest wait indicator: the agent is blocked on this decision, and the hook
+   gives up after its timeout. Turns red when it's about to. */
+.approval-countdown {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim);
+  padding: 1px 6px;
+}
+.approval-countdown.urgent { color: var(--warning, #e0a030); }
+.approval-countdown.expired { color: var(--danger); }
+.approval-countdown ~ .approval-queue-depth { margin-left: 8px; }
 .approval-bash-risk {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 10px; font-size: 11px;

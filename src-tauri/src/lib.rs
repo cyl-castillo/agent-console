@@ -51,6 +51,7 @@ pub fn run() {
             commands::project::open_project,
             commands::project::read_tree,
             commands::project::current_project,
+            commands::project::app_build_info,
             commands::project::read_file_text,
             commands::project::workspace_context,
             commands::terminal::term_spawn,

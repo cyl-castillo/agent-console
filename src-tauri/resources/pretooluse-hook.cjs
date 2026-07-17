@@ -44,6 +44,10 @@ process.stdin.on("end", () => {
     cwd: input.cwd || process.cwd(),
     tool: input.tool_name || "Unknown",
     input: input.tool_input || {},
+    // How long this hook will wait before falling back to the terminal
+    // prompt — lets the UI show an honest countdown instead of a silent
+    // stall (MEJORAS-2026-07 R2.8).
+    timeoutMs: TIMEOUT_MS,
   };
   // The PTY that launched this claude tags itself via AGENT_CONSOLE_TERM_ID
   // (same binding the userprompt hook uses), so the UI can mark exactly which

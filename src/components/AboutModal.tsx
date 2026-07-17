@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { Modal } from "./Modal";
 import { reportProblem } from "../lib/reportProblem";
+import { ipc } from "../ipc/tauri";
 
 const REPO_URL = "https://github.com/cyl-castillo/agent-console";
 const SPONSORS_URL = "https://github.com/sponsors/cyl-castillo";
@@ -13,16 +14,29 @@ interface Props {
 
 export function AboutModal({ onClose }: Props) {
   const [version, setVersion] = useState("");
+  const [build, setBuild] = useState("");
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion(""));
+    ipc
+      .appBuildInfo()
+      .then((b) => {
+        const when = b.buildTimeSecs
+          ? new Date(b.buildTimeSecs * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC"
+          : "";
+        setBuild(`${b.commit}${when ? ` · built ${when}` : ""}${b.debug ? " · debug" : ""}`);
+      })
+      .catch(() => setBuild(""));
   }, []);
 
   return (
     <Modal onClose={onClose} className="about-modal" ariaLabel="About Agent Console">
         <div className="about-head">
           <div className="about-title">Agent Console</div>
-          <div className="about-version">{version ? `v${version}` : ""} · early preview</div>
+          <div className="about-version">
+            {version ? `v${version}` : ""} · early preview
+            {build && <span title="build provenance"> · {build}</span>}
+          </div>
         </div>
 
         <div className="about-quote">
