@@ -16,7 +16,11 @@ import { useSchedulerStore } from "../stores/schedulerStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
-export type WorkbenchTab = "skills" | "permissions" | "advisor" | "learning" | "roundtable" | "schedule" | "vault" | "context" | "plugins" | "mcp" | "transfer" | "feedback" | "jira" | "agenda" | "notes" | "proof";
+// Single source of truth for the tab list lives in lib/workbenchTabs (a
+// component file exporting constants would break fast refresh). Re-exporting
+// the type keeps existing `import type { WorkbenchTab }` sites working.
+import type { WorkbenchTab } from "../lib/workbenchTabs";
+export type { WorkbenchTab } from "../lib/workbenchTabs";
 
 export function WorkbenchTabs({
   active,

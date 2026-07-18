@@ -157,8 +157,23 @@ impl SessionsService {
                 let _ = fs::copy(&path, &bak);
             }
         }
-        fs::rename(&tmp, &path)?;
-        Ok(())
+        // On Windows, antivirus/indexers briefly lock recently-written files
+        // and the rename fails transiently; without a retry, every persist in
+        // that window fails and (before the failure toast existed) session
+        // history silently stopped saving — issue #72's likeliest mechanism.
+        let mut last = None;
+        for attempt in 0..3 {
+            match fs::rename(&tmp, &path) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    last = Some(e);
+                    if attempt < 2 {
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                    }
+                }
+            }
+        }
+        Err(last.expect("loop ran").into())
     }
 
     pub fn list(&self, project_root: &str) -> AppResult<Vec<PersistedSession>> {

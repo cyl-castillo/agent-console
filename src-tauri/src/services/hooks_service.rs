@@ -598,9 +598,20 @@ fn drain_new_lines(path: &Path, last_size: u64) -> (Vec<Value>, u64) {
     let Some(consumed) = buf.rfind('\n').map(|i| i + 1) else {
         return (Vec::new(), last_size);
     };
+    // Cap per-event size BEFORE parsing: a buggy (or hostile) hook writing a
+    // multi-MB line must not balloon the app's memory — the ledger bounds its
+    // payloads anyway, so an oversized event carries nothing we'd keep.
+    const MAX_EVENT_BYTES: usize = 1024 * 1024;
     let events = buf[..consumed]
         .lines()
         .filter(|l| !l.trim().is_empty())
+        .filter(|l| {
+            let ok = l.len() <= MAX_EVENT_BYTES;
+            if !ok {
+                eprintln!("hooks: dropping oversized event line ({} bytes)", l.len());
+            }
+            ok
+        })
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .collect();
     (events, last_size + consumed as u64)
@@ -633,7 +644,10 @@ fn handle_event(v: &Value, app: &AppHandle) {
             // never block the snapshot or the UI event.
             let root = p.root.to_string_lossy();
             let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
-            let _ = state.activity.record(
+            // Best-effort but never SILENT: a failed persistence append (disk
+            // full, permissions) is data loss the user can't see happening —
+            // log it so "why is my history empty" has a trail (R3 policy).
+            if let Err(e) = state.activity.record(
                 root.as_ref(),
                 &ActivityEvent {
                     ts,
@@ -644,11 +658,15 @@ fn handle_event(v: &Value, app: &AppHandle) {
                     session_id: str_field(v, "sessionId"),
                     snapshot_sha: None,
                 },
-            );
+            ) {
+                eprintln!("hooks: activity append failed: {e}");
+            }
 
             // Testigo: the prompt is the intent — it opens a turn in the
-            // evidence chain. Best-effort like the activity append.
-            let _ = state.testigo.on_prompt(
+            // evidence chain. Best-effort like the activity append. A
+            // witness-off project errs here BY DESIGN (that's the per-project
+            // opt-out working) — only real failures get logged.
+            if let Err(e) = state.testigo.on_prompt(
                 root.as_ref(),
                 ts,
                 str_field(v, "termId").as_deref(),
@@ -656,7 +674,12 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 str_field(v, "prompt").as_deref(),
                 str_field(v, "skill").as_deref(),
                 str_field(v, "cwd").as_deref(),
-            );
+            ) {
+                let msg = e.to_string();
+                if !msg.contains("witnessing disabled") {
+                    eprintln!("hooks: testigo append failed: {msg}");
+                }
+            }
 
             // Auto-snapshot the working tree the prompt ran in. Worktree
             // sessions report their own cwd — snapshotting the project root
