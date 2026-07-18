@@ -1,9 +1,16 @@
 import { create } from "zustand";
 import { ipc } from "../ipc/tauri";
+import { useToastStore } from "./toastStore";
 import type { PersistedSession, WorktreeRef } from "../types/domain";
 import { asAgentKind, type AgentKind } from "../agents/profiles";
 
 const MAX_SCROLLBACK = 50_000;
+
+/// Consecutive sessionsSave failures. Persisting is best-effort per call, but
+/// SILENT persistent failure means every close loses all session history with
+/// zero signal (the invisible half of issue #72) — so the first failure and
+/// every 10th after it surface a toast.
+let persistFailures = 0;
 
 export interface TerminalSession {
   id: string;
@@ -293,8 +300,15 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     });
     try {
       await ipc.sessionsSave(projectRoot, payload);
-    } catch {
-      /* best-effort */
+      persistFailures = 0;
+    } catch (e) {
+      persistFailures += 1;
+      console.error("[sessions] persist failed:", e);
+      if (persistFailures === 1 || persistFailures % 10 === 0) {
+        useToastStore
+          .getState()
+          .show(`Session history isn't saving: ${String(e).slice(0, 120)}`, "error");
+      }
     }
   },
 }));

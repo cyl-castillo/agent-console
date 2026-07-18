@@ -36,7 +36,8 @@ import { Composer } from "./components/Composer";
 import { McpPanel } from "./components/McpPanel";
 import { ExportImportPanel } from "./components/ExportImportPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
-import { WorkbenchTabs, type WorkbenchTab } from "./components/WorkbenchTabs";
+import { WorkbenchTabs } from "./components/WorkbenchTabs";
+import { isWorkbenchTab, type WorkbenchTab } from "./lib/workbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
@@ -213,7 +214,7 @@ export default function App() {
     };
     const onOpenWb = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (d === "skills" || d === "permissions" || d === "advisor" || d === "learning" || d === "schedule" || d === "vault" || d === "context" || d === "plugins" || d === "mcp" || d === "transfer" || d === "feedback" || d === "jira" || d === "agenda" || d === "notes" || d === "proof") {
+      if (isWorkbenchTab(d)) {
         setWorkbenchTab(d);
       }
     };
@@ -311,10 +312,7 @@ export default function App() {
     // Restore last workbench tab for this project, if any.
     try {
       const saved = localStorage.getItem(`agent-console:workbench-tab:${project.root}`);
-      if (saved === "skills" || saved === "permissions" || saved === "advisor"
-          || saved === "learning" || saved === "roundtable" || saved === "schedule" || saved === "vault" || saved === "context"
-          || saved === "plugins" || saved === "mcp" || saved === "transfer" || saved === "feedback"
-          || saved === "jira" || saved === "agenda" || saved === "notes" || saved === "proof") {
+      if (isWorkbenchTab(saved)) {
         setWorkbenchTabState(saved);
       }
     } catch { /* ignore */ }
@@ -346,11 +344,50 @@ export default function App() {
     })();
   }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal, resetPaletteForProject, showToast]);
 
-  // Persist sessions on tab close / app unload.
+  // Persist sessions when the app closes. beforeunload alone is NOT enough:
+  // on Windows/WebView2 the window can be destroyed without dispatching it
+  // (issue #72 — sessions lost on close/update). Tauri's close-requested hook
+  // is the reliable path: hold the close, await the persist, then destroy.
   useEffect(() => {
     const onUnload = () => { persistTerminals(); };
     window.addEventListener("beforeunload", onUnload);
-    return () => window.removeEventListener("beforeunload", onUnload);
+
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    let closing = false;
+    void getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        // Second pass (our close() fallback re-entering): let the default
+        // close proceed — never block the user's X twice.
+        if (closing) return;
+        closing = true;
+        event.preventDefault();
+        try {
+          // Bounded: a wedged IPC must not hold the window hostage. The
+          // periodic 10s persist is the backstop for whatever this misses.
+          await Promise.race([
+            persistTerminals(),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+          ]);
+        } catch {
+          /* closing anyway */
+        }
+        // destroy() skips close-requested (needs core:window:allow-destroy);
+        // if it's unavailable for any reason, close() re-enters this handler
+        // with closing=true and falls through to the default close.
+        getCurrentWindow()
+          .destroy()
+          .catch(() => void getCurrentWindow().close());
+      })
+      .then((u) => {
+        if (disposed) u();
+        else unlisten = u;
+      });
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      disposed = true;
+      unlisten?.();
+    };
   }, [persistTerminals]);
 
   // Periodic persist so a hard kill doesn't lose more than ~10s of scrollback.
