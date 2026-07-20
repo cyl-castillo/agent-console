@@ -113,3 +113,83 @@ pub fn read_usage(project_root: &Path, session_id: &str) -> AppResult<Option<Usa
 
     Ok(saw_usage.then_some(stats))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One test fn — it mutates the process-global HOME so the transcript is
+    /// read from a sandbox instead of the developer's real ~/.claude.
+    #[test]
+    fn read_usage_aggregates_totals_and_tracks_latest_context() {
+        let _env = crate::test_support::lock_env();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fake_home = std::env::temp_dir().join(format!(
+            "ac-usage-home-{}-{nanos}",
+            std::process::id()
+        ));
+        let project = std::env::temp_dir().join(format!(
+            "ac-usage-proj-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&fake_home).unwrap();
+        fs::create_dir_all(&project).unwrap();
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &fake_home);
+
+        let run = || {
+            // No transcript yet → None, indicator hidden.
+            assert!(read_usage(&project, "sess-1").unwrap().is_none());
+
+            let canon = project.canonicalize().unwrap();
+            let slug = canon.to_string_lossy().replace(['/', '\\'], "-");
+            let dir = fake_home.join(".claude").join("projects").join(&slug);
+            fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("sess-1.jsonl");
+
+            // A transcript with: garbage, a usage-shaped line with all zeros
+            // (must not reset context), and two real assistant turns.
+            let lines = [
+                "not json at all",
+                r#"{"type":"other","usage":{"input_tokens":0,"output_tokens":0}}"#,
+                r#"{"message":{"usage":{"input_tokens":1000,"output_tokens":50,"cache_read_input_tokens":200,"cache_creation_input_tokens":30}}}"#,
+                r#"{"message":{"usage":{"input_tokens":2000,"output_tokens":80,"cache_read_input_tokens":500,"cache_creation_input_tokens":0}}}"#,
+            ];
+            fs::write(&path, lines.join("\n")).unwrap();
+
+            let stats = read_usage(&project, "sess-1").unwrap().expect("some usage");
+            assert_eq!(stats.input_total, 3000);
+            assert_eq!(stats.output_total, 130);
+            assert_eq!(stats.cache_read_total, 700);
+            assert_eq!(stats.cache_creation_total, 30);
+            // Context is the LATEST turn's footprint, not the sum.
+            assert_eq!(stats.context_tokens, 2500);
+            assert_eq!(stats.context_window, 200_000);
+
+            // A transcript whose lines carry no usage at all → None.
+            fs::write(&path, "{\"type\":\"user\"}\n").unwrap();
+            assert!(read_usage(&project, "sess-1").unwrap().is_none());
+
+            // A turn bigger than the standard window flips the denominator to
+            // the long-context tier (otherwise the indicator reads >100%).
+            let big = r#"{"message":{"usage":{"input_tokens":250000,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#;
+            fs::write(&path, big).unwrap();
+            let stats = read_usage(&project, "sess-1").unwrap().unwrap();
+            assert_eq!(stats.context_window, 1_000_000);
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
+
+        match prev_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+        fs::remove_dir_all(&fake_home).ok();
+        fs::remove_dir_all(&project).ok();
+        if let Err(p) = result {
+            std::panic::resume_unwind(p);
+        }
+    }
+}
