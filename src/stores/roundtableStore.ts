@@ -165,7 +165,13 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     set((s) => {
       pidCounter += 1;
       const id = `p${pidCounter}`;
-      const next: RtParticipantDraft = { id, name: `Agent ${s.draft.participants.length + 1}`, engine: "claude", model: "sonnet", role: "" };
+      const next: RtParticipantDraft = {
+        id,
+        name: `Agent ${s.draft.participants.length + 1}`,
+        engine: "claude",
+        model: "sonnet",
+        role: "",
+      };
       return { draft: { ...s.draft, participants: [...s.draft.participants, next] } };
     }),
 
@@ -173,7 +179,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     set((s) => {
       // A room needs at least two voices.
       if (s.draft.participants.length <= 2) return s;
-      return { draft: { ...s.draft, participants: s.draft.participants.filter((p) => p.id !== id) } };
+      return {
+        draft: { ...s.draft, participants: s.draft.participants.filter((p) => p.id !== id) },
+      };
     }),
 
   updateParticipant: (id, patch) =>
@@ -465,9 +473,7 @@ export function modelsFor(engine: "claude" | "codex") {
 
 async function bindListeners(
   set: (
-    partial:
-      | Partial<RoundtableState>
-      | ((s: RoundtableState) => Partial<RoundtableState>),
+    partial: Partial<RoundtableState> | ((s: RoundtableState) => Partial<RoundtableState>),
   ) => void,
   get: () => RoundtableState,
 ): Promise<void> {

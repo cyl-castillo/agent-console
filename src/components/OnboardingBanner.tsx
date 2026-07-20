@@ -36,8 +36,12 @@ export function OnboardingBanner({ onOpen }: Props) {
       <span className="ob-text">
         {pending} getting-started step{pending === 1 ? "" : "s"} left.
       </span>
-      <button className="wb-link" onClick={onOpen}>Open guide</button>
-      <button className="ob-dismiss" onClick={ob.dismissBanner} title="Don't show again">×</button>
+      <button className="wb-link" onClick={onOpen}>
+        Open guide
+      </button>
+      <button className="ob-dismiss" onClick={ob.dismissBanner} title="Don't show again">
+        ×
+      </button>
     </div>
   );
 }

@@ -21,10 +21,7 @@ export function BranchSwitcher({ currentBranch }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   // Find ahead/behind for the current branch to render the inline counter.
-  const currentInfo = useMemo(
-    () => branches.find((b) => b.current) ?? null,
-    [branches],
-  );
+  const currentInfo = useMemo(() => branches.find((b) => b.current) ?? null, [branches]);
 
   // Reload list every time the popover opens — branches can change from the
   // terminal (git checkout/branch/delete) and the filesystem watcher already
@@ -50,11 +47,19 @@ export function BranchSwitcher({ currentBranch }: Props) {
   }, [branches, query]);
 
   const onPick = async (b: BranchInfo) => {
-    if (b.current) { setOpen(false); return; }
+    if (b.current) {
+      setOpen(false);
+      return;
+    }
     setSwitching(b.name);
-    try { await checkoutBranch(b.name); setOpen(false); }
-    catch (e) { alert(`Could not switch: ${e}`); }
-    finally { setSwitching(null); }
+    try {
+      await checkoutBranch(b.name);
+      setOpen(false);
+    } catch (e) {
+      alert(`Could not switch: ${e}`);
+    } finally {
+      setSwitching(null);
+    }
   };
 
   return (
@@ -68,8 +73,12 @@ export function BranchSwitcher({ currentBranch }: Props) {
         <span className="branch-chip-name">{currentBranch ?? "(detached)"}</span>
         {currentInfo && (currentInfo.ahead > 0 || currentInfo.behind > 0) && (
           <span className="branch-chip-ab">
-            {currentInfo.ahead > 0 && <span title="commits ahead of upstream">↑{currentInfo.ahead}</span>}
-            {currentInfo.behind > 0 && <span title="commits behind upstream">↓{currentInfo.behind}</span>}
+            {currentInfo.ahead > 0 && (
+              <span title="commits ahead of upstream">↑{currentInfo.ahead}</span>
+            )}
+            {currentInfo.behind > 0 && (
+              <span title="commits behind upstream">↓{currentInfo.behind}</span>
+            )}
           </span>
         )}
         <span className="branch-chip-caret">▾</span>
@@ -87,9 +96,7 @@ export function BranchSwitcher({ currentBranch }: Props) {
             />
           </div>
 
-          {loading && branches.length === 0 && (
-            <div className="branch-empty">Loading…</div>
-          )}
+          {loading && branches.length === 0 && <div className="branch-empty">Loading…</div>}
           {!loading && branches.length === 0 && (
             <div className="branch-empty">No local branches.</div>
           )}

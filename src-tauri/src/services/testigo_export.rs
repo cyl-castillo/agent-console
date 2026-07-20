@@ -192,8 +192,16 @@ pub fn preview(
         let v = &seg.parsed[i];
         let seq = v.get("seq").and_then(|s| s.as_u64()).unwrap_or(i as u64);
         let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
-        let kind = v.get("kind").and_then(|k| k.as_str()).unwrap_or("").to_string();
-        let actor = v.get("actor").and_then(|a| a.as_str()).unwrap_or("").to_string();
+        let kind = v
+            .get("kind")
+            .and_then(|k| k.as_str())
+            .unwrap_or("")
+            .to_string();
+        let actor = v
+            .get("actor")
+            .and_then(|a| a.as_str())
+            .unwrap_or("")
+            .to_string();
         if seg.in_case(v) {
             let (line, n) = redact(&seg.raw_lines[i]);
             entries.push(PreviewEntry {
@@ -256,7 +264,9 @@ fn select_segment(
     }
     let raw_lines = testigo.raw_lines(project_root)?;
     if raw_lines.is_empty() {
-        return Err(AppError::Other("ledger is empty — nothing to export".into()));
+        return Err(AppError::Other(
+            "ledger is empty — nothing to export".into(),
+        ));
     }
     let parsed: Vec<Value> = raw_lines
         .iter()
@@ -420,7 +430,10 @@ pub fn export_with_seed(
         .unwrap_or_else(|| "ledger".into());
     let path = dest_dir.join(format!("{stem}.proofpack.json"));
     let tmp = dest_dir.join(format!("{stem}.proofpack.json.tmp"));
-    fs::write(&tmp, serde_json::to_string_pretty(&packet).unwrap_or_default())?;
+    fs::write(
+        &tmp,
+        serde_json::to_string_pretty(&packet).unwrap_or_default(),
+    )?;
     fs::rename(&tmp, &path)?;
 
     // Ship the standalone verifier next to the packet so "send the proof"
@@ -495,8 +508,16 @@ mod tests {
         let svc = TestigoService::new();
         let root = "/proj/export";
         svc.link_case(root, 1, "t1", "jira:FIXY-9").unwrap();
-        svc.on_prompt(root, 2, Some("t1"), None, Some("deploy with key ghp_0123456789abcdefghijklmnopqrstuvwxyz"), None, None)
-            .unwrap();
+        svc.on_prompt(
+            root,
+            2,
+            Some("t1"),
+            None,
+            Some("deploy with key ghp_0123456789abcdefghijklmnopqrstuvwxyz"),
+            None,
+            None,
+        )
+        .unwrap();
         // An interleaved event from another terminal → becomes a stub.
         svc.on_prompt(root, 3, Some("t2"), None, Some("unrelated"), None, None)
             .unwrap();
@@ -506,7 +527,10 @@ mod tests {
         // The pre-sign review lists exactly what would be packed.
         let pv = preview(&svc, root, Some("jira:FIXY-9")).unwrap();
         assert_eq!(pv.entries.len(), 4);
-        assert!(pv.entries[1].auto_redacted, "token prompt flagged in preview");
+        assert!(
+            pv.entries[1].auto_redacted,
+            "token prompt flagged in preview"
+        );
         assert!(pv.entries[2].stub && pv.entries[2].line.is_none());
 
         let seed = [7u8; 32];
@@ -520,8 +544,7 @@ mod tests {
         assert!(std::path::Path::new(&sum.verifier_path).exists());
 
         // Receiver side: parse packet, verify DSSE sig over PAE, check digest.
-        let packet: Value =
-            serde_json::from_str(&fs::read_to_string(&sum.path).unwrap()).unwrap();
+        let packet: Value = serde_json::from_str(&fs::read_to_string(&sum.path).unwrap()).unwrap();
         assert_eq!(packet["format"], PACKET_FORMAT);
         let payload = B64
             .decode(packet["envelope"]["payload"].as_str().unwrap())
@@ -550,7 +573,9 @@ mod tests {
         h.update(body.as_bytes());
         assert_eq!(
             format!("{:x}", h.finalize()),
-            statement["subject"][0]["digest"]["sha256"].as_str().unwrap()
+            statement["subject"][0]["digest"]["sha256"]
+                .as_str()
+                .unwrap()
         );
 
         // Chain linkage: stored prevHash/hash link through clean, redacted
@@ -591,7 +616,10 @@ mod tests {
             .iter()
             .find(|e| e["line"].as_str().is_some_and(|l| l.contains("\"prompt\"")))
             .unwrap();
-        assert!(prompt_entry["line"].as_str().unwrap().contains("[REDACTED:github-token]"));
+        assert!(prompt_entry["line"]
+            .as_str()
+            .unwrap()
+            .contains("[REDACTED:github-token]"));
         assert!(!prompt_entry["line"].as_str().unwrap().contains("ghp_0123"));
         assert_eq!(prompt_entry["redacted"], true);
 
@@ -609,20 +637,33 @@ mod tests {
         let evs2 = st2["predicate"]["events"].as_array().unwrap();
         let turn_end = evs2
             .iter()
-            .find(|e| e["line"].as_str().is_some_and(|l| l.contains("\"turn_end\"")))
+            .find(|e| {
+                e["line"]
+                    .as_str()
+                    .is_some_and(|l| l.contains("\"turn_end\""))
+            })
             .unwrap();
         assert_eq!(turn_end["redacted"], true);
         let v2: Value = serde_json::from_str(turn_end["line"].as_str().unwrap()).unwrap();
         assert_eq!(v2["payload"]["redacted"], "manual", "payload replaced");
         // Linkage still holds through the manually redacted event.
-        let mut prev2 = st2["predicate"]["range"]["prevHashBefore"].as_str().unwrap().to_string();
+        let mut prev2 = st2["predicate"]["range"]["prevHashBefore"]
+            .as_str()
+            .unwrap()
+            .to_string();
         for e in evs2 {
             let (ph, h) = if let Some(line) = e["line"].as_str() {
                 let v: Value = serde_json::from_str(line).unwrap();
-                (v["prevHash"].as_str().unwrap().to_string(), v["hash"].as_str().unwrap().to_string())
+                (
+                    v["prevHash"].as_str().unwrap().to_string(),
+                    v["hash"].as_str().unwrap().to_string(),
+                )
             } else {
                 let s = &e["stub"];
-                (s["prevHash"].as_str().unwrap().to_string(), s["hash"].as_str().unwrap().to_string())
+                (
+                    s["prevHash"].as_str().unwrap().to_string(),
+                    s["hash"].as_str().unwrap().to_string(),
+                )
             };
             assert_eq!(ph, prev2);
             prev2 = h;
@@ -643,7 +684,9 @@ mod tests {
 
         // Broken ledger → export refuses (preview too).
         let ledger = TestigoService::ledger_path(root).unwrap();
-        let tampered = fs::read_to_string(&ledger).unwrap().replace("unrelated", "tampered!!");
+        let tampered = fs::read_to_string(&ledger)
+            .unwrap()
+            .replace("unrelated", "tampered!!");
         fs::write(&ledger, tampered).unwrap();
         let svc2 = TestigoService::new();
         assert!(export_with_seed(&svc2, root, None, &dest, &seed, &[], None).is_err());
@@ -665,11 +708,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let base = std::env::temp_dir().join(format!(
-            "ac-testigo-tsa-{}-{}",
-            std::process::id(),
-            nanos
-        ));
+        let base =
+            std::env::temp_dir().join(format!("ac-testigo-tsa-{}-{}", std::process::id(), nanos));
         std::fs::create_dir_all(&base).unwrap();
         std::env::set_var("XDG_DATA_HOME", &base);
 
@@ -690,10 +730,12 @@ mod tests {
             Some("https://freetsa.org/tsr"),
         )
         .unwrap();
-        assert_eq!(sum.timestamp_tsa.as_deref(), Some("https://freetsa.org/tsr"));
+        assert_eq!(
+            sum.timestamp_tsa.as_deref(),
+            Some("https://freetsa.org/tsr")
+        );
 
-        let packet: Value =
-            serde_json::from_str(&fs::read_to_string(&sum.path).unwrap()).unwrap();
+        let packet: Value = serde_json::from_str(&fs::read_to_string(&sum.path).unwrap()).unwrap();
         let tsp = &packet["timestamp"];
         assert_eq!(tsp["type"], "rfc3161");
         assert_eq!(tsp["hashAlg"], "sha256");
@@ -711,4 +753,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 }
-

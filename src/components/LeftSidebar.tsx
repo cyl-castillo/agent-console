@@ -12,7 +12,12 @@ import { useRoundtableStore } from "../stores/roundtableStore";
 type SectionId = "sessions" | "rooms" | "changes" | "files";
 
 type CollapsedMap = Record<SectionId, boolean>;
-const DEFAULT_COLLAPSED: CollapsedMap = { sessions: false, rooms: false, changes: false, files: true };
+const DEFAULT_COLLAPSED: CollapsedMap = {
+  sessions: false,
+  rooms: false,
+  changes: false,
+  files: true,
+};
 
 const KEY_PREFIX = "agent-console:sidebar-collapsed:";
 
@@ -30,7 +35,11 @@ function loadCollapsed(projectRoot: string | undefined): CollapsedMap {
 
 function saveCollapsed(projectRoot: string | undefined, v: CollapsedMap) {
   if (!projectRoot) return;
-  try { localStorage.setItem(KEY_PREFIX + projectRoot, JSON.stringify(v)); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(KEY_PREFIX + projectRoot, JSON.stringify(v));
+  } catch {
+    /* ignore */
+  }
 }
 
 export function LeftSidebar({ onOpenRoom }: { onOpenRoom: (id: string) => void }) {
@@ -52,15 +61,16 @@ export function LeftSidebar({ onOpenRoom }: { onOpenRoom: (id: string) => void }
   // Force-collapse Changes when the project isn't a git repo.
   useEffect(() => {
     if (status && !isRepo) {
-      setCollapsed((prev) => prev.changes ? prev : { ...prev, changes: true });
+      setCollapsed((prev) => (prev.changes ? prev : { ...prev, changes: true }));
     }
   }, [status, isRepo]);
 
-  const toggle = (id: SectionId) => setCollapsed((prev) => {
-    const next = { ...prev, [id]: !prev[id] };
-    saveCollapsed(projectRoot, next);
-    return next;
-  });
+  const toggle = (id: SectionId) =>
+    setCollapsed((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      saveCollapsed(projectRoot, next);
+      return next;
+    });
 
   return (
     <aside className="panel left">
@@ -95,13 +105,7 @@ export function LeftSidebar({ onOpenRoom }: { onOpenRoom: (id: string) => void }
         <ChangesList />
       </Section>
 
-      <Section
-        id="files"
-        title="Files"
-        collapsed={collapsed.files}
-        onToggle={toggle}
-        grow
-      >
+      <Section id="files" title="Files" collapsed={collapsed.files} onToggle={toggle} grow>
         {tree ? <FileTree root={tree} /> : <div className="placeholder">Loading…</div>}
       </Section>
     </aside>
@@ -128,7 +132,9 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`side-section ${collapsed ? "collapsed" : ""} ${grow ? "grow" : ""} ${muted ? "muted" : ""}`}>
+    <section
+      className={`side-section ${collapsed ? "collapsed" : ""} ${grow ? "grow" : ""} ${muted ? "muted" : ""}`}
+    >
       <button
         className="side-section-header"
         onClick={() => onToggle(id)}

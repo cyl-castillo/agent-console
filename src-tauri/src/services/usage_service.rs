@@ -127,14 +127,10 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let fake_home = std::env::temp_dir().join(format!(
-            "ac-usage-home-{}-{nanos}",
-            std::process::id()
-        ));
-        let project = std::env::temp_dir().join(format!(
-            "ac-usage-proj-{}-{nanos}",
-            std::process::id()
-        ));
+        let fake_home =
+            std::env::temp_dir().join(format!("ac-usage-home-{}-{nanos}", std::process::id()));
+        let project =
+            std::env::temp_dir().join(format!("ac-usage-proj-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&fake_home).unwrap();
         fs::create_dir_all(&project).unwrap();
         let prev_home = std::env::var("HOME").ok();

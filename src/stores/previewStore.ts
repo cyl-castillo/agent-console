@@ -35,8 +35,11 @@ export const usePreviewStore = create<PreviewState>((set) => ({
   open: async (absPath) => {
     const project = useSessionStore.getState().project;
     const root = project?.root ?? "";
-    const relative = absPath.startsWith(root + "/") ? absPath.slice(root.length + 1)
-                    : absPath === root ? "" : absPath;
+    const relative = absPath.startsWith(root + "/")
+      ? absPath.slice(root.length + 1)
+      : absPath === root
+        ? ""
+        : absPath;
 
     set({
       selectedAbs: absPath,
@@ -73,8 +76,14 @@ export const usePreviewStore = create<PreviewState>((set) => ({
     }
   },
 
-  clear: () => set({
-    selectedAbs: null, displayPath: null, mode: "empty",
-    content: "", sizeBytes: 0, truncated: false, error: null,
-  }),
+  clear: () =>
+    set({
+      selectedAbs: null,
+      displayPath: null,
+      mode: "empty",
+      content: "",
+      sizeBytes: 0,
+      truncated: false,
+      error: null,
+    }),
 }));

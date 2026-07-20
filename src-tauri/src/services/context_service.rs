@@ -236,10 +236,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "ac-context-{tag}-{}-{nanos}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("ac-context-{tag}-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -275,8 +273,8 @@ mod tests {
         let stat = write_md(Some(&root), "project", "v1", None).unwrap();
 
         // Stale expectation → recognizable conflict error, file untouched.
-        let err = write_md(Some(&root), "project", "v2", Some(stat.modified_ms - 5000))
-            .unwrap_err();
+        let err =
+            write_md(Some(&root), "project", "v2", Some(stat.modified_ms - 5000)).unwrap_err();
         assert!(err.to_string().contains("context:conflict"), "{err}");
         assert_eq!(fs::read_to_string(root.join("CLAUDE.md")).unwrap(), "v1");
 

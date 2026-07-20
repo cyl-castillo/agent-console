@@ -33,7 +33,9 @@ export function SkillsPanel() {
   const [integrationOpen, setIntegrationOpen] = useState(false);
   const [activityExpanded, setActivityExpanded] = useState(false);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   // Frequency map from observed prompt events for "recent" boost.
   const frequency = useMemo(() => {
@@ -45,12 +47,15 @@ export function SkillsPanel() {
     return m;
   }, [recent]);
 
-  const counts = useMemo(() => ({
-    all: installed.length,
-    skill: installed.filter((s) => s.kind === "skill").length,
-    command: installed.filter((s) => s.kind === "command").length,
-    agent: installed.filter((s) => s.kind === "agent").length,
-  }), [installed]);
+  const counts = useMemo(
+    () => ({
+      all: installed.length,
+      skill: installed.filter((s) => s.kind === "skill").length,
+      command: installed.filter((s) => s.kind === "command").length,
+      agent: installed.filter((s) => s.kind === "agent").length,
+    }),
+    [installed],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -83,7 +88,9 @@ export function SkillsPanel() {
       <div className="workbench-header workbench-header-slim">
         <span className="workbench-title">skills</span>
         <span className="spacer" />
-        <button className="workbench-action" onClick={refresh} title="Refresh">↻</button>
+        <button className="workbench-action" onClick={refresh} title="Refresh">
+          ↻
+        </button>
       </div>
 
       <div className="workbench-body">
@@ -104,16 +111,20 @@ export function SkillsPanel() {
             <div className="wb-integration-body">
               {integrationActive ? (
                 <p className="wb-hint">
-                  Hook installed. Agent sessions inside this terminal trigger
-                  snapshots and feed the activity stream below.
-                  <button className="wb-link" onClick={uninstall}>disable</button>
+                  Hook installed. Agent sessions inside this terminal trigger snapshots and feed the
+                  activity stream below.
+                  <button className="wb-link" onClick={uninstall}>
+                    disable
+                  </button>
                 </p>
               ) : (
                 <p className="wb-hint">
-                  Snapshots + activity tracking require a small hook in
-                  {" "}<code>~/.claude/settings.json</code>. It only activates when claude runs
-                  inside Agent Console (gated by env var).
-                  <button className="wb-cta" onClick={install}>enable</button>
+                  Snapshots + activity tracking require a small hook in{" "}
+                  <code>~/.claude/settings.json</code>. It only activates when claude runs inside
+                  Agent Console (gated by env var).
+                  <button className="wb-cta" onClick={install}>
+                    enable
+                  </button>
                 </p>
               )}
               {/* The observer auto-installs on first run, so the enable button
@@ -123,23 +134,25 @@ export function SkillsPanel() {
                   never records. install() upserts all hooks, idempotently. */}
               {integrationActive && hooks && !hooks.pretooluseInstalled && (
                 <p className="wb-hint">
-                  Approvals bridge off: permission prompts stay inside the
-                  terminal and are not recorded. Enable it to approve from the
-                  console UI (and audit-trail every decision).
-                  <button className="wb-cta" onClick={install}>enable approvals bridge</button>
+                  Approvals bridge off: permission prompts stay inside the terminal and are not
+                  recorded. Enable it to approve from the console UI (and audit-trail every
+                  decision).
+                  <button className="wb-cta" onClick={install}>
+                    enable approvals bridge
+                  </button>
                 </p>
               )}
               {integrationActive && hooks?.pretooluseInstalled && (
                 <p className="wb-hint">
-                  Approvals bridge active: permission requests surface in the
-                  console and every decision is recorded.
+                  Approvals bridge active: permission requests surface in the console and every
+                  decision is recorded.
                 </p>
               )}
               {hooks?.codexAvailable && hooks.codexInstalled && (
                 <p className="wb-hint">
-                  Codex too: wired via <code>~/.codex/hooks.json</code>. Codex asks you to
-                  trust the hook once — run <code>/hooks</code> inside a codex session to
-                  review and approve it.
+                  Codex too: wired via <code>~/.codex/hooks.json</code>. Codex asks you to trust the
+                  hook once — run <code>/hooks</code> inside a codex session to review and approve
+                  it.
                 </p>
               )}
             </div>
@@ -161,7 +174,9 @@ export function SkillsPanel() {
           ) : (
             <>
               <ul className="wb-events">
-                {visibleRecent.map((e) => <EventRow key={e.id} event={e} onRestore={restore} />)}
+                {visibleRecent.map((e) => (
+                  <EventRow key={e.id} event={e} onRestore={restore} />
+                ))}
               </ul>
               {recent.length > RECENT_PREVIEW && (
                 <button
@@ -192,19 +207,41 @@ export function SkillsPanel() {
                   onChange={(e) => setQuery(e.target.value)}
                 />
                 {query && (
-                  <button
-                    className="wb-search-clear"
-                    onClick={() => setQuery("")}
-                    title="Clear"
-                  >×</button>
+                  <button className="wb-search-clear" onClick={() => setQuery("")} title="Clear">
+                    ×
+                  </button>
                 )}
               </div>
 
               <div className="wb-chips">
-                <KindChip label="All" value="all" active={filter === "all"} count={counts.all} onClick={setFilter} />
-                <KindChip label="Skills" value="skill" active={filter === "skill"} count={counts.skill} onClick={setFilter} />
-                <KindChip label="Commands" value="command" active={filter === "command"} count={counts.command} onClick={setFilter} />
-                <KindChip label="Agents" value="agent" active={filter === "agent"} count={counts.agent} onClick={setFilter} />
+                <KindChip
+                  label="All"
+                  value="all"
+                  active={filter === "all"}
+                  count={counts.all}
+                  onClick={setFilter}
+                />
+                <KindChip
+                  label="Skills"
+                  value="skill"
+                  active={filter === "skill"}
+                  count={counts.skill}
+                  onClick={setFilter}
+                />
+                <KindChip
+                  label="Commands"
+                  value="command"
+                  active={filter === "command"}
+                  count={counts.command}
+                  onClick={setFilter}
+                />
+                <KindChip
+                  label="Agents"
+                  value="agent"
+                  active={filter === "agent"}
+                  count={counts.agent}
+                  onClick={setFilter}
+                />
               </div>
             </>
           )}
@@ -212,13 +249,13 @@ export function SkillsPanel() {
           {installed.length === 0 ? (
             <div className="wb-empty">
               <p className="wb-hint">
-                No skills yet. Skills live in
-                {" "}<code>.claude/skills</code>, <code>.claude/commands</code>, and
-                {" "}<code>.claude/agents</code>, and are invoked from Claude in the terminal.
+                No skills yet. Skills live in <code>.claude/skills</code>,{" "}
+                <code>.claude/commands</code>, and <code>.claude/agents</code>, and are invoked from
+                Claude in the terminal.
               </p>
               <p className="wb-hint">
-                Fastest way in? Open the <strong>Advisor</strong> tab — it analyzes
-                your project and proposes concrete skills in one click.
+                Fastest way in? Open the <strong>Advisor</strong> tab — it analyzes your project and
+                proposes concrete skills in one click.
               </p>
             </div>
           ) : filtered.length === 0 ? (
@@ -245,7 +282,13 @@ export function SkillsPanel() {
   );
 }
 
-function KindChip({ label, value, active, count, onClick }: {
+function KindChip({
+  label,
+  value,
+  active,
+  count,
+  onClick,
+}: {
   label: string;
   value: KindFilter;
   active: boolean;
@@ -264,7 +307,12 @@ function KindChip({ label, value, active, count, onClick }: {
   );
 }
 
-function SkillRow({ skill, pinned, onClick, onTogglePin }: {
+function SkillRow({
+  skill,
+  pinned,
+  onClick,
+  onTogglePin,
+}: {
   skill: Skill;
   pinned: boolean;
   onClick: () => void;
@@ -294,12 +342,16 @@ function SkillRow({ skill, pinned, onClick, onTogglePin }: {
           className={`wb-skill-pin ${pinned ? "active" : ""}`}
           onClick={onPin}
           title={pinned ? "Unpin" : "Pin to top"}
-        >{pinned ? "★" : "☆"}</button>
+        >
+          {pinned ? "★" : "☆"}
+        </button>
         <button
           className="wb-skill-invoke"
           onClick={onInsert}
           title={`Insert into terminal: ${snippet.trim()}`}
-        >→</button>
+        >
+          →
+        </button>
       </div>
     </li>
   );
@@ -317,16 +369,21 @@ async function insertIntoTerminal(text: string): Promise<void> {
   useUIStore.getState().setTab("terminal");
   if (!activeId) {
     // Fallback: copy so the user can paste manually.
-    try { await navigator.clipboard.writeText(text); } catch { /* ignore */ }
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      /* ignore */
+    }
     return;
   }
-  try { await ipc.termWrite(activeId, text); } catch { /* ignore */ }
+  try {
+    await ipc.termWrite(activeId, text);
+  } catch {
+    /* ignore */
+  }
 }
 
-function EventRow({ event, onRestore }: {
-  event: PromptEvent;
-  onRestore: (sha: string) => void;
-}) {
+function EventRow({ event, onRestore }: { event: PromptEvent; onRestore: (sha: string) => void }) {
   const time = new Date(event.ts).toLocaleTimeString();
   return (
     <li className="wb-event">
@@ -338,15 +395,20 @@ function EventRow({ event, onRestore }: {
           className="wb-event-restore"
           title="Restore the working tree to before this turn (a backup is taken first)"
           onClick={() => {
-            if (event.snapshotCommitSha && confirm(
-              "Restore the working tree to before this turn?\n\n" +
-              "This discards ALL changes made after this point — not just this turn's. " +
-              "A backup is taken first, so you can undo from the command palette.",
-            )) {
+            if (
+              event.snapshotCommitSha &&
+              confirm(
+                "Restore the working tree to before this turn?\n\n" +
+                  "This discards ALL changes made after this point — not just this turn's. " +
+                  "A backup is taken first, so you can undo from the command palette.",
+              )
+            ) {
               onRestore(event.snapshotCommitSha);
             }
           }}
-        >↶</button>
+        >
+          ↶
+        </button>
       )}
     </li>
   );
@@ -357,17 +419,24 @@ function SkillDetail({ skill, md, onBack }: { skill: Skill; md: string; onBack: 
   const [copied, setCopied] = useState(false);
 
   const onCopy = () => {
-    navigator.clipboard?.writeText(snippet.trim()).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    }).catch(() => {});
+    navigator.clipboard
+      ?.writeText(snippet.trim())
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      })
+      .catch(() => {});
   };
-  const onInsert = () => { insertIntoTerminal(snippet); };
+  const onInsert = () => {
+    insertIntoTerminal(snippet);
+  };
 
   return (
     <div className="workbench">
       <div className="workbench-header">
-        <button className="workbench-action" onClick={onBack}>← back</button>
+        <button className="workbench-action" onClick={onBack}>
+          ← back
+        </button>
         <span className="workbench-title wb-detail-name">{skill.name}</span>
         <span className="spacer" />
         <span className={`wb-skill-kind kind-${skill.kind}`}>{kindLabel(skill.kind)}</span>
@@ -376,17 +445,29 @@ function SkillDetail({ skill, md, onBack }: { skill: Skill; md: string; onBack: 
         {skill.description && <div className="wb-detail-desc">{skill.description}</div>}
         <div className="wb-detail-invoke">
           <code>{snippet.trim()}</code>
-          <button className="wb-cta wb-cta-sm" onClick={onInsert}>insert →</button>
-          <button className="wb-link" onClick={onCopy}>{copied ? "copied!" : "copy"}</button>
+          <button className="wb-cta wb-cta-sm" onClick={onInsert}>
+            insert →
+          </button>
+          <button className="wb-link" onClick={onCopy}>
+            {copied ? "copied!" : "copy"}
+          </button>
         </div>
         <div className="wb-detail-meta">
           <span className="wb-detail-source">source: {skill.source}</span>
-          <span className="wb-detail-path" title={skill.path}>{skill.path}</span>
+          <span className="wb-detail-path" title={skill.path}>
+            {skill.path}
+          </span>
         </div>
         {skill.allowedTools.length > 0 && (
           <div className="wb-detail-tools">
-            <span className="wb-section-title" style={{ display: "block", marginBottom: 4 }}>allowed tools</span>
-            {skill.allowedTools.map((t) => <span key={t} className="wb-tool-tag">{t}</span>)}
+            <span className="wb-section-title" style={{ display: "block", marginBottom: 4 }}>
+              allowed tools
+            </span>
+            {skill.allowedTools.map((t) => (
+              <span key={t} className="wb-tool-tag">
+                {t}
+              </span>
+            ))}
           </div>
         )}
         <div className="wb-detail-md">
@@ -399,9 +480,12 @@ function SkillDetail({ skill, md, onBack }: { skill: Skill; md: string; onBack: 
 
 function kindLabel(kind: Skill["kind"]): string {
   switch (kind) {
-    case "skill": return "S";
-    case "command": return "/";
-    case "agent": return "A";
+    case "skill":
+      return "S";
+    case "command":
+      return "/";
+    case "agent":
+      return "A";
   }
 }
 

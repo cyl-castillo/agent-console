@@ -18,18 +18,28 @@ export function ChangesList() {
   };
 
   if (!status) {
-    return <div className="placeholder" style={{ padding: "8px 12px" }}>Loading…</div>;
+    return (
+      <div className="placeholder" style={{ padding: "8px 12px" }}>
+        Loading…
+      </div>
+    );
   }
 
   if (!status.isRepo) {
-    return <div className="placeholder" style={{ padding: "8px 12px" }}>Not a git repo.</div>;
+    return (
+      <div className="placeholder" style={{ padding: "8px 12px" }}>
+        Not a git repo.
+      </div>
+    );
   }
 
   if (changes.length === 0) {
     return (
       <div className="changes-empty">
         <span>Working tree clean.</span>
-        <button className="btn btn-link" onClick={() => refresh()} title="Refresh">refresh</button>
+        <button className="btn btn-link" onClick={() => refresh()} title="Refresh">
+          refresh
+        </button>
       </div>
     );
   }
@@ -48,7 +58,11 @@ export function ChangesList() {
   );
 }
 
-function ChangeRow({ change, active, onPick }: {
+function ChangeRow({
+  change,
+  active,
+  onPick,
+}: {
   change: GitFileChange;
   active: boolean;
   onPick: () => void;
@@ -59,11 +73,7 @@ function ChangeRow({ change, active, onPick }: {
   const name = idx >= 0 ? change.path.slice(idx + 1) : change.path;
 
   return (
-    <li
-      className={`change-row ${active ? "active" : ""}`}
-      onClick={onPick}
-      title={change.path}
-    >
+    <li className={`change-row ${active ? "active" : ""}`} onClick={onPick} title={change.path}>
       <span className={`change-tag ${kind}`}>{tag}</span>
       <span className="change-name">{name}</span>
       {dir && <span className="change-dir">{dir}</span>}

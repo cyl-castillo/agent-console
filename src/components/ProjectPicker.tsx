@@ -27,7 +27,9 @@ function PreflightCard() {
   const checking = usePreflightStore((s) => s.checking);
   const check = usePreflightStore((s) => s.check);
 
-  useEffect(() => { void check(); }, [check]);
+  useEffect(() => {
+    void check();
+  }, [check]);
 
   if (!result) {
     return checking ? <div className="preflight checking">Checking your setup…</div> : null;
@@ -47,7 +49,7 @@ function PreflightCard() {
           <div className="preflight-title">Claude CLI not found</div>
           <div className="preflight-body">
             Agent Console drives the Claude CLI. Install it, then sign in once:
-            <pre>npm install -g @anthropic-ai/claude-code{"\n"}claude   # sign in</pre>
+            <pre>npm install -g @anthropic-ai/claude-code{"\n"}claude # sign in</pre>
           </div>
         </div>
       ) : nodeMissing ? (
@@ -84,7 +86,9 @@ export function ProjectPicker() {
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
 
-  useEffect(() => { loadRecent(); }, [loadRecent]);
+  useEffect(() => {
+    loadRecent();
+  }, [loadRecent]);
 
   const onPick = async () => {
     const path = await pickFolder();
@@ -102,12 +106,10 @@ export function ProjectPicker() {
       </button>
       <div className="picker-card">
         <h1>AGENT CONSOLE</h1>
-        <p>
-          A minimalist, AI-native console for directing agents inside a repository.
-        </p>
+        <p>A minimalist, AI-native console for directing agents inside a repository.</p>
         <p className="picker-sub">
-          Pick a git repository — the agent works inside it. You approve every file
-          change and command, and any turn can be rewound.
+          Pick a git repository — the agent works inside it. You approve every file change and
+          command, and any turn can be rewound.
         </p>
         <button className="btn btn-primary" onClick={onPick} disabled={loading}>
           {loading ? "Opening..." : "Open folder"}
@@ -135,7 +137,9 @@ export function ProjectPicker() {
                   onClick={() => forget(r.path)}
                   title="Remove from list"
                   aria-label="Remove from list"
-                ><Icon name="x" size={14} /></button>
+                >
+                  <Icon name="x" size={14} />
+                </button>
               </div>
             ))}
           </div>

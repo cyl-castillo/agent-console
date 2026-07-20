@@ -46,7 +46,9 @@ function JiraHeaderActions() {
       onClick={() => void refreshIssues()}
       disabled={loadingIssues}
       title="Refresh assigned issues"
-    >↻</button>
+    >
+      ↻
+    </button>
   );
 }
 
@@ -66,8 +68,8 @@ function ConnectForm() {
   return (
     <div className="jira-connect">
       <p className="wb-hint wb-trust">
-        Your API token is stored in your OS keychain, never in a file or log — it
-        only leaves this machine as an authenticated request to your own Jira site.
+        Your API token is stored in your OS keychain, never in a file or log — it only leaves this
+        machine as an authenticated request to your own Jira site.
       </p>
 
       <label className="jira-field">
@@ -99,7 +101,9 @@ function ConnectForm() {
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit();
+          }}
           placeholder="paste your Atlassian API token"
           spellCheck={false}
         />
@@ -112,7 +116,9 @@ function ConnectForm() {
             void openUrl("https://id.atlassian.com/manage-profile/security/api-tokens")
           }
           title="Create an API token on id.atlassian.com"
-        >Get a token ↗</button>
+        >
+          Get a token ↗
+        </button>
         <button
           className="wb-cta wb-cta-sm"
           onClick={submit}
@@ -140,11 +146,17 @@ function IssueList() {
   return (
     <div className="jira-list">
       <div className="jira-account">
-        <span className="jira-account-who" title={status?.siteUrl}>{status?.email}</span>
+        <span className="jira-account-who" title={status?.siteUrl}>
+          {status?.email}
+        </span>
         <button
           className="wb-link"
-          onClick={() => { if (confirm("Disconnect Jira? The stored token is removed.")) void disconnect(); }}
-        >disconnect</button>
+          onClick={() => {
+            if (confirm("Disconnect Jira? The stored token is removed.")) void disconnect();
+          }}
+        >
+          disconnect
+        </button>
       </div>
 
       {issuesError && <PanelError message={issuesError} onRetry={() => void refreshIssues()} />}
@@ -161,7 +173,9 @@ function IssueList() {
               <span className="jira-group-count">{g.issues.length}</span>
             </div>
             <ul className="jira-issues">
-              {g.issues.map((it) => <IssueRow key={it.key} issue={it} isRepo={isRepo} />)}
+              {g.issues.map((it) => (
+                <IssueRow key={it.key} issue={it} isRepo={isRepo} />
+              ))}
             </ul>
           </section>
         ))
@@ -204,8 +218,14 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
           className="jira-key"
           onClick={() => void openUrl(issue.url)}
           title={`Open ${issue.key} in Jira`}
-        >{issue.key}</button>
-        {issue.dueDate && <span className="jira-due" title="Due date">⏱ {issue.dueDate}</span>}
+        >
+          {issue.key}
+        </button>
+        {issue.dueDate && (
+          <span className="jira-due" title="Due date">
+            ⏱ {issue.dueDate}
+          </span>
+        )}
       </div>
       <div className="jira-summary">{issue.summary}</div>
 
@@ -223,8 +243,16 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
               if (e.key === "Escape") setBranch(null);
             }}
           />
-          <button className="jira-start" onClick={createWorktree} title="Create the worktree on this branch and start the session">Create</button>
-          <button className="jira-wt-cancel" onClick={() => setBranch(null)} title="Cancel">✕</button>
+          <button
+            className="jira-start"
+            onClick={createWorktree}
+            title="Create the worktree on this branch and start the session"
+          >
+            Create
+          </button>
+          <button className="jira-wt-cancel" onClick={() => setBranch(null)} title="Cancel">
+            ✕
+          </button>
         </div>
       ) : (
         <div className="jira-issue-bottom">
@@ -240,13 +268,17 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
                 onClick={() => void openWorktreeEditor()}
                 disabled={proposing}
                 title={`Start a ${verb} session in an isolated worktree for ${issue.key} (you name the branch)`}
-              >{proposing ? "…" : "⎇ worktree"}</button>
+              >
+                {proposing ? "…" : "⎇ worktree"}
+              </button>
             )}
             <button
               className="jira-start"
               onClick={() => void startSessionForIssue(issue)}
               title={`Start a ${verb} session for ${issue.key} in the project checkout`}
-            >▸ Start session</button>
+            >
+              ▸ Start session
+            </button>
           </div>
         </div>
       )}

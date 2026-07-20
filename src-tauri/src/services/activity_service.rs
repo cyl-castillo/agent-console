@@ -1,8 +1,8 @@
 use std::fs::{self, OpenOptions};
 
+use parking_lot::Mutex;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
 

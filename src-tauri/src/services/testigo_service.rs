@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 
+use parking_lot::Mutex;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -202,7 +202,11 @@ impl TestigoService {
 
     /// Persist this project's policy: load-before-save merge into the shared
     /// file, temp+rename atomic write, .bak of the previous version.
-    pub fn set_settings(&self, project_root: &str, s: TestigoSettings) -> AppResult<TestigoSettings> {
+    pub fn set_settings(
+        &self,
+        project_root: &str,
+        s: TestigoSettings,
+    ) -> AppResult<TestigoSettings> {
         let mut inner = self.inner.lock();
         Self::settings_map(&mut inner).insert(project_root.to_string(), s.clone());
         let mut file = Self::load_settings_file();
@@ -311,7 +315,9 @@ impl TestigoService {
             .get(project_root)
             .is_none_or(|s| s.witness)
         {
-            return Err(AppError::Other("testigo: witnessing disabled for this project".into()));
+            return Err(AppError::Other(
+                "testigo: witnessing disabled for this project".into(),
+            ));
         }
         Self::ensure_tail(inner, project_root)?;
         let tail = inner.tails.get(project_root).cloned().flatten();
@@ -407,7 +413,9 @@ impl TestigoService {
         payload: Value,
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
-        let turn_id = term_id.and_then(|t| inner.turns.remove(t)).map(|s| s.turn_id);
+        let turn_id = term_id
+            .and_then(|t| inner.turns.remove(t))
+            .map(|s| s.turn_id);
         let case = Self::case_for(&inner, term_id);
         Self::record(
             &mut inner,
@@ -437,7 +445,9 @@ impl TestigoService {
         truncated: bool,
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
-        let turn_id = term_id.and_then(|t| inner.turns.get(t)).map(|s| s.turn_id.clone());
+        let turn_id = term_id
+            .and_then(|t| inner.turns.get(t))
+            .map(|s| s.turn_id.clone());
         let case = Self::case_for(&inner, term_id);
         let excerpt_v = bounded_input(json!(excerpt));
         Self::record(
@@ -843,14 +853,24 @@ mod tests {
 
         // The first snapshot of the turn becomes the "before" side of the
         // turn diff (peek_turn exposes it to the turn_end handler).
-        let s = svc.on_snapshot(root, 5, Some("t1"), Some("s1"), "abc123").unwrap();
+        let s = svc
+            .on_snapshot(root, 5, Some("t1"), Some("s1"), "abc123")
+            .unwrap();
         assert_eq!(s.turn_id.as_deref(), Some(turn.as_str()));
         let peeked = svc.peek_turn("t1").unwrap();
         assert_eq!(peeked.pre_sha.as_deref(), Some("abc123"));
 
         // A tool result lands inside the same turn, excerpt preserved.
         let tr = svc
-            .on_tool_result(root, 6, Some("t1"), Some("s1"), Some("Bash"), Some("ok\n"), false)
+            .on_tool_result(
+                root,
+                6,
+                Some("t1"),
+                Some("s1"),
+                Some("Bash"),
+                Some("ok\n"),
+                false,
+            )
             .unwrap();
         assert_eq!(tr.turn_id.as_deref(), Some(turn.as_str()));
         assert_eq!(tr.actor, "agent");
@@ -899,7 +919,9 @@ mod tests {
         assert!(svc.list("/proj/b", None, None).unwrap().is_empty());
 
         // Scheduler runs chain in under their own job case.
-        let jr = svc.on_job_run(root, 9, "j1", "nightly", "ok", "all good").unwrap();
+        let jr = svc
+            .on_job_run(root, 9, "j1", "nightly", "ok", "all good")
+            .unwrap();
         assert_eq!(jr.case_id, "job:j1");
         assert_eq!(jr.actor, "system");
 
@@ -999,12 +1021,22 @@ mod tests {
         assert_eq!(svc.list(root, None, None).unwrap().len(), 1);
 
         // …and stops when switched off; past evidence stays readable.
-        svc.set_settings(root, TestigoSettings { witness: false, ..Default::default() })
-            .unwrap();
+        svc.set_settings(
+            root,
+            TestigoSettings {
+                witness: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(svc
             .on_prompt(root, 2, Some("t1"), None, Some("nope"), None, None)
             .is_err());
-        assert_eq!(svc.list(root, None, None).unwrap().len(), 1, "no new events");
+        assert_eq!(
+            svc.list(root, None, None).unwrap().len(),
+            1,
+            "no new events"
+        );
         assert!(svc.verify(root).unwrap().ok, "reads unaffected");
 
         // Round-trip: a fresh instance loads the persisted policy.
@@ -1012,8 +1044,15 @@ mod tests {
         let s2 = svc2.settings(root);
         assert!(!s2.witness);
         // Enabling repo marks persists too.
-        svc2.set_settings(root, TestigoSettings { witness: true, repo_marks: true, ..Default::default() })
-            .unwrap();
+        svc2.set_settings(
+            root,
+            TestigoSettings {
+                witness: true,
+                repo_marks: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(TestigoService::new().repo_marks(root));
 
         let _ = std::fs::remove_dir_all(&base);
@@ -1046,9 +1085,15 @@ mod tests {
             .current_dir(&repo)
             .output()
             .unwrap();
-        assert!(show.status.success(), "ref must exist and point at the blob");
+        assert!(
+            show.status.success(),
+            "ref must exist and point at the blob"
+        );
         let body = String::from_utf8_lossy(&show.stdout);
-        assert!(body.contains("\"seq\":7") && body.contains("abc123"), "{body}");
+        assert!(
+            body.contains("\"seq\":7") && body.contains("abc123"),
+            "{body}"
+        );
 
         // Re-anchor moves the ref to the new head.
         anchor_head(&repo, 8, "def456", 222).unwrap();

@@ -18,13 +18,15 @@ export function VaultPanel() {
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return entries;
-    return entries.filter((e) =>
-      e.key.toLowerCase().includes(q) || e.description.toLowerCase().includes(q),
+    return entries.filter(
+      (e) => e.key.toLowerCase().includes(q) || e.description.toLowerCase().includes(q),
     );
   }, [entries, query]);
 
@@ -33,25 +35,32 @@ export function VaultPanel() {
       <div className="workbench-header workbench-header-slim">
         <span className="workbench-title">vault</span>
         <span className="spacer" />
-        <button className="workbench-action" onClick={refresh} disabled={loading} title="Refresh">↻</button>
+        <button className="workbench-action" onClick={refresh} disabled={loading} title="Refresh">
+          ↻
+        </button>
         <button
           className="workbench-action"
-          onClick={() => { setEditingKey(null); setAdding(true); }}
+          onClick={() => {
+            setEditingKey(null);
+            setAdding(true);
+          }}
           title="Add entry"
-        >＋</button>
+        >
+          ＋
+        </button>
       </div>
 
       <div className="workbench-body">
         <section className="wb-section">
           <p className="wb-hint">
-            Entries are injected as environment variables into every terminal
-            this app spawns. Secrets live in your OS keychain; non-secrets in
+            Entries are injected as environment variables into every terminal this app spawns.
+            Secrets live in your OS keychain; non-secrets in
             <code> .claude/vault.json</code>. A companion <code>VAULT.md</code>
             lists key names + descriptions so Claude knows what's available.
           </p>
           <p className="wb-hint wb-trust">
-            Values stay on your machine and are never sent to the model — the
-            agent sees only the key names.
+            Values stay on your machine and are never sent to the model — the agent sees only the
+            key names.
           </p>
         </section>
 
@@ -87,7 +96,9 @@ export function VaultPanel() {
                 onChange={(e) => setQuery(e.target.value)}
               />
               {query && (
-                <button className="wb-search-clear" onClick={() => setQuery("")} title="Clear">×</button>
+                <button className="wb-search-clear" onClick={() => setQuery("")} title="Clear">
+                  ×
+                </button>
               )}
             </div>
           )}
@@ -96,8 +107,8 @@ export function VaultPanel() {
             <p className="wb-hint">Loading…</p>
           ) : entries.length === 0 ? (
             <p className="wb-hint">
-              No entries yet. Click <strong>＋</strong> to add a password, token,
-              URL, or any default the agent should reuse.
+              No entries yet. Click <strong>＋</strong> to add a password, token, URL, or any
+              default the agent should reuse.
             </p>
           ) : filtered.length === 0 ? (
             <p className="wb-hint">No matches.</p>
@@ -108,7 +119,10 @@ export function VaultPanel() {
                   key={`${e.scope}:${e.key}`}
                   entry={e}
                   editing={editingKey === `${e.scope}:${e.key}`}
-                  onEdit={() => { setAdding(false); setEditingKey(`${e.scope}:${e.key}`); }}
+                  onEdit={() => {
+                    setAdding(false);
+                    setEditingKey(`${e.scope}:${e.key}`);
+                  }}
                   onCancelEdit={() => setEditingKey(null)}
                   onSaved={() => setEditingKey(null)}
                   projectAvailable={!!project}
@@ -123,7 +137,12 @@ export function VaultPanel() {
 }
 
 function VaultRow({
-  entry, editing, onEdit, onCancelEdit, onSaved, projectAvailable,
+  entry,
+  editing,
+  onEdit,
+  onCancelEdit,
+  onSaved,
+  projectAvailable,
 }: {
   entry: VaultEntryView;
   editing: boolean;
@@ -153,7 +172,10 @@ function VaultRow({
   }
 
   const onReveal = async () => {
-    if (shown !== null) { setShown(null); return; }
+    if (shown !== null) {
+      setShown(null);
+      return;
+    }
     setRevealing(true);
     try {
       const v = await reveal(entry.scope, entry.key);
@@ -189,29 +211,42 @@ function VaultRow({
           {entry.secret ? "S" : "C"}
         </span>
         <div className="vault-text">
-          <div className="vault-key">${entry.key}
+          <div className="vault-key">
+            ${entry.key}
             <span className="vault-scope">{entry.scope}</span>
           </div>
           {entry.description && <div className="vault-desc">{entry.description}</div>}
         </div>
         <div className="vault-actions">
-          <button onClick={onReveal} disabled={revealing} title={shown !== null ? "Hide" : "Reveal"}>
+          <button
+            onClick={onReveal}
+            disabled={revealing}
+            title={shown !== null ? "Hide" : "Reveal"}
+          >
             {revealing ? "…" : shown !== null ? "🙈" : "👁"}
           </button>
-          <button onClick={onCopy} title="Copy value">{copied ? "✓" : "⧉"}</button>
-          <button onClick={onEdit} title="Edit">✎</button>
-          <button onClick={onDelete} title="Delete">×</button>
+          <button onClick={onCopy} title="Copy value">
+            {copied ? "✓" : "⧉"}
+          </button>
+          <button onClick={onEdit} title="Edit">
+            ✎
+          </button>
+          <button onClick={onDelete} title="Delete">
+            ×
+          </button>
         </div>
       </div>
-      {shown !== null && (
-        <pre className="vault-value">{shown || "(empty)"}</pre>
-      )}
+      {shown !== null && <pre className="vault-value">{shown || "(empty)"}</pre>}
     </li>
   );
 }
 
 function VaultEntryForm({
-  existing, defaultScope, projectAvailable, onCancel, onSaved,
+  existing,
+  defaultScope,
+  projectAvailable,
+  onCancel,
+  onSaved,
 }: {
   existing?: VaultEntryView;
   defaultScope: Scope;
@@ -277,15 +312,23 @@ function VaultEntryForm({
           onChange={(e) => setScope(e.target.value as Scope)}
           disabled={editing || submitting}
         >
-          <option value="project" disabled={!projectAvailable}>project (this repo)</option>
+          <option value="project" disabled={!projectAvailable}>
+            project (this repo)
+          </option>
           <option value="global">global (all projects)</option>
         </select>
       </div>
       <div className="vault-form-row">
         <label>kind</label>
         <div className="vault-form-radio">
-          <label><input type="radio" checked={secret} onChange={() => setSecret(true)} /> secret (keychain)</label>
-          <label><input type="radio" checked={!secret} onChange={() => setSecret(false)} /> config (plaintext)</label>
+          <label>
+            <input type="radio" checked={secret} onChange={() => setSecret(true)} /> secret
+            (keychain)
+          </label>
+          <label>
+            <input type="radio" checked={!secret} onChange={() => setSecret(false)} /> config
+            (plaintext)
+          </label>
         </div>
       </div>
       <div className="vault-form-row">
@@ -300,7 +343,9 @@ function VaultEntryForm({
       </div>
       {err && <div className="vault-form-error">{err}</div>}
       <div className="vault-form-actions">
-        <button className="wb-link" onClick={onCancel} disabled={submitting}>cancel</button>
+        <button className="wb-link" onClick={onCancel} disabled={submitting}>
+          cancel
+        </button>
         <button
           className="wb-cta wb-cta-sm"
           onClick={onSave}

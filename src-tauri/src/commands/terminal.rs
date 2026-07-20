@@ -29,12 +29,7 @@ pub fn term_spawn(
     }
     // Inject Vault entries (project overrides global) so the agent can use
     // `$KEY` in shell commands without ever seeing the value in its context.
-    let project_root = state
-        .inner
-        .lock()
-        .project
-        .as_ref()
-        .map(|p| p.root.clone());
+    let project_root = state.inner.lock().project.as_ref().map(|p| p.root.clone());
     if let Ok(vault_env) = crate::services::vault_service::env_for_spawn(project_root.as_deref()) {
         for (k, v) in vault_env {
             extra.push((k, v));

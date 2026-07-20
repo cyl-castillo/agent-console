@@ -1,17 +1,21 @@
 // Pure functions: build raw rule strings, classify risk, suggest rules
 // from a tool-use request, and screen against the hard-deny list.
 
-import type {
-  Effect, RiskLevel, RuleSuggestion, Scope, ToolUseRequest,
-} from "./types";
+import type { Effect, RiskLevel, RuleSuggestion, Scope, ToolUseRequest } from "./types";
 
 const PATH_TOOLS = new Set(["Edit", "Write", "MultiEdit", "Read", "NotebookEdit"]);
 
 // Patterns that are NEVER allowed, regardless of confirmation. Allow rules
 // matching any of these are refused by the UI. Deny rules are fine.
 const HARD_DENY_ALLOW_PATTERNS: Array<{ test: (raw: string) => boolean; reason: string }> = [
-  { test: (r) => /^Bash\(rm\s+-rf?\s+[/*~]/.test(r), reason: "matches recursive delete from root or home" },
-  { test: (r) => /^Bash\(sudo(\s|:)/.test(r) && !r.includes("AGENT_CONSOLE"), reason: "sudo cannot be auto-allowed" },
+  {
+    test: (r) => /^Bash\(rm\s+-rf?\s+[/*~]/.test(r),
+    reason: "matches recursive delete from root or home",
+  },
+  {
+    test: (r) => /^Bash\(sudo(\s|:)/.test(r) && !r.includes("AGENT_CONSOLE"),
+    reason: "sudo cannot be auto-allowed",
+  },
   { test: (r) => /^Bash\(:\(\)/.test(r), reason: "fork bomb pattern" },
   { test: (r) => /^Bash\(dd\s/.test(r), reason: "raw disk write" },
   { test: (r) => /^Bash\(mkfs/.test(r), reason: "filesystem format" },
@@ -25,7 +29,14 @@ const HARD_DENY_ALLOW_PATTERNS: Array<{ test: (raw: string) => boolean; reason: 
 // Bash commands that, when used with `:*` suffix in global scope, are broad enough
 // to flag. In project scope they're acceptable.
 const BROAD_GLOBAL_BASH_PREFIXES = new Set([
-  "git", "npm", "pnpm", "yarn", "cargo", "make", "docker", "kubectl",
+  "git",
+  "npm",
+  "pnpm",
+  "yarn",
+  "cargo",
+  "make",
+  "docker",
+  "kubectl",
 ]);
 
 // Live-command risk assessment: separate from HARD_DENY_ALLOW_PATTERNS, which
@@ -72,7 +83,9 @@ const CAUTION_COMMAND_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\bkubectl\s+(delete|drain)\b/i, reason: "removes Kubernetes resources" },
 ];
 
-export function assessCommand(cmd: string): { level: "dangerous" | "caution"; reason: string } | null {
+export function assessCommand(
+  cmd: string,
+): { level: "dangerous" | "caution"; reason: string } | null {
   for (const p of DANGEROUS_COMMAND_PATTERNS) {
     if (p.re.test(cmd)) return { level: "dangerous", reason: p.reason };
   }
@@ -99,9 +112,13 @@ export function isHardDenyAllow(raw: string): { hard: boolean; reason?: string }
   return { hard: false };
 }
 
-export function classify(
-  rule: { scope: Scope; effect: Effect; tool: string; pattern: string | null; raw: string },
-): { risk: RiskLevel; reason?: string } {
+export function classify(rule: {
+  scope: Scope;
+  effect: Effect;
+  tool: string;
+  pattern: string | null;
+  raw: string;
+}): { risk: RiskLevel; reason?: string } {
   if (rule.effect !== "allow") {
     // Deny/ask rules are inherently safe — they restrict, not expand.
     return { risk: "safe" };

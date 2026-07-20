@@ -24,7 +24,9 @@ export function NotesPanel() {
       <div className="workbench-header workbench-header-slim">
         <span className="workbench-title">notes</span>
         <span className="spacer" />
-        <button className="workbench-action" onClick={add} title="New note">＋</button>
+        <button className="workbench-action" onClick={add} title="New note">
+          ＋
+        </button>
       </div>
       <div className="workbench-body">
         {error && <PanelError message={error} onRetry={() => project && void load(project.root)} />}
@@ -32,15 +34,17 @@ export function NotesPanel() {
           <div className="wb-hint">Loading…</div>
         ) : notes.length === 0 ? (
           <div className="wb-empty">
-            Your scratchpad while agents work: prompt ideas, things to review,
-            reminders. Notes stay with this project.
+            Your scratchpad while agents work: prompt ideas, things to review, reminders. Notes stay
+            with this project.
             <button className="wb-cta wb-cta-sm" onClick={add} style={{ marginLeft: 8 }}>
               ＋ First note
             </button>
           </div>
         ) : (
           <div className="notes-grid">
-            {notes.map((n) => <NoteCard key={n.id} note={n} />)}
+            {notes.map((n) => (
+              <NoteCard key={n.id} note={n} />
+            ))}
           </div>
         )}
       </div>
@@ -54,7 +58,9 @@ function NoteCard({ note }: { note: StickyNote }) {
   const remove = useNotesStore((s) => s.remove);
 
   return (
-    <div className={`note-card note-${NOTE_COLORS.includes(note.color as typeof NOTE_COLORS[number]) ? note.color : "yellow"}`}>
+    <div
+      className={`note-card note-${NOTE_COLORS.includes(note.color as (typeof NOTE_COLORS)[number]) ? note.color : "yellow"}`}
+    >
       <textarea
         className="note-text"
         value={note.text}
@@ -80,12 +86,12 @@ function NoteCard({ note }: { note: StickyNote }) {
             onClick={() => void sendToAgent(note.text)}
             disabled={!note.text.trim()}
             title="Type this note into the active agent session (you review, then send)"
-          >▸</button>
-          <button
-            className="note-act note-del"
-            onClick={() => remove(note.id)}
-            title="Delete note"
-          >✕</button>
+          >
+            ▸
+          </button>
+          <button className="note-act note-del" onClick={() => remove(note.id)} title="Delete note">
+            ✕
+          </button>
         </div>
       </div>
     </div>

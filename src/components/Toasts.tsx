@@ -20,18 +20,29 @@ export function Toasts() {
           role="status"
           title="Dismiss"
         >
-          <span className="toast-glyph" aria-hidden="true">{glyph[t.tone]}</span>
+          <span className="toast-glyph" aria-hidden="true">
+            {glyph[t.tone]}
+          </span>
           <span className="toast-msg">{t.message}</span>
           {t.tone === "error" && (
             // A failure is the moment a field report is worth the most — one
             // click opens a GitHub issue with the exact error prefilled.
             <button
               className="toast-report"
-              onClick={(e) => { e.stopPropagation(); void reportProblem(t.message); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                void reportProblem(t.message);
+              }}
               title="Report this problem on GitHub (opens a prefilled issue)"
-            >Report</button>
+            >
+              Report
+            </button>
           )}
-          {t.tone === "error" && <span className="toast-dismiss" aria-hidden="true">✕</span>}
+          {t.tone === "error" && (
+            <span className="toast-dismiss" aria-hidden="true">
+              ✕
+            </span>
+          )}
         </div>
       ))}
     </div>

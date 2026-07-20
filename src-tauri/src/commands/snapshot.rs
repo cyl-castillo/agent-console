@@ -26,7 +26,10 @@ fn repo(state: &AppState) -> AppResult<PathBuf> {
 /// the restore itself undoable. The returned commit sha (if any) lets the UI offer
 /// an "undo last restore". Capturing the backup never blocks the restore.
 #[tauri::command]
-pub fn snapshot_restore(commit_sha: String, state: State<'_, AppState>) -> AppResult<Option<String>> {
+pub fn snapshot_restore(
+    commit_sha: String,
+    state: State<'_, AppState>,
+) -> AppResult<Option<String>> {
     let repo = repo(&state)?;
     let pre_id = format!("pre-restore-{}", now_nanos());
     let pre = snapshot_service::create(&repo, &pre_id)

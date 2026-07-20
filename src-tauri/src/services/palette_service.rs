@@ -68,10 +68,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "ac-palette-{}-{nanos}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("ac-palette-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(root.join("src/deep")).unwrap();
         std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
         std::fs::create_dir_all(root.join(".git")).unwrap();

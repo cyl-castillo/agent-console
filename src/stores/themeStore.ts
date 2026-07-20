@@ -8,8 +8,13 @@ function initialTheme(): Theme {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "dark" || stored === "light") return stored;
-  } catch { /* ignore */ }
-  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: light)").matches) {
+  } catch {
+    /* ignore */
+  }
+  if (
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-color-scheme: light)").matches
+  ) {
     return "light";
   }
   return "dark";
@@ -31,7 +36,11 @@ export const useThemeStore = create<ThemeState>((set, get) => {
   return {
     theme: initial,
     setTheme: (t) => {
-      try { localStorage.setItem(STORAGE_KEY, t); } catch { /* ignore */ }
+      try {
+        localStorage.setItem(STORAGE_KEY, t);
+      } catch {
+        /* ignore */
+      }
       apply(t);
       set({ theme: t });
     },

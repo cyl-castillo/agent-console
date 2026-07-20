@@ -47,7 +47,11 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         useToastStore.getState().show(`Voice: ${String(e)}`, "error");
       }
     } else {
-      try { await ipc.voiceDisable(); } catch { /* ignore */ }
+      try {
+        await ipc.voiceDisable();
+      } catch {
+        /* ignore */
+      }
       set({ phase: "off", progress: null, approvalStage: null });
     }
   },
@@ -86,7 +90,11 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   pttCancel: async () => {
     if (get().phase !== "listening") return;
-    try { await ipc.voicePttStop(); } catch { /* ignore */ }
+    try {
+      await ipc.voicePttStop();
+    } catch {
+      /* ignore */
+    }
     set({ phase: "ready" });
   },
 }));
@@ -120,8 +128,7 @@ async function announceApproval(req: ApprovalRequest): Promise<void> {
   handledApprovals.add(req.id);
 
   const es = voice.lang.startsWith("es");
-  const stillPending = () =>
-    useApprovalStore.getState().queue.some((r) => r.id === req.id);
+  const stillPending = () => useApprovalStore.getState().queue.some((r) => r.id === req.id);
   // Same rule as the modal's Ctrl+Enter: dangerous commands need a deliberate
   // click — a spoken "sí" must not be able to bypass that gate.
   const cmd = typeof req.input?.command === "string" ? req.input.command : "";
@@ -151,9 +158,9 @@ async function announceApproval(req: ApprovalRequest): Promise<void> {
       await useApprovalStore.getState().decide(req.id, "deny", "denied by voice");
       void ipc.voiceSpeak(es ? "Denegado." : "Denied.").catch(() => {});
     } else {
-      void ipc.voiceSpeak(
-        es ? "No te entendí. Usa el modal." : "I didn't catch that. Use the modal.",
-      ).catch(() => {});
+      void ipc
+        .voiceSpeak(es ? "No te entendí. Usa el modal." : "I didn't catch that. Use the modal.")
+        .catch(() => {});
     }
   } catch {
     // TTS or mic hiccup — the visual modal is still there as fallback.
@@ -178,8 +185,12 @@ export function speechFor(req: ApprovalRequest, es: boolean): string {
   if (typeof inp.file_path === "string") {
     const file = inp.file_path.split("/").pop() ?? inp.file_path;
     const verbEs: Record<string, string> = {
-      Write: "escribir", Edit: "editar", MultiEdit: "editar",
-      StrReplace: "editar", Read: "leer", NotebookEdit: "editar",
+      Write: "escribir",
+      Edit: "editar",
+      MultiEdit: "editar",
+      StrReplace: "editar",
+      Read: "leer",
+      NotebookEdit: "editar",
     };
     return es
       ? `El agente quiere ${verbEs[req.tool] ?? `usar ${req.tool} en`} el archivo ${file}`
@@ -194,12 +205,27 @@ export function speechFor(req: ApprovalRequest, es: boolean): string {
 /// anywhere wins over a positive ("no, dale" must not approve).
 /// Exported for tests — pure.
 export function parseYesNo(transcript: string): "yes" | "no" | "unclear" {
-  const norm = transcript.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const norm = transcript
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
   const words = norm.split(/[^a-zñ]+/).filter(Boolean);
   const NO = new Set(["no", "nope", "cancela", "cancelar", "niega", "deny", "denegar", "para"]);
   const YES = new Set([
-    "si", "dale", "ok", "okay", "aprueba", "apruebo", "aprobar",
-    "hazlo", "adelante", "claro", "confirmo", "yes", "approve", "sure",
+    "si",
+    "dale",
+    "ok",
+    "okay",
+    "aprueba",
+    "apruebo",
+    "aprobar",
+    "hazlo",
+    "adelante",
+    "claro",
+    "confirmo",
+    "yes",
+    "approve",
+    "sure",
   ]);
   if (words.some((w) => NO.has(w))) return "no";
   if (words.some((w) => YES.has(w))) return "yes";

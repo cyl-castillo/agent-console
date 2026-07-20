@@ -1,11 +1,6 @@
 import type { GitFileChange } from "../types/domain";
 
-export type ChangeKind =
-  | "modified"
-  | "added"
-  | "deleted"
-  | "renamed"
-  | "untracked";
+export type ChangeKind = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
 /// Single source of truth for the M/A/D/R/U badge shown next to a changed file.
 /// Both the tree view (`ChangeTree`) and the flat list (`ChangesList`) derive

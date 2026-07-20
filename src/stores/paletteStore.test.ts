@@ -58,7 +58,11 @@ vi.mock("./changesStore", () => ({
 }));
 vi.mock("./skillsStore", () => ({
   useSkillsStore: {
-    getState: () => ({ recent: world.recent, undoRestoreSha: null, restoreSnapshot: async () => {} }),
+    getState: () => ({
+      recent: world.recent,
+      undoRestoreSha: null,
+      restoreSnapshot: async () => {},
+    }),
   },
 }));
 vi.mock("./previewStore", () => ({

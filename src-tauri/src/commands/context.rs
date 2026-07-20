@@ -7,12 +7,7 @@ use crate::services::memory_service::{self, MemoryEntry};
 use crate::state::AppState;
 
 fn project_root(state: &AppState) -> Option<std::path::PathBuf> {
-    state
-        .inner
-        .lock()
-        .project
-        .as_ref()
-        .map(|p| p.root.clone())
+    state.inner.lock().project.as_ref().map(|p| p.root.clone())
 }
 
 #[tauri::command]

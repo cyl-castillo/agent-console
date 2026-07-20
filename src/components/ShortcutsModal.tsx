@@ -46,35 +46,36 @@ const GROUPS = [
 export function ShortcutsModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal onClose={onClose} className="shortcuts-modal" ariaLabel="Keyboard Shortcuts">
-        <div className="shortcuts-head">
-          <div>
-            <div className="shortcuts-title">Keyboard Shortcuts</div>
-            <div className="shortcuts-subtitle">Terminal-first controls for daily navigation.</div>
-          </div>
-          <button className="gs-close" onClick={onClose} title="Close" aria-label="Close">
-            <Icon name="x" size={14} />
-          </button>
+      <div className="shortcuts-head">
+        <div>
+          <div className="shortcuts-title">Keyboard Shortcuts</div>
+          <div className="shortcuts-subtitle">Terminal-first controls for daily navigation.</div>
         </div>
+        <button className="gs-close" onClick={onClose} title="Close" aria-label="Close">
+          <Icon name="x" size={14} />
+        </button>
+      </div>
 
-        <div className="shortcuts-groups">
-          {GROUPS.map((group) => (
-            <section className="shortcuts-group" key={group.title}>
-              <div className="shortcuts-group-title">{group.title}</div>
-              {group.rows.map(([keys, label]) => (
-                <div className="shortcuts-row" key={keys}>
-                  <span className="shortcuts-label">{label}</span>
-                  <span className="shortcuts-keys">
-                    {keys.split("+").map((k, i, all) => (
-                      <span key={`${keys}-${k}-${i}`}>
-                        <kbd>{k}</kbd>{i < all.length - 1 && <span className="shortcut-plus">+</span>}
-                      </span>
-                    ))}
-                  </span>
-                </div>
-              ))}
-            </section>
-          ))}
-        </div>
+      <div className="shortcuts-groups">
+        {GROUPS.map((group) => (
+          <section className="shortcuts-group" key={group.title}>
+            <div className="shortcuts-group-title">{group.title}</div>
+            {group.rows.map(([keys, label]) => (
+              <div className="shortcuts-row" key={keys}>
+                <span className="shortcuts-label">{label}</span>
+                <span className="shortcuts-keys">
+                  {keys.split("+").map((k, i, all) => (
+                    <span key={`${keys}-${k}-${i}`}>
+                      <kbd>{k}</kbd>
+                      {i < all.length - 1 && <span className="shortcut-plus">+</span>}
+                    </span>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
     </Modal>
   );
 }

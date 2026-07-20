@@ -87,12 +87,16 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("ac-trim-{}-{nanos}.jsonl", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("ac-trim-{}-{nanos}.jsonl", std::process::id()));
         fs::write(&path, "{\"n\":1}\n{\"n\":2}\n\n{\"n\":3}\n").unwrap();
 
         trim_jsonl(&path, 2).unwrap();
         let after = fs::read_to_string(&path).unwrap();
-        assert_eq!(after, "{\"n\":2}\n{\"n\":3}\n", "keeps the newest, drops blanks");
+        assert_eq!(
+            after, "{\"n\":2}\n{\"n\":3}\n",
+            "keeps the newest, drops blanks"
+        );
 
         // Within bounds: byte-identical no-op.
         trim_jsonl(&path, 10).unwrap();

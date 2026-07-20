@@ -88,7 +88,9 @@ fn normalize_site(raw: &str) -> AppResult<String> {
     }
     // No spaces or control chars — it becomes a request URL.
     if s.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err(AppError::InvalidArgument("site URL contains invalid characters".into()));
+        return Err(AppError::InvalidArgument(
+            "site URL contains invalid characters".into(),
+        ));
     }
     Ok(s.to_string())
 }
@@ -114,7 +116,10 @@ pub fn save(site_url: &str, email: &str, token: &str) -> AppResult<()> {
     if token.trim().is_empty() {
         return Err(AppError::InvalidArgument("API token is required".into()));
     }
-    let cfg = JiraConfig { site_url: site, email: email.to_string() };
+    let cfg = JiraConfig {
+        site_url: site,
+        email: email.to_string(),
+    };
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| AppError::Other(e.to_string()))?;
     std::fs::write(config_path()?, json)?;
     keyring_entry()?
@@ -194,10 +199,15 @@ pub async fn list_assigned() -> AppResult<Vec<JiraIssue>> {
         .await
         .map_err(|e| AppError::Other(format!("Jira request failed: {e}")))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(AppError::Other("Jira rejected the credentials (401)".into()));
+        return Err(AppError::Other(
+            "Jira rejected the credentials (401)".into(),
+        ));
     }
     if !resp.status().is_success() {
-        return Err(AppError::Other(format!("Jira search returned {}", resp.status())));
+        return Err(AppError::Other(format!(
+            "Jira search returned {}",
+            resp.status()
+        )));
     }
     let parsed: SearchResp = resp
         .json()
@@ -216,7 +226,11 @@ fn flatten(site: &str, i: RawIssue) -> JiraIssue {
         url: format!("{site}/browse/{}", i.key),
         key: i.key,
         summary: f.summary.unwrap_or_default(),
-        status: f.status.as_ref().map(|s| s.name.clone()).unwrap_or_default(),
+        status: f
+            .status
+            .as_ref()
+            .map(|s| s.name.clone())
+            .unwrap_or_default(),
         status_category: f
             .status
             .and_then(|s| s.status_category)
@@ -308,12 +322,16 @@ mod tests {
                 summary: Some("Fix the thing".into()),
                 status: Some(RawStatus {
                     name: "In Progress".into(),
-                    status_category: Some(RawStatusCategory { key: "indeterminate".into() }),
+                    status_category: Some(RawStatusCategory {
+                        key: "indeterminate".into(),
+                    }),
                 }),
                 priority: None,
                 duedate: None,
                 issuetype: Some(RawNamed { name: "Bug".into() }),
-                project: Some(RawNamed { name: "Acme".into() }),
+                project: Some(RawNamed {
+                    name: "Acme".into(),
+                }),
                 updated: None,
             },
         };

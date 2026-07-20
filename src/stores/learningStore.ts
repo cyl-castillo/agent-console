@@ -185,10 +185,9 @@ async function runReflection(
     });
     if (auto && items.length > 0) {
       const n = items.length;
-      useToastStore.getState().show(
-        `Learning: ${n} new suggestion${n === 1 ? "" : "s"} from recent activity`,
-        "info",
-      );
+      useToastStore
+        .getState()
+        .show(`Learning: ${n} new suggestion${n === 1 ? "" : "s"} from recent activity`, "info");
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -364,9 +363,7 @@ export const useLearningStore = create<LearningState>((set, get) => ({
 
     const patch = (changes: Partial<CurationItem>) =>
       set((s) => ({
-        curationItems: s.curationItems.map((it) =>
-          it.id === id ? { ...it, ...changes } : it,
-        ),
+        curationItems: s.curationItems.map((it) => (it.id === id ? { ...it, ...changes } : it)),
       }));
 
     patch({ status: "applying", errorMessage: undefined });
@@ -433,9 +430,7 @@ export const useLearningStore = create<LearningState>((set, get) => ({
     const skills = useSkillsStore
       .getState()
       .installed.filter((sk) => sk.source === "project" && sk.kind === "skill").length;
-    const memories = useContextStore
-      .getState()
-      .memories.filter((m) => !m.isIndex).length;
+    const memories = useContextStore.getState().memories.filter((m) => !m.isIndex).length;
     const size = skills + memories;
 
     if (size < CURATE_MIN_CORPUS) return;

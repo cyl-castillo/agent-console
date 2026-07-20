@@ -42,10 +42,28 @@ describe("summarizeCases", () => {
 describe("buildTimeline", () => {
   it("folds a case's events into turns with approvals, results and diff", () => {
     const turns = buildTimeline([
-      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "do it", skill: "deploy" } }),
-      ev({ seq: 2, ts: 11, kind: "approval_decision", turnId: "T1", payload: { tool: "Bash", decision: "allow", reason: "ok" } }),
+      ev({
+        seq: 1,
+        ts: 10,
+        kind: "prompt",
+        turnId: "T1",
+        payload: { prompt: "do it", skill: "deploy" },
+      }),
+      ev({
+        seq: 2,
+        ts: 11,
+        kind: "approval_decision",
+        turnId: "T1",
+        payload: { tool: "Bash", decision: "allow", reason: "ok" },
+      }),
       ev({ seq: 3, ts: 12, kind: "tool_result", turnId: "T1", payload: { tool: "Bash" } }),
-      ev({ seq: 4, ts: 13, kind: "turn_end", turnId: "T1", payload: { filesChanged: [{ status: "M", path: "a.ts" }], filesTruncated: false } }),
+      ev({
+        seq: 4,
+        ts: 13,
+        kind: "turn_end",
+        turnId: "T1",
+        payload: { filesChanged: [{ status: "M", path: "a.ts" }], filesTruncated: false },
+      }),
       ev({ seq: 5, ts: 20, kind: "prompt", turnId: "T2", payload: { prompt: "next" } }),
     ]);
     expect(turns).toHaveLength(2);

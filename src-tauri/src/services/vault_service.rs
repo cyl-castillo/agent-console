@@ -342,10 +342,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "ac-vault-{tag}-{}-{nanos}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("ac-vault-{tag}-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -394,7 +392,10 @@ mod tests {
         let md = fs::read_to_string(root.join(".claude").join(VAULT_MD)).unwrap();
         assert!(md.contains("$AC_TEST_DB_URL"));
         assert!(md.contains("Staging database"));
-        assert!(!md.contains("leak-canary"), "VAULT.md leaked a value:\n{md}");
+        assert!(
+            !md.contains("leak-canary"),
+            "VAULT.md leaked a value:\n{md}"
+        );
 
         fs::remove_dir_all(&root).ok();
     }

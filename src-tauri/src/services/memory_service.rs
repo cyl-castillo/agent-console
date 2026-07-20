@@ -223,8 +223,15 @@ mod tests {
 
         let dest = archive(&project, "stale.md").unwrap();
         assert!(dest.exists(), "archived copy exists");
-        let names: Vec<String> = list(&project).unwrap().into_iter().map(|m| m.name).collect();
-        assert!(!names.iter().any(|n| n == "stale.md"), "removed from corpus: {names:?}");
+        let names: Vec<String> = list(&project)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        assert!(
+            !names.iter().any(|n| n == "stale.md"),
+            "removed from corpus: {names:?}"
+        );
 
         // Index is protected from archiving.
         assert!(archive(&project, MEMORY_INDEX).is_err());

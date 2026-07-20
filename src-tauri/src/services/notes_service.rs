@@ -41,7 +41,9 @@ pub struct NotesService {
 
 impl NotesService {
     pub fn new() -> Self {
-        Self { lock: Mutex::new(()) }
+        Self {
+            lock: Mutex::new(()),
+        }
     }
 
     fn dir() -> AppResult<PathBuf> {
@@ -111,7 +113,11 @@ impl NotesService {
     pub fn list(&self, project_root: &str) -> AppResult<Vec<Note>> {
         let _g = self.lock.lock();
         let file = Self::load_file()?;
-        Ok(file.by_project.get(project_root).cloned().unwrap_or_default())
+        Ok(file
+            .by_project
+            .get(project_root)
+            .cloned()
+            .unwrap_or_default())
     }
 
     pub fn save(&self, project_root: &str, mut notes: Vec<Note>) -> AppResult<()> {
@@ -153,7 +159,10 @@ mod tests {
     #[test]
     fn persistence_round_trip_and_bak_recovery() {
         let _env = crate::test_support::lock_env();
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("ac-notes-{nanos}"));
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("XDG_DATA_HOME", &dir);
@@ -161,9 +170,13 @@ mod tests {
         let svc = NotesService::new();
         assert!(svc.list("/proj/a").unwrap().is_empty());
 
-        svc.save("/proj/a", vec![note("n1", "try prompt X"), note("n2", "review PR")])
+        svc.save(
+            "/proj/a",
+            vec![note("n1", "try prompt X"), note("n2", "review PR")],
+        )
+        .unwrap();
+        svc.save("/proj/b", vec![note("n3", "other project")])
             .unwrap();
-        svc.save("/proj/b", vec![note("n3", "other project")]).unwrap();
 
         // Round trip + isolation between projects.
         let a = svc.list("/proj/a").unwrap();
@@ -179,7 +192,11 @@ mod tests {
         let path = NotesService::path().unwrap();
         std::fs::write(&path, "{ corrupted").unwrap();
         let recovered = svc.list("/proj/b").unwrap();
-        assert_eq!(recovered.len(), 1, "bak fallback must recover, not lose notes");
+        assert_eq!(
+            recovered.len(),
+            1,
+            "bak fallback must recover, not lose notes"
+        );
 
         // Empty save removes the project bucket entirely.
         svc.save("/proj/b", vec![]).unwrap();

@@ -20,7 +20,11 @@ import type {
 const EXPORT_BLOCKS: { key: keyof ExportOptions; label: string; desc: string }[] = [
   { key: "sessions", label: "Sessions", desc: "Terminals + scrollback (resume ids are dropped)" },
   { key: "rooms", label: "Rooms", desc: "Roundtable transcripts (live run state is dropped)" },
-  { key: "schedules", label: "Schedules", desc: "Scheduled jobs — imported disabled, never auto-fire" },
+  {
+    key: "schedules",
+    label: "Schedules",
+    desc: "Scheduled jobs — imported disabled, never auto-fire",
+  },
   { key: "learning", label: "Learning", desc: "Project skills + memory entries" },
 ];
 
@@ -115,8 +119,8 @@ function ExportSection({
     <section className="wb-section">
       <div className="wb-section-title">export your work</div>
       <p className="wb-hint">
-        Bundle the chosen blocks into a portable <code>.acwork</code> file. Secrets
-        and machine-specific paths never leave — only the work itself.
+        Bundle the chosen blocks into a portable <code>.acwork</code> file. Secrets and
+        machine-specific paths never leave — only the work itself.
       </p>
       <div className="wb-ei-blocks">
         {EXPORT_BLOCKS.map((b) => (
@@ -238,8 +242,8 @@ function ImportSection({
       <section className="wb-section">
         <div className="wb-section-title">import from a file</div>
         <p className="wb-hint">
-          Load an <code>.acwork</code> file someone shared. You choose what to do
-          with each block before anything is written.
+          Load an <code>.acwork</code> file someone shared. You choose what to do with each block
+          before anything is written.
         </p>
         <button className="wb-cta" onClick={chooseFile} disabled={busy}>
           {busy ? "Reading…" : "Choose a file…"}
@@ -274,7 +278,8 @@ function ImportSection({
                 {m.total} item{m.total === 1 ? "" : "s"}
                 {m.collisions > 0 && (
                   <span className="wb-ei-collide" title="Already present in this project">
-                    {" "}· {m.collisions} overlap
+                    {" "}
+                    · {m.collisions} overlap
                   </span>
                 )}
               </span>

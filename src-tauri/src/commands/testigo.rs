@@ -14,9 +14,7 @@ pub fn testigo_list(
     limit: Option<usize>,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<ProofEvent>> {
-    state
-        .testigo
-        .list(&project_root, case_id.as_deref(), limit)
+    state.testigo.list(&project_root, case_id.as_deref(), limit)
 }
 
 #[tauri::command]

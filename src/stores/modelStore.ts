@@ -11,7 +11,13 @@ import { isValidModel } from "../agents/profiles";
 /// the wrong value across (Claude's "opus" must not leak into Codex).
 
 export type { AgentKind } from "../agents/profiles";
-export { isValidModel, modelLabel, AGENT_PROFILES, profileFor, DEFAULT_AGENT } from "../agents/profiles";
+export {
+  isValidModel,
+  modelLabel,
+  AGENT_PROFILES,
+  profileFor,
+  DEFAULT_AGENT,
+} from "../agents/profiles";
 
 const MODEL_KEY_PREFIX = "agent-console:model:";
 const AGENT_KEY_PREFIX = "agent-console:agent:";
@@ -70,7 +76,9 @@ export const useModelStore = create<ModelState>((set, get) => ({
       /* ignore */
     }
     const k = `${agent}|${root}`;
-    set((s) => ({ modelDefaults: { ...s.modelDefaults, [k]: isValidModel(model) ? model : undefined } }));
+    set((s) => ({
+      modelDefaults: { ...s.modelDefaults, [k]: isValidModel(model) ? model : undefined },
+    }));
   },
 
   defaultAgentFor: (root) => {

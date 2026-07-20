@@ -4,13 +4,7 @@ import { checkGithubRelease, type ManualUpdateInfo } from "../ipc/githubRelease"
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 type Phase =
-  | "idle"
-  | "checking"
-  | "available"
-  | "available-manual"
-  | "installing"
-  | "error"
-  | "uptodate";
+  "idle" | "checking" | "available" | "available-manual" | "installing" | "error" | "uptodate";
 
 interface UpdaterState {
   phase: Phase;

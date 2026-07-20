@@ -10,11 +10,7 @@ pub fn jira_status() -> JiraStatus {
 /// `/myself`. If validation fails, roll the save back so a bad token doesn't
 /// leave the app looking "configured". Returns the account display name.
 #[tauri::command]
-pub async fn jira_connect(
-    site_url: String,
-    email: String,
-    token: String,
-) -> AppResult<String> {
+pub async fn jira_connect(site_url: String, email: String, token: String) -> AppResult<String> {
     jira_service::save(&site_url, &email, &token)?;
     match jira_service::test_connection().await {
         Ok(name) => Ok(name),

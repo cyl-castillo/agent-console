@@ -71,7 +71,13 @@ export function seedForIssue(issue: JiraIssue): string {
 
 /// A one-word verb for the intent, for button tooltips ("Start a review session").
 export function intentVerb(intent: IssueIntent): string {
-  return { implement: "implementation", continue: "continue", review: "review", test: "testing", debug: "debugging" }[intent];
+  return {
+    implement: "implementation",
+    continue: "continue",
+    review: "review",
+    test: "testing",
+    debug: "debugging",
+  }[intent];
 }
 
 export interface IssueGroup {

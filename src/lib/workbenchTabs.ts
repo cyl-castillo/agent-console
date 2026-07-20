@@ -4,9 +4,22 @@
 /// open the Room tab because "roundtable" was missing from one of them).
 /// Lives outside the component file so fast refresh keeps working.
 export const WORKBENCH_TABS = [
-  "skills", "permissions", "advisor", "learning", "roundtable", "schedule",
-  "vault", "context", "plugins", "mcp", "transfer", "feedback", "jira",
-  "agenda", "notes", "proof",
+  "skills",
+  "permissions",
+  "advisor",
+  "learning",
+  "roundtable",
+  "schedule",
+  "vault",
+  "context",
+  "plugins",
+  "mcp",
+  "transfer",
+  "feedback",
+  "jira",
+  "agenda",
+  "notes",
+  "proof",
 ] as const;
 
 export type WorkbenchTab = (typeof WORKBENCH_TABS)[number];

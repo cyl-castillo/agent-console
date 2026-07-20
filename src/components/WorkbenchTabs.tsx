@@ -37,7 +37,11 @@ function useFlaggedRules(): number {
       const p = parseRaw(r.raw);
       if (!p) return n;
       const risk = classify({
-        scope: r.scope, effect: r.effect, tool: p.tool, pattern: p.pattern, raw: r.raw,
+        scope: r.scope,
+        effect: r.effect,
+        tool: p.tool,
+        pattern: p.pattern,
+        raw: r.raw,
       }).risk;
       return risk === "broad" || risk === "dangerous" ? n + 1 : n;
     }, 0);
@@ -62,17 +66,15 @@ export function WorkbenchTabs({
   const jiraCount = useJiraStore((s) => s.issues.length);
   const notesCount = useNotesStore((s) => s.notes.length);
   const memoriesCount = useContextStore((s) => s.memories.length);
-  const advisorPending = useAdvisorStore((s) =>
-    s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
+  const advisorPending = useAdvisorStore(
+    (s) => s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
   );
   const advisorAnalyzing = useAdvisorStore((s) => s.status === "analyzing");
-  const learningPending = useLearningStore((s) =>
-    s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
+  const learningPending = useLearningStore(
+    (s) => s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
   );
   const learningReflecting = useLearningStore((s) => s.status === "reflecting");
-  const rtActive = useRoundtableStore(
-    (s) => s.phase === "running" || s.phase === "paused",
-  );
+  const rtActive = useRoundtableStore((s) => s.phase === "running" || s.phase === "paused");
   const scheduledCount = useSchedulerStore((s) => s.jobs.filter((j) => j.enabled).length);
   const schedulerRunning = useSchedulerStore((s) => s.runningJobIds.length > 0);
   const pluginsCount = usePluginsStore((s) => s.installed.length);
@@ -84,10 +86,30 @@ export function WorkbenchTabs({
   // One button per group. Badges are actionable where possible: Coach shows
   // pending suggestions (not installed skills), Trust shows only the flag.
   const meta: Record<WorkbenchGroupKey, ButtonMeta> = {
-    tasks: { icon: "check", label: "Tasks", title: "Tasks — your Jira queue + agenda", count: jiraCount },
-    notes: { icon: "sticky-note", label: "Notes", title: "Notes — your per-project scratchpad", count: notesCount },
-    proof: { icon: "shield-check", label: "Proof", title: "Proof — attach a verifiable proof packet to your next PR: what was asked, what you approved, what changed. Verified in any browser, no install." },
-    context: { icon: "file-text", label: "Context", title: "Context — CLAUDE.md & memories", count: memoriesCount },
+    tasks: {
+      icon: "check",
+      label: "Tasks",
+      title: "Tasks — your Jira queue + agenda",
+      count: jiraCount,
+    },
+    notes: {
+      icon: "sticky-note",
+      label: "Notes",
+      title: "Notes — your per-project scratchpad",
+      count: notesCount,
+    },
+    proof: {
+      icon: "shield-check",
+      label: "Proof",
+      title:
+        "Proof — attach a verifiable proof packet to your next PR: what was asked, what you approved, what changed. Verified in any browser, no install.",
+    },
+    context: {
+      icon: "file-text",
+      label: "Context",
+      title: "Context — CLAUDE.md & memories",
+      count: memoriesCount,
+    },
     coach: {
       icon: "lightbulb",
       label: coachBusy ? "Coach…" : "Coach",
@@ -104,11 +126,23 @@ export function WorkbenchTabs({
     schedule: {
       icon: "clock",
       label: schedulerRunning ? "Sched…" : "Schedule",
-      title: schedulerRunning ? "Schedule (a job is running)" : "Schedule — run skills/prompts/pipelines on a clock (suggest-only)",
+      title: schedulerRunning
+        ? "Schedule (a job is running)"
+        : "Schedule — run skills/prompts/pipelines on a clock (suggest-only)",
       count: scheduledCount,
     },
-    trust: { icon: "key", label: "Trust", title: "Trust — permissions + vault: what the agent can touch", flagged },
-    addons: { icon: "plug", label: "Add-ons", title: "Add-ons — plugins + MCP servers", count: pluginsCount + mcpCount },
+    trust: {
+      icon: "key",
+      label: "Trust",
+      title: "Trust — permissions + vault: what the agent can touch",
+      flagged,
+    },
+    addons: {
+      icon: "plug",
+      label: "Add-ons",
+      title: "Add-ons — plugins + MCP servers",
+      count: pluginsCount + mcpCount,
+    },
   };
 
   const sections: { label: string; groups: WorkbenchGroupKey[] }[] = [
@@ -121,7 +155,9 @@ export function WorkbenchTabs({
     <div className="workbench-strip">
       {sections.map((sec) => (
         <div className="wb-strip-group" key={sec.label}>
-          <div className="wb-strip-group-label" aria-hidden="true">{sec.label}</div>
+          <div className="wb-strip-group-label" aria-hidden="true">
+            {sec.label}
+          </div>
           {sec.groups.map((key) => {
             const group = WORKBENCH_GROUPS.find((g) => g.key === key)!;
             const isActive = (group.tabs as readonly string[]).includes(active);
@@ -155,12 +191,12 @@ export function WorkbenchSubTabs({
 }) {
   const jiraCount = useJiraStore((s) => s.issues.length);
   const skillsCount = useSkillsStore((s) => s.installed.length);
-  const advisorPending = useAdvisorStore((s) =>
-    s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
+  const advisorPending = useAdvisorStore(
+    (s) => s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
   );
   const advisorAnalyzing = useAdvisorStore((s) => s.status === "analyzing");
-  const learningPending = useLearningStore((s) =>
-    s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
+  const learningPending = useLearningStore(
+    (s) => s.items.filter((it) => it.status === "proposed" || it.status === "error").length,
   );
   const learningReflecting = useLearningStore((s) => s.status === "reflecting");
   const permsCount = usePermissionsStore((s) => s.snapshot?.rules.length ?? 0);
@@ -220,12 +256,10 @@ function StripButton({ icon, label, title, count, flagged, active, onClick }: St
     ? `${title} — ${flagged} rule${flagged === 1 ? "" : "s"} need review`
     : title;
   return (
-    <button
-      className={`wb-strip-btn ${active ? "active" : ""}`}
-      onClick={onClick}
-      title={tooltip}
-    >
-      <span className="wb-strip-icon"><Icon name={icon} size={18} /></span>
+    <button className={`wb-strip-btn ${active ? "active" : ""}`} onClick={onClick} title={tooltip}>
+      <span className="wb-strip-icon">
+        <Icon name={icon} size={18} />
+      </span>
       <span className="wb-strip-label">{label}</span>
       {count !== undefined && count > 0 && <span className="wb-strip-count">{count}</span>}
       {flagged !== undefined && flagged > 0 && <span className="wb-strip-flag">{flagged}</span>}

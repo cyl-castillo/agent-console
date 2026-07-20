@@ -49,9 +49,13 @@ pub fn approval_respond(
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let root = p.root.to_string_lossy();
-        let _ = state
-            .testigo
-            .on_approval_decision(root.as_ref(), ts, &id, &decision, reason.as_deref());
+        let _ = state.testigo.on_approval_decision(
+            root.as_ref(),
+            ts,
+            &id,
+            &decision,
+            reason.as_deref(),
+        );
     }
     Ok(())
 }

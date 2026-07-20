@@ -2,12 +2,12 @@
 //! (whisper.cpp via whisper-rs). Audio never leaves the machine — the model
 //! file is downloaded once from Hugging Face and inference runs on CPU threads.
 
+use parking_lot::Mutex;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
-use parking_lot::Mutex;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -35,8 +35,7 @@ fn model_language() -> String {
 }
 
 fn model_path() -> AppResult<PathBuf> {
-    let base =
-        dirs::data_dir().ok_or_else(|| AppError::Other("cannot resolve data dir".into()))?;
+    let base = dirs::data_dir().ok_or_else(|| AppError::Other("cannot resolve data dir".into()))?;
     Ok(base.join("agent-console").join("models").join(model_file()))
 }
 
@@ -104,13 +103,19 @@ pub async fn ensure_model(app: &AppHandle) -> AppResult<PathBuf> {
         downloaded += chunk.len() as u64;
         if downloaded - last_emit >= PROGRESS_EVERY_BYTES {
             last_emit = downloaded;
-            let _ = app.emit("voice://model-progress", ModelProgress { downloaded, total });
+            let _ = app.emit(
+                "voice://model-progress",
+                ModelProgress { downloaded, total },
+            );
         }
     }
     file.sync_all()?;
     drop(file);
     std::fs::rename(&part, &path)?;
-    let _ = app.emit("voice://model-progress", ModelProgress { downloaded, total });
+    let _ = app.emit(
+        "voice://model-progress",
+        ModelProgress { downloaded, total },
+    );
     Ok(path)
 }
 
@@ -168,7 +173,13 @@ impl VoiceService {
         };
         match ready_rx.recv_timeout(Duration::from_secs(5)) {
             Ok(Ok((sample_rate, channels))) => {
-                *slot = Some(Capture { stop, samples, sample_rate, channels, join });
+                *slot = Some(Capture {
+                    stop,
+                    samples,
+                    sample_rate,
+                    channels,
+                    join,
+                });
                 Ok(())
             }
             Ok(Err(e)) => {
@@ -213,7 +224,11 @@ impl VoiceService {
         if self.capture.lock().is_some() {
             return Err(AppError::Other("already capturing".into()));
         }
-        let secs = if seconds.is_finite() { seconds.clamp(1.0, 10.0) } else { 4.0 };
+        let secs = if seconds.is_finite() {
+            seconds.clamp(1.0, 10.0)
+        } else {
+            4.0
+        };
         self.start_capture()?;
         std::thread::sleep(Duration::from_secs_f32(secs));
         self.stop_and_transcribe()
@@ -264,7 +279,9 @@ fn transcribe(ctx: &WhisperContext, audio: &[f32]) -> AppResult<String> {
         .map_err(|e| AppError::Other(format!("whisper inference: {e}")))?;
     let mut text = String::new();
     for i in 0..state.full_n_segments() {
-        let Some(seg) = state.get_segment(i) else { continue };
+        let Some(seg) = state.get_segment(i) else {
+            continue;
+        };
         let Ok(piece) = seg.to_str() else { continue };
         let piece = piece.trim();
         // Whisper marks non-speech as bracketed annotations ("[BLANK_AUDIO]",
@@ -321,8 +338,7 @@ fn capture_thread(
             device.build_input_stream(
                 config,
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    sink.lock()
-                        .extend(data.iter().map(|&v| v as f32 / 32768.0));
+                    sink.lock().extend(data.iter().map(|&v| v as f32 / 32768.0));
                 },
                 |e| eprintln!("voice: stream error: {e}"),
                 None,

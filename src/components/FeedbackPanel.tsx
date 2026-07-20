@@ -16,7 +16,9 @@ export function FeedbackPanel() {
   const refreshContext = useFeedbackStore((s) => s.refreshContext);
   const reset = useFeedbackStore((s) => s.reset);
 
-  useEffect(() => { void refreshContext(); }, [refreshContext]);
+  useEffect(() => {
+    void refreshContext();
+  }, [refreshContext]);
 
   const disabled = status === "submitting";
 
@@ -25,8 +27,8 @@ export function FeedbackPanel() {
       <div className="feedback-header">
         <h3>Feedback</h3>
         <p className="feedback-help">
-          Crea un issue en <code>cyl-castillo/agent-console</code> con el contexto adjunto.
-          Only visible to the dev team (<code>AGENT_CONSOLE_DEV=1</code>).
+          Crea un issue en <code>cyl-castillo/agent-console</code> con el contexto adjunto. Only
+          visible to the dev team (<code>AGENT_CONSOLE_DEV=1</code>).
         </p>
       </div>
 
@@ -87,10 +89,22 @@ export function FeedbackPanel() {
         <div className="feedback-context">
           <div className="feedback-context-title">Will be attached:</div>
           <ul>
-            <li>App: <code>v{ctx.appVersion}</code></li>
-            <li>OS: <code>{ctx.os}</code></li>
-            {ctx.projectName && <li>Project: <code>{ctx.projectName}</code></li>}
-            {ctx.branch && <li>Branch: <code>{ctx.branch}</code></li>}
+            <li>
+              App: <code>v{ctx.appVersion}</code>
+            </li>
+            <li>
+              OS: <code>{ctx.os}</code>
+            </li>
+            {ctx.projectName && (
+              <li>
+                Project: <code>{ctx.projectName}</code>
+              </li>
+            )}
+            {ctx.branch && (
+              <li>
+                Branch: <code>{ctx.branch}</code>
+              </li>
+            )}
           </ul>
         </div>
       )}
@@ -110,12 +124,13 @@ export function FeedbackPanel() {
 
       {status === "success" && lastUrl && (
         <div className="feedback-success">
-          ✔ Issue creado: <a href={lastUrl} target="_blank" rel="noreferrer">{lastUrl}</a>
+          ✔ Issue creado:{" "}
+          <a href={lastUrl} target="_blank" rel="noreferrer">
+            {lastUrl}
+          </a>
         </div>
       )}
-      {status === "error" && error && (
-        <div className="feedback-error">{error}</div>
-      )}
+      {status === "error" && error && <div className="feedback-error">{error}</div>}
     </div>
   );
 }

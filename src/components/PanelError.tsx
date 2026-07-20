@@ -12,10 +12,14 @@ export function PanelError({
 }) {
   return (
     <div className="panel-error" role="alert">
-      <span className="panel-error-icon" aria-hidden="true">⚠</span>
+      <span className="panel-error-icon" aria-hidden="true">
+        ⚠
+      </span>
       <span className="panel-error-msg">{message}</span>
       {onRetry && (
-        <button className="btn btn-link btn-sm" onClick={onRetry}>Retry</button>
+        <button className="btn btn-link btn-sm" onClick={onRetry}>
+          Retry
+        </button>
       )}
       {onDismiss && (
         <button
@@ -23,7 +27,9 @@ export function PanelError({
           onClick={onDismiss}
           aria-label="Dismiss"
           title="Dismiss"
-        >✕</button>
+        >
+          ✕
+        </button>
       )}
     </div>
   );

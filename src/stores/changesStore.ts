@@ -67,7 +67,10 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
 
   setSelected: async (file) => {
     set({ selected: file });
-    if (!file) { set({ diff: "" }); return; }
+    if (!file) {
+      set({ diff: "" });
+      return;
+    }
     try {
       const diff = await ipc.gitDiffFile(file);
       if (get().selected === file) set({ diff });
@@ -98,14 +101,22 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
 
   stageMany: async (files) => {
     for (const f of files) {
-      try { await ipc.gitStageFile(f); } catch { /* keep going */ }
+      try {
+        await ipc.gitStageFile(f);
+      } catch {
+        /* keep going */
+      }
     }
     await get().refresh();
   },
 
   unstageMany: async (files) => {
     for (const f of files) {
-      try { await ipc.gitUnstageFile(f); } catch { /* keep going */ }
+      try {
+        await ipc.gitUnstageFile(f);
+      } catch {
+        /* keep going */
+      }
     }
     await get().refresh();
   },
@@ -114,12 +125,17 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     try {
       const msgs = await ipc.gitRecentMessages(10);
       set({ recentMessages: msgs });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   },
 
   loadHeadMessage: async () => {
-    try { return await ipc.gitHeadMessage(); }
-    catch { return ""; }
+    try {
+      return await ipc.gitHeadMessage();
+    } catch {
+      return "";
+    }
   },
 
   loadBranches: async () => {
@@ -156,7 +172,11 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     const status = get().status;
     if (!status) return;
     for (const change of status.changes) {
-      try { await ipc.gitRevertFile(change.path); } catch { /* keep going */ }
+      try {
+        await ipc.gitRevertFile(change.path);
+      } catch {
+        /* keep going */
+      }
     }
     await get().refresh();
   },
@@ -166,9 +186,7 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     if (!msg) return null;
     set({ committing: true, error: null });
     try {
-      const sha = opts?.amend
-        ? await ipc.gitAmendCommit(msg)
-        : await ipc.gitCommit(msg);
+      const sha = opts?.amend ? await ipc.gitAmendCommit(msg) : await ipc.gitCommit(msg);
       set({ commitMessage: "", committing: false });
       await get().refresh();
       await get().loadCommitHistory();
@@ -181,11 +199,18 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     }
   },
 
-  clear: () => set({
-    status: null, selected: null, diff: "", error: null,
-    commitMessage: "", committing: false, recentMessages: [],
-    branches: [], branchesLoading: false,
-  }),
+  clear: () =>
+    set({
+      status: null,
+      selected: null,
+      diff: "",
+      error: null,
+      commitMessage: "",
+      committing: false,
+      recentMessages: [],
+      branches: [],
+      branchesLoading: false,
+    }),
 }));
 
 /// Subscribe once to the backend `git://changed` filesystem watcher and

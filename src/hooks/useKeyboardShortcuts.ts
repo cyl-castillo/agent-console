@@ -40,7 +40,11 @@ export function useKeyboardShortcuts({ setTab }: Args) {
       const terminals = useTerminalsStore.getState();
       const active = terminals.sessions.find((s) => s.id === terminals.activeId);
       if (!active) return;
-      if (active.status === "live" && !confirm(`Close session "${active.name}"? Process will be killed.`)) return;
+      if (
+        active.status === "live" &&
+        !confirm(`Close session "${active.name}"? Process will be killed.`)
+      )
+        return;
       void terminals.close(active.id);
     };
 
@@ -48,7 +52,8 @@ export function useKeyboardShortcuts({ setTab }: Args) {
       if (!(e.ctrlKey || e.metaKey)) return;
       const target = e.target as HTMLElement | null;
       const inTerminal = !!target?.closest(".terminal-host");
-      const inField = !!target && !inTerminal && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+      const inField =
+        !!target && !inTerminal && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
 
       if (e.key === "Tab") {
         if (cycleSession(e.shiftKey ? -1 : 1)) e.preventDefault();

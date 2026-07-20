@@ -11,12 +11,12 @@
 //! diff to apply — the outcome is the conversation itself. Each agent keeps its
 //! own resumed session so it retains its private reasoning across turns.
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -624,9 +624,7 @@ impl RoundtableService {
             rooms: self.rooms.clone(),
             notice,
         });
-        self.runs
-            .lock()
-            .insert(id.clone(), control.clone());
+        self.runs.lock().insert(id.clone(), control.clone());
 
         let driver_id = id.clone();
         tauri::async_runtime::spawn(async move {
@@ -678,8 +676,7 @@ impl RoundtableService {
         // Best-effort: on any failure this falls back to read-only, exactly the
         // prior behavior, so a resume never breaks.
         let allow_edits = room.allow_edits;
-        let (workspace, worktree, branch, tools) =
-            reattach_room_worktree(&repo, &id, allow_edits);
+        let (workspace, worktree, branch, tools) = reattach_room_worktree(&repo, &id, allow_edits);
         // If it WAS a working room but the worktree couldn't be remounted, say so
         // once on resume: Share still works (by branch name), Sync needs the
         // worktree. Surfaced as the feed banner when the room next runs.
@@ -977,11 +974,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         // seen yet, minus its own messages (it remembers those via its session).
         let (delta, seen_to): (Vec<Message>, usize) = {
             let t = control.transcript.lock();
-            let start = *control
-                .last_seen
-                .lock()
-                .get(&participant.id)
-                .unwrap_or(&0);
+            let start = *control.last_seen.lock().get(&participant.id).unwrap_or(&0);
             let delta = t[start..]
                 .iter()
                 .filter(|m| m.author_id != participant.id)
@@ -1048,10 +1041,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         total_tokens = total_tokens.saturating_add(outcome.tokens);
         control.total_tokens.store(total_tokens, Ordering::SeqCst);
         if let Some(sid) = outcome.session_id {
-            control
-                .resume
-                .lock()
-                .insert(participant.id.clone(), sid);
+            control.resume.lock().insert(participant.id.clone(), sid);
         }
 
         let msg = Message {
@@ -1516,7 +1506,10 @@ fn commit_transcript(
     if fs::write(wt.join(&rel), md).is_err() {
         return;
     }
-    let _ = proc::command("git").args(["add", &rel]).current_dir(wt).output();
+    let _ = proc::command("git")
+        .args(["add", &rel])
+        .current_dir(wt)
+        .output();
     let staged = proc::command("git")
         .args(["diff", "--cached", "--quiet"])
         .current_dir(wt)
@@ -1526,7 +1519,12 @@ fn commit_transcript(
         return;
     }
     let _ = proc::command("git")
-        .args(["commit", "--no-verify", "-m", &format!("room {id}: update transcript")])
+        .args([
+            "commit",
+            "--no-verify",
+            "-m",
+            &format!("room {id}: update transcript"),
+        ])
         .current_dir(wt)
         .output();
 }
@@ -1560,7 +1558,12 @@ fn pick_remote(repo: &Path) -> AppResult<String> {
 /// room's `room/<id>` branch by name when the live handle was dropped on resume.
 fn branch_exists(repo: &Path, branch: &str) -> bool {
     proc::command("git")
-        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
         .current_dir(repo)
         .output()
         .map(|o| o.status.success())
@@ -1715,7 +1718,10 @@ fn push_room_branch(repo: &Path, branch: &str) -> AppResult<ShareResult> {
         // The common round-trip snag: a colleague pushed to `room/<id>` after our
         // last sync, so this push is non-fast-forward. Point the human at Sync
         // (which pulls their commits in cleanly) instead of a raw git error.
-        if err.contains("non-fast-forward") || err.contains("fetch first") || err.contains("rejected") {
+        if err.contains("non-fast-forward")
+            || err.contains("fetch first")
+            || err.contains("rejected")
+        {
             return Err(AppError::Other(format!(
                 "push rejected — a colleague has pushed to {branch} since your last \
                  sync. Click Sync to bring their work in, then Share again. \
@@ -1734,9 +1740,7 @@ fn push_room_branch(repo: &Path, branch: &str) -> AppResult<ShareResult> {
 
     let message = match &pr_url {
         Some(u) => format!("Pushed {branch} → {remote}. Open the MR/PR: {u}"),
-        None => format!(
-            "Pushed {branch} → {remote}. Open an MR/PR from it in your git host."
-        ),
+        None => format!("Pushed {branch} → {remote}. Open an MR/PR from it in your git host."),
     };
     Ok(ShareResult {
         branch: branch.to_string(),
@@ -1799,25 +1803,67 @@ mod tests {
         let repo = std::env::temp_dir().join(format!("ac-roomgc-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&repo).unwrap();
         let git = |args: &[&str]| {
-            let out = proc::command("git").args(args).current_dir(&repo).output().unwrap();
-            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            let out = proc::command("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         };
         git(&["init", "-q", "-b", "main"]);
-        git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base"]);
+        git(&[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "base",
+        ]);
 
         // Merged room branch (same tip as main) → removed.
         git(&["branch", "room/merged-1"]);
         gc_room_branch(&repo, "merged-1");
-        let ls = proc::command("git").args(["branch", "--list", "room/merged-1"]).current_dir(&repo).output().unwrap();
-        assert!(String::from_utf8_lossy(&ls.stdout).trim().is_empty(), "merged branch gone");
+        let ls = proc::command("git")
+            .args(["branch", "--list", "room/merged-1"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&ls.stdout).trim().is_empty(),
+            "merged branch gone"
+        );
 
         // Unmerged branch (extra commit) → survives.
         git(&["checkout", "-q", "-b", "room/wip-2"]);
-        git(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "unreviewed"]);
+        git(&[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "unreviewed",
+        ]);
         git(&["checkout", "-q", "main"]);
         gc_room_branch(&repo, "wip-2");
-        let ls = proc::command("git").args(["branch", "--list", "room/wip-2"]).current_dir(&repo).output().unwrap();
-        assert!(!String::from_utf8_lossy(&ls.stdout).trim().is_empty(), "unmerged work is never destroyed");
+        let ls = proc::command("git")
+            .args(["branch", "--list", "room/wip-2"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&ls.stdout).trim().is_empty(),
+            "unmerged work is never destroyed"
+        );
 
         // Non-git dir: no panic, no error.
         let plain = std::env::temp_dir().join(format!("ac-roomgc-plain-{nanos}"));
@@ -1946,15 +1992,27 @@ mod tests {
         );
         assert_eq!(full.last_seen.get("p1"), Some(&2usize));
         assert_eq!(full.total_tokens, 4242);
-        assert!(!full.allow_edits, "a conversation room round-trips as allow_edits=false");
+        assert!(
+            !full.allow_edits,
+            "a conversation room round-trips as allow_edits=false"
+        );
 
         // A working room's allow_edits survives the round trip — this is what lets
         // a reopened working room still offer Share for review.
         store
-            .save_room(&PersistedRoom { allow_edits: true, ..room("w", "editing room", 150) }, p1)
+            .save_room(
+                &PersistedRoom {
+                    allow_edits: true,
+                    ..room("w", "editing room", 150)
+                },
+                p1,
+            )
             .unwrap();
         let w = store.get("/proj/one", "w").unwrap().expect("room w exists");
-        assert!(w.allow_edits, "a working room round-trips as allow_edits=true");
+        assert!(
+            w.allow_edits,
+            "a working room round-trips as allow_edits=true"
+        );
         store.delete_room("/proj/one", "w").unwrap();
         // Summary derives its fields from the room.
         let sum = store.summaries("/proj/one").unwrap();
@@ -2113,11 +2171,18 @@ mod tests {
     /// remount. Hermetic temp repo.
     #[test]
     fn reattach_remounts_a_reopened_working_room() {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let repo = std::env::temp_dir().join(format!("ac-reattach-{nanos}"));
         fs::create_dir_all(&repo).unwrap();
         let git = |args: &[&str], cwd: &Path| {
-            proc::command("git").args(args).current_dir(cwd).output().unwrap()
+            proc::command("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap()
         };
         git(&["init", "-q"], &repo);
         git(&["config", "user.email", "t@t"], &repo);
@@ -2138,12 +2203,18 @@ mod tests {
         assert!(!wt.exists(), "session ended: no live checkout");
 
         // Reattach: the reopened working room gets its worktree back.
-        let (workspace, worktree, branch_out, tools) =
-            reattach_room_worktree(&repo, &id, true);
-        assert_eq!(worktree.as_deref(), Some(wt.as_path()), "worktree remounted");
+        let (workspace, worktree, branch_out, tools) = reattach_room_worktree(&repo, &id, true);
+        assert_eq!(
+            worktree.as_deref(),
+            Some(wt.as_path()),
+            "worktree remounted"
+        );
         assert_eq!(workspace, wt, "turns run in the remounted checkout");
         assert_eq!(branch_out.as_deref(), Some(branch.as_str()));
-        assert!(matches!(tools, ToolPolicy::AcceptEdits), "editing re-enabled");
+        assert!(
+            matches!(tools, ToolPolicy::AcceptEdits),
+            "editing re-enabled"
+        );
         assert!(
             wt.join("agent.txt").exists(),
             "checkout carries the branch's prior-session commits"
@@ -2167,11 +2238,18 @@ mod tests {
     /// handle) still Share by recovering `room/<id>` by name. Hermetic temp repo.
     #[test]
     fn branch_exists_detects_room_branch() {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let repo = std::env::temp_dir().join(format!("ac-be-test-{nanos}"));
         fs::create_dir_all(&repo).unwrap();
         let git = |args: &[&str]| {
-            proc::command("git").args(args).current_dir(&repo).output().unwrap()
+            proc::command("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap()
         };
         git(&["init", "-q"]);
         git(&["config", "user.email", "t@t"]);
@@ -2180,7 +2258,10 @@ mod tests {
         git(&["add", "-A"]);
         git(&["commit", "-qm", "seed"]);
 
-        assert!(!branch_exists(&repo, "room/r-missing"), "absent branch → false");
+        assert!(
+            !branch_exists(&repo, "room/r-missing"),
+            "absent branch → false"
+        );
         git(&["branch", "room/r-here"]);
         assert!(branch_exists(&repo, "room/r-here"), "created branch → true");
 
@@ -2193,9 +2274,16 @@ mod tests {
     /// agent loop auto-commits the worktree). Hermetic: bare remote + temp clones.
     #[test]
     fn room_sync_pulls_colleague_commits_and_aborts_on_conflict() {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let git = |args: &[&str], cwd: &Path| {
-            proc::command("git").args(args).current_dir(cwd).output().unwrap()
+            proc::command("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap()
         };
         let tmp = std::env::temp_dir();
 
@@ -2224,7 +2312,10 @@ mod tests {
 
         // A colleague clones, adds a non-conflicting file, and pushes.
         let colab = tmp.join(format!("ac-sync-colab-{nanos}"));
-        git(&["clone", "-q", &remote_url, &colab.to_string_lossy()], &tmp);
+        git(
+            &["clone", "-q", &remote_url, &colab.to_string_lossy()],
+            &tmp,
+        );
         git(&["config", "user.email", "c@c"], &colab);
         git(&["config", "user.name", "C"], &colab);
         git(&["checkout", "-q", branch], &colab);
@@ -2237,7 +2328,10 @@ mod tests {
         let res = pull_room_branch(&repo, &wt, branch).unwrap();
         assert_eq!(res.merged_commits, 1, "one colleague commit merged in");
         assert!(res.conflicts.is_empty(), "clean merge has no conflicts");
-        assert!(wt.join("colab.txt").exists(), "colleague's file landed in the worktree");
+        assert!(
+            wt.join("colab.txt").exists(),
+            "colleague's file landed in the worktree"
+        );
 
         // A second sync with nothing new is a clean no-op.
         let again = pull_room_branch(&repo, &wt, branch).unwrap();
@@ -2253,15 +2347,25 @@ mod tests {
         git(&["push", "-q", "origin", branch], &colab);
 
         let conflict = pull_room_branch(&repo, &wt, branch).unwrap();
-        assert_eq!(conflict.merged_commits, 0, "conflicting merge brings nothing in");
-        assert_eq!(conflict.conflicts, vec!["seed.txt".to_string()], "reports the conflicting file");
+        assert_eq!(
+            conflict.merged_commits, 0,
+            "conflicting merge brings nothing in"
+        );
+        assert_eq!(
+            conflict.conflicts,
+            vec!["seed.txt".to_string()],
+            "reports the conflicting file"
+        );
         // The merge was aborted: the worktree is clean and keeps the room's version.
         let status = git(&["status", "--porcelain"], &wt);
         assert!(
             String::from_utf8_lossy(&status.stdout).trim().is_empty(),
             "worktree is clean after abort (safe for the next auto-committing turn)"
         );
-        assert_eq!(fs::read_to_string(wt.join("seed.txt")).unwrap(), "room version\n");
+        assert_eq!(
+            fs::read_to_string(wt.join("seed.txt")).unwrap(),
+            "room version\n"
+        );
 
         remove_room_worktree(&repo, &wt);
         let _ = fs::remove_dir_all(&repo);
@@ -2275,9 +2379,16 @@ mod tests {
     /// than leaking a raw git error. Hermetic: bare remote + temp clone.
     #[test]
     fn room_share_pushes_branch_and_guides_on_nonfastforward() {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let git = |args: &[&str], cwd: &Path| {
-            proc::command("git").args(args).current_dir(cwd).output().unwrap()
+            proc::command("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap()
         };
         let tmp = std::env::temp_dir();
 
@@ -2307,13 +2418,22 @@ mod tests {
         let res = push_room_branch(&repo, branch).unwrap();
         assert_eq!(res.remote, "origin");
         assert_eq!(res.branch, branch);
-        assert!(res.pr_url.is_none(), "a filesystem remote has no recognized host → no MR link");
+        assert!(
+            res.pr_url.is_none(),
+            "a filesystem remote has no recognized host → no MR link"
+        );
         let on_remote = git(&["rev-parse", "--verify", branch], &remote);
-        assert!(on_remote.status.success(), "the remote now carries the room branch");
+        assert!(
+            on_remote.status.success(),
+            "the remote now carries the room branch"
+        );
 
         // A colleague clones, advances the branch, and pushes.
         let colab = tmp.join(format!("ac-share-colab-{nanos}"));
-        git(&["clone", "-q", &remote_url, &colab.to_string_lossy()], &tmp);
+        git(
+            &["clone", "-q", &remote_url, &colab.to_string_lossy()],
+            &tmp,
+        );
         git(&["config", "user.email", "c@c"], &colab);
         git(&["config", "user.name", "C"], &colab);
         git(&["checkout", "-q", branch], &colab);
@@ -2329,7 +2449,10 @@ mod tests {
         // Share again without syncing → push rejected, guidance points at Sync.
         let err = push_room_branch(&repo, branch).unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("Sync"), "non-fast-forward push guides the human to Sync: {msg}");
+        assert!(
+            msg.contains("Sync"),
+            "non-fast-forward push guides the human to Sync: {msg}"
+        );
 
         remove_room_worktree(&repo, &wt);
         let _ = fs::remove_dir_all(&repo);

@@ -11,11 +11,11 @@
 //! original `claude`-only API; `codex_bin()`/`codex_command_with_stdin()` are
 //! the `codex` equivalents. Both route through the same parameterized resolver.
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use parking_lot::Mutex;
 
 /// Caches successfully-resolved absolute paths, keyed by binary base name.
 /// Failures are NOT cached, so a binary installed after a failed lookup is

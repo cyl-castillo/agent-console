@@ -99,7 +99,11 @@ describe("revertAll (mass discard — UX P0.3)", () => {
 
   it("keeps going when one revert throws, and still refreshes at the end", async () => {
     useChangesStore.setState({
-      status: status([change({ path: "a.ts" }), change({ path: "b.ts" }), change({ path: "c.ts" })]),
+      status: status([
+        change({ path: "a.ts" }),
+        change({ path: "b.ts" }),
+        change({ path: "c.ts" }),
+      ]),
     });
     mockRevert.mockRejectedValueOnce(new Error("locked")); // a.ts fails
 
@@ -136,9 +140,7 @@ describe("revert (single file)", () => {
 describe("refresh selection", () => {
   it("keeps the previously selected file when it still exists", async () => {
     useChangesStore.setState({ selected: "b.ts" });
-    mockStatus.mockResolvedValueOnce(
-      status([change({ path: "a.ts" }), change({ path: "b.ts" })]),
-    );
+    mockStatus.mockResolvedValueOnce(status([change({ path: "a.ts" }), change({ path: "b.ts" })]));
     await store().refresh();
     expect(store().selected).toBe("b.ts");
   });
@@ -171,7 +173,9 @@ describe("setSelected stale-diff race guard", () => {
     let resolveA: (v: string) => void = () => {};
     mockDiff.mockImplementation((f: string) =>
       f === "a.ts"
-        ? new Promise<string>((r) => { resolveA = r; })
+        ? new Promise<string>((r) => {
+            resolveA = r;
+          })
         : Promise.resolve("diff-B"),
     );
 

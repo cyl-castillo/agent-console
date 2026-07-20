@@ -93,9 +93,7 @@ export function CommandPalette() {
           {filesError && (
             <div className="palette-empty palette-error">Index error: {filesError}</div>
           )}
-          {!filesLoading && items.length === 0 && (
-            <div className="palette-empty">No matches</div>
-          )}
+          {!filesLoading && items.length === 0 && <div className="palette-empty">No matches</div>}
           {items.map((it, idx) => {
             const isSelected = idx === selectedIndex;
             const isPending = pendingBranchSwitch === it.id;
@@ -111,19 +109,26 @@ export function CommandPalette() {
                 <span className="palette-label">{it.label}</span>
                 {it.hint && <span className="palette-hint">{it.hint}</span>}
                 {it.badge && <span className="palette-badge">{it.badge}</span>}
-                {isPending && it.warn && (
-                  <span className="palette-confirm">{it.warn}</span>
-                )}
+                {isPending && it.warn && <span className="palette-confirm">{it.warn}</span>}
               </div>
             );
           })}
         </div>
         <div className="palette-footer">
-          <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
-          <span><kbd>Enter</kbd> run</span>
-          <span><kbd>Esc</kbd> close</span>
+          <span>
+            <kbd>↑</kbd>
+            <kbd>↓</kbd> move
+          </span>
+          <span>
+            <kbd>Enter</kbd> run
+          </span>
+          <span>
+            <kbd>Esc</kbd> close
+          </span>
           <span className="spacer" />
-          <span><kbd>&gt;</kbd> actions · <kbd>:</kbd> sessions · <kbd>@</kbd> branches</span>
+          <span>
+            <kbd>&gt;</kbd> actions · <kbd>:</kbd> sessions · <kbd>@</kbd> branches
+          </span>
         </div>
       </div>
     </div>

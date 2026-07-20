@@ -17,7 +17,9 @@ export function AboutModal({ onClose }: Props) {
   const [build, setBuild] = useState("");
 
   useEffect(() => {
-    getVersion().then(setVersion).catch(() => setVersion(""));
+    getVersion()
+      .then(setVersion)
+      .catch(() => setVersion(""));
     ipc
       .appBuildInfo()
       .then((b) => {
@@ -31,40 +33,49 @@ export function AboutModal({ onClose }: Props) {
 
   return (
     <Modal onClose={onClose} className="about-modal" ariaLabel="About Agent Console">
-        <div className="about-head">
-          <div className="about-title">Agent Console</div>
-          <div className="about-version">
-            {version ? `v${version}` : ""} · early preview
-            {build && <span title="build provenance"> · {build}</span>}
-          </div>
+      <div className="about-head">
+        <div className="about-title">Agent Console</div>
+        <div className="about-version">
+          {version ? `v${version}` : ""} · early preview
+          {build && <span title="build provenance"> · {build}</span>}
         </div>
+      </div>
 
-        <div className="about-quote">
-          Built for the AI-native era of software engineering.
-        </div>
+      <div className="about-quote">Built for the AI-native era of software engineering.</div>
 
-        <dl className="about-fields">
-          <dt>Stack</dt>
-          <dd>Tauri 2 · Rust · React 19 · TypeScript</dd>
-          <dt>Agent</dt>
-          <dd>Claude Code CLI (stream-json)</dd>
-          <dt>License</dt>
-          <dd>MIT</dd>
-        </dl>
+      <dl className="about-fields">
+        <dt>Stack</dt>
+        <dd>Tauri 2 · Rust · React 19 · TypeScript</dd>
+        <dt>Agent</dt>
+        <dd>Claude Code CLI (stream-json)</dd>
+        <dt>License</dt>
+        <dd>MIT</dd>
+      </dl>
 
-        <div className="about-links">
-          <a href={REPO_URL} target="_blank" rel="noopener">↗ GitHub</a>
-          <a
-            href="#report"
-            onClick={(e) => { e.preventDefault(); void reportProblem(); }}
-          >⚑ Report a problem</a>
-          <a href={SPONSORS_URL} target="_blank" rel="noopener">♥ Sponsor</a>
-          <a href={BMC_URL} target="_blank" rel="noopener">☕ Buy me a coffee</a>
-        </div>
+      <div className="about-links">
+        <a href={REPO_URL} target="_blank" rel="noopener">
+          ↗ GitHub
+        </a>
+        <a
+          href="#report"
+          onClick={(e) => {
+            e.preventDefault();
+            void reportProblem();
+          }}
+        >
+          ⚑ Report a problem
+        </a>
+        <a href={SPONSORS_URL} target="_blank" rel="noopener">
+          ♥ Sponsor
+        </a>
+        <a href={BMC_URL} target="_blank" rel="noopener">
+          ☕ Buy me a coffee
+        </a>
+      </div>
 
-        <div className="modal-actions">
-          <button onClick={onClose}>Close</button>
-        </div>
+      <div className="modal-actions">
+        <button onClick={onClose}>Close</button>
+      </div>
     </Modal>
   );
 }

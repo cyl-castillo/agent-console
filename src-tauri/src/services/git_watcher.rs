@@ -1,7 +1,7 @@
+use parking_lot::Mutex;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 use std::time::Duration;
 
 use notify::RecursiveMode;
@@ -321,10 +321,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "ac-gitwatch-{}-{nanos}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("ac-gitwatch-{}-{nanos}", std::process::id()));
         for d in [
             "src/sub",
             "node_modules/pkg/lib",

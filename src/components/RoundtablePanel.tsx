@@ -31,9 +31,7 @@ export function RoundtablePanel() {
         <span className="spacer" />
         <RunControls />
       </div>
-      <div className="workbench-body">
-        {phase === "config" ? <ConfigForm /> : <RoomView />}
-      </div>
+      <div className="workbench-body">{phase === "config" ? <ConfigForm /> : <RoomView />}</div>
     </div>
   );
 }
@@ -51,7 +49,9 @@ function RunControls() {
   // Viewing a saved room: the only action is to close the viewer (keeps it on disk).
   if (readOnly) {
     return (
-      <button className="workbench-action" onClick={reset} title="Close (keeps the saved room)">×</button>
+      <button className="workbench-action" onClick={reset} title="Close (keeps the saved room)">
+        ×
+      </button>
     );
   }
 
@@ -60,15 +60,23 @@ function RunControls() {
   return (
     <>
       {phase === "running" && (
-        <button className="workbench-action" onClick={pause} title="Pause at next turn">⏸</button>
+        <button className="workbench-action" onClick={pause} title="Pause at next turn">
+          ⏸
+        </button>
       )}
       {phase === "paused" && (
-        <button className="workbench-action" onClick={resume} title="Resume">▶</button>
+        <button className="workbench-action" onClick={resume} title="Resume">
+          ▶
+        </button>
       )}
       {!finished && (
-        <button className="workbench-action" onClick={stop} title="Stop the conversation">⏹</button>
+        <button className="workbench-action" onClick={stop} title="Stop the conversation">
+          ⏹
+        </button>
       )}
-      <button className="workbench-action" onClick={reset} title="Discard and reset">×</button>
+      <button className="workbench-action" onClick={reset} title="Discard and reset">
+        ×
+      </button>
     </>
   );
 }
@@ -93,10 +101,10 @@ function ConfigForm() {
   return (
     <section className="wb-section">
       <p className="wb-hint">
-        You plus a room of agents (Claude and/or Codex) hold one shared
-        conversation about a problem. Each takes turns; everyone sees what the
-        others — and you — said. They can read the open project to ground their
-        reasoning but won't edit anything. Steer anytime by posting a message.
+        You plus a room of agents (Claude and/or Codex) hold one shared conversation about a
+        problem. Each takes turns; everyone sees what the others — and you — said. They can read the
+        open project to ground their reasoning but won't edit anything. Steer anytime by posting a
+        message.
       </p>
 
       <label className="rt-field">
@@ -114,7 +122,9 @@ function ConfigForm() {
         {draft.participants.map((p) => (
           <ParticipantRow key={p.id} p={p} canRemove={draft.participants.length > 2} />
         ))}
-        <button className="rt-add-participant" onClick={addParticipant}>+ add participant</button>
+        <button className="rt-add-participant" onClick={addParticipant}>
+          + add participant
+        </button>
       </div>
 
       <div className="rt-knobs">
@@ -153,13 +163,17 @@ function ConfigForm() {
             {noRepo
               ? "Unavailable — the open folder isn't a git repo. Editing needs a repo with at least one commit; conversation still works."
               : draft.allowEdits
-              ? "On — they work in an isolated worktree on a room/… branch; you review and merge. Your files stay untouched."
-              : "Off — conversation only, read-only."}
+                ? "On — they work in an isolated worktree on a room/… branch; you review and merge. Your files stay untouched."
+                : "Off — conversation only, read-only."}
           </span>
         </span>
       </label>
 
-      {message && <p className="wb-hint" style={{ color: "#ff8585" }}>{message}</p>}
+      {message && (
+        <p className="wb-hint" style={{ color: "#ff8585" }}>
+          {message}
+        </p>
+      )}
 
       <button className="wb-cta" onClick={start} disabled={!draft.problem.trim()}>
         Start conversation
@@ -189,9 +203,14 @@ function ParticipantRow({ p, canRemove }: { p: RtParticipantDraft; canRemove: bo
         </label>
         <label className="rt-field rt-field-sm">
           <span>engine</span>
-          <select value={p.engine} onChange={(e) => setEngine(e.target.value as "claude" | "codex")}>
+          <select
+            value={p.engine}
+            onChange={(e) => setEngine(e.target.value as "claude" | "codex")}
+          >
             {AGENT_PROFILES.map((prof) => (
-              <option key={prof.kind} value={prof.kind}>{prof.icon} {prof.label}</option>
+              <option key={prof.kind} value={prof.kind}>
+                {prof.icon} {prof.label}
+              </option>
             ))}
           </select>
         </label>
@@ -199,12 +218,16 @@ function ParticipantRow({ p, canRemove }: { p: RtParticipantDraft; canRemove: bo
           <span>{p.engine === "codex" ? "effort" : "model"}</span>
           <select value={p.model} onChange={(e) => update(p.id, { model: e.target.value })}>
             {models.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
             ))}
           </select>
         </label>
         {canRemove && (
-          <button className="rt-remove-participant" onClick={() => remove(p.id)} title="Remove">×</button>
+          <button className="rt-remove-participant" onClick={() => remove(p.id)} title="Remove">
+            ×
+          </button>
         )}
       </div>
       <label className="rt-field rt-field-sm">
@@ -255,7 +278,9 @@ function RoomView() {
 
   const n = Math.max(1, roster.length);
   // Activities whose AI turn hasn't completed yet = the in-flight turn's feed.
-  const completedKeys = new Set(turns.filter((t) => !t.isHuman).map((t) => `${t.authorId}-${t.turn}`));
+  const completedKeys = new Set(
+    turns.filter((t) => !t.isHuman).map((t) => `${t.authorId}-${t.turn}`),
+  );
   const live = activities.filter((a) => !completedKeys.has(`${a.authorId}-${a.turn}`));
   // Who's up: trust streaming activity; before it arrives, infer from how many
   // AI turns have completed (round-robin over the launched roster order).
@@ -272,13 +297,18 @@ function RoomView() {
         {!readOnly && draft.allowEdits && (
           <>
             <span className="rt-meta-sep">·</span>
-            <span className="rt-editing" title="Agents edit in an isolated worktree on a room/… branch; review & merge when done">
+            <span
+              className="rt-editing"
+              title="Agents edit in an isolated worktree on a room/… branch; review & merge when done"
+            >
               ✎ editing
             </span>
           </>
         )}
         <span className="rt-meta-sep">·</span>
-        <span>turn {turn}/{targetTurns || draft.maxTurns}</span>
+        <span>
+          turn {turn}/{targetTurns || draft.maxTurns}
+        </span>
         <span className="rt-meta-sep">·</span>
         <span>{formatTokens(totalTokens)} tok</span>
         {!readOnly && draft.tokenBudget > 0 && (
@@ -299,7 +329,9 @@ function RoomView() {
         )}
       </div>
 
-      <div className="rt-topic-banner" title={problem}>{problem}</div>
+      <div className="rt-topic-banner" title={problem}>
+        {problem}
+      </div>
 
       <div className="rt-roster">
         {roster.map((p) => (
@@ -319,7 +351,11 @@ function RoomView() {
           <MessageBubble
             key={i}
             turn={t}
-            activities={t.isHuman ? [] : activities.filter((a) => a.authorId === t.authorId && a.turn === t.turn)}
+            activities={
+              t.isHuman
+                ? []
+                : activities.filter((a) => a.authorId === t.authorId && a.turn === t.turn)
+            }
           />
         ))}
 
@@ -368,7 +404,10 @@ function CoworkBar() {
   return (
     <div className="rt-cowork">
       <div className="rt-cowork-actions">
-        <span className="rt-cowork-label" title="Connect with colleagues working on the same problem, over your git remote">
+        <span
+          className="rt-cowork-label"
+          title="Connect with colleagues working on the same problem, over your git remote"
+        >
           cowork
         </span>
         <span className="spacer" />
@@ -391,15 +430,21 @@ function CoworkBar() {
       </div>
 
       {result && (
-        <div className={`rt-banner ${result.kind === "sync" && result.conflicts.length ? "rt-banner-error" : "rt-banner-info"}`}>
+        <div
+          className={`rt-banner ${result.kind === "sync" && result.conflicts.length ? "rt-banner-error" : "rt-banner-info"}`}
+        >
           <span>{result.message}</span>
           {result.kind === "share" && result.prUrl && (
             <>
               {" "}
-              <a href={result.prUrl} target="_blank" rel="noreferrer">Open MR/PR ↗</a>
+              <a href={result.prUrl} target="_blank" rel="noreferrer">
+                Open MR/PR ↗
+              </a>
             </>
           )}
-          <button className="rt-cowork-dismiss" onClick={clear} title="Dismiss">×</button>
+          <button className="rt-cowork-dismiss" onClick={clear} title="Dismiss">
+            ×
+          </button>
         </div>
       )}
     </div>
@@ -412,7 +457,9 @@ function SavedRoomFooter() {
   const resumeRoom = useRoundtableStore((s) => s.resumeRoom);
   return (
     <div className="rt-moderator">
-      <span className="rt-readonly-note">Saved room · read-only. Reading the engines' prior sessions isn't guaranteed.</span>
+      <span className="rt-readonly-note">
+        Saved room · read-only. Reading the engines' prior sessions isn't guaranteed.
+      </span>
       <span className="spacer" />
       <button className="wb-cta wb-cta-sm rt-continue" onClick={() => void resumeRoom()}>
         Continue conversation ▸
@@ -462,14 +509,35 @@ function fmtDur(ms: number): string {
   return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
 }
 
-function RosterChip({ id, name, model, engine, active }: { id: string; name: string; model: string; engine?: string; active: boolean }) {
+function RosterChip({
+  id,
+  name,
+  model,
+  engine,
+  active,
+}: {
+  id: string;
+  name: string;
+  model: string;
+  engine?: string;
+  active: boolean;
+}) {
   const color = authorColor(id);
   return (
-    <div className={`rt-roster-chip ${active ? "rt-roster-active" : ""}`} style={{ borderColor: active ? color : undefined }}>
+    <div
+      className={`rt-roster-chip ${active ? "rt-roster-active" : ""}`}
+      style={{ borderColor: active ? color : undefined }}
+    >
       <span className="rt-dot" style={{ background: color }} />
       <span className="rt-roster-name">{name}</span>
-      <span className="rt-roster-model">{engine === "codex" ? "◆" : "✶"} {model}</span>
-      {active && <span className="rt-roster-turn"><span className="wb-spinner" /> turn</span>}
+      <span className="rt-roster-model">
+        {engine === "codex" ? "◆" : "✶"} {model}
+      </span>
+      {active && (
+        <span className="rt-roster-turn">
+          <span className="wb-spinner" /> turn
+        </span>
+      )}
     </div>
   );
 }
@@ -489,7 +557,11 @@ function ActivityFeed({ items, showText }: { items: RoundtableActivity[]; showTe
           );
         }
         if (a.kind === "thinking") {
-          return <div key={i} className="rt-act rt-act-thinking">🧠 {a.text}</div>;
+          return (
+            <div key={i} className="rt-act rt-act-thinking">
+              🧠 {a.text}
+            </div>
+          );
         }
         return (
           <div key={i} className="rt-act rt-act-text">
@@ -501,7 +573,13 @@ function ActivityFeed({ items, showText }: { items: RoundtableActivity[]; showTe
   );
 }
 
-function MessageBubble({ turn, activities }: { turn: RoundtableTurn; activities: RoundtableActivity[] }) {
+function MessageBubble({
+  turn,
+  activities,
+}: {
+  turn: RoundtableTurn;
+  activities: RoundtableActivity[];
+}) {
   const color = authorColor(turn.authorId);
   const steps = activities.filter((a) => a.kind !== "text");
 
@@ -512,7 +590,9 @@ function MessageBubble({ turn, activities }: { turn: RoundtableTurn; activities:
           <span className="rt-dot" style={{ background: color }} />
           <span className="rt-turn-name">{turn.authorName}</span>
         </div>
-        <div className="rt-turn-body"><MarkdownText content={turn.text} /></div>
+        <div className="rt-turn-body">
+          <MarkdownText content={turn.text} />
+        </div>
       </div>
     );
   }
@@ -522,13 +602,17 @@ function MessageBubble({ turn, activities }: { turn: RoundtableTurn; activities:
       <div className="rt-turn-head">
         <span className="rt-dot" style={{ background: color }} />
         <span className="rt-turn-name">{turn.authorName}</span>
-        <span className="rt-turn-model">{turn.engine === "codex" ? "◆" : "✶"} {turn.model}</span>
+        <span className="rt-turn-model">
+          {turn.engine === "codex" ? "◆" : "✶"} {turn.model}
+        </span>
         <span className="spacer" />
         <span className="rt-turn-round">t{turn.turn}</span>
       </div>
       {steps.length > 0 && (
         <details className="rt-steps">
-          <summary>{steps.length} step{steps.length === 1 ? "" : "s"} — what it did</summary>
+          <summary>
+            {steps.length} step{steps.length === 1 ? "" : "s"} — what it did
+          </summary>
           <ActivityFeed items={steps} showText={false} />
         </details>
       )}
@@ -573,7 +657,11 @@ function HumanInput() {
           if (e.key === "Enter" && injectDraft.trim()) void send();
         }}
       />
-      <button className="wb-cta wb-cta-sm" onClick={() => void send()} disabled={!injectDraft.trim()}>
+      <button
+        className="wb-cta wb-cta-sm"
+        onClick={() => void send()}
+        disabled={!injectDraft.trim()}
+      >
         Send
       </button>
       {awaiting && (
