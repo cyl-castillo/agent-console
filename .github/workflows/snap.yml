@@ -1,0 +1,59 @@
+name: Snap
+
+# Builds the snap by repacking a published release's .deb, so the snap always
+# ships byte-identical binaries to the GitHub release. Manual trigger while
+# the Snap Store side (name registration + classic-confinement approval —
+# see docs/snap-classic-request.md) is pending; once approved, flip on the
+# release-published trigger below if desired.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to package (e.g. v0.59.0)'
+        required: true
+      publish:
+        description: 'Publish to the Snap Store stable channel'
+        type: boolean
+        default: false
+
+jobs:
+  snap:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch release .deb
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release download "${{ inputs.tag }}" --pattern '*_amd64.deb' --output agent-console.deb
+          dpkg-deb --info agent-console.deb | head -20
+
+      - name: Set snap version from the tag
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          sed -i "s/^version: .*/version: '${TAG#v}'/" snap/snapcraft.yaml
+          grep '^version:' snap/snapcraft.yaml
+
+      - name: Build snap
+        id: build
+        uses: snapcore/action-build@v1
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-console-snap
+          path: ${{ steps.build.outputs.snap }}
+
+      # Requires the SNAPCRAFT_STORE_CREDENTIALS secret (snapcraft
+      # export-login) and the store-side approvals to exist.
+      - name: Publish to Snap Store
+        if: inputs.publish
+        uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: stable

@@ -1,0 +1,49 @@
+name: agent-console
+base: core22
+# Placeholder — the Snap workflow rewrites this from the release tag before building.
+version: '0.0.0'
+summary: Minimalist AI-native console for directing coding agents
+description: |
+  Agent Console is a terminal-first desktop app that pairs coding-agent CLIs
+  (Claude Code, Codex) with an integrated PTY terminal, a git diff viewer,
+  per-turn working-tree snapshots, and per-tool approvals — so you can drive
+  an agent through real work without losing control. Every session is
+  witnessed into a hash-chained evidence ledger (Testigo) exportable as
+  signed proof packets verifiable in any browser.
+
+  Requires the Claude Code CLI (npm i -g @anthropic-ai/claude-code) and
+  Node.js 20+ on the host.
+website: https://github.com/cyl-castillo/agent-console
+license: MIT
+grade: stable
+
+# Classic confinement is REQUIRED, not a convenience: the app's entire purpose
+# is orchestrating binaries the user installed on the host (claude, codex,
+# node, git, their login shell) inside arbitrary project directories, and it
+# shares ~/.claude state with the Claude CLI. Strict confinement cannot exec
+# host binaries, which would leave an empty shell of the app. Same category as
+# the classic IDE/dev-tool snaps (code, goland, etc.). Approval tracked in
+# docs/snap-classic-request.md.
+confinement: classic
+compression: lzo
+
+parts:
+  agent-console:
+    # Repack the released .deb (the Snap workflow downloads it next to this
+    # file as agent-console.deb) instead of rebuilding — identical binaries to
+    # every other channel, and the snap can never drift from the release.
+    plugin: dump
+    source: ./agent-console.deb
+    source-type: deb
+    stage-packages:
+      - libwebkit2gtk-4.1-0
+      - libgtk-3-0
+      - libayatana-appindicator3-1
+      - librsvg2-2
+      - libasound2
+    prime:
+      - -usr/share/doc
+
+apps:
+  agent-console:
+    command: usr/bin/agent-console
