@@ -226,3 +226,145 @@ fn dir_stat(path: &Path) -> DirStat {
         entry_count,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ac-context-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn resolve_md_scopes() {
+        let root = temp_root("resolve");
+        assert_eq!(
+            resolve_md(Some(&root), "project").unwrap(),
+            root.join("CLAUDE.md")
+        );
+        assert!(matches!(
+            resolve_md(None, "project").unwrap_err(),
+            AppError::InvalidArgument(_)
+        ));
+        assert!(matches!(
+            resolve_md(Some(&root), "workspace").unwrap_err(),
+            AppError::InvalidArgument(_)
+        ));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn read_md_missing_file_is_empty_not_error() {
+        let root = temp_root("readmd");
+        assert_eq!(read_md(Some(&root), "project").unwrap(), "");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn write_md_detects_external_edits_via_mtime() {
+        let root = temp_root("conflict");
+        let stat = write_md(Some(&root), "project", "v1", None).unwrap();
+
+        // Stale expectation → recognizable conflict error, file untouched.
+        let err = write_md(Some(&root), "project", "v2", Some(stat.modified_ms - 5000))
+            .unwrap_err();
+        assert!(err.to_string().contains("context:conflict"), "{err}");
+        assert_eq!(fs::read_to_string(root.join("CLAUDE.md")).unwrap(), "v1");
+
+        // Matching expectation → write goes through.
+        write_md(Some(&root), "project", "v2", Some(stat.modified_ms)).unwrap();
+        assert_eq!(fs::read_to_string(root.join("CLAUDE.md")).unwrap(), "v2");
+
+        // No expectation → last-writer-wins overwrite.
+        write_md(Some(&root), "project", "v3", None).unwrap();
+        assert_eq!(fs::read_to_string(root.join("CLAUDE.md")).unwrap(), "v3");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn render_starter_reflects_the_detected_stack() {
+        let ctx = WorkspaceContext {
+            root: PathBuf::from("/work/fixy-app"),
+            language: Some("typescript".into()),
+            framework: Some("vite".into()),
+            file_count: 10,
+            package_scripts: vec!["dev".into(), "test".into()],
+            entry_points: vec!["src/main.tsx".into()],
+            readme_preview: None,
+        };
+        let md = render_starter(&ctx);
+        assert!(md.starts_with("# fixy-app\n"));
+        assert!(md.contains("- Language: typescript"));
+        assert!(md.contains("- Framework: vite"));
+        assert!(md.contains("`npm run dev`"));
+        assert!(md.contains("`src/main.tsx`"));
+
+        // Nothing detected → explicit fill-in hint instead of empty sections.
+        let bare = WorkspaceContext {
+            root: PathBuf::from("/work/x"),
+            language: None,
+            framework: None,
+            file_count: 0,
+            package_scripts: vec![],
+            entry_points: vec![],
+            readme_preview: None,
+        };
+        let md = render_starter(&bare);
+        assert!(md.contains("no language/framework detected"));
+        assert!(!md.contains("## Common commands"));
+    }
+
+    #[test]
+    fn dir_stat_counts_only_markdown_memories() {
+        let root = temp_root("dirstat");
+        fs::write(root.join("a.md"), "x").unwrap();
+        fs::write(root.join("b.md"), "x").unwrap();
+        fs::write(root.join("index.json"), "{}").unwrap();
+        let stat = dir_stat(&root);
+        assert!(stat.exists);
+        assert_eq!(stat.entry_count, 2);
+
+        let gone = dir_stat(&root.join("nope"));
+        assert!(!gone.exists);
+        assert_eq!(gone.entry_count, 0);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// One test fn — it mutates the process-global HOME so the slug lands in
+    /// a sandbox instead of the developer's real ~/.claude.
+    #[test]
+    fn memory_dir_slug_encodes_the_project_path() {
+        let _env = crate::test_support::lock_env();
+        let fake_home = temp_root("home");
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &fake_home);
+
+        let root = temp_root("slug");
+        let dir = memory_dir_for(&root).unwrap();
+
+        match prev_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+
+        let canon = root.canonicalize().unwrap();
+        let expected_slug = canon.to_string_lossy().replace(['/', '\\'], "-");
+        assert!(dir.starts_with(&fake_home));
+        assert!(dir.ends_with(Path::new(&expected_slug).join("memory")));
+        // The slug is a single path component — no separators survive.
+        assert!(!expected_slug.contains('/'));
+
+        fs::remove_dir_all(&root).ok();
+        fs::remove_dir_all(&fake_home).ok();
+    }
+}

@@ -131,3 +131,114 @@ fn format_body(description: &str, ctx: &FeedbackContext, cat: &str, sev: &str) -
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_dev_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _env = crate::test_support::lock_env();
+        let prev = std::env::var("AGENT_CONSOLE_DEV").ok();
+        match value {
+            Some(v) => std::env::set_var("AGENT_CONSOLE_DEV", v),
+            None => std::env::remove_var("AGENT_CONSOLE_DEV"),
+        }
+        let out = f();
+        match prev {
+            Some(v) => std::env::set_var("AGENT_CONSOLE_DEV", v),
+            None => std::env::remove_var("AGENT_CONSOLE_DEV"),
+        }
+        out
+    }
+
+    fn input(title: &str, desc: &str) -> FeedbackInput {
+        FeedbackInput {
+            title: title.into(),
+            description: desc.into(),
+            category: "bug".into(),
+            severity: "high".into(),
+        }
+    }
+
+    fn ctx() -> FeedbackContext {
+        FeedbackContext {
+            app_version: "9.9.9".into(),
+            os: "linux x86_64".into(),
+            project_name: Some("fixy-app".into()),
+            branch: Some("main".into()),
+        }
+    }
+
+    #[test]
+    fn dev_enabled_only_for_a_nonempty_nonzero_flag() {
+        assert!(!with_dev_env(None, dev_enabled));
+        assert!(!with_dev_env(Some(""), dev_enabled));
+        assert!(!with_dev_env(Some("0"), dev_enabled));
+        assert!(with_dev_env(Some("1"), dev_enabled));
+        assert!(with_dev_env(Some("yes"), dev_enabled));
+    }
+
+    #[test]
+    fn submit_is_hard_gated_behind_the_dev_flag() {
+        let err = with_dev_env(None, || submit(input("t", "d"), &ctx()).unwrap_err());
+        assert!(matches!(err, AppError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn submit_validates_before_reaching_the_gh_cli() {
+        // With the flag on, empty title/description must fail fast — these
+        // paths return before any external command is spawned.
+        let err = with_dev_env(Some("1"), || submit(input("  ", "d"), &ctx()).unwrap_err());
+        assert!(err.to_string().contains("title"));
+        let err = with_dev_env(Some("1"), || submit(input("t", "  "), &ctx()).unwrap_err());
+        assert!(err.to_string().contains("description"));
+    }
+
+    #[test]
+    fn sanitize_token_falls_back_to_the_first_allowed_value() {
+        assert_eq!(sanitize_token(" BUG ", &["bug", "feature"]), "bug");
+        assert_eq!(sanitize_token("feature", &["bug", "feature"]), "feature");
+        // Unknown / injection-ish input can only become a known label.
+        assert_eq!(sanitize_token("pwned]; rm -rf", &["bug", "feature"]), "bug");
+    }
+
+    #[test]
+    fn format_body_carries_description_and_environment() {
+        let body = format_body("It broke.", &ctx(), "bug", "high");
+        assert!(body.starts_with("It broke.\n"));
+        assert!(body.contains("- Category: `bug`"));
+        assert!(body.contains("- Severity: `high`"));
+        assert!(body.contains("- App version: `9.9.9`"));
+        assert!(body.contains("- Project: `fixy-app`"));
+        assert!(body.contains("- Branch: `main`"));
+
+        // Optional fields disappear cleanly.
+        let bare = FeedbackContext {
+            app_version: "1".into(),
+            os: "linux".into(),
+            project_name: None,
+            branch: None,
+        };
+        let body = format_body("d", &bare, "bug", "low");
+        assert!(!body.contains("- Project:"));
+        assert!(!body.contains("- Branch:"));
+    }
+
+    #[test]
+    fn context_reports_no_branch_outside_a_git_repo() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ac-feedback-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let c = context(Some(&dir), Some("proj"));
+        assert_eq!(c.branch, None);
+        assert_eq!(c.project_name.as_deref(), Some("proj"));
+        assert_eq!(c.app_version, env!("CARGO_PKG_VERSION"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

@@ -57,3 +57,37 @@ pub fn index_files(root: &Path, limit: usize) -> Vec<String> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_skips_churn_dirs_lists_files_only_and_respects_the_limit() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "ac-palette-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(root.join("src/deep")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join("README.md"), "x").unwrap();
+        std::fs::write(root.join("src/main.rs"), "x").unwrap();
+        std::fs::write(root.join("src/deep/util.rs"), "x").unwrap();
+        std::fs::write(root.join("node_modules/pkg/index.js"), "x").unwrap();
+        std::fs::write(root.join(".git/config"), "x").unwrap();
+
+        let mut files = index_files(&root, 1000);
+        files.sort();
+        // Relative, forward-slash paths; no dirs, nothing from churn dirs.
+        assert_eq!(files, vec!["README.md", "src/deep/util.rs", "src/main.rs"]);
+
+        assert_eq!(index_files(&root, 2).len(), 2);
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+}

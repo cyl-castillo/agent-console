@@ -326,3 +326,97 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}…", &s[..cut])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ac-advisor-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn parse_recommendations_tolerates_chatter_around_the_json() {
+        let out = r#"Sure! Here are my recommendations:
+{"recommendations": [{"name": "run-tests", "description": "d", "whyItFits": "w", "scope": "project", "skillMdContent": "---\nname: run-tests\n---\nBody"}]}
+Hope that helps!"#;
+        let recs = parse_recommendations(out).unwrap();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].name, "run-tests");
+        assert_eq!(recs[0].why_it_fits, "w");
+    }
+
+    #[test]
+    fn parse_recommendations_rejects_output_without_json() {
+        let err = parse_recommendations("I could not analyze this project.").unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+        let err = parse_recommendations("{\"recommendations\": [{\"broken\"").unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+    }
+
+    #[test]
+    fn sanitize_name_produces_safe_directory_names() {
+        assert_eq!(sanitize_name("run-tests"), "run-tests");
+        assert_eq!(sanitize_name("  My Cool Skill!  "), "my-cool-skill");
+        assert_eq!(sanitize_name("../../etc/passwd"), "etc-passwd");
+        assert_eq!(sanitize_name("---"), "");
+        assert_eq!(sanitize_name("é!"), "");
+    }
+
+    #[test]
+    fn truncate_respects_char_boundaries() {
+        // "ñ" is 2 bytes; cutting at byte 1 must back off, not panic.
+        assert_eq!(truncate("ñx", 1), "…");
+        assert_eq!(truncate("abc", 3), "abc");
+        assert_eq!(truncate("abcd", 3), "abc…");
+    }
+
+    #[test]
+    fn create_skill_writes_project_scope_and_refuses_duplicates_and_junk() {
+        let root = temp_root("create");
+        let path = create_skill(&root, "project", "My Skill", "content").unwrap();
+        assert!(path.ends_with(".claude/skills/my-skill/SKILL.md"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "content");
+
+        // Same name again → refuse rather than clobber.
+        let err = create_skill(&root, "project", "My Skill", "other").unwrap_err();
+        assert!(matches!(err, AppError::Other(_)));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "content");
+
+        // A name that sanitizes to nothing, and an unknown scope.
+        assert!(matches!(
+            create_skill(&root, "project", "///", "c").unwrap_err(),
+            AppError::InvalidArgument(_)
+        ));
+        assert!(matches!(
+            create_skill(&root, "workspace", "ok-name", "c").unwrap_err(),
+            AppError::InvalidArgument(_)
+        ));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn build_prompt_embeds_the_context_and_defaults_empty_manifests() {
+        let ctx = Context {
+            tree_excerpt: "src/\nsrc/main.rs".into(),
+            manifests: String::new(),
+            existing_skills: "release-flow".into(),
+            git_log: "abc123 fix".into(),
+        };
+        let p = build_prompt(&ctx);
+        assert!(p.contains("src/main.rs"));
+        assert!(p.contains("Existing skills: release-flow"));
+        assert!(p.contains("abc123 fix"));
+        assert!(p.contains("Manifests:\n(none)"));
+    }
+}
