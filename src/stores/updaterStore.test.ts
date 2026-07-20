@@ -8,6 +8,13 @@ const world = vi.hoisted(() => ({
   installed: 0,
   installError: null as string | null,
   opened: [] as string[],
+  snap: false,
+}));
+
+vi.mock("../ipc/tauri", () => ({
+  ipc: {
+    appBuildInfo: async () => ({ commit: "test", buildTimeSecs: 0, debug: true, snap: world.snap }),
+  },
 }));
 
 vi.mock("../ipc/updater", () => ({
@@ -42,7 +49,23 @@ beforeEach(() => {
   world.installed = 0;
   world.installError = null;
   world.opened = [];
+  world.snap = false;
   useUpdaterStore.setState({ phase: "idle", info: null, manualInfo: null, error: null });
+});
+
+describe("snap-managed installs", () => {
+  it("the in-app updater stands down inside a snap (snapd owns updates)", async () => {
+    world.snap = true;
+    world.tauriUpdate = { version: "9.9.9" }; // must never be consulted
+    await useUpdaterStore.getState().check();
+    const s = useUpdaterStore.getState();
+    expect(s.phase).toBe("snap-managed");
+    expect(s.info).toBeNull();
+
+    // Startup (silent) check: quietly idle, no banner state at all.
+    await useUpdaterStore.getState().check({ silentIfNone: true });
+    expect(useUpdaterStore.getState().phase).toBe("idle");
+  });
 });
 
 describe("updater check", () => {

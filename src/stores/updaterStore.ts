@@ -1,10 +1,28 @@
 import { create } from "zustand";
+import { ipc } from "../ipc/tauri";
 import { checkForUpdate, installAndRelaunch, type UpdateInfo } from "../ipc/updater";
 import { checkGithubRelease, type ManualUpdateInfo } from "../ipc/githubRelease";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 type Phase =
-  "idle" | "checking" | "available" | "available-manual" | "installing" | "error" | "uptodate";
+  | "idle"
+  | "checking"
+  | "available"
+  | "available-manual"
+  | "installing"
+  | "error"
+  | "uptodate"
+  /// Running inside a snap: snapd auto-refreshes the app, so the in-app
+  /// updater stands down entirely (two updaters would fight over the install).
+  | "snap-managed";
+
+async function isSnapManaged(): Promise<boolean> {
+  try {
+    return (await ipc.appBuildInfo()).snap;
+  } catch {
+    return false;
+  }
+}
 
 interface UpdaterState {
   phase: Phase;
@@ -25,6 +43,14 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
 
   async check(opts) {
     if (get().phase === "checking" || get().phase === "installing") return;
+    if (await isSnapManaged()) {
+      set({
+        phase: opts?.silentIfNone ? "idle" : "snap-managed",
+        info: null,
+        manualInfo: null,
+      });
+      return;
+    }
     set({ phase: "checking", error: null });
     try {
       const info = await checkForUpdate();

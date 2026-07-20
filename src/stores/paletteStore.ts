@@ -272,6 +272,8 @@ const ACTIONS: PaletteAction[] = [
       const phase = useUpdaterStore.getState().phase;
       if (phase === "uptodate")
         useToastStore.getState().show("Agent Console is up to date", "success");
+      if (phase === "snap-managed")
+        useToastStore.getState().show("Updates are managed by the Snap Store", "info");
     },
   },
   {

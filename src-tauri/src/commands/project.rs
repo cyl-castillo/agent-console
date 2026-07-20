@@ -61,6 +61,10 @@ pub fn app_build_info() -> serde_json::Value {
         "commit": env!("AC_BUILD_COMMIT"),
         "buildTimeSecs": env!("AC_BUILD_TIME").parse::<u64>().unwrap_or(0),
         "debug": cfg!(debug_assertions),
+        // Running inside a snap (snapd sets $SNAP). The in-app updater must
+        // stand down there: snapd auto-refreshes, and two updaters racing over
+        // the same install is exactly the kind of silent breakage we hunt.
+        "snap": std::env::var_os("SNAP").is_some(),
     })
 }
 
