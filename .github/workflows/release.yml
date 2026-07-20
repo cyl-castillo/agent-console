@@ -265,6 +265,45 @@ jobs:
         shell: bash
         run: echo "WINGET_TOKEN secret not set — skipping winget submission."
 
+  # Publish/update the AUR package (agent-console-bin) AFTER the release is
+  # live — the PKGBUILD downloads the published .deb. Same in-workflow
+  # placement rationale as publish-winget (GITHUB_TOKEN events don't trigger
+  # other workflows). The action runs makepkg --printsrcinfo + updpkgsums in
+  # an Arch container, so version AND checksums are derived fresh each time.
+  # Skips cleanly without the AUR_SSH_PRIVATE_KEY secret.
+  publish-aur:
+    needs: publish-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    env:
+      AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set pkgver from tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i "s/^pkgver=.*/pkgver=${GITHUB_REF_NAME#v}/" packaging/aur/PKGBUILD
+          grep '^pkgver=' packaging/aur/PKGBUILD
+
+      - name: Publish to AUR
+        if: env.AUR_KEY != ''
+        uses: KSXGitHub/github-actions-deploy-aur@v3
+        with:
+          pkgname: agent-console-bin
+          pkgbuild: packaging/aur/PKGBUILD
+          updpkgsums: true
+          commit_username: cyl-castillo
+          commit_email: cmcastillochacon91@gmail.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: Update to ${{ github.ref_name }}
+
+      - name: Skipped (no AUR_SSH_PRIVATE_KEY)
+        if: env.AUR_KEY == ''
+        shell: bash
+        run: echo "AUR_SSH_PRIVATE_KEY secret not set — skipping AUR publish."
+
   # Publish the npm launcher (launcher/) AFTER the release is live — the launcher
   # fetches those assets at runtime, so it must not go out ahead of them. Only
   # runs for real version tags; skips cleanly if the version is already on npm
