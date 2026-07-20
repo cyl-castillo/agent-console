@@ -55,6 +55,13 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_posttooluse_autoinstalled() {
                 eprintln!("hooks: posttooluse auto-install failed: {e}");
             }
+            // Migrate legacy bare-path hook commands to `node "<path>"` on
+            // installs that predate the format (on Windows the old format
+            // never executed at all — no shebangs in cmd.exe, and the path
+            // broke at the first space in the user's home dir).
+            if let Err(e) = state.hooks.normalize_hook_commands() {
+                eprintln!("hooks: command normalization failed: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

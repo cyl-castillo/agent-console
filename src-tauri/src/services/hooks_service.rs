@@ -361,6 +361,48 @@ impl HooksRuntime {
         Ok(())
     }
 
+    /// Migrate any of OUR already-installed hook entries from the legacy
+    /// bare-path command format to the canonical `node "<path>"` form, in both
+    /// Claude's settings.json and Codex's hooks.json. Runs on every startup
+    /// (cheap: read + compare; writes only when something changed) because the
+    /// one-time autoinstall markers mean existing installs never re-run
+    /// upsert_hook. Only rewrites events where the script is ALREADY
+    /// registered — a deliberate uninstall stays uninstalled.
+    pub fn normalize_hook_commands(&self) -> AppResult<()> {
+        let pairs: [(&str, &PathBuf); 4] = [
+            ("UserPromptSubmit", &self.script_path),
+            ("PreToolUse", &self.pretooluse_script_path),
+            ("Stop", &self.stop_script_path),
+            ("PostToolUse", &self.posttooluse_script_path),
+        ];
+        for path in [settings_path(), codex_hooks_path()] {
+            if !path.exists() {
+                continue;
+            }
+            let txt = fs::read_to_string(&path)?;
+            let mut settings: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
+            if !settings.is_object() {
+                continue;
+            }
+            let before = settings.to_string();
+            for (event, script) in pairs {
+                let installed = settings
+                    .pointer(&format!("/hooks/{event}"))
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().any(|e| has_command_path(e, script)))
+                    .unwrap_or(false);
+                if installed {
+                    upsert_hook(&mut settings, event, script);
+                }
+            }
+            let after = settings.to_string();
+            if after != before {
+                write_settings_atomic(&path, &settings)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Remove our hook entries from settings.json and ~/.codex/hooks.json.
     /// Other hooks/settings untouched.
     pub fn uninstall(&self) -> AppResult<HooksStatus> {
@@ -437,27 +479,53 @@ fn write_settings_atomic(settings_path: &Path, settings: &Value) -> AppResult<()
     Ok(())
 }
 
+/// Canonical hook command: `node "<script>"`.
+///
+/// The old format was the bare script path, which relied on shebang execution.
+/// That works on Unix but is dead on Windows twice over: cmd.exe has no
+/// shebangs and `.cjs` has no default file association, and the unquoted path
+/// split at the first space in the user's home dir ("C:\Users\Melissa
+/// Mujica\…"). So on Windows NO hook ever fired — no session-id capture (every
+/// resume started a fresh chat), no approval bridge, no activity/Testigo
+/// events. Quoted path + explicit interpreter works on all three platforms;
+/// node is already a hard requirement of the app.
+fn hook_command(script_path: &Path) -> String {
+    format!("node \"{}\"", script_path.to_string_lossy())
+}
+
+fn entry_has_command(entry: &Value, cmd: &str) -> bool {
+    entry
+        .get("hooks")
+        .and_then(|v| v.as_array())
+        .map(|hs| {
+            hs.iter()
+                .any(|h| h.get("command").and_then(|c| c.as_str()) == Some(cmd))
+        })
+        .unwrap_or(false)
+}
+
 fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path) {
+    let canonical = hook_command(script_path);
     let hooks = settings.get("hooks").cloned().unwrap_or(json!({}));
     let mut hooks = if hooks.is_object() { hooks } else { json!({}) };
-    let entry = json!({
-        "matcher": "*",
-        "hooks": [{ "type": "command", "command": script_path.to_string_lossy() }]
-    });
-    let arr = hooks
+    let mut arr = hooks
         .get_mut(event)
         .and_then(|v| v.as_array_mut())
         .cloned()
         .unwrap_or_default();
-    let already = arr.iter().any(|e| has_command_path(e, script_path));
-    let mut new_arr = arr;
-    if !already {
-        new_arr.push(entry);
+    if !arr.iter().any(|e| entry_has_command(e, &canonical)) {
+        // Drop any prior entry for this script (the legacy bare-path format)
+        // so a re-install migrates it instead of duplicating the hook.
+        arr.retain(|e| !has_command_path(e, script_path));
+        arr.push(json!({
+            "matcher": "*",
+            "hooks": [{ "type": "command", "command": canonical }]
+        }));
     }
     hooks
         .as_object_mut()
         .unwrap()
-        .insert(event.to_string(), Value::Array(new_arr));
+        .insert(event.to_string(), Value::Array(arr));
     settings
         .as_object_mut()
         .unwrap()
@@ -518,15 +586,19 @@ fn is_hook_installed(settings_path: &Path, event: &str, script_path: &Path) -> A
     Ok(arr.iter().any(|e| has_command_path(e, script_path)))
 }
 
+/// Does this settings entry point at our script? Matches BOTH command formats:
+/// the legacy bare path and the canonical `node "<path>"` — install stays
+/// idempotent and uninstall removes either generation.
 fn has_command_path(entry: &Value, target: &Path) -> bool {
     let target_str = target.to_string_lossy().to_string();
+    let quoted = format!("\"{target_str}\"");
     let Some(hooks) = entry.get("hooks").and_then(|v| v.as_array()) else {
         return false;
     };
     hooks.iter().any(|h| {
         h.get("command")
             .and_then(|c| c.as_str())
-            .map(|c| c == target_str)
+            .map(|c| c == target_str || c.contains(&quoted))
             .unwrap_or(false)
     })
 }
@@ -951,5 +1023,72 @@ mod tests {
         assert_eq!(evs[0]["type"], "fresh");
 
         let _ = fs::remove_file(&path);
+    }
+
+    /// The hook command must survive cmd.exe: explicit `node` interpreter
+    /// (no shebangs on Windows) and a quoted path (home dirs contain spaces —
+    /// "C:\\Users\\Melissa Mujica\\…" is the real case that surfaced this).
+    #[test]
+    fn hook_command_is_quoted_and_node_prefixed() {
+        let cmd = hook_command(Path::new("/home/user name/cache/userprompt-hook.cjs"));
+        assert_eq!(cmd, "node \"/home/user name/cache/userprompt-hook.cjs\"");
+    }
+
+    #[test]
+    fn upsert_installs_canonical_and_migrates_the_legacy_bare_path_format() {
+        let script = Path::new("/x/hook with space.cjs");
+
+        // Fresh install → canonical entry, once.
+        let mut settings = json!({});
+        upsert_hook(&mut settings, "UserPromptSubmit", script);
+        upsert_hook(&mut settings, "UserPromptSubmit", script); // idempotent
+        let arr = settings
+            .pointer("/hooks/UserPromptSubmit")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(
+            arr[0]
+                .pointer("/hooks/0/command")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "node \"/x/hook with space.cjs\""
+        );
+
+        // A legacy bare-path entry gets REPLACED, not duplicated; a foreign
+        // hook in the same event is left alone.
+        let mut settings = json!({
+            "hooks": { "PreToolUse": [
+                { "matcher": "*", "hooks": [{ "type": "command", "command": "/x/hook with space.cjs" }] },
+                { "matcher": "*", "hooks": [{ "type": "command", "command": "some-other-tool" }] }
+            ]}
+        });
+        upsert_hook(&mut settings, "PreToolUse", script);
+        let arr = settings
+            .pointer("/hooks/PreToolUse")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 2);
+        let cmds: Vec<&str> = arr
+            .iter()
+            .map(|e| e.pointer("/hooks/0/command").unwrap().as_str().unwrap())
+            .collect();
+        assert!(cmds.contains(&"some-other-tool"));
+        assert!(cmds.contains(&"node \"/x/hook with space.cjs\""));
+        assert!(!cmds.contains(&"/x/hook with space.cjs"));
+    }
+
+    #[test]
+    fn has_command_path_matches_both_generations() {
+        let script = Path::new("/x/h.cjs");
+        let legacy = json!({ "hooks": [{ "type": "command", "command": "/x/h.cjs" }] });
+        let canonical = json!({ "hooks": [{ "type": "command", "command": "node \"/x/h.cjs\"" }] });
+        let other = json!({ "hooks": [{ "type": "command", "command": "node \"/y/other.cjs\"" }] });
+        assert!(has_command_path(&legacy, script));
+        assert!(has_command_path(&canonical, script));
+        assert!(!has_command_path(&other, script));
     }
 }
