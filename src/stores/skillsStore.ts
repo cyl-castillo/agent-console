@@ -91,21 +91,21 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const n = skills.filter((sk) => sk.source === "project" && sk.kind === "skill").length;
       if (lastSkillCount >= 0 && n > lastSkillCount) void fireSchedulerEvent("corpus_grew");
       lastSkillCount = n;
-    } catch { /* ignore */ }
+    } catch (e) { console.error("[skills] refresh failed:", e); }
   },
 
   install: async () => {
     try {
       const status = await ipc.hooksInstall();
       set({ hooks: status });
-    } catch { /* ignore */ }
+    } catch (e) { console.error("[skills] install failed:", e); }
   },
 
   uninstall: async () => {
     try {
       const status = await ipc.hooksUninstall();
       set({ hooks: status });
-    } catch { /* ignore */ }
+    } catch (e) { console.error("[skills] uninstall failed:", e); }
   },
 
   open: async (skill) => {
@@ -114,7 +114,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     try {
       const md = await ipc.skillRead(skill.path);
       if (get().selected?.path === skill.path) set({ selectedMarkdown: md });
-    } catch { /* ignore */ }
+    } catch (e) { console.error("[skills] open failed:", e); }
   },
 
   restoreSnapshot: async (commitSha) => {

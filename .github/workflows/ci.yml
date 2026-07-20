@@ -61,3 +61,15 @@ jobs:
       - name: Tests
         working-directory: src-tauri
         run: cargo test
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # Known-vulnerability scan of the dependency tree (RustSec advisory DB).
+      # Warnings (unmaintained/yanked) don't fail the build; actual
+      # vulnerabilities do.
+      - name: Audit dependencies
+        working-directory: src-tauri
+        run: cargo audit

@@ -1,0 +1,12 @@
+# cargo-audit policy. Ignores are DOCUMENTED EXCEPTIONS, not dismissals:
+# every entry needs the reason and the unblock condition.
+[advisories]
+ignore = [
+    # quick-xml <0.41 DoS-class issues (quadratic dup-attribute check /
+    # unbounded namespace allocation). Pinned by plist -> tauri-utils; no
+    # compatible fix until Tauri bumps plist. plist parsing happens in the
+    # bundling toolchain, not on hostile input at runtime. Re-check on every
+    # Tauri upgrade and drop these when `cargo update quick-xml` moves.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

@@ -3,12 +3,15 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
 import { useAgentStatusStore } from "./agentStatusStore";
+import { useToastStore } from "./toastStore";
 import { notify, windowIsFocused } from "../lib/notify";
 import type { ApprovalRequest } from "../types/domain";
 
 interface ApprovalState {
   queue: ApprovalRequest[];
-  decide: (id: string, decision: "allow" | "deny" | "ask", reason?: string) => Promise<void>;
+  /// Resolves true when the decision reached the hook; false when delivery
+  /// failed (the request stays queued for retry).
+  decide: (id: string, decision: "allow" | "deny" | "ask", reason?: string) => Promise<boolean>;
   _enqueue: (req: ApprovalRequest) => void;
   /// Reconcile the queue against the on-disk pending requests (the source of
   /// truth: the hook deletes each req file once decided or timed out). Heals
@@ -22,10 +25,22 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
   queue: [],
 
   decide: async (id, decision, reason) => {
-    try { await ipc.approvalRespond(id, decision, reason); } catch { /* ignore */ }
+    try {
+      await ipc.approvalRespond(id, decision, reason);
+    } catch (e) {
+      // The hook is still polling for this answer. Dropping the request on a
+      // failed delivery (the old behavior) made the UI look "answered" while
+      // the agent stalled to its timeout — keep it queued and say so.
+      console.error("[approvals] respond failed:", e);
+      useToastStore
+        .getState()
+        .show(`Couldn't deliver the approval: ${String(e).slice(0, 100)} — try again`, "error");
+      return false;
+    }
     set((s) => ({ queue: s.queue.filter((r) => r.id !== id) }));
     // Answering an approval means the agent resumes — keep "working" alive.
     useAgentStatusStore.getState().markActive();
+    return true;
   },
 
   _enqueue: (req) => {
