@@ -3803,6 +3803,10 @@ select:focus-visible,
 .gs-step-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
 .gs-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .gs-hint { font-size: 10.5px; color: var(--text-faint); margin: 0; }
+.gs-section-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); margin: 14px 0 4px;
+}
 
 /* ===== Onboarding banner ===== */
 .onboarding-banner {

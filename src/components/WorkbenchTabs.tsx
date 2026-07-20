@@ -73,7 +73,7 @@ export function WorkbenchTabs({
     jira: { icon: "check", label: "Tasks", title: "Tasks — your assigned Jira issues", count: jiraCount },
     agenda: { icon: "calendar", label: "Agenda", title: "Agenda — task due dates + scheduled jobs" },
     notes: { icon: "sticky-note", label: "Notes", title: "Notes — your per-project scratchpad", count: notesCount },
-    proof: { icon: "shield-check", label: "Proof", title: "Proof — Testigo evidence ledger, verify + signed packet export" },
+    proof: { icon: "shield-check", label: "Proof", title: "Proof — attach a verifiable proof packet to your next PR: what was asked, what you approved, what changed. Verified in any browser, no install." },
     context: { icon: "file-text", label: "Context", title: "Context", count: memoriesCount },
     advisor: {
       icon: "lightbulb",

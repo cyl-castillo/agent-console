@@ -17,6 +17,9 @@ export interface OnboardingState {
   createdSkill: boolean;
   /// True once the user has sent at least one prompt to Claude in any terminal.
   promptedClaude: boolean;
+  /// True once the user has opened the Proof tab from the guide ("what makes
+  /// you stay" section).
+  visitedProof: boolean;
   /// User dismissed the unobtrusive progress banner.
   bannerDismissed: boolean;
 }
@@ -27,6 +30,7 @@ const DEFAULT: OnboardingState = {
   triggeredAdvisor: false,
   createdSkill: false,
   promptedClaude: false,
+  visitedProof: false,
   bannerDismissed: false,
 };
 
@@ -51,6 +55,7 @@ interface Store extends OnboardingState {
   markTriggeredAdvisor: () => void;
   markCreatedSkill: () => void;
   markPromptedClaude: () => void;
+  markVisitedProof: () => void;
   dismissBanner: () => void;
   reset: () => void;
 }
@@ -64,6 +69,7 @@ export const useOnboardingStore = create<Store>((set, get) => {
       triggeredAdvisor: next.triggeredAdvisor,
       createdSkill: next.createdSkill,
       promptedClaude: next.promptedClaude,
+      visitedProof: next.visitedProof,
       bannerDismissed: next.bannerDismissed,
     });
     set(p);
@@ -75,6 +81,7 @@ export const useOnboardingStore = create<Store>((set, get) => {
     markTriggeredAdvisor: () => patch({ triggeredAdvisor: true }),
     markCreatedSkill: () => patch({ createdSkill: true }),
     markPromptedClaude: () => patch({ promptedClaude: true }),
+    markVisitedProof: () => patch({ visitedProof: true }),
     dismissBanner: () => patch({ bannerDismissed: true }),
     reset: () => {
       persist(DEFAULT);

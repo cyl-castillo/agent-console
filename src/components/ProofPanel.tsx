@@ -202,8 +202,21 @@ export function ProofPanel() {
         {!review && events.length === 0 && !error && (
           <section className="wb-section">
             <p className="wb-hint">
-              No evidence recorded yet. Every prompt, approval and turn result
-              lands here automatically — work with an agent and come back.
+              Prove your work, not just show it: every prompt, human approval
+              and result lands here automatically, hash-chained. Export a
+              signed <strong>proof packet</strong> and attach it to a PR, a
+              client hand-off, an audit — anyone verifies it{" "}
+              <a
+                href="https://cyl-castillo.github.io/testigo/verifier/testigo-verifier.html"
+                target="_blank"
+                rel="noreferrer"
+              >
+                in a browser
+              </a>
+              , no install.
+            </p>
+            <p className="wb-hint">
+              Nothing here yet — work with an agent and come back.
             </p>
           </section>
         )}

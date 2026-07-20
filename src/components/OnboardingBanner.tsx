@@ -34,10 +34,10 @@ export function OnboardingBanner({ onOpen }: Props) {
     <div className="onboarding-banner">
       <span className="ob-dot" />
       <span className="ob-text">
-        Tenés {pending} paso{pending === 1 ? "" : "s"} pendiente{pending === 1 ? "" : "s"} en la guía de inicio.
+        {pending} getting-started step{pending === 1 ? "" : "s"} left.
       </span>
-      <button className="wb-link" onClick={onOpen}>Abrir guía</button>
-      <button className="ob-dismiss" onClick={ob.dismissBanner} title="No volver a mostrar">×</button>
+      <button className="wb-link" onClick={onOpen}>Open guide</button>
+      <button className="ob-dismiss" onClick={ob.dismissBanner} title="Don't show again">×</button>
     </div>
   );
 }
