@@ -13,7 +13,10 @@ export function AdvisorPanel() {
   // rather than a frozen panel.
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    if (status !== "analyzing") { setElapsed(0); return; }
+    if (status !== "analyzing") {
+      setElapsed(0);
+      return;
+    }
     setElapsed(0);
     const started = Date.now();
     const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
@@ -26,7 +29,9 @@ export function AdvisorPanel() {
         <span className="workbench-title">advisor</span>
         <span className="spacer" />
         {status === "results" && (
-          <button className="workbench-action" onClick={reset} title="Clear results">×</button>
+          <button className="workbench-action" onClick={reset} title="Clear results">
+            ×
+          </button>
         )}
         <button
           className="workbench-action"
@@ -42,11 +47,13 @@ export function AdvisorPanel() {
         {status === "idle" && (
           <section className="wb-section">
             <p className="wb-hint">
-              The Advisor opens a background Claude session in this project,
-              analyzes its structure, and proposes skills you can create with
-              one click. Nothing is written to disk until you confirm.
+              The Advisor opens a background Claude session in this project, analyzes its structure,
+              and proposes skills you can create with one click. Nothing is written to disk until
+              you confirm.
             </p>
-            <button className="wb-cta" onClick={analyze}>Analyze project</button>
+            <button className="wb-cta" onClick={analyze}>
+              Analyze project
+            </button>
           </section>
         )}
 
@@ -59,8 +66,8 @@ export function AdvisorPanel() {
                   Working… <span className="wb-working-elapsed">{formatElapsed(elapsed)}</span>
                 </div>
                 <div className="wb-working-sub">
-                  Analyzing the project with Claude in the background (usually
-                  30–90s). You can keep using the app — results land here when ready.
+                  Analyzing the project with Claude in the background (usually 30–90s). You can keep
+                  using the app — results land here when ready.
                 </div>
               </div>
             </div>
@@ -73,7 +80,9 @@ export function AdvisorPanel() {
             <p className="wb-hint" style={{ whiteSpace: "pre-wrap" }}>
               {errorMessage}
             </p>
-            <button className="wb-cta" onClick={analyze}>Retry</button>
+            <button className="wb-cta" onClick={analyze}>
+              Retry
+            </button>
           </section>
         )}
 
@@ -85,12 +94,14 @@ export function AdvisorPanel() {
             </div>
             {items.length === 0 ? (
               <p className="wb-hint">
-                The analysis returned no recommendations. Try again or open an
-                issue if this keeps happening.
+                The analysis returned no recommendations. Try again or open an issue if this keeps
+                happening.
               </p>
             ) : (
               <ul className="wb-advisor-list">
-                {items.map((it) => <AdvisorRow key={it.id} item={it} />)}
+                {items.map((it) => (
+                  <AdvisorRow key={it.id} item={it} />
+                ))}
               </ul>
             )}
           </section>
@@ -122,7 +133,9 @@ function AdvisorRow({ item }: { item: AdvisorItem }) {
 
       {open && (
         <div className="wb-advisor-body">
-          <p className="wb-advisor-why"><strong>why:</strong> {item.whyItFits}</p>
+          <p className="wb-advisor-why">
+            <strong>why:</strong> {item.whyItFits}
+          </p>
 
           <div className="wb-advisor-controls">
             <label className="wb-advisor-scope">
@@ -140,11 +153,10 @@ function AdvisorRow({ item }: { item: AdvisorItem }) {
             <div className="wb-advisor-actions">
               {(item.status === "proposed" || item.status === "error") && (
                 <>
-                  <button className="wb-link" onClick={() => skip(item.id)}>skip</button>
-                  <button
-                    className="wb-cta wb-cta-sm"
-                    onClick={() => create(item.id)}
-                  >
+                  <button className="wb-link" onClick={() => skip(item.id)}>
+                    skip
+                  </button>
+                  <button className="wb-cta wb-cta-sm" onClick={() => create(item.id)}>
                     Create
                   </button>
                 </>
@@ -185,9 +197,12 @@ function formatElapsed(secs: number): string {
 function StatusBadge({ status }: { status: AdvisorItem["status"] }) {
   if (status === "proposed") return null;
   const label =
-    status === "created" ? "created" :
-    status === "creating" ? "…" :
-    status === "skipped" ? "skipped" :
-    "error";
+    status === "created"
+      ? "created"
+      : status === "creating"
+        ? "…"
+        : status === "skipped"
+          ? "skipped"
+          : "error";
   return <span className={`wb-advisor-badge status-${status}`}>{label}</span>;
 }

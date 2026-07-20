@@ -40,9 +40,7 @@ describe("clipboardActionFor (terminal copy/paste policy)", () => {
   });
 
   it("Cmd works as the modifier too (macOS)", () => {
-    expect(
-      clipboardActionFor(key({ ctrlKey: false, metaKey: true }), true),
-    ).toBe("copy-and-clear");
+    expect(clipboardActionFor(key({ ctrlKey: false, metaKey: true }), true)).toBe("copy-and-clear");
   });
 
   it("ignores keyup and unmodified keys", () => {

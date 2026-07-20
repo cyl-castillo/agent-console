@@ -25,7 +25,14 @@ interface TreeNode {
 
 /// Hierarchical view of a list of changes. Folders are collapsible and
 /// show the count of files plus aggregate diff stats when available.
-export function ChangeTree({ changes, selected, onSelect, fileAction, folderAction, onRevert }: Props) {
+export function ChangeTree({
+  changes,
+  selected,
+  onSelect,
+  fileAction,
+  folderAction,
+  onRevert,
+}: Props) {
   const root = useMemo(() => buildTree(changes), [changes]);
   // Default: collapse everything except the path to the selected file.
   const [openDirs, setOpenDirs] = useState<Set<string>>(() => initialOpenDirs(root, selected));
@@ -41,9 +48,20 @@ export function ChangeTree({ changes, selected, onSelect, fileAction, folderActi
 
   return (
     <ul className="change-tree">
-      {renderChildren(root, "", openDirs, toggle, {
-        selected, onSelect, fileAction, folderAction, onRevert,
-      }, 0)}
+      {renderChildren(
+        root,
+        "",
+        openDirs,
+        toggle,
+        {
+          selected,
+          onSelect,
+          fileAction,
+          folderAction,
+          onRevert,
+        },
+        0,
+      )}
     </ul>
   );
 }
@@ -108,7 +126,10 @@ function renderChildren(
           <button
             className="ct-folder-action"
             title={ctx.folderAction.title}
-            onClick={(e) => { e.stopPropagation(); ctx.folderAction.run(leaves); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.folderAction.run(leaves);
+            }}
           >
             {ctx.fileAction.label}
           </button>
@@ -124,7 +145,14 @@ function renderChildren(
 }
 
 function FileRow({
-  change, depth, active, actionLabel, actionTitle, onClick, onAction, onRevert,
+  change,
+  depth,
+  active,
+  actionLabel,
+  actionTitle,
+  onClick,
+  onAction,
+  onRevert,
 }: {
   change: GitFileChange;
   depth: number;
@@ -146,16 +174,26 @@ function FileRow({
     >
       <button
         className="ct-file-action"
-        onClick={(e) => { e.stopPropagation(); onAction(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAction();
+        }}
         title={actionTitle}
-      >{actionLabel}</button>
+      >
+        {actionLabel}
+      </button>
       <span className={`change-badge ${badge.kind}`}>{badge.label}</span>
       <span className="ct-name">{name}</span>
       <button
         className="ct-file-revert"
-        onClick={(e) => { e.stopPropagation(); onRevert(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRevert();
+        }}
         title="Discard changes"
-      >↺</button>
+      >
+        ↺
+      </button>
     </li>
   );
 }
@@ -233,4 +271,3 @@ function initialOpenDirs(root: TreeNode, selected: string | null): Set<string> {
   }
   return open;
 }
-

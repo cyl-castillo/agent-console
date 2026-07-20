@@ -113,7 +113,10 @@ describe("schedulerStore", () => {
     // Resolve slowly so we can observe the optimistic state first.
     let resolveSet: (j: Job) => void = () => {};
     mockSetEnabled.mockImplementation(
-      () => new Promise<Job>((res) => { resolveSet = res; }),
+      () =>
+        new Promise<Job>((res) => {
+          resolveSet = res;
+        }),
     );
     const p = useSchedulerStore.getState().setEnabled("j1", false);
     // Optimistic: already shows disabled before the IPC resolves.

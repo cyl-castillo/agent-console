@@ -16,7 +16,9 @@ export function ContextPanel() {
   const refresh = useContextStore((s) => s.refresh);
   const project = useSessionStore((s) => s.project);
 
-  useEffect(() => { refresh(); }, [refresh, project?.root]);
+  useEffect(() => {
+    refresh();
+  }, [refresh, project?.root]);
 
   const [projOpen, setProjOpen] = useState(true);
   const [globOpen, setGlobOpen] = useState(false);
@@ -27,7 +29,9 @@ export function ContextPanel() {
       <div className="workbench-header workbench-header-slim">
         <span className="workbench-title">context</span>
         <span className="spacer" />
-        <button className="workbench-action" onClick={refresh} disabled={loading} title="Refresh">↻</button>
+        <button className="workbench-action" onClick={refresh} disabled={loading} title="Refresh">
+          ↻
+        </button>
       </div>
 
       <div className="workbench-body">
@@ -53,9 +57,7 @@ export function ContextPanel() {
           {projOpen && project && status?.projectClaudeMd && (
             <ClaudeMdEditor scope="project" stat={status.projectClaudeMd} />
           )}
-          {projOpen && !project && (
-            <p className="wb-hint">Open a project to view its CLAUDE.md.</p>
-          )}
+          {projOpen && !project && <p className="wb-hint">Open a project to view its CLAUDE.md.</p>}
         </section>
 
         <section className="wb-section">
@@ -112,16 +114,23 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
   // Load whenever stat (path/mtime) changes.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true); setErr(null);
-    readMd(scope).then((c) => {
-      if (cancelled) return;
-      setContent(c);
-      setOriginal(c);
-      setOriginalMtime(stat.exists ? stat.modifiedMs : null);
-      setMode("view");
-    }).catch((e) => setErr(String(e)))
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    setLoading(true);
+    setErr(null);
+    readMd(scope)
+      .then((c) => {
+        if (cancelled) return;
+        setContent(c);
+        setOriginal(c);
+        setOriginalMtime(stat.exists ? stat.modifiedMs : null);
+        setMode("view");
+      })
+      .catch((e) => setErr(String(e)))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [scope, stat.path, stat.modifiedMs, stat.exists, readMd]);
 
   const dirty = content !== original;
@@ -136,7 +145,11 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
     } catch (e) {
       const msg = String(e);
       if (msg.includes("context:conflict")) {
-        if (confirm("This file was modified externally since you opened it. Save anyway and overwrite?")) {
+        if (
+          confirm(
+            "This file was modified externally since you opened it. Save anyway and overwrite?",
+          )
+        ) {
           try {
             await writeMd(scope, content, null);
             setOriginal(content);
@@ -155,9 +168,13 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
 
   const onProposeStarter = async () => {
     setProposingStarter(true);
-    try { setProposed(await generateStarter()); }
-    catch (e) { setErr(String(e)); }
-    finally { setProposingStarter(false); }
+    try {
+      setProposed(await generateStarter());
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setProposingStarter(false);
+    }
   };
 
   const onAcceptStarter = async () => {
@@ -188,7 +205,11 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
           )}
           <button
             className="wb-link"
-            onClick={() => { setContent(""); setOriginal(""); setMode("edit"); }}
+            onClick={() => {
+              setContent("");
+              setOriginal("");
+              setMode("edit");
+            }}
           >
             Create empty
           </button>
@@ -201,9 +222,7 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
   if (proposed != null) {
     return (
       <div className={`ctx-editor scope-${scope}`}>
-        <p className="wb-hint">
-          Preview of the starter template — review and edit before saving.
-        </p>
+        <p className="wb-hint">Preview of the starter template — review and edit before saving.</p>
         <textarea
           className="ctx-textarea"
           value={proposed}
@@ -211,8 +230,12 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
           rows={16}
         />
         <div className="ctx-actions">
-          <button className="wb-link" onClick={() => setProposed(null)}>Discard</button>
-          <button className="wb-cta wb-cta-sm" onClick={onAcceptStarter}>Use this</button>
+          <button className="wb-link" onClick={() => setProposed(null)}>
+            Discard
+          </button>
+          <button className="wb-cta wb-cta-sm" onClick={onAcceptStarter}>
+            Use this
+          </button>
         </div>
       </div>
     );
@@ -221,31 +244,43 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
   return (
     <div className={`ctx-editor scope-${scope}`}>
       <div className="ctx-toolbar">
-        <span className="ctx-path" title={stat.path}>{stat.path}</span>
+        <span className="ctx-path" title={stat.path}>
+          {stat.path}
+        </span>
         <span className="spacer" />
         <div className="ctx-mode-toggle">
           <button
             className={mode === "view" ? "active" : ""}
             onClick={() => setMode("view")}
             disabled={mode === "view"}
-          >view</button>
+          >
+            view
+          </button>
           <button
             className={mode === "edit" ? "active" : ""}
             onClick={() => setMode("edit")}
             disabled={mode === "edit"}
-          >edit</button>
+          >
+            edit
+          </button>
         </div>
         <button
           className="wb-link"
           onClick={() => openExternally(scope).catch((e) => setErr(String(e)))}
           title="Open in external editor"
-        >open ext</button>
+        >
+          open ext
+        </button>
       </div>
 
       {mode === "view" ? (
-        content
-          ? <div className="ctx-preview"><MarkdownText content={content} /></div>
-          : <p className="wb-hint">(empty)</p>
+        content ? (
+          <div className="ctx-preview">
+            <MarkdownText content={content} />
+          </div>
+        ) : (
+          <p className="wb-hint">(empty)</p>
+        )
       ) : (
         <textarea
           className="ctx-textarea"
@@ -258,7 +293,14 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
 
       {mode === "edit" && (
         <div className="ctx-actions">
-          <button className="wb-link" onClick={() => { setContent(original); setMode("view"); setErr(null); }}>
+          <button
+            className="wb-link"
+            onClick={() => {
+              setContent(original);
+              setMode("view");
+              setErr(null);
+            }}
+          >
             Cancel
           </button>
           <button
@@ -283,18 +325,17 @@ function MemoryList({ memories }: { memories: MemoryEntry[] }) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return memories;
-    return memories.filter((m) =>
-      m.name.toLowerCase().includes(q) ||
-      (m.description ?? "").toLowerCase().includes(q),
+    return memories.filter(
+      (m) => m.name.toLowerCase().includes(q) || (m.description ?? "").toLowerCase().includes(q),
     );
   }, [memories, query]);
 
   if (memories.length === 0) {
     return (
       <p className="wb-hint">
-        No memories yet. Claude will save them to
-        {" "}<code>~/.claude/projects/&lt;project&gt;/memory/</code>
-        {" "}as it learns about you and this codebase.
+        No memories yet. Claude will save them to{" "}
+        <code>~/.claude/projects/&lt;project&gt;/memory/</code> as it learns about you and this
+        codebase.
       </p>
     );
   }
@@ -308,7 +349,11 @@ function MemoryList({ memories }: { memories: MemoryEntry[] }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        {query && <button className="wb-search-clear" onClick={() => setQuery("")} title="Clear">×</button>}
+        {query && (
+          <button className="wb-search-clear" onClick={() => setQuery("")} title="Clear">
+            ×
+          </button>
+        )}
       </div>
       {filtered.length === 0 ? (
         <p className="wb-hint">No matches.</p>
@@ -328,7 +373,11 @@ function MemoryList({ memories }: { memories: MemoryEntry[] }) {
   );
 }
 
-function MemoryRow({ entry, expanded, onToggle }: {
+function MemoryRow({
+  entry,
+  expanded,
+  onToggle,
+}: {
   entry: MemoryEntry;
   expanded: boolean;
   onToggle: () => void;
@@ -341,9 +390,16 @@ function MemoryRow({ entry, expanded, onToggle }: {
   useEffect(() => {
     if (!expanded) return;
     let cancelled = false;
-    readMemory(entry.name).then((c) => { if (!cancelled) setContent(c); })
-      .catch((e) => { if (!cancelled) setErr(String(e)); });
-    return () => { cancelled = true; };
+    readMemory(entry.name)
+      .then((c) => {
+        if (!cancelled) setContent(c);
+      })
+      .catch((e) => {
+        if (!cancelled) setErr(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [expanded, entry.name, readMemory]);
 
   const onDelete = (e: React.MouseEvent) => {
@@ -352,7 +408,11 @@ function MemoryRow({ entry, expanded, onToggle }: {
       alert("MEMORY.md is the index — delete the individual memory files instead.");
       return;
     }
-    if (confirm(`Delete memory "${entry.name}"?\n\nThe agent uses this to remember context — this cannot be undone.`)) {
+    if (
+      confirm(
+        `Delete memory "${entry.name}"?\n\nThe agent uses this to remember context — this cannot be undone.`,
+      )
+    ) {
       deleteMemory(entry.name).catch((e2) => alert(`Could not delete: ${e2}`));
     }
   };
@@ -368,7 +428,9 @@ function MemoryRow({ entry, expanded, onToggle }: {
         <span className="spacer" />
         <span className="ctx-memory-meta">{formatRelative(entry.modifiedMs)}</span>
         {!entry.isIndex && (
-          <button className="ctx-memory-delete" onClick={onDelete} title="Delete">×</button>
+          <button className="ctx-memory-delete" onClick={onDelete} title="Delete">
+            ×
+          </button>
         )}
       </div>
       {expanded && (

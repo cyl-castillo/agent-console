@@ -61,7 +61,11 @@ describe("isHardDenyAllow", () => {
 });
 
 describe("classify", () => {
-  const rule = (raw: string, scope: "project" | "global" = "project", effect: "allow" | "deny" | "ask" = "allow") => {
+  const rule = (
+    raw: string,
+    scope: "project" | "global" = "project",
+    effect: "allow" | "deny" | "ask" = "allow",
+  ) => {
     const parsed = parseRaw(raw);
     if (!parsed) throw new Error(`bad raw in test: ${raw}`);
     return classify({ scope, effect, tool: parsed.tool, pattern: parsed.pattern, raw });
@@ -151,11 +155,7 @@ describe("suggestRules", () => {
 
   it("Bash: exact, prefix, and whole-tool — whole-tool marked dangerous", () => {
     const out = suggestRules(req("Bash", { command: "npm run build" }), "project");
-    expect(out.map((s) => s.rule.raw)).toEqual([
-      "Bash(npm run build)",
-      "Bash(npm:*)",
-      "Bash",
-    ]);
+    expect(out.map((s) => s.rule.raw)).toEqual(["Bash(npm run build)", "Bash(npm:*)", "Bash"]);
     const whole = out[2];
     expect(whole.risk).toBe("dangerous");
     expect(whole.requiresConfirm).toBe(true);
@@ -167,15 +167,8 @@ describe("suggestRules", () => {
   });
 
   it("path tools: file, parent dir glob, whole tool — paths relativized to cwd", () => {
-    const out = suggestRules(
-      req("Edit", { file_path: "/home/me/proj/src/app.tsx" }),
-      "project",
-    );
-    expect(out.map((s) => s.rule.raw)).toEqual([
-      "Edit(src/app.tsx)",
-      "Edit(src/**)",
-      "Edit",
-    ]);
+    const out = suggestRules(req("Edit", { file_path: "/home/me/proj/src/app.tsx" }), "project");
+    expect(out.map((s) => s.rule.raw)).toEqual(["Edit(src/app.tsx)", "Edit(src/**)", "Edit"]);
   });
 
   it("empty Bash command yields no suggestions", () => {

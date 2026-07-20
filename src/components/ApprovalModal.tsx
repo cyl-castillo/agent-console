@@ -3,7 +3,14 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { useApprovalStore } from "../stores/approvalStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
 import { useVoiceStore } from "../stores/voiceStore";
-import { suggestRules, classify, buildRaw, isHardDenyAllow, assessCommand, toRelative } from "../permissions/rules";
+import {
+  suggestRules,
+  classify,
+  buildRaw,
+  isHardDenyAllow,
+  assessCommand,
+  toRelative,
+} from "../permissions/rules";
 import type { RuleSuggestion, Scope } from "../permissions/types";
 import type { ApprovalRequest } from "../types/domain";
 
@@ -36,7 +43,8 @@ interface DiffLine {
 function diffLines(oldStr: string, newStr: string): DiffLine[] {
   // Pure insertion / deletion: skip the LCS and the spurious empty-line pair
   // that "".split("\n") would otherwise introduce.
-  if (oldStr === "") return newStr === "" ? [] : newStr.split("\n").map((l) => ({ type: "add", text: l }));
+  if (oldStr === "")
+    return newStr === "" ? [] : newStr.split("\n").map((l) => ({ type: "add", text: l }));
   if (newStr === "") return oldStr.split("\n").map((l) => ({ type: "del", text: l }));
   const a = oldStr.split("\n");
   const b = newStr.split("\n");
@@ -57,7 +65,8 @@ function diffLines(oldStr: string, newStr: string): DiffLine[] {
   while (i < n && j < m) {
     if (a[i] === b[j]) {
       lines.push({ type: "ctx", text: a[i] });
-      i++; j++;
+      i++;
+      j++;
     } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
       lines.push({ type: "del", text: a[i] });
       i++;
@@ -153,7 +162,10 @@ function ApprovalCountdown({ req }: { req: { ts: number; timeoutMs?: number } })
   const left = Math.max(0, Math.ceil((deadline - now) / 1000));
   if (left === 0) {
     return (
-      <span className="approval-countdown expired" title="The hook timed out; the agent fell back to its own terminal prompt.">
+      <span
+        className="approval-countdown expired"
+        title="The hook timed out; the agent fell back to its own terminal prompt."
+      >
         expired — answer in the terminal
       </span>
     );
@@ -247,11 +259,11 @@ export function ApprovalModal() {
       <div className="modal approval-modal" onClick={(e) => e.stopPropagation()}>
         <div className="approval-head">
           <span className={`approval-tool tool-${req.tool.toLowerCase()}`}>{req.tool}</span>
-          <span className="approval-cwd" title={req.cwd}>{shortenPath(req.cwd)}</span>
+          <span className="approval-cwd" title={req.cwd}>
+            {shortenPath(req.cwd)}
+          </span>
           <ApprovalCountdown req={req} />
-          {queue.length > 1 && (
-            <span className="approval-queue-depth">1 of {queue.length}</span>
-          )}
+          {queue.length > 1 && <span className="approval-queue-depth">1 of {queue.length}</span>}
         </div>
 
         {voiceStage === "speaking" && (
@@ -267,9 +279,7 @@ export function ApprovalModal() {
 
         {cmdAssessment && (
           <div className="approval-bash-risk">
-            <span className={`risk risk-${cmdAssessment.level}`}>
-              {cmdAssessment.level}
-            </span>
+            <span className={`risk risk-${cmdAssessment.level}`}>{cmdAssessment.level}</span>
             <span className="approval-risk-hint">{cmdAssessment.reason}</span>
           </div>
         )}
@@ -283,7 +293,10 @@ export function ApprovalModal() {
             <button
               className="btn btn-danger"
               disabled={busy}
-              onClick={() => { setBusy(true); decideAndRefocus(req.id, "deny", "user denied"); }}
+              onClick={() => {
+                setBusy(true);
+                decideAndRefocus(req.id, "deny", "user denied");
+              }}
             >
               Deny
             </button>
@@ -297,8 +310,15 @@ export function ApprovalModal() {
             <button
               className="btn btn-success"
               disabled={busy}
-              title={cmdAssessment?.level === "dangerous" ? "Click required — keyboard shortcut disabled for dangerous commands" : "Ctrl+Enter"}
-              onClick={() => { setBusy(true); decideAndRefocus(req.id, "allow", "approved once"); }}
+              title={
+                cmdAssessment?.level === "dangerous"
+                  ? "Click required — keyboard shortcut disabled for dangerous commands"
+                  : "Ctrl+Enter"
+              }
+              onClick={() => {
+                setBusy(true);
+                decideAndRefocus(req.id, "allow", "approved once");
+              }}
             >
               Approve once
             </button>
@@ -308,7 +328,10 @@ export function ApprovalModal() {
         {!showAlways && (
           <div className="approval-hint">
             <strong>Deny</strong> tells the agent no — it keeps going without running this.
-            <span className="approval-hint-keys"><kbd>Esc</kbd> dismiss · <kbd>Ctrl</kbd>+<kbd>D</kbd> deny · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> approve</span>
+            <span className="approval-hint-keys">
+              <kbd>Esc</kbd> dismiss · <kbd>Ctrl</kbd>+<kbd>D</kbd> deny · <kbd>Ctrl</kbd>+
+              <kbd>Enter</kbd> approve
+            </span>
           </div>
         )}
 
@@ -323,8 +346,11 @@ export function ApprovalModal() {
               setBusy(true);
               const r = await addRule(suggestion.rule.scope, effect, suggestion.rule.raw);
               if (r) {
-                await decide(req.id, effect === "deny" ? "deny" : "allow",
-                  `rule saved: ${suggestion.rule.raw}`);
+                await decide(
+                  req.id,
+                  effect === "deny" ? "deny" : "allow",
+                  `rule saved: ${suggestion.rule.raw}`,
+                );
               } else {
                 setBusy(false);
               }
@@ -352,7 +378,9 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
 
   const selected = suggestions[selectedIdx];
 
-  useEffect(() => { setConfirmText(""); }, [selectedIdx, scope, denyMode]);
+  useEffect(() => {
+    setConfirmText("");
+  }, [selectedIdx, scope, denyMode]);
 
   // ↑/↓ cycle through the rule suggestions — the list was click-only before,
   // stranding keyboard users. Arrows are harmless in the single-line confirm
@@ -373,34 +401,45 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
   if (!selected) return <div className="placeholder">No suggestions.</div>;
 
   const effect: "allow" | "deny" = denyMode ? "deny" : "allow";
-  const live = { ...selected.rule, scope, effect, raw: buildRaw(selected.rule.tool, selected.rule.pattern) };
+  const live = {
+    ...selected.rule,
+    scope,
+    effect,
+    raw: buildRaw(selected.rule.tool, selected.rule.pattern),
+  };
   const { risk, reason } = classify(live);
-  const hd = effect === "allow" ? isHardDenyAllow(live.raw) : { hard: false } as const;
+  const hd = effect === "allow" ? isHardDenyAllow(live.raw) : ({ hard: false } as const);
   const blocked = hd.hard;
   const strict = risk === "broad" || risk === "dangerous";
-  const requiresTyping = !blocked && (
-    risk === "dangerous" ||
-    (effect === "allow" && scope === "global" && (live.tool === "Bash" || live.tool === "Write"))
-  );
+  const requiresTyping =
+    !blocked &&
+    (risk === "dangerous" ||
+      (effect === "allow" &&
+        scope === "global" &&
+        (live.tool === "Bash" || live.tool === "Write")));
 
   return (
     <div className="approval-always">
       <div className="approval-row">
         <span className="label">Scope</span>
         <div className="seg">
-          <button
-            className={scope === "project" ? "on" : ""}
-            onClick={() => setScope("project")}
-          >project</button>
-          <button
-            className={scope === "global" ? "on" : ""}
-            onClick={() => setScope("global")}
-          >global</button>
+          <button className={scope === "project" ? "on" : ""} onClick={() => setScope("project")}>
+            project
+          </button>
+          <button className={scope === "global" ? "on" : ""} onClick={() => setScope("global")}>
+            global
+          </button>
         </div>
-        <span className="label" style={{ marginLeft: 12 }}>Effect</span>
+        <span className="label" style={{ marginLeft: 12 }}>
+          Effect
+        </span>
         <div className="seg">
-          <button className={!denyMode ? "on" : ""} onClick={() => setDenyMode(false)}>allow</button>
-          <button className={denyMode ? "on" : ""} onClick={() => setDenyMode(true)}>deny</button>
+          <button className={!denyMode ? "on" : ""} onClick={() => setDenyMode(false)}>
+            allow
+          </button>
+          <button className={denyMode ? "on" : ""} onClick={() => setDenyMode(true)}>
+            deny
+          </button>
         </div>
       </div>
 
@@ -448,8 +487,8 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
 
       {blocked && (
         <div className="approval-blocked">
-          <strong>Blocked</strong> — this pattern is in Agent Console's hard-deny list
-          and cannot be saved as an allow rule. {hd.reason}
+          <strong>Blocked</strong> — this pattern is in Agent Console's hard-deny list and cannot be
+          saved as an allow rule. {hd.reason}
         </div>
       )}
 
@@ -482,7 +521,9 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
       )}
 
       <div className="approval-actions">
-        <button className="btn btn-secondary" onClick={onCancel}>Back</button>
+        <button className="btn btn-secondary" onClick={onCancel}>
+          Back
+        </button>
         <button
           className="btn btn-success"
           disabled={

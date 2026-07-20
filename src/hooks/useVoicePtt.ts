@@ -34,7 +34,9 @@ export function useVoicePtt() {
       }
     };
     // Losing focus mid-hold means we'll never see the keyup — drop the take.
-    const onBlur = () => { void useVoiceStore.getState().pttCancel(); };
+    const onBlur = () => {
+      void useVoiceStore.getState().pttCancel();
+    };
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("keyup", onKeyUp, true);
     window.addEventListener("blur", onBlur);

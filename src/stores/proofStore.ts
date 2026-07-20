@@ -204,12 +204,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
     if (!root || !review) return;
     set({ exporting: review.caseId ?? "__ledger__", error: null });
     try {
-      const lastExport = await ipc.testigoExport(
-        root,
-        review.caseId,
-        undefined,
-        review.redactSeqs,
-      );
+      const lastExport = await ipc.testigoExport(root, review.caseId, undefined, review.redactSeqs);
       set({ lastExport, exporting: null, review: null });
     } catch (e) {
       set({ exporting: null, error: String(e) });

@@ -49,14 +49,12 @@ function TreeNode({ node, depth }: { node: FileNode; depth: number }) {
         onDoubleClick={onDoubleClick}
         title={isDir ? node.name : "Double-click to preview"}
       >
-        <span className="icon">
-          {isDir ? (open ? "▾" : "▸") : " "}
-        </span>
+        <span className="icon">{isDir ? (open ? "▾" : "▸") : " "}</span>
         <span className={`name ${isDir ? "dir" : "file"}`}>{node.name}</span>
       </div>
-      {isDir && open && node.children?.map((child) => (
-        <TreeNode key={child.path} node={child} depth={depth + 1} />
-      ))}
+      {isDir &&
+        open &&
+        node.children?.map((child) => <TreeNode key={child.path} node={child} depth={depth + 1} />)}
     </>
   );
 }

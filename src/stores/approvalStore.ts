@@ -114,10 +114,7 @@ export interface SessionRef {
 ///    Ambiguous matches attribute to nobody — a wrong "waiting" badge on the
 ///    wrong session is worse than none (the global StatusBar pill still covers
 ///    the queue as a whole).
-export function blockedSessionIds(
-  queue: ApprovalRequest[],
-  sessions: SessionRef[],
-): Set<string> {
+export function blockedSessionIds(queue: ApprovalRequest[], sessions: SessionRef[]): Set<string> {
   const blocked = new Set<string>();
   for (const req of queue) {
     if (req.termId && sessions.some((s) => s.id === req.termId)) {

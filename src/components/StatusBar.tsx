@@ -65,7 +65,9 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
           onClick={() => setTab("changes")}
           title="Open Changes"
         >
-          <span>{changesCount} change{changesCount === 1 ? "" : "s"}</span>
+          <span>
+            {changesCount} change{changesCount === 1 ? "" : "s"}
+          </span>
         </button>
       )}
       <div className="sb-spacer" />
@@ -93,13 +95,19 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
         {liveCount} live
       </span>
       {project.language && (
-        <span className="sb-item sb-muted" title="Language">{project.language}</span>
+        <span className="sb-item sb-muted" title="Language">
+          {project.language}
+        </span>
       )}
       {project.framework && (
-        <span className="sb-item sb-muted" title="Framework">{project.framework}</span>
+        <span className="sb-item sb-muted" title="Framework">
+          {project.framework}
+        </span>
       )}
       {workspace?.fileCount ? (
-        <span className="sb-item sb-muted" title="Tracked files">{workspace.fileCount} files</span>
+        <span className="sb-item sb-muted" title="Tracked files">
+          {workspace.fileCount} files
+        </span>
       ) : null}
       {build?.debug && (
         <span
@@ -110,7 +118,9 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
         </span>
       )}
       {appVersion && (
-        <span className="sb-item sb-muted" title="Agent Console version">v{appVersion}</span>
+        <span className="sb-item sb-muted" title="Agent Console version">
+          v{appVersion}
+        </span>
       )}
     </footer>
   );
@@ -229,8 +239,15 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
     if (session.model === model) return;
     setModel(session.id, model);
     setDefaultFor(projectRoot, profile.kind, model);
-    if (session.status === "live" && profile.supportsLiveModelSwitch && profile.liveModelSwitchInput) {
-      const detail: TermInputDetail = { sessionId: session.id, data: profile.liveModelSwitchInput(model) };
+    if (
+      session.status === "live" &&
+      profile.supportsLiveModelSwitch &&
+      profile.liveModelSwitchInput
+    ) {
+      const detail: TermInputDetail = {
+        sessionId: session.id,
+        data: profile.liveModelSwitchInput(model),
+      };
       window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
     }
   };
@@ -253,7 +270,9 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
       </button>
       {open && (
         <div className="model-menu" role="menu">
-          <div className="model-menu-head">{canLiveSwitch ? "Switch model" : "Model on resume"}</div>
+          <div className="model-menu-head">
+            {canLiveSwitch ? "Switch model" : "Model on resume"}
+          </div>
           {profile.models.map((p) => (
             <button
               key={p.value}
@@ -267,13 +286,12 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
           ))}
           {canLiveSwitch && (
             <div className="model-menu-note">
-              Sends <code>/model</code> to the terminal — only takes effect if {profile.label} is idle.
+              Sends <code>/model</code> to the terminal — only takes effect if {profile.label} is
+              idle.
             </div>
           )}
           {live && !profile.supportsLiveModelSwitch && (
-            <div className="model-menu-note">
-              Applies the next time this session is resumed.
-            </div>
+            <div className="model-menu-note">Applies the next time this session is resumed.</div>
           )}
         </div>
       )}
@@ -289,15 +307,19 @@ function VoicePill() {
   const progress = useVoiceStore((s) => s.progress);
   const toggle = useVoiceStore((s) => s.toggle);
 
-  const pct = progress?.total
-    ? Math.round((progress.downloaded / progress.total) * 100)
-    : null;
+  const pct = progress?.total ? Math.round((progress.downloaded / progress.total) * 100) : null;
   const label =
-    phase === "off" ? "voice off"
-    : phase === "loading" ? (pct != null ? `voice ${pct}%` : "voice loading…")
-    : phase === "listening" ? "listening…"
-    : phase === "transcribing" ? "transcribing…"
-    : "voice ready";
+    phase === "off"
+      ? "voice off"
+      : phase === "loading"
+        ? pct != null
+          ? `voice ${pct}%`
+          : "voice loading…"
+        : phase === "listening"
+          ? "listening…"
+          : phase === "transcribing"
+            ? "transcribing…"
+            : "voice ready";
   const title =
     phase === "off"
       ? "Enable voice input (Ctrl+Shift+V). First use downloads the Whisper model (~190 MB, local)."
@@ -322,20 +344,36 @@ function VoicePill() {
 /// (`contextTokens / contextWindow`). Polls while the session is live so it
 /// tracks the agent's progress; the totals live in the tooltip. Turns amber
 /// past 80% as a hint to `/compact`.
-function UsagePill({ sessionId, projectRoot, live }: { sessionId: string; projectRoot: string; live: boolean }) {
+function UsagePill({
+  sessionId,
+  projectRoot,
+  live,
+}: {
+  sessionId: string;
+  projectRoot: string;
+  live: boolean;
+}) {
   const [usage, setUsage] = useState<SessionUsage | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      ipc.sessionUsage(sessionId, projectRoot)
-        .then((u) => { if (!cancelled) setUsage(u); })
-        .catch(() => { /* transcript not ready / unreadable — keep last value */ });
+      ipc
+        .sessionUsage(sessionId, projectRoot)
+        .then((u) => {
+          if (!cancelled) setUsage(u);
+        })
+        .catch(() => {
+          /* transcript not ready / unreadable — keep last value */
+        });
     };
     load();
     // Only poll while the agent can still be producing tokens.
     const t = live ? window.setInterval(load, 5000) : null;
-    return () => { cancelled = true; if (t) window.clearInterval(t); };
+    return () => {
+      cancelled = true;
+      if (t) window.clearInterval(t);
+    };
   }, [sessionId, projectRoot, live]);
 
   if (!usage || usage.contextTokens <= 0) return null;
@@ -352,7 +390,9 @@ function UsagePill({ sessionId, projectRoot, live }: { sessionId: string; projec
   return (
     <span className={`sb-item sb-muted usage-pill ${warn ? "usage-warn" : ""}`} title={tip}>
       <span className="usage-glyph">⌁</span>
-      <span>{fmtTokens(usage.contextTokens)} ({pct}%)</span>
+      <span>
+        {fmtTokens(usage.contextTokens)} ({pct}%)
+      </span>
     </span>
   );
 }

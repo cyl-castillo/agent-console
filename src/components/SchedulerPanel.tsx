@@ -331,15 +331,16 @@ export function SchedulerPanel() {
       <div className="workbench-body">
         {paused && (
           <div className="wb-sched-banner">
-            Scheduler paused — automated runs are halted. You can still run a job
-            manually with ▶.
+            Scheduler paused — automated runs are halted. You can still run a job manually with ▶.
           </div>
         )}
 
         {status === "error" && (
           <section className="wb-section">
             <div className="wb-section-title">scheduler error</div>
-            <p className="wb-hint" style={{ whiteSpace: "pre-wrap" }}>{errorMessage}</p>
+            <p className="wb-hint" style={{ whiteSpace: "pre-wrap" }}>
+              {errorMessage}
+            </p>
           </section>
         )}
 
@@ -357,13 +358,14 @@ export function SchedulerPanel() {
             {jobs.length === 0 && status !== "loading" && (
               <section className="wb-section">
                 <p className="wb-hint">
-                  Schedule a skill, a prompt, or a small pipeline to run on a
-                  clock — a nightly digest, a weekly corpus tidy, an hourly
-                  status check. Every run goes through Claude in <em>plan mode</em>,
-                  so it can only <strong>suggest</strong> — nothing is changed
-                  until you act on the result.
+                  Schedule a skill, a prompt, or a small pipeline to run on a clock — a nightly
+                  digest, a weekly corpus tidy, an hourly status check. Every run goes through
+                  Claude in <em>plan mode</em>, so it can only <strong>suggest</strong> — nothing is
+                  changed until you act on the result.
                 </p>
-                <button className="wb-cta" onClick={startNew}>Schedule a job</button>
+                <button className="wb-cta" onClick={startNew}>
+                  Schedule a job
+                </button>
               </section>
             )}
 
@@ -382,7 +384,11 @@ export function SchedulerPanel() {
                       onToggle={() => void setEnabled(job.id, !job.enabled)}
                       onEdit={() => startEdit(job)}
                       onDelete={() => {
-                        if (confirm(`Delete the scheduled job "${job.name}"?\n\nThis can't be undone.`)) {
+                        if (
+                          confirm(
+                            `Delete the scheduled job "${job.name}"?\n\nThis can't be undone.`,
+                          )
+                        ) {
                           void deleteJob(job.id);
                         }
                       }}
@@ -429,8 +435,14 @@ function JobCard({
   return (
     <div className={`wb-job-card ${job.enabled ? "" : "paused"}`}>
       <div className="wb-job-head">
-        <span className="wb-job-name" title={job.name}>{job.name}</span>
-        {running && <span className="wb-job-running" title="Running now">running…</span>}
+        <span className="wb-job-name" title={job.name}>
+          {job.name}
+        </span>
+        {running && (
+          <span className="wb-job-running" title="Running now">
+            running…
+          </span>
+        )}
         {!job.enabled && !running && <span className="wb-job-paused-tag">paused</span>}
         {job.consecutiveFailures > 0 && !running && (
           <span
@@ -453,27 +465,25 @@ function JobCard({
         <span>last: {formatWhen(job.lastRunMs)}</span>
       </div>
       <div className="wb-job-actions">
-        <button
-          className="wb-job-btn"
-          onClick={onRun}
-          disabled={running}
-          title="Run now"
-        >
+        <button className="wb-job-btn" onClick={onRun} disabled={running} title="Run now">
           ▶ run
         </button>
         <button className="wb-job-btn" onClick={onToggle} title={job.enabled ? "Pause" : "Resume"}>
           {job.enabled ? "⏸ pause" : "▶ resume"}
         </button>
-        <button className="wb-job-btn" onClick={onEdit} title="Edit">edit</button>
-        <button className="wb-job-btn danger" onClick={onDelete} title="Delete">✕</button>
+        <button className="wb-job-btn" onClick={onEdit} title="Edit">
+          edit
+        </button>
+        <button className="wb-job-btn danger" onClick={onDelete} title="Delete">
+          ✕
+        </button>
       </div>
     </div>
   );
 }
 
 function RunRow({ rec }: { rec: RunRecord }) {
-  const cls =
-    rec.status === "ok" ? "ok" : rec.status === "missed" ? "missed" : "error";
+  const cls = rec.status === "ok" ? "ok" : rec.status === "missed" ? "missed" : "error";
   return (
     <div className={`wb-run-row ${cls}`}>
       <div className="wb-run-head">
@@ -579,7 +589,9 @@ function JobEditor({
             onChange={(e) => set({ weeklyDay: Number(e.target.value) })}
           >
             {WEEKDAYS.map((d, i) => (
-              <option key={i} value={i}>{d}</option>
+              <option key={i} value={i}>
+                {d}
+              </option>
             ))}
           </select>
           <input
@@ -599,12 +611,14 @@ function JobEditor({
             onChange={(e) => set({ eventName: e.target.value })}
           >
             {SCHEDULER_EVENTS.map((ev) => (
-              <option key={ev.name} value={ev.name}>{ev.label}</option>
+              <option key={ev.name} value={ev.name}>
+                {ev.label}
+              </option>
             ))}
           </select>
           <p className="wb-hint wb-hint-sm">
-            Fires whenever this happens in the app. Set a cooldown below so a
-            burst (many prompts, several commits) doesn’t run it repeatedly.
+            Fires whenever this happens in the app. Set a cooldown below so a burst (many prompts,
+            several commits) doesn’t run it repeatedly.
           </p>
           <label className="wb-field" style={{ marginTop: 8 }}>
             <span className="wb-field-label">cooldown (min)</span>
@@ -680,7 +694,9 @@ function JobEditor({
         <button className="wb-cta" onClick={onSave} disabled={saving}>
           {saving ? "saving…" : draft.id ? "save" : "create"}
         </button>
-        <button className="wb-job-btn" onClick={onCancel} disabled={saving}>cancel</button>
+        <button className="wb-job-btn" onClick={onCancel} disabled={saving}>
+          cancel
+        </button>
       </div>
     </section>
   );
@@ -753,10 +769,8 @@ function PipelineEditor({
   skillNames: string[];
   onChange: (steps: PipelineStep[]) => void;
 }) {
-  const addSkill = () =>
-    onChange([...steps, { action: { type: "skill", name: "" } }]);
-  const addPrompt = () =>
-    onChange([...steps, { action: { type: "prompt", text: "" } }]);
+  const addSkill = () => onChange([...steps, { action: { type: "skill", name: "" } }]);
+  const addPrompt = () => onChange([...steps, { action: { type: "prompt", text: "" } }]);
   const update = (i: number, step: PipelineStep) =>
     onChange(steps.map((s, j) => (j === i ? step : s)));
   const remove = (i: number) => onChange(steps.filter((_, j) => j !== i));
@@ -792,7 +806,9 @@ function PipelineEditor({
               ) : (
                 <span className="wb-hint wb-hint-sm">nested pipeline</span>
               )}
-              <button className="wb-job-btn danger" onClick={() => remove(i)} title="Remove step">✕</button>
+              <button className="wb-job-btn danger" onClick={() => remove(i)} title="Remove step">
+                ✕
+              </button>
             </div>
             {/* The first step always runs; later steps can branch on the prior. */}
             {i > 0 && (
@@ -833,8 +849,12 @@ function PipelineEditor({
         ))}
       </datalist>
       <div className="wb-pipeline-add">
-        <button className="wb-job-btn" onClick={addSkill}>+ skill step</button>
-        <button className="wb-job-btn" onClick={addPrompt}>+ prompt step</button>
+        <button className="wb-job-btn" onClick={addSkill}>
+          + skill step
+        </button>
+        <button className="wb-job-btn" onClick={addPrompt}>
+          + prompt step
+        </button>
       </div>
     </div>
   );

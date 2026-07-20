@@ -15,7 +15,11 @@ export function Preview() {
   }
   if (loading) return <div className="placeholder">Loading…</div>;
   if (error) {
-    return <div className="placeholder" style={{ color: "var(--danger)" }}>{error}</div>;
+    return (
+      <div className="placeholder" style={{ color: "var(--danger)" }}>
+        {error}
+      </div>
+    );
   }
 
   return (
@@ -34,11 +38,9 @@ export function Preview() {
         )}
       </div>
       <div className="preview-body">
-        {mode === "diff"    && <DiffViewer diff={content} />}
+        {mode === "diff" && <DiffViewer diff={content} />}
         {mode === "content" && <pre className="preview-content">{content || " "}</pre>}
-        {mode === "binary"  && (
-          <div className="placeholder">Binary file — not previewable.</div>
-        )}
+        {mode === "binary" && <div className="placeholder">Binary file — not previewable.</div>}
       </div>
     </div>
   );

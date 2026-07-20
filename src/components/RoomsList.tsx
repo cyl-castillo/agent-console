@@ -64,7 +64,12 @@ export function RoomsList({ onOpenRoom }: { onOpenRoom: (id: string) => void }) 
   );
 }
 
-function RoomRow({ room, active, onOpen, onDelete }: {
+function RoomRow({
+  room,
+  active,
+  onOpen,
+  onDelete,
+}: {
   room: RoomSummary;
   active: boolean;
   onOpen: () => void;
@@ -85,9 +90,14 @@ function RoomRow({ room, active, onOpen, onDelete }: {
       <span className="session-meta">{meta}</span>
       <button
         className="session-close"
-        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
         title="Delete saved room"
-      >×</button>
+      >
+        ×
+      </button>
     </li>
   );
 }

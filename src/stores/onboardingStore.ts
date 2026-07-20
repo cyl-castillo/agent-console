@@ -46,7 +46,11 @@ function load(): OnboardingState {
 }
 
 function persist(s: OnboardingState) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  } catch {
+    /* ignore */
+  }
 }
 
 interface Store extends OnboardingState {

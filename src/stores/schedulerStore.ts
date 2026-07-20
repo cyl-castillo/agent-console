@@ -139,9 +139,7 @@ export const useSchedulerStore = create<SchedulerState>((set, get) => ({
 
   _onRunStarted: (jobId) => {
     set((s) =>
-      s.runningJobIds.includes(jobId)
-        ? s
-        : { runningJobIds: [...s.runningJobIds, jobId] },
+      s.runningJobIds.includes(jobId) ? s : { runningJobIds: [...s.runningJobIds, jobId] },
     );
   },
 
@@ -174,13 +172,9 @@ export async function attachSchedulerListeners(): Promise<UnlistenFn> {
     ),
   );
   offs.push(
-    await listen<RunRecord>("scheduler://run_finished", (e) =>
-      s._onRunFinished(e.payload),
-    ),
+    await listen<RunRecord>("scheduler://run_finished", (e) => s._onRunFinished(e.payload)),
   );
-  offs.push(
-    await listen("scheduler://jobs_changed", () => s._onJobsChanged()),
-  );
+  offs.push(await listen("scheduler://jobs_changed", () => s._onJobsChanged()));
   offs.push(
     await listen<{ paused: boolean }>("scheduler://paused_changed", (e) =>
       s._onPausedChanged(e.payload.paused),

@@ -72,9 +72,6 @@ describe("restoreSnapshot (UX P0.1 — undoable restore)", () => {
     // A failed restore must not clobber the existing undo pointer or refresh.
     expect(store().undoRestoreSha).toBe("previous-undo");
     expect(refresh).not.toHaveBeenCalled();
-    expect(showToast).toHaveBeenCalledWith(
-      expect.stringContaining("Restore failed"),
-      "error",
-    );
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("Restore failed"), "error");
   });
 });

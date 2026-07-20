@@ -9,17 +9,31 @@ const DAY = 86_400_000;
 
 function issue(over: Partial<JiraIssue> = {}): JiraIssue {
   return {
-    key: "ABC-1", summary: "s", status: "To Do", statusCategory: "new",
-    priority: "High", issueType: "Bug", dueDate: null, project: "Acme",
-    updated: null, url: "https://x/browse/ABC-1", ...over,
+    key: "ABC-1",
+    summary: "s",
+    status: "To Do",
+    statusCategory: "new",
+    priority: "High",
+    issueType: "Bug",
+    dueDate: null,
+    project: "Acme",
+    updated: null,
+    url: "https://x/browse/ABC-1",
+    ...over,
   };
 }
 function job(over: Partial<Job> = {}): Job {
   return {
-    id: "j1", name: "nightly", enabled: true,
-    trigger: {} as Job["trigger"], action: {} as Job["action"],
-    onMissed: "skip" as Job["onMissed"], cooldownMs: 0, createdAtMs: 0,
-    consecutiveFailures: 0, ...over,
+    id: "j1",
+    name: "nightly",
+    enabled: true,
+    trigger: {} as Job["trigger"],
+    action: {} as Job["action"],
+    onMissed: "skip" as Job["onMissed"],
+    cooldownMs: 0,
+    createdAtMs: 0,
+    consecutiveFailures: 0,
+    ...over,
   };
 }
 
@@ -64,7 +78,10 @@ describe("buildAgenda", () => {
   it("skips disabled jobs and jobs without a next run", () => {
     const items = buildAgenda(
       [],
-      [job({ id: "off", enabled: false, nextDueMs: NOW + 1000 }), job({ id: "norun", nextDueMs: undefined })],
+      [
+        job({ id: "off", enabled: false, nextDueMs: NOW + 1000 }),
+        job({ id: "norun", nextDueMs: undefined }),
+      ],
       NOW,
     );
     expect(items).toHaveLength(0);

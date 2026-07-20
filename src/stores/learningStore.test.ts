@@ -229,7 +229,9 @@ describe("apply / skip", () => {
     mockReflect.mockResolvedValue(REFLECTION);
     await useLearningStore.getState().reflect();
     const id = useLearningStore.getState().items[0].id;
-    vi.mocked(ipc.learningCreateSkill).mockResolvedValue("/proj/.claude/skills/deploy-backend/SKILL.md");
+    vi.mocked(ipc.learningCreateSkill).mockResolvedValue(
+      "/proj/.claude/skills/deploy-backend/SKILL.md",
+    );
 
     await useLearningStore.getState().apply(id);
 
@@ -256,15 +258,17 @@ describe("apply / skip", () => {
   it("apply scaffolds a plugin suggestion via learningCreatePlugin", async () => {
     mockReflect.mockResolvedValue({
       ...REFLECTION,
-      suggestions: [{
-        kind: "plugin",
-        title: "Package release helpers",
-        rationale: "used across repos",
-        evidence: ["release flow in 3 projects"],
-        pluginName: "release-helpers",
-        pluginDescription: "Release workflow helpers",
-        pluginSkillMd: "---\nname: release-helpers\n---\n\nBody",
-      }],
+      suggestions: [
+        {
+          kind: "plugin",
+          title: "Package release helpers",
+          rationale: "used across repos",
+          evidence: ["release flow in 3 projects"],
+          pluginName: "release-helpers",
+          pluginDescription: "Release workflow helpers",
+          pluginSkillMd: "---\nname: release-helpers\n---\n\nBody",
+        },
+      ],
     });
     await useLearningStore.getState().reflect();
     const id = useLearningStore.getState().items[0].id;
@@ -285,12 +289,14 @@ describe("apply / skip", () => {
   it("hook suggestions are report-only: apply is a no-op", async () => {
     mockReflect.mockResolvedValue({
       ...REFLECTION,
-      suggestions: [{
-        kind: "hook",
-        title: "Enforce no direct pushes",
-        rationale: "user repeats this rule",
-        evidence: ["'no pushees a main' x4"],
-      }],
+      suggestions: [
+        {
+          kind: "hook",
+          title: "Enforce no direct pushes",
+          rationale: "user repeats this rule",
+          evidence: ["'no pushees a main' x4"],
+        },
+      ],
     });
     await useLearningStore.getState().reflect();
     const id = useLearningStore.getState().items[0].id;

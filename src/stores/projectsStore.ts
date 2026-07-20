@@ -15,12 +15,16 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     try {
       const recent = await ipc.projectsRecent();
       set({ recent });
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   },
   forget: async (path) => {
     try {
       await ipc.projectsForget(path);
       await get().load();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   },
 }));

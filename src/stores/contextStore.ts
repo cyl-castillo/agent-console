@@ -35,10 +35,7 @@ export const useContextStore = create<ContextState>((set, get) => ({
   refresh: async () => {
     set({ loading: true, error: null });
     try {
-      const [status, memories] = await Promise.all([
-        ipc.contextStatus(),
-        ipc.memoryList(),
-      ]);
+      const [status, memories] = await Promise.all([ipc.contextStatus(), ipc.memoryList()]);
       set({ status, memories, loading: false });
       // Corpus changed → maybe the curator should tidy it (threshold auto-trigger).
       useLearningStore.getState().noteCorpusSize();

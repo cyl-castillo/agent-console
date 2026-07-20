@@ -48,8 +48,8 @@ export function AgendaPanel() {
       <div className="workbench-body">
         {items.length === 0 ? (
           <div className="wb-empty">
-            Nothing scheduled. Due dates from your Jira tasks and upcoming
-            scheduled jobs show up here.
+            Nothing scheduled. Due dates from your Jira tasks and upcoming scheduled jobs show up
+            here.
             {!jiraConfigured && (
               <>
                 {" "}
@@ -67,7 +67,9 @@ export function AgendaPanel() {
                 {BUCKET_LABELS[b]}
               </div>
               <ul className="agenda-items">
-                {grouped.get(b)!.map((it) => <AgendaRow key={it.id} item={it} />)}
+                {grouped.get(b)!.map((it) => (
+                  <AgendaRow key={it.id} item={it} />
+                ))}
               </ul>
             </section>
           ))
@@ -81,7 +83,12 @@ function AgendaRow({ item }: { item: AgendaItem }) {
   const when = new Date(item.whenMs);
   const label = item.allDay
     ? when.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-    : when.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    : when.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
   return (
     <li className={`agenda-item kind-${item.kind}`}>
@@ -96,12 +103,16 @@ function AgendaRow({ item }: { item: AgendaItem }) {
             className="agenda-act"
             onClick={() => startSessionForIssue(item.issue!)}
             title="Start an agent session for this ticket"
-          >▸ session</button>
+          >
+            ▸ session
+          </button>
           <button
             className="agenda-act"
             onClick={() => void openUrl(item.issue!.url)}
             title="Open in Jira"
-          >↗</button>
+          >
+            ↗
+          </button>
         </div>
       )}
       {item.kind === "job" && (
@@ -109,7 +120,9 @@ function AgendaRow({ item }: { item: AgendaItem }) {
           className="agenda-act"
           onClick={() => openWorkbenchTab("schedule")}
           title="Open the Schedule panel"
-        >⧉</button>
+        >
+          ⧉
+        </button>
       )}
     </li>
   );

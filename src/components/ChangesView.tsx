@@ -10,10 +10,25 @@ const SUBJECT_LIMIT = 72;
 
 export function ChangesView() {
   const {
-    status, selected, diff, error, commitMessage, committing,
+    status,
+    selected,
+    diff,
+    error,
+    commitMessage,
+    committing,
     recentMessages,
-    refresh, setSelected, setCommitMessage, stage, unstage, stageMany, unstageMany,
-    revert, revertAll, commit, loadCommitHistory, loadHeadMessage,
+    refresh,
+    setSelected,
+    setCommitMessage,
+    stage,
+    unstage,
+    stageMany,
+    unstageMany,
+    revert,
+    revertAll,
+    commit,
+    loadCommitHistory,
+    loadHeadMessage,
   } = useChangesStore();
 
   const [diffMode, setDiffMode] = useState<"unified" | "split">("split");
@@ -125,12 +140,13 @@ export function ChangesView() {
             </span>
           </div>
           <span style={{ display: "flex", gap: 4 }}>
-            <button onClick={refresh} title="Refresh status">↻</button>
+            <button onClick={refresh} title="Refresh status">
+              ↻
+            </button>
             {allChanges.length > 0 && (
-              <button
-                onClick={confirmRevertAll}
-                title="Discard all changes"
-              >Discard all</button>
+              <button onClick={confirmRevertAll} title="Discard all changes">
+                Discard all
+              </button>
             )}
           </span>
         </div>
@@ -150,7 +166,9 @@ export function ChangesView() {
                     className="change-group-action"
                     onClick={() => unstageMany(staged.map((c) => c.path))}
                     title="Unstage all"
-                  >−</button>
+                  >
+                    −
+                  </button>
                 </div>
                 <ChangeTree
                   changes={staged}
@@ -170,7 +188,9 @@ export function ChangesView() {
                     className="change-group-action"
                     onClick={() => stageMany(unstaged.map((c) => c.path))}
                     title="Stage all"
-                  >+</button>
+                  >
+                    +
+                  </button>
                 </div>
                 <ChangeTree
                   changes={unstaged}
@@ -187,12 +207,11 @@ export function ChangesView() {
 
         <div className="commit-box">
           <div className="commit-controls">
-            <label className="commit-toggle" title="Replace the latest commit with these staged changes + this message">
-              <input
-                type="checkbox"
-                checked={amend}
-                onChange={(e) => setAmend(e.target.checked)}
-              />
+            <label
+              className="commit-toggle"
+              title="Replace the latest commit with these staged changes + this message"
+            >
+              <input type="checkbox" checked={amend} onChange={(e) => setAmend(e.target.checked)} />
               <span>Amend</span>
             </label>
             <span className="spacer" />
@@ -213,7 +232,10 @@ export function ChangesView() {
                   key={i}
                   className="commit-history-item"
                   title={m}
-                  onClick={() => { setCommitMessage(m); setShowHistory(false); }}
+                  onClick={() => {
+                    setCommitMessage(m);
+                    setShowHistory(false);
+                  }}
                 >
                   {firstLine(m)}
                 </li>
@@ -248,7 +270,9 @@ export function ChangesView() {
               disabled={!canCommit}
               title={
                 !canCommit
-                  ? amend ? "Need a message" : "Need a message and at least 1 staged file"
+                  ? amend
+                    ? "Need a message"
+                    : "Need a message and at least 1 staged file"
                   : amend
                     ? `Amend HEAD (${stagedCount} additional staged file${stagedCount === 1 ? "" : "s"})`
                     : `Commit ${stagedCount} file${stagedCount === 1 ? "" : "s"}`
@@ -272,19 +296,27 @@ export function ChangesView() {
               className={diffMode === "split" ? "active" : ""}
               onClick={() => setDiffMode("split")}
               title="Side-by-side"
-            >split</button>
+            >
+              split
+            </button>
             <button
               className={diffMode === "unified" ? "active" : ""}
               onClick={() => setDiffMode("unified")}
               title="Unified diff"
-            >unified</button>
+            >
+              unified
+            </button>
           </div>
         </div>
-        {selected
-          ? diffMode === "split"
-            ? <SideBySideDiffViewer diff={diff} />
-            : <DiffViewer diff={diff} />
-          : <div className="placeholder">Select a file.</div>}
+        {selected ? (
+          diffMode === "split" ? (
+            <SideBySideDiffViewer diff={diff} />
+          ) : (
+            <DiffViewer diff={diff} />
+          )
+        ) : (
+          <div className="placeholder">Select a file.</div>
+        )}
       </div>
     </div>
   );

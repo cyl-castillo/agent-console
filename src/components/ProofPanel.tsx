@@ -141,10 +141,9 @@ export function ProofPanel() {
         {review && (
           <section className="wb-section">
             <p className="wb-hint">
-              This is everything the packet will contain. Token-shaped secrets
-              are already auto-redacted; mark anything else that shouldn't
-              leave this machine — redacted events keep their place in the
-              verifiable chain, content excluded.
+              This is everything the packet will contain. Token-shaped secrets are already
+              auto-redacted; mark anything else that shouldn't leave this machine — redacted events
+              keep their place in the verifiable chain, content excluded.
             </p>
             {review.preview.entries.map((e) => {
               const marked = review.redactSeqs.includes(e.seq);
@@ -202,10 +201,9 @@ export function ProofPanel() {
         {!review && events.length === 0 && !error && (
           <section className="wb-section">
             <p className="wb-hint">
-              Prove your work, not just show it: every prompt, human approval
-              and result lands here automatically, hash-chained. Export a
-              signed <strong>proof packet</strong> and attach it to a PR, a
-              client hand-off, an audit — anyone verifies it{" "}
+              Prove your work, not just show it: every prompt, human approval and result lands here
+              automatically, hash-chained. Export a signed <strong>proof packet</strong> and attach
+              it to a PR, a client hand-off, an audit — anyone verifies it{" "}
               <a
                 href="https://cyl-castillo.github.io/testigo/verifier/testigo-verifier.html"
                 target="_blank"
@@ -215,9 +213,7 @@ export function ProofPanel() {
               </a>
               , no install.
             </p>
-            <p className="wb-hint">
-              Nothing here yet — work with an agent and come back.
-            </p>
+            <p className="wb-hint">Nothing here yet — work with an agent and come back.</p>
           </section>
         )}
 
@@ -231,8 +227,8 @@ export function ProofPanel() {
                   checked={settings.witness}
                   onChange={(e) => void setSettings({ witness: e.target.checked })}
                 />{" "}
-                witness — record prompts, approvals and turn results in the
-                local ledger (outside the repo, never pushed)
+                witness — record prompts, approvals and turn results in the local ledger (outside
+                the repo, never pushed)
               </label>
             </p>
             <p className="wb-hint">
@@ -243,9 +239,9 @@ export function ProofPanel() {
                   disabled={!settings.witness}
                   onChange={(e) => void setSettings({ repoMarks: e.target.checked })}
                 />{" "}
-                repo marks — stamp <code>Testigo-Case</code>/<code>Testigo-Head</code>{" "}
-                commit trailers and pin the anchor ref in this project's git.
-                Off by default: in shared repos this is the owner's call.
+                repo marks — stamp <code>Testigo-Case</code>/<code>Testigo-Head</code> commit
+                trailers and pin the anchor ref in this project's git. Off by default: in shared
+                repos this is the owner's call.
               </label>
             </p>
             <p className="wb-hint">
@@ -259,10 +255,9 @@ export function ProofPanel() {
                     })
                   }
                 />{" "}
-                trusted timestamp — at export, request an RFC 3161 token over
-                the packet signature from <code>{hostOf(settings.timestampTsa ?? DEFAULT_TSA)}</code>{" "}
-                (proves the packet existed at that time; sends the TSA only a
-                signature hash, never content).
+                trusted timestamp — at export, request an RFC 3161 token over the packet signature
+                from <code>{hostOf(settings.timestampTsa ?? DEFAULT_TSA)}</code> (proves the packet
+                existed at that time; sends the TSA only a signature hash, never content).
               </label>
             </p>
           </section>
@@ -280,7 +275,8 @@ export function ProofPanel() {
                 >
                   <code>{c.caseId}</code>
                   <span className="wb-hint">
-                    {" "}· {c.turns} turns · {c.approvals} approvals · {c.events} events
+                    {" "}
+                    · {c.turns} turns · {c.approvals} approvals · {c.events} events
                   </span>
                 </button>
                 <button
@@ -315,9 +311,7 @@ export function ProofPanel() {
               <div className="wb-section proof-turn" key={t.turnId ?? t.ts}>
                 <p>
                   <span className="wb-hint">{fmtTime(t.ts)}</span>
-                  {t.endTs === null && (
-                    <span className="wb-hint"> · turn still open</span>
-                  )}
+                  {t.endTs === null && <span className="wb-hint"> · turn still open</span>}
                   <br />
                   <span title={t.prompt}>
                     {t.prompt.length > 160 ? `${t.prompt.slice(0, 160)}…` : t.prompt}
@@ -366,8 +360,8 @@ export function ProofPanel() {
               {" · key "}
               <code title={lastExport.keyId}>{lastExport.keyId.slice(0, 16)}…</code>
               <br />
-              Send the packet with <code>testigo-verifier.html</code> (written
-              alongside) — the receiver verifies in a browser, no install.
+              Send the packet with <code>testigo-verifier.html</code> (written alongside) — the
+              receiver verifies in a browser, no install.
             </p>
           </section>
         )}

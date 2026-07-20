@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import { useSessionStore } from "./stores/sessionStore";
 import { attachGitWatcherListener, useChangesStore } from "./stores/changesStore";
@@ -66,10 +72,16 @@ function loadPanelWidth(side: "left" | "right"): number {
   try {
     const v = Number(localStorage.getItem(PANEL_W_KEY + side));
     return Number.isFinite(v) && v > 0 ? v : DEFAULT_W[side];
-  } catch { return DEFAULT_W[side]; }
+  } catch {
+    return DEFAULT_W[side];
+  }
 }
 function savePanelWidth(side: "left" | "right", w: number) {
-  try { localStorage.setItem(PANEL_W_KEY + side, String(w)); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(PANEL_W_KEY + side, String(w));
+  } catch {
+    /* ignore */
+  }
 }
 function clampW(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(v)));
@@ -102,12 +114,19 @@ export default function App() {
   const setWorkbenchTab = (t: WbTab) => {
     setWorkbenchTabState(t);
     if (project) {
-      try { localStorage.setItem(`agent-console:workbench-tab:${project.root}`, t); } catch { /* ignore */ }
+      try {
+        localStorage.setItem(`agent-console:workbench-tab:${project.root}`, t);
+      } catch {
+        /* ignore */
+      }
     }
   };
   const openRoom = useRoundtableStore((s) => s.openRoom);
   // Open a saved room read-only and surface the room tab so it's visible.
-  const onOpenRoom = (id: string) => { void openRoom(id); setWorkbenchTab("roundtable"); };
+  const onOpenRoom = (id: string) => {
+    void openRoom(id);
+    setWorkbenchTab("roundtable");
+  };
   const initFeedback = useFeedbackStore((s) => s.init);
   const theme = useThemeStore((s) => s.theme);
   const toggleTheme = useThemeStore((s) => s.toggle);
@@ -120,10 +139,13 @@ export default function App() {
   // Mirror the "waiting on you" state into the window title, so the taskbar /
   // Alt-Tab entry says it even when the app isn't visible.
   useEffect(() => {
-    const title = blockedCount > 0
-      ? `● waiting (${blockedCount}) — Agent Console`
-      : "Agent Console";
-    getCurrentWindow().setTitle(title).catch(() => { /* cosmetic — never break on it */ });
+    const title =
+      blockedCount > 0 ? `● waiting (${blockedCount}) — Agent Console` : "Agent Console";
+    getCurrentWindow()
+      .setTitle(title)
+      .catch(() => {
+        /* cosmetic — never break on it */
+      });
   }, [blockedCount]);
 
   const newSession = () => {
@@ -141,14 +163,18 @@ export default function App() {
     terminalSessions.find((s) => s.id === activeTerminalId)?.worktree?.path ?? null;
   useEffect(() => {
     if (!project) return;
-    ipc.setActiveRepo(activeWorktreePath)
+    ipc
+      .setActiveRepo(activeWorktreePath)
       .then(() => refreshChanges())
-      .catch(() => { /* stale session referencing a removed worktree — root stays */ });
+      .catch(() => {
+        /* stale session referencing a removed worktree — root stays */
+      });
   }, [project, activeWorktreePath, refreshChanges]);
 
   const copyProjectPath = () => {
     if (!project) return;
-    navigator.clipboard?.writeText(project.root)
+    navigator.clipboard
+      ?.writeText(project.root)
       .then(() => showToast("Project path copied", "success"))
       .catch(() => showToast("Could not copy project path", "error"));
   };
@@ -195,12 +221,18 @@ export default function App() {
     const w = pendingW.current;
     pendingW.current = null;
     if (w == null) return;
-    if (side === "left") { setLeftW(w); savePanelWidth("left", w); }
-    else { setRightW(w); savePanelWidth("right", w); }
+    if (side === "left") {
+      setLeftW(w);
+      savePanelWidth("left", w);
+    } else {
+      setRightW(w);
+      savePanelWidth("right", w);
+    }
   };
   const resetResize = (side: "left" | "right") => () => {
     const w = DEFAULT_W[side];
-    if (side === "left") setLeftW(w); else setRightW(w);
+    if (side === "left") setLeftW(w);
+    else setRightW(w);
     savePanelWidth(side, w);
   };
 
@@ -260,9 +292,18 @@ export default function App() {
     let offGit: (() => void) | null = null;
     let offVoice: (() => void) | null = null;
     let offScheduler: (() => void) | null = null;
-    attachSkillsListeners().then((u) => { if (disposed) u(); else offSkills = u; });
-    attachApprovalListener().then((u) => { if (disposed) u(); else offApproval = u; });
-    attachGitWatcherListener().then((u) => { if (disposed) u(); else offGit = u; });
+    attachSkillsListeners().then((u) => {
+      if (disposed) u();
+      else offSkills = u;
+    });
+    attachApprovalListener().then((u) => {
+      if (disposed) u();
+      else offApproval = u;
+    });
+    attachGitWatcherListener().then((u) => {
+      if (disposed) u();
+      else offGit = u;
+    });
     // Corrupt session history was quarantined so saving could resume — the
     // one situation that must never pass silently again (#72).
     let offQuarantine: (() => void) | null = null;
@@ -273,11 +314,29 @@ export default function App() {
           `Session history file was corrupt; it was set aside at ${e.payload.path} and saving has resumed.`,
           "error",
         );
-    }).then((u) => { if (disposed) u(); else offQuarantine = u; });
-    attachVoiceListeners().then((u) => { if (disposed) u(); else offVoice = u; });
-    attachSchedulerListeners().then((u) => { if (disposed) u(); else offScheduler = u; });
+    }).then((u) => {
+      if (disposed) u();
+      else offQuarantine = u;
+    });
+    attachVoiceListeners().then((u) => {
+      if (disposed) u();
+      else offVoice = u;
+    });
+    attachSchedulerListeners().then((u) => {
+      if (disposed) u();
+      else offScheduler = u;
+    });
     const offVoiceApproval = attachVoiceApprovalWatcher();
-    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); offVoice?.(); offScheduler?.(); offVoiceApproval(); offQuarantine?.(); };
+    return () => {
+      disposed = true;
+      offSkills?.();
+      offApproval?.();
+      offGit?.();
+      offVoice?.();
+      offScheduler?.();
+      offVoiceApproval();
+      offQuarantine?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -292,7 +351,9 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [checkForUpdates]);
 
-  useEffect(() => { void initFeedback(); }, [initFeedback]);
+  useEffect(() => {
+    void initFeedback();
+  }, [initFeedback]);
 
   // First-time auto-open of the Getting Started guide.
   useEffect(() => {
@@ -327,8 +388,13 @@ export default function App() {
       if (isWorkbenchTab(saved)) {
         setWorkbenchTabState(saved);
       }
-    } catch { /* ignore */ }
-    ipc.workspaceContext().then(setWorkspace).catch(() => setWorkspace(null));
+    } catch {
+      /* ignore */
+    }
+    ipc
+      .workspaceContext()
+      .then(setWorkspace)
+      .catch(() => setWorkspace(null));
     (async () => {
       await hydrateTerminals(project.root);
       // Auto-spawn one live session only when the load SUCCEEDED and restored
@@ -345,23 +411,42 @@ export default function App() {
         const keep = st.sessions
           .map((s) => s.worktree?.path)
           .filter((p): p is string => Boolean(p));
-        ipc.worktreePruneOrphans(keep)
+        ipc
+          .worktreePruneOrphans(keep)
           .then((removed) => {
             if (removed.length > 0) {
-              showToast(`Cleaned ${removed.length} orphaned worktree${removed.length === 1 ? "" : "s"} (branches kept)`, "info");
+              showToast(
+                `Cleaned ${removed.length} orphaned worktree${removed.length === 1 ? "" : "s"} (branches kept)`,
+                "info",
+              );
             }
           })
-          .catch(() => { /* best-effort */ });
+          .catch(() => {
+            /* best-effort */
+          });
       }
     })();
-  }, [project, refreshChanges, refreshSkills, clearChanges, clearPreview, hydrateTerminals, clearTerminals, addTerminal, resetPaletteForProject, showToast]);
+  }, [
+    project,
+    refreshChanges,
+    refreshSkills,
+    clearChanges,
+    clearPreview,
+    hydrateTerminals,
+    clearTerminals,
+    addTerminal,
+    resetPaletteForProject,
+    showToast,
+  ]);
 
   // Persist sessions when the app closes. beforeunload alone is NOT enough:
   // on Windows/WebView2 the window can be destroyed without dispatching it
   // (issue #72 — sessions lost on close/update). Tauri's close-requested hook
   // is the reliable path: hold the close, await the persist, then destroy.
   useEffect(() => {
-    const onUnload = () => { persistTerminals(); };
+    const onUnload = () => {
+      persistTerminals();
+    };
     window.addEventListener("beforeunload", onUnload);
 
     let unlisten: (() => void) | null = null;
@@ -405,7 +490,9 @@ export default function App() {
   // Periodic persist so a hard kill doesn't lose more than ~10s of scrollback.
   useEffect(() => {
     if (!project) return;
-    const t = setInterval(() => { persistTerminals(); }, 10_000);
+    const t = setInterval(() => {
+      persistTerminals();
+    }, 10_000);
     return () => clearInterval(t);
   }, [project, persistTerminals]);
 
@@ -442,7 +529,9 @@ export default function App() {
             onClick={() => setLeftOpen((v) => !v)}
             title={leftOpen ? "Hide workspace" : "Show workspace"}
           >
-            <span className="sidebar-toggle-icon"><Icon name="panel-left" size={14} /></span>
+            <span className="sidebar-toggle-icon">
+              <Icon name="panel-left" size={14} />
+            </span>
             <span>Workspace</span>
             {changesCount > 0 && <span className="sidebar-toggle-badge">{changesCount}</span>}
           </button>
@@ -476,24 +565,35 @@ export default function App() {
             onClick={() => setShowShortcuts(true)}
             title="Keyboard shortcuts (Ctrl+/)"
             aria-label="Keyboard shortcuts"
-          ><Icon name="command" size={14} /></button>
+          >
+            <Icon name="command" size={14} />
+          </button>
           <button
             className="topbar-icon"
             onClick={() => setShowGettingStarted(true)}
             title="Getting started guide"
             aria-label="Getting started guide"
-          ><Icon name="help-circle" size={14} /></button>
+          >
+            <Icon name="help-circle" size={14} />
+          </button>
           <button
             className="topbar-icon"
             onClick={() => setShowAbout(true)}
             title="About Agent Console"
             aria-label="About Agent Console"
-          ><Icon name="info" size={14} /></button>
+          >
+            <Icon name="info" size={14} />
+          </button>
           <button
             className="tb-close"
-            onClick={() => { persistTerminals(); closeProject(); }}
+            onClick={() => {
+              persistTerminals();
+              closeProject();
+            }}
             title="Close project"
-          >Close</button>
+          >
+            Close
+          </button>
         </div>
 
         {leftOpen && <LeftSidebar onOpenRoom={onOpenRoom} />}
@@ -531,9 +631,13 @@ export default function App() {
               <div className="terminal-empty">
                 <div>
                   <div className="terminal-empty-title">No active sessions</div>
-                  <div className="terminal-empty-copy">Each new session starts in this project and launches its agent automatically.</div>
+                  <div className="terminal-empty-copy">
+                    Each new session starts in this project and launches its agent automatically.
+                  </div>
                 </div>
-                <button className="btn btn-primary" onClick={newSession}>+ New session</button>
+                <button className="btn btn-primary" onClick={newSession}>
+                  + New session
+                </button>
               </div>
             ) : (
               <>
@@ -616,7 +720,9 @@ export default function App() {
       {showGettingStarted && (
         <GettingStartedModal
           onClose={() => setShowGettingStarted(false)}
-          onJumpToTab={(t) => { setWorkbenchTab(t); }}
+          onJumpToTab={(t) => {
+            setWorkbenchTab(t);
+          }}
         />
       )}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}

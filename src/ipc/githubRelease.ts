@@ -1,9 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 
-const RELEASES_API =
-  "https://api.github.com/repos/cyl-castillo/agent-console/releases/latest";
-const RELEASES_PAGE =
-  "https://github.com/cyl-castillo/agent-console/releases/latest";
+const RELEASES_API = "https://api.github.com/repos/cyl-castillo/agent-console/releases/latest";
+const RELEASES_PAGE = "https://github.com/cyl-castillo/agent-console/releases/latest";
 
 export type ManualUpdateInfo = {
   version: string;
@@ -13,8 +11,14 @@ export type ManualUpdateInfo = {
 };
 
 function cmpSemver(a: string, b: string): number {
-  const pa = a.replace(/^v/, "").split(/[.+-]/).map((x) => parseInt(x, 10));
-  const pb = b.replace(/^v/, "").split(/[.+-]/).map((x) => parseInt(x, 10));
+  const pa = a
+    .replace(/^v/, "")
+    .split(/[.+-]/)
+    .map((x) => parseInt(x, 10));
+  const pb = b
+    .replace(/^v/, "")
+    .split(/[.+-]/)
+    .map((x) => parseInt(x, 10));
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const ai = Number.isFinite(pa[i]) ? pa[i] : 0;
     const bi = Number.isFinite(pb[i]) ? pb[i] : 0;

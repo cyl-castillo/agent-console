@@ -204,7 +204,9 @@ const ACTIONS: PaletteAction[] = [
     label: "Refresh Git Status",
     hint: "Re-runs git status (safe)",
     keywords: ["reload", "sync"],
-    run: () => { void useChangesStore.getState().refresh(); },
+    run: () => {
+      void useChangesStore.getState().refresh();
+    },
   },
   {
     id: "session.new",
@@ -223,7 +225,11 @@ const ACTIONS: PaletteAction[] = [
       const st = useTerminalsStore.getState();
       const active = st.sessions.find((s) => s.id === st.activeId);
       if (!active) return;
-      if (active.status === "live" && !confirm(`Close session "${active.name}"? Process will be killed.`)) return;
+      if (
+        active.status === "live" &&
+        !confirm(`Close session "${active.name}"? Process will be killed.`)
+      )
+        return;
       await st.close(active.id);
     },
   },
@@ -264,7 +270,8 @@ const ACTIONS: PaletteAction[] = [
     run: async () => {
       await useUpdaterStore.getState().check({ silentIfNone: false });
       const phase = useUpdaterStore.getState().phase;
-      if (phase === "uptodate") useToastStore.getState().show("Agent Console is up to date", "success");
+      if (phase === "uptodate")
+        useToastStore.getState().show("Agent Console is up to date", "success");
     },
   },
   {
@@ -301,11 +308,14 @@ const ACTIONS: PaletteAction[] = [
     run: async () => {
       const event = useSkillsStore.getState().recent.find((e) => !!e.snapshotCommitSha);
       if (!event?.snapshotCommitSha) return;
-      if (!confirm(
-        "Restore to before the latest turn?\n\n" +
-        "This discards ALL changes made since that turn — not just the last one. " +
-        "A backup is taken first, so you can undo from the command palette.",
-      )) return;
+      if (
+        !confirm(
+          "Restore to before the latest turn?\n\n" +
+            "This discards ALL changes made since that turn — not just the last one. " +
+            "A backup is taken first, so you can undo from the command palette.",
+        )
+      )
+        return;
       // restoreSnapshot handles the success/error toast and the undo backup.
       await useSkillsStore.getState().restoreSnapshot(event.snapshotCommitSha);
     },
@@ -352,12 +362,21 @@ function fuzzyScore(query: string, target: string): number {
     const ch = q[qi];
     let found = -1;
     while (ti < t.length) {
-      if (t[ti] === ch) { found = ti; ti++; break; }
+      if (t[ti] === ch) {
+        found = ti;
+        ti++;
+        break;
+      }
       ti++;
     }
     if (found === -1) return -1;
-    if (found === lastMatch + 1) { streak++; score += 5 + streak * 2; }
-    else { streak = 0; score += 1; }
+    if (found === lastMatch + 1) {
+      streak++;
+      score += 5 + streak * 2;
+    } else {
+      streak = 0;
+      score += 1;
+    }
     // boost on word boundaries
     if (found === 0 || /[/_\-. ]/.test(t[found - 1])) score += 8;
     lastMatch = found;
@@ -438,9 +457,16 @@ export const usePaletteStore = create<PaletteState>((set, get) => ({
     const raw = query.trim();
     let mode: "all" | "action" | "session" | "branch" = "all";
     let q = raw;
-    if (raw.startsWith(">")) { mode = "action"; q = raw.slice(1).trim(); }
-    else if (raw.startsWith(":")) { mode = "session"; q = raw.slice(1).trim(); }
-    else if (raw.startsWith("@")) { mode = "branch"; q = raw.slice(1).trim(); }
+    if (raw.startsWith(">")) {
+      mode = "action";
+      q = raw.slice(1).trim();
+    } else if (raw.startsWith(":")) {
+      mode = "session";
+      q = raw.slice(1).trim();
+    } else if (raw.startsWith("@")) {
+      mode = "branch";
+      q = raw.slice(1).trim();
+    }
 
     const items: PaletteItem[] = [];
 

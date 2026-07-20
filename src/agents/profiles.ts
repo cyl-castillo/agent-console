@@ -171,7 +171,9 @@ export function asAgentKind(s: string | undefined | null): AgentKind | undefined
 const MODEL_RE = /^[A-Za-z0-9._-]+$/;
 
 export function isValidModel(model: string | undefined | null): model is string {
-  return typeof model === "string" && model.length > 0 && model.length <= 64 && MODEL_RE.test(model);
+  return (
+    typeof model === "string" && model.length > 0 && model.length <= 64 && MODEL_RE.test(model)
+  );
 }
 
 /// Session ids also end up interpolated into the PTY launch command

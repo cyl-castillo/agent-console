@@ -17,7 +17,9 @@ export function McpPanel() {
 
   const [adding, setAdding] = useState(false);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   return (
     <div className="workbench">
@@ -28,13 +30,17 @@ export function McpPanel() {
           className="workbench-action"
           onClick={() => setAdding((v) => !v)}
           title="Add MCP server"
-        >{adding ? "×" : "+"}</button>
+        >
+          {adding ? "×" : "+"}
+        </button>
         <button
           className="workbench-action"
           onClick={() => void refresh()}
           disabled={loading}
           title="Refresh (health-checks each server)"
-        >{loading ? "…" : "↻"}</button>
+        >
+          {loading ? "…" : "↻"}
+        </button>
       </div>
 
       <div className="workbench-body">
@@ -44,8 +50,7 @@ export function McpPanel() {
 
         <section className="wb-section">
           <p className="wb-hint wb-trust">
-            An MCP server can supply tools and data to the agent — only add ones
-            you trust.
+            An MCP server can supply tools and data to the agent — only add ones you trust.
           </p>
           <div className="wb-section-title">
             configured
@@ -55,8 +60,8 @@ export function McpPanel() {
 
           {servers.length === 0 && !loading ? (
             <p className="wb-hint">
-              No MCP servers configured. Click <strong>+</strong> to add one, or
-              run <code>claude mcp add</code> in a terminal.
+              No MCP servers configured. Click <strong>+</strong> to add one, or run{" "}
+              <code>claude mcp add</code> in a terminal.
             </p>
           ) : (
             <ul className="mcp-list">
@@ -80,15 +85,20 @@ export function McpPanel() {
   );
 }
 
-function McpRow({ server, busy, onRemove }: {
+function McpRow({
+  server,
+  busy,
+  onRemove,
+}: {
   server: McpServer;
   busy: boolean;
   onRemove: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const target = server.transport === "stdio"
-    ? [server.command, server.args].filter(Boolean).join(" ")
-    : (server.url ?? "");
+  const target =
+    server.transport === "stdio"
+      ? [server.command, server.args].filter(Boolean).join(" ")
+      : (server.url ?? "");
 
   return (
     <li className="mcp-row">
@@ -105,19 +115,34 @@ function McpRow({ server, busy, onRemove }: {
       {open && (
         <div className="mcp-row-body">
           <dl className="mcp-detail">
-            <dt>status</dt><dd>{server.status}</dd>
-            <dt>transport</dt><dd>{server.transport ?? "—"}</dd>
-            <dt>scope</dt><dd>{server.scope ?? "—"}</dd>
+            <dt>status</dt>
+            <dd>{server.status}</dd>
+            <dt>transport</dt>
+            <dd>{server.transport ?? "—"}</dd>
+            <dt>scope</dt>
+            <dd>{server.scope ?? "—"}</dd>
             {server.transport === "stdio" ? (
               <>
-                <dt>command</dt><dd>{server.command ?? "—"}</dd>
-                {server.args && (<><dt>args</dt><dd>{server.args}</dd></>)}
+                <dt>command</dt>
+                <dd>{server.command ?? "—"}</dd>
+                {server.args && (
+                  <>
+                    <dt>args</dt>
+                    <dd>{server.args}</dd>
+                  </>
+                )}
               </>
             ) : (
-              <><dt>url</dt><dd className="mcp-mono">{server.url ?? "—"}</dd></>
+              <>
+                <dt>url</dt>
+                <dd className="mcp-mono">{server.url ?? "—"}</dd>
+              </>
             )}
             {server.env.length > 0 && (
-              <><dt>env</dt><dd className="mcp-mono">{server.env.join("\n")}</dd></>
+              <>
+                <dt>env</dt>
+                <dd className="mcp-mono">{server.env.join("\n")}</dd>
+              </>
             )}
           </dl>
           <div className="mcp-row-actions">
@@ -149,8 +174,14 @@ function AddForm({ onDone }: { onDone: () => void }) {
 
   const submit = async () => {
     if (!canSubmit) return;
-    const env = envText.split("\n").map((l) => l.trim()).filter((l) => l.includes("="));
-    const headers = headersText.split("\n").map((l) => l.trim()).filter((l) => l.includes(":"));
+    const env = envText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.includes("="));
+    const headers = headersText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.includes(":"));
     const ok = await add({
       name: name.trim(),
       transport,
@@ -173,7 +204,10 @@ function AddForm({ onDone }: { onDone: () => void }) {
             className="wb-search-input"
             value={name}
             placeholder="e.g. github"
-            onChange={(e) => { setName(e.target.value); clearAddError(); }}
+            onChange={(e) => {
+              setName(e.target.value);
+              clearAddError();
+            }}
             autoFocus
           />
         </label>
@@ -200,8 +234,13 @@ function AddForm({ onDone }: { onDone: () => void }) {
         <input
           className="wb-search-input"
           value={commandOrUrl}
-          placeholder={stdio ? "npx -y @modelcontextprotocol/server-github" : "https://mcp.example.dev/mcp"}
-          onChange={(e) => { setCommandOrUrl(e.target.value); clearAddError(); }}
+          placeholder={
+            stdio ? "npx -y @modelcontextprotocol/server-github" : "https://mcp.example.dev/mcp"
+          }
+          onChange={(e) => {
+            setCommandOrUrl(e.target.value);
+            clearAddError();
+          }}
         />
       </label>
 
@@ -232,7 +271,9 @@ function AddForm({ onDone }: { onDone: () => void }) {
       {addError && <div className="plugin-install-error">{addError}</div>}
 
       <div className="mcp-add-actions">
-        <button className="wb-link" onClick={onDone}>cancel</button>
+        <button className="wb-link" onClick={onDone}>
+          cancel
+        </button>
         <button className="wb-cta wb-cta-sm" onClick={() => void submit()} disabled={!canSubmit}>
           {adding ? "adding…" : "Add server"}
         </button>

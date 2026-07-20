@@ -15,7 +15,11 @@ function draftKey(projectRoot: string): string {
 
 export function Composer({ projectRoot, onClose }: { projectRoot: string; onClose: () => void }) {
   const [draft, setDraft] = useState<string>(() => {
-    try { return localStorage.getItem(draftKey(projectRoot)) ?? ""; } catch { return ""; }
+    try {
+      return localStorage.getItem(draftKey(projectRoot)) ?? "";
+    } catch {
+      return "";
+    }
   });
   const taRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -25,7 +29,11 @@ export function Composer({ projectRoot, onClose }: { projectRoot: string; onClos
 
   // Persist the draft as it changes so an accidental close/crash loses nothing.
   useEffect(() => {
-    try { localStorage.setItem(draftKey(projectRoot), draft); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(draftKey(projectRoot), draft);
+    } catch {
+      /* ignore */
+    }
   }, [draft, projectRoot]);
 
   const send = async () => {
@@ -33,7 +41,11 @@ export function Composer({ projectRoot, onClose }: { projectRoot: string; onClos
     const ok = await typeIntoActiveSession(draft, { submit: true });
     if (ok) {
       setDraft("");
-      try { localStorage.removeItem(draftKey(projectRoot)); } catch { /* ignore */ }
+      try {
+        localStorage.removeItem(draftKey(projectRoot));
+      } catch {
+        /* ignore */
+      }
       onClose();
     }
   };
@@ -62,11 +74,9 @@ export function Composer({ projectRoot, onClose }: { projectRoot: string; onClos
         <span className="composer-hint">
           Ctrl+Enter sends to the active session · Esc closes (draft kept)
         </span>
-        <button
-          className="wb-cta wb-cta-sm"
-          onClick={() => void send()}
-          disabled={!draft.trim()}
-        >Send ⏎</button>
+        <button className="wb-cta wb-cta-sm" onClick={() => void send()} disabled={!draft.trim()}>
+          Send ⏎
+        </button>
       </div>
     </div>
   );

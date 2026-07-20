@@ -36,8 +36,18 @@ function readClip(): Promise<string> {
 const TERM_THEMES = {
   // selectionBackground is explicit so the highlight is clearly visible in both
   // themes — an invisible selection reads as "copy is broken".
-  dark:  { background: "#0d0f12", foreground: "#d9dde3", cursor: "#6aa9ff", selectionBackground: "rgba(106, 169, 255, 0.35)" },
-  light: { background: "#fbfcfd", foreground: "#1a1d23", cursor: "#2563eb", selectionBackground: "rgba(37, 99, 235, 0.25)" },
+  dark: {
+    background: "#0d0f12",
+    foreground: "#d9dde3",
+    cursor: "#6aa9ff",
+    selectionBackground: "rgba(106, 169, 255, 0.35)",
+  },
+  light: {
+    background: "#fbfcfd",
+    foreground: "#1a1d23",
+    cursor: "#2563eb",
+    selectionBackground: "rgba(37, 99, 235, 0.25)",
+  },
 } as const;
 
 interface Props {
@@ -95,14 +105,15 @@ export function Terminal({ session, visible }: Props) {
       if (!action) return true;
       if (action === "paste") {
         readClip()
-          .then((text) => { if (text) term.paste(text); })
+          .then((text) => {
+            if (text) term.paste(text);
+          })
           .catch(() => {});
         return false;
       }
       // Ctrl+Shift+C may fall back to the last-selection snapshot; plain
       // Ctrl+C only ever gets here with a live selection (policy above).
-      const sel = term.getSelection() ||
-        (action === "copy" ? selSnapshotRef.current.text : "");
+      const sel = term.getSelection() || (action === "copy" ? selSnapshotRef.current.text : "");
       if (sel) {
         writeClip(sel).catch(() => {
           useToastStore.getState().show("Copy failed — clipboard unavailable", "error");
@@ -127,13 +138,21 @@ export function Terminal({ session, visible }: Props) {
     // the terminal font is ready, so the cell metrics — and thus the row count —
     // match what's actually visible.
     const rafFit = requestAnimationFrame(() => {
-      try { fit.fit(); } catch { /* host not mounted yet */ }
+      try {
+        fit.fit();
+      } catch {
+        /* host not mounted yet */
+      }
     });
     let fontsDone = false;
     document.fonts.ready.then(() => {
       if (disposed || fontsDone) return;
       fontsDone = true;
-      try { fit.fit(); } catch { /* host not mounted yet */ }
+      try {
+        fit.fit();
+      } catch {
+        /* host not mounted yet */
+      }
     });
 
     // Replay saved scrollback from a previous run, dimmed, with a divider.
@@ -151,9 +170,7 @@ export function Terminal({ session, visible }: Props) {
       // to run as commands ("command not found"). Reset the input-affecting
       // modes here so the terminal is sane while the shell holds the prompt;
       // the relaunched agent re-enables whatever it needs on startup.
-      term.write(
-        "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[?1049l",
-      );
+      term.write("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[?1049l");
       term.write(`\r\n\x1b[90m── resumed ──\x1b[0m\r\n`);
     }
 
@@ -173,14 +190,20 @@ export function Terminal({ session, visible }: Props) {
           appendOutput(session.id, e.payload.data);
         }
       });
-      if (disposed) { uOut(); return; }
+      if (disposed) {
+        uOut();
+        return;
+      }
       unlistenOutput = uOut;
       const uExit = await listen<TermExit>("term://exit", (e) => {
         if (e.payload.id === termId) {
           term.write(`\r\n\x1b[90m[process exited: ${e.payload.code ?? "?"}]\x1b[0m\r\n`);
         }
       });
-      if (disposed) { uExit(); return; }
+      if (disposed) {
+        uExit();
+        return;
+      }
       unlistenExit = uExit;
 
       // Drop files/folders onto this terminal: type their quoted paths into
@@ -200,7 +223,10 @@ export function Terminal({ session, visible }: Props) {
         const text = e.payload.paths.map((p) => `"${p}"`).join(" ");
         if (text) ipc.termWrite(termId, `${text} `).catch(() => {});
       });
-      if (disposed) { uDrop(); return; }
+      if (disposed) {
+        uDrop();
+        return;
+      }
       unlistenDragDrop = uDrop;
 
       try {
@@ -214,7 +240,9 @@ export function Terminal({ session, visible }: Props) {
       } catch (err) {
         term.write(`\x1b[31m✕ Couldn't start a shell session.\x1b[0m\r\n`);
         term.write(`\x1b[90m  ${err}\x1b[0m\r\n`);
-        term.write(`\x1b[90m  Check that your shell is available, then open a new session to retry.\x1b[0m\r\n`);
+        term.write(
+          `\x1b[90m  Check that your shell is available, then open a new session to retry.\x1b[0m\r\n`,
+        );
         useToastStore.getState().show(`Couldn't start a terminal session: ${err}`, "error");
         return;
       }
@@ -225,12 +253,15 @@ export function Terminal({ session, visible }: Props) {
       // type the command as text into the login-shell PTY, which resolves the
       // bare binary (`claude`/`codex`) from the user's PATH.
       if (termId) {
-        const { cmd: launchCmd, label: launchLabel, note: launchNote } =
-          profileFor(session.agent).buildLaunch({
-            agentSessionId: session.claudeSessionId,
-            model: session.model,
-            hasScrollback: Boolean(session.initialScrollback),
-          });
+        const {
+          cmd: launchCmd,
+          label: launchLabel,
+          note: launchNote,
+        } = profileFor(session.agent).buildLaunch({
+          agentSessionId: session.claudeSessionId,
+          model: session.model,
+          hasScrollback: Boolean(session.initialScrollback),
+        });
         const tid = termId;
         // Fresh worktree sessions may carry a one-shot install command (from
         // .claude/worktree-setup.json). Chain it before the agent launch so it
@@ -250,10 +281,13 @@ export function Terminal({ session, visible }: Props) {
         // first and takes longer, so wait more when one is present.
         const seed = session.seedPrompt?.trim();
         if (seed) {
-          setTimeout(() => {
-            if (disposed) return;
-            ipc.termWrite(tid, seed).catch(() => {});
-          }, setup ? 6000 : 3000);
+          setTimeout(
+            () => {
+              if (disposed) return;
+              ipc.termWrite(tid, seed).catch(() => {});
+            },
+            setup ? 6000 : 3000,
+          );
         }
       }
 
@@ -268,7 +302,8 @@ export function Terminal({ session, visible }: Props) {
       term.onResize(({ cols, rows }) => {
         if (!termId) return;
         if (cols === lastCols && rows === lastRows) return;
-        lastCols = cols; lastRows = rows;
+        lastCols = cols;
+        lastRows = rows;
         ipc.termResize(termId, cols, rows).catch(() => {});
       });
     })();
@@ -294,7 +329,11 @@ export function Terminal({ session, visible }: Props) {
       debounceTimer = window.setTimeout(() => {
         debounceTimer = null;
         if (disposed) return;
-        try { fit.fit(); } catch { /* host not mounted yet */ }
+        try {
+          fit.fit();
+        } catch {
+          /* host not mounted yet */
+        }
       }, 800);
     };
     const ro = new ResizeObserver(() => {
@@ -302,14 +341,17 @@ export function Terminal({ session, visible }: Props) {
       if (rect.width < 8 || rect.height < 8) return;
       if (!document.hasFocus()) return;
       if (Math.abs(rect.width - lastW) < 4 && Math.abs(rect.height - lastH) < 4) return;
-      lastW = rect.width; lastH = rect.height;
+      lastW = rect.width;
+      lastH = rect.height;
       scheduleFit();
     });
     ro.observe(host);
     const onFocus = () => scheduleFit();
     window.addEventListener("focus", onFocus);
 
-    const onClear = () => { term.clear(); };
+    const onClear = () => {
+      term.clear();
+    };
     window.addEventListener("ac:clear-terminal", onClear);
 
     // External input (e.g. the StatusBar model pill sending `/model <alias>`).
@@ -408,7 +450,11 @@ export function Terminal({ session, visible }: Props) {
   useEffect(() => {
     if (!visible) return;
     const raf = requestAnimationFrame(() => {
-      try { fitRef.current?.fit(); } catch { /* ignore */ }
+      try {
+        fitRef.current?.fit();
+      } catch {
+        /* ignore */
+      }
     });
     return () => cancelAnimationFrame(raf);
   }, [visible]);
@@ -426,7 +472,9 @@ export function Terminal({ session, visible }: Props) {
     const onDown = (e: MouseEvent) => {
       if (!(e.target as HTMLElement | null)?.closest?.(".term-menu")) setMenu(null);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
     return () => {
@@ -453,7 +501,9 @@ export function Terminal({ session, visible }: Props) {
   const menuPaste = () => {
     const t = termRef.current;
     readClip()
-      .then((text) => { if (text && t) t.paste(text); })
+      .then((text) => {
+        if (text && t) t.paste(text);
+      })
       .catch(() => {});
     setMenu(null);
     t?.focus();
@@ -474,7 +524,8 @@ export function Terminal({ session, visible }: Props) {
           const live = termRef.current?.hasSelection() ?? false;
           // A recent snapshot counts: the selection was made moments ago even
           // if something (repaint, pointerdown) already cleared the visual.
-          const snap = selSnapshotRef.current.text.length > 0 &&
+          const snap =
+            selSnapshotRef.current.text.length > 0 &&
             Date.now() - selSnapshotRef.current.ts < 15_000;
           setMenu({
             // Clamp so the menu never opens off-screen near the edges.
@@ -487,10 +538,12 @@ export function Terminal({ session, visible }: Props) {
       {menu && (
         <div className="term-menu" style={{ left: menu.x, top: menu.y }} role="menu">
           <button role="menuitem" disabled={!menu.hasSelection} onClick={menuCopy}>
-            <span>Copy</span><kbd>Ctrl+Shift+C</kbd>
+            <span>Copy</span>
+            <kbd>Ctrl+Shift+C</kbd>
           </button>
           <button role="menuitem" onClick={menuPaste}>
-            <span>Paste</span><kbd>Ctrl+Shift+V</kbd>
+            <span>Paste</span>
+            <kbd>Ctrl+Shift+V</kbd>
           </button>
           <div className="term-menu-sep" />
           <button role="menuitem" onClick={menuSelectAll}>

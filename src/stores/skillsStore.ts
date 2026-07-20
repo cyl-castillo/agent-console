@@ -34,10 +34,10 @@ let lastSkillCount = -1;
 function deriveSessionLabel(prompt: string): string {
   if (!prompt) return "";
   let s = prompt
-    .replace(/```[\s\S]*?```/g, " ")  // drop fenced code blocks
-    .replace(/`[^`]*`/g, " ")          // drop inline code
-    .replace(/https?:\/\/\S+/g, " ")   // drop urls
-    .replace(/[#*_>`~|]/g, " ")        // drop markdown punctuation
+    .replace(/```[\s\S]*?```/g, " ") // drop fenced code blocks
+    .replace(/`[^`]*`/g, " ") // drop inline code
+    .replace(/https?:\/\/\S+/g, " ") // drop urls
+    .replace(/[#*_>`~|]/g, " ") // drop markdown punctuation
     .replace(/[\r\n]+/g, " ")
     .trim();
   // Cut at the first sentence boundary if present.
@@ -80,10 +80,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
 
   refresh: async () => {
     try {
-      const [skills, status] = await Promise.all([
-        ipc.skillList(),
-        ipc.hooksStatus(),
-      ]);
+      const [skills, status] = await Promise.all([ipc.skillList(), ipc.hooksStatus()]);
       set({ installed: skills, hooks: status });
       // Corpus changed → maybe the curator should tidy it (threshold auto-trigger).
       useLearningStore.getState().noteCorpusSize();
@@ -91,21 +88,27 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const n = skills.filter((sk) => sk.source === "project" && sk.kind === "skill").length;
       if (lastSkillCount >= 0 && n > lastSkillCount) void fireSchedulerEvent("corpus_grew");
       lastSkillCount = n;
-    } catch (e) { console.error("[skills] refresh failed:", e); }
+    } catch (e) {
+      console.error("[skills] refresh failed:", e);
+    }
   },
 
   install: async () => {
     try {
       const status = await ipc.hooksInstall();
       set({ hooks: status });
-    } catch (e) { console.error("[skills] install failed:", e); }
+    } catch (e) {
+      console.error("[skills] install failed:", e);
+    }
   },
 
   uninstall: async () => {
     try {
       const status = await ipc.hooksUninstall();
       set({ hooks: status });
-    } catch (e) { console.error("[skills] uninstall failed:", e); }
+    } catch (e) {
+      console.error("[skills] uninstall failed:", e);
+    }
   },
 
   open: async (skill) => {
@@ -114,7 +117,9 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     try {
       const md = await ipc.skillRead(skill.path);
       if (get().selected?.path === skill.path) set({ selectedMarkdown: md });
-    } catch (e) { console.error("[skills] open failed:", e); }
+    } catch (e) {
+      console.error("[skills] open failed:", e);
+    }
   },
 
   restoreSnapshot: async (commitSha) => {
@@ -124,12 +129,9 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const undoSha = await ipc.snapshotRestore(commitSha);
       set({ undoRestoreSha: undoSha ?? null });
       await useChangesStore.getState().refresh();
-      useToastStore.getState().show(
-        undoSha
-          ? "Restored. Undo via ⌘P → Undo last restore"
-          : "Restored",
-        "success",
-      );
+      useToastStore
+        .getState()
+        .show(undoSha ? "Restored. Undo via ⌘P → Undo last restore" : "Restored", "success");
     } catch (e) {
       useToastStore.getState().show(`Restore failed: ${e}`, "error");
     }
@@ -158,17 +160,15 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     // termId is missing (e.g. a claude launched before this build's hook change).
     if (e.sessionId) {
       const { activeId, sessions } = useTerminalsStore.getState();
-      const targetId = (e.termId && sessions.some((s) => s.id === e.termId))
-        ? e.termId
-        : activeId;
+      const targetId = e.termId && sessions.some((s) => s.id === e.termId) ? e.termId : activeId;
       if (targetId) {
         useTerminalsStore.getState().setClaudeSessionId(targetId, e.sessionId);
         // Offer a meaningful rename derived from the first prompt — only if
         // this is still the first prompt (the session had no claudeSessionId
         // before we just set it).
         const target = useTerminalsStore.getState().sessions.find((s) => s.id === targetId);
-        const hadNoPriorClaude = !!target && target.claudeSessionId === e.sessionId
-          && !target.suggestedName; // not yet suggested
+        const hadNoPriorClaude =
+          !!target && target.claudeSessionId === e.sessionId && !target.suggestedName; // not yet suggested
         if (hadNoPriorClaude) {
           const label = deriveSessionLabel(e.prompt);
           if (label && label !== target.name) {
@@ -197,15 +197,22 @@ export async function attachSkillsListeners(): Promise<UnlistenFn> {
   // The Stop hook (both engines) gives a REAL turn-completed signal — flip the
   // status pill to idle immediately instead of waiting out the decay window,
   // and let the user know if they're in another window.
-  offs.push(await listen<{ termId?: string }>("hook://turn_end", (e) => {
-    useAgentStatusStore.getState().markIdle();
-    if (!windowIsFocused()) {
-      const termId = e.payload?.termId;
-      const name = termId
-        ? useTerminalsStore.getState().sessions.find((t) => t.id === termId)?.name
-        : undefined;
-      notify("Agent Console — turn finished", name ? `${name} is ready for you` : "The agent finished its turn");
-    }
-  }));
-  return () => { for (const off of offs) off(); };
+  offs.push(
+    await listen<{ termId?: string }>("hook://turn_end", (e) => {
+      useAgentStatusStore.getState().markIdle();
+      if (!windowIsFocused()) {
+        const termId = e.payload?.termId;
+        const name = termId
+          ? useTerminalsStore.getState().sessions.find((t) => t.id === termId)?.name
+          : undefined;
+        notify(
+          "Agent Console — turn finished",
+          name ? `${name} is ready for you` : "The agent finished its turn",
+        );
+      }
+    }),
+  );
+  return () => {
+    for (const off of offs) off();
+  };
 }

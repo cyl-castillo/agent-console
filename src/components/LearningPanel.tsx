@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 
-import {
-  useLearningStore,
-  type CurationItem,
-  type LearningItem,
-} from "../stores/learningStore";
+import { useLearningStore, type CurationItem, type LearningItem } from "../stores/learningStore";
 
 export function LearningPanel() {
   const status = useLearningStore((s) => s.status);
@@ -20,7 +16,10 @@ export function LearningPanel() {
   // Elapsed-time counter while reflecting, so the wait reads as live progress.
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    if (status !== "reflecting") { setElapsed(0); return; }
+    if (status !== "reflecting") {
+      setElapsed(0);
+      return;
+    }
     setElapsed(0);
     const started = Date.now();
     const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
@@ -44,7 +43,9 @@ export function LearningPanel() {
           {autoEnabled ? "auto ⚡" : "auto"}
         </button>
         {status === "results" && (
-          <button className="workbench-action" onClick={reset} title="Clear results">×</button>
+          <button className="workbench-action" onClick={reset} title="Clear results">
+            ×
+          </button>
         )}
         <button
           className="workbench-action"
@@ -60,18 +61,19 @@ export function LearningPanel() {
         {status === "idle" && (
           <section className="wb-section">
             <p className="wb-hint">
-              Learning mode reflects on what you've actually been doing in this
-              project — the prompts you've sent and the checkpoints they made —
-              and proposes skills to automate repeated work, memories worth
-              keeping, and friction worth fixing. Nothing is written until you
-              confirm.
+              Learning mode reflects on what you've actually been doing in this project — the
+              prompts you've sent and the checkpoints they made — and proposes skills to automate
+              repeated work, memories worth keeping, and friction worth fixing. Nothing is written
+              until you confirm.
             </p>
             <p className="wb-hint">
               {autoEnabled
                 ? "Auto-reflect is on — it'll surface suggestions on its own as you work. You can also run it now:"
                 : "Auto-reflect is off — run it whenever you like:"}
             </p>
-            <button className="wb-cta" onClick={reflect}>Reflect on recent activity</button>
+            <button className="wb-cta" onClick={reflect}>
+              Reflect on recent activity
+            </button>
           </section>
         )}
 
@@ -84,8 +86,8 @@ export function LearningPanel() {
                   Reflecting… <span className="wb-working-elapsed">{formatElapsed(elapsed)}</span>
                 </div>
                 <div className="wb-working-sub">
-                  Reviewing your recent activity with Claude in the background
-                  (usually 30–90s). You can keep working — suggestions land here.
+                  Reviewing your recent activity with Claude in the background (usually 30–90s). You
+                  can keep working — suggestions land here.
                 </div>
               </div>
             </div>
@@ -98,7 +100,9 @@ export function LearningPanel() {
             <p className="wb-hint" style={{ whiteSpace: "pre-wrap" }}>
               {errorMessage}
             </p>
-            <button className="wb-cta" onClick={reflect}>Retry</button>
+            <button className="wb-cta" onClick={reflect}>
+              Retry
+            </button>
           </section>
         )}
 
@@ -107,7 +111,14 @@ export function LearningPanel() {
             <div className="wb-section-title">
               suggestions
               <span className="wb-count">{items.length}</span>
-              {lastWasAuto && <span className="wb-learning-auto-tag" title="Triggered automatically by recent activity">auto</span>}
+              {lastWasAuto && (
+                <span
+                  className="wb-learning-auto-tag"
+                  title="Triggered automatically by recent activity"
+                >
+                  auto
+                </span>
+              )}
             </div>
             {items.length === 0 ? (
               <p className="wb-hint">
@@ -121,7 +132,9 @@ export function LearningPanel() {
                   From {eventsAnalyzed} recent events.
                 </p>
                 <ul className="wb-advisor-list">
-                  {items.map((it) => <LearningRow key={it.id} item={it} />)}
+                  {items.map((it) => (
+                    <LearningRow key={it.id} item={it} />
+                  ))}
                 </ul>
               </>
             )}
@@ -147,7 +160,10 @@ function CurationSection() {
 
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    if (status !== "curating") { setElapsed(0); return; }
+    if (status !== "curating") {
+      setElapsed(0);
+      return;
+    }
     const started = Date.now();
     const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(t);
@@ -171,7 +187,9 @@ function CurationSection() {
           {autoEnabled ? "auto ⚡" : "auto"}
         </button>
         {status === "results" && (
-          <button className="wb-link" onClick={resetCuration} title="Clear curation results">×</button>
+          <button className="wb-link" onClick={resetCuration} title="Clear curation results">
+            ×
+          </button>
         )}
         <button
           className="wb-link"
@@ -185,10 +203,9 @@ function CurationSection() {
 
       {status === "idle" && (
         <p className="wb-hint">
-          Curation tends what you've already accumulated — it fuses overlapping
-          skills/memories, flags entries pointing at code that no longer exists,
-          rewrites sloppy ones, and surfaces dead weight. Suggest-only; archiving
-          moves entries aside (reversible), never deletes.
+          Curation tends what you've already accumulated — it fuses overlapping skills/memories,
+          flags entries pointing at code that no longer exists, rewrites sloppy ones, and surfaces
+          dead weight. Suggest-only; archiving moves entries aside (reversible), never deletes.
         </p>
       )}
 
@@ -208,13 +225,17 @@ function CurationSection() {
 
       {status === "error" && (
         <>
-          <p className="wb-hint" style={{ whiteSpace: "pre-wrap", color: "#ff8585" }}>{error}</p>
-          <button className="wb-cta" onClick={curate}>Retry</button>
+          <p className="wb-hint" style={{ whiteSpace: "pre-wrap", color: "#ff8585" }}>
+            {error}
+          </p>
+          <button className="wb-cta" onClick={curate}>
+            Retry
+          </button>
         </>
       )}
 
-      {status === "results" && (
-        items.length === 0 ? (
+      {status === "results" &&
+        (items.length === 0 ? (
           <p className="wb-hint">
             {skillsAnalyzed + memoriesAnalyzed < 2
               ? "Not enough skills/memories yet to consolidate. Come back once the corpus grows."
@@ -226,11 +247,12 @@ function CurationSection() {
               From {skillsAnalyzed} skills and {memoriesAnalyzed} memories.
             </p>
             <ul className="wb-advisor-list">
-              {items.map((it) => <CurationRow key={it.id} item={it} />)}
+              {items.map((it) => (
+                <CurationRow key={it.id} item={it} />
+              ))}
             </ul>
           </>
-        )
-      )}
+        ))}
     </section>
   );
 }
@@ -243,9 +265,7 @@ function CurationRow({ item }: { item: CurationItem }) {
   const dimmed = item.status === "skipped" || item.status === "applied";
   const canApply = item.action !== "rerank";
   const applyLabel =
-    item.action === "merge" ? "Merge" :
-    item.action === "refactor" ? "Rewrite" :
-    "Archive";
+    item.action === "merge" ? "Merge" : item.action === "refactor" ? "Rewrite" : "Archive";
   const effect =
     item.action === "merge"
       ? `Writes ${item.newName ?? "the merged entry"}, archives the rest`
@@ -267,7 +287,9 @@ function CurationRow({ item }: { item: CurationItem }) {
           <div className="wb-curation-targets">
             <span className={`wb-learning-kind kind-${item.targetKind}`}>{item.targetKind}</span>
             {item.targets.map((t) => (
-              <span key={t} className="wb-curation-target">{t}</span>
+              <span key={t} className="wb-curation-target">
+                {t}
+              </span>
             ))}
           </div>
         </div>
@@ -280,13 +302,17 @@ function CurationRow({ item }: { item: CurationItem }) {
             <div className="wb-advisor-why">
               <strong>evidence:</strong>
               <ul className="wb-learning-evidence">
-                {item.evidence.map((e, i) => <li key={i}>{e}</li>)}
+                {item.evidence.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
               </ul>
             </div>
           )}
 
           <div className="wb-advisor-controls">
-            <span className="wb-hint" style={{ margin: 0 }}>{effect}</span>
+            <span className="wb-hint" style={{ margin: 0 }}>
+              {effect}
+            </span>
             <div className="wb-advisor-actions">
               {(item.status === "proposed" || item.status === "error") && (
                 <>
@@ -302,7 +328,9 @@ function CurationRow({ item }: { item: CurationItem }) {
               )}
               {item.status === "applying" && <span className="wb-hint">applying…</span>}
               {item.status === "applied" && item.appliedPath && (
-                <span className="wb-hint" title={item.appliedPath}>✓ applied</span>
+                <span className="wb-hint" title={item.appliedPath}>
+                  ✓ applied
+                </span>
               )}
               {item.status === "skipped" && <span className="wb-hint">dismissed</span>}
             </div>
@@ -316,7 +344,9 @@ function CurationRow({ item }: { item: CurationItem }) {
 
           {item.newContent && (
             <details className="wb-advisor-preview">
-              <summary>{item.action === "merge" ? "merged result preview" : "rewritten preview"}</summary>
+              <summary>
+                {item.action === "merge" ? "merged result preview" : "rewritten preview"}
+              </summary>
               <pre className="wb-advisor-md">{item.newContent}</pre>
             </details>
           )}
@@ -338,18 +368,25 @@ function LearningRow({ item }: { item: LearningItem }) {
   const dimmed = item.status === "skipped" || item.status === "applied";
   const canApply = item.kind !== "friction" && item.kind !== "hook";
   const previewContent =
-    item.kind === "skill" ? item.skillMdContent
-    : item.kind === "plugin" ? item.pluginSkillMd
-    : item.kind === "memory" ? item.memoryContent
-    : undefined;
+    item.kind === "skill"
+      ? item.skillMdContent
+      : item.kind === "plugin"
+        ? item.pluginSkillMd
+        : item.kind === "memory"
+          ? item.memoryContent
+          : undefined;
   const previewLabel =
-    item.kind === "plugin" ? "plugin SKILL.md preview"
-    : item.kind === "skill" ? "SKILL.md preview"
-    : "memory preview";
+    item.kind === "plugin"
+      ? "plugin SKILL.md preview"
+      : item.kind === "skill"
+        ? "SKILL.md preview"
+        : "memory preview";
   const applyLabel =
-    item.kind === "skill" ? "Create skill"
-    : item.kind === "plugin" ? "Scaffold plugin"
-    : "Save memory";
+    item.kind === "skill"
+      ? "Create skill"
+      : item.kind === "plugin"
+        ? "Scaffold plugin"
+        : "Save memory";
 
   return (
     <li className={`wb-advisor ${dimmed ? "dimmed" : ""}`}>
@@ -370,7 +407,9 @@ function LearningRow({ item }: { item: LearningItem }) {
             <div className="wb-advisor-why">
               <strong>evidence:</strong>
               <ul className="wb-learning-evidence">
-                {item.evidence.map((e, i) => <li key={i}>{e}</li>)}
+                {item.evidence.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
               </ul>
             </div>
           )}
@@ -403,7 +442,9 @@ function LearningRow({ item }: { item: LearningItem }) {
               )}
               {item.status === "applying" && <span className="wb-hint">applying…</span>}
               {item.status === "applied" && item.appliedPath && (
-                <span className="wb-hint" title={item.appliedPath}>✓ applied</span>
+                <span className="wb-hint" title={item.appliedPath}>
+                  ✓ applied
+                </span>
               )}
               {item.status === "skipped" && <span className="wb-hint">dismissed</span>}
             </div>
@@ -441,9 +482,12 @@ function formatElapsed(secs: number): string {
 function StatusBadge({ status }: { status: LearningItem["status"] }) {
   if (status === "proposed") return null;
   const label =
-    status === "applied" ? "applied" :
-    status === "applying" ? "…" :
-    status === "skipped" ? "dismissed" :
-    "error";
+    status === "applied"
+      ? "applied"
+      : status === "applying"
+        ? "…"
+        : status === "skipped"
+          ? "dismissed"
+          : "error";
   return <span className={`wb-advisor-badge status-${status}`}>{label}</span>;
 }

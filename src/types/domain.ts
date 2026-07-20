@@ -406,9 +406,7 @@ export type Trigger =
 /// A gate on a pipeline step, evaluated against the previous executed step's
 /// (status, output) (mirrors the Rust `StepCondition`).
 export type StepCondition =
-  | { type: "contains"; text: string }
-  | { type: "prevFailed" }
-  | { type: "prevOk" };
+  { type: "contains"; text: string } | { type: "prevFailed" } | { type: "prevOk" };
 
 /// One pipeline step: an action plus an optional condition (mirrors the Rust
 /// `PipelineStep`). No condition = run only if the prior step succeeded.
@@ -527,13 +525,13 @@ export interface AvailableSnapshot {
 
 export interface McpServer {
   name: string;
-  scope: string | null;       // local | user | project
-  transport: string | null;   // stdio | http | sse
+  scope: string | null; // local | user | project
+  transport: string | null; // stdio | http | sse
   command: string | null;
   args: string | null;
   url: string | null;
   env: string[];
-  status: string;             // connected | failed | pending | unknown
+  status: string; // connected | failed | pending | unknown
   connected: boolean;
 }
 

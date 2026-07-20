@@ -28,7 +28,8 @@ export function FileInspector() {
     setLogError(null);
     if (!selected || !status?.isRepo) return;
     setLogLoading(true);
-    ipc.gitFileLog(selected, 5)
+    ipc
+      .gitFileLog(selected, 5)
       .then((rows) => setLog(rows))
       .catch((e) => setLogError(String(e)))
       .finally(() => setLogLoading(false));
@@ -37,7 +38,11 @@ export function FileInspector() {
   const absPath = project && selected ? joinPath(project.root, selected) : null;
 
   if (!status) {
-    return <InspectorShell><div className="placeholder">Loading…</div></InspectorShell>;
+    return (
+      <InspectorShell>
+        <div className="placeholder">Loading…</div>
+      </InspectorShell>
+    );
   }
   if (!status.isRepo) {
     return (
@@ -60,24 +65,30 @@ export function FileInspector() {
 
   const onOpen = async () => {
     if (!absPath) return;
-    try { await openPath(absPath); }
-    catch (e) { alert(`Could not open file: ${e}`); }
+    try {
+      await openPath(absPath);
+    } catch (e) {
+      alert(`Could not open file: ${e}`);
+    }
   };
 
   const onReveal = async () => {
     if (!absPath) return;
-    try { await revealItemInDir(absPath); }
-    catch { /* best-effort */ }
+    try {
+      await revealItemInDir(absPath);
+    } catch {
+      /* best-effort */
+    }
   };
 
   return (
     <InspectorShell>
       <section className="inspector-section">
         <div className="inspector-label">file</div>
-        <div className="inspector-path" title={absPath ?? selected}>{selected}</div>
-        {absPath && (
-          <div className="inspector-abspath">{absPath}</div>
-        )}
+        <div className="inspector-path" title={absPath ?? selected}>
+          {selected}
+        </div>
+        {absPath && <div className="inspector-abspath">{absPath}</div>}
       </section>
 
       <section className="inspector-section">
@@ -114,7 +125,11 @@ export function FileInspector() {
 
       <section className="inspector-section">
         <div className="inspector-label">recent commits</div>
-        {logLoading && <div className="placeholder" style={{ padding: 0, fontSize: 11 }}>Loading…</div>}
+        {logLoading && (
+          <div className="placeholder" style={{ padding: 0, fontSize: 11 }}>
+            Loading…
+          </div>
+        )}
         {!logLoading && logError && (
           <div className="placeholder" style={{ padding: 0, fontSize: 11, color: "var(--danger)" }}>
             {logError}

@@ -44,7 +44,12 @@ describe("permissions rules", () => {
   it("add records the op for undo and refreshes the snapshot", async () => {
     await usePermissionsStore.getState().add("project", "allow", "Bash(npm test)");
     const s = usePermissionsStore.getState();
-    expect(s.lastOp).toEqual({ kind: "add", scope: "project", effect: "allow", raw: "Bash(npm test)" });
+    expect(s.lastOp).toEqual({
+      kind: "add",
+      scope: "project",
+      effect: "allow",
+      raw: "Bash(npm test)",
+    });
     expect(s.snapshot?.rules).toHaveLength(1);
   });
 

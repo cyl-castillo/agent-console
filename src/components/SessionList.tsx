@@ -66,7 +66,9 @@ export function SessionList() {
         const created = await ipc.worktreeCreate(wt.name, wt.base);
         add(created.info.path, wt.name, m, agent, created.info, created.setupCommand ?? undefined);
         const copies = created.copied.length ? ` · copied ${created.copied.join(", ")}` : "";
-        useToastStore.getState().show(`Worktree ready on ${created.info.branch}${copies}`, "success");
+        useToastStore
+          .getState()
+          .show(`Worktree ready on ${created.info.branch}${copies}`, "success");
       } catch (e) {
         // Keep the chooser open so the user can fix the name/base and retry.
         useToastStore.getState().show(`Couldn't create worktree: ${e}`, "error");
@@ -103,7 +105,9 @@ export function SessionList() {
           onClick={() => setChoosing((v) => !v)}
           disabled={!project}
           title="New session — pick an agent and model"
-        >+ new</button>
+        >
+          + new
+        </button>
       </div>
       {choosing && project && (
         <AgentModelChooser
@@ -125,12 +129,23 @@ export function SessionList() {
               blocked={blocked.has(s.id)}
               onActivate={() => onActivate(s)}
               onClose={async () => {
-                if (s.status === "live" && !confirm(`Close session "${s.name}"? Process will be killed.`)) return;
+                if (
+                  s.status === "live" &&
+                  !confirm(`Close session "${s.name}"? Process will be killed.`)
+                )
+                  return;
                 await close(s.id);
               }}
-              onRename={(name) => { rename(s.id, name); persist(); }}
-              onAcceptSuggestion={() => { acceptSuggestion(s.id); }}
-              onDismissSuggestion={() => { dismissSuggestion(s.id); }}
+              onRename={(name) => {
+                rename(s.id, name);
+                persist();
+              }}
+              onAcceptSuggestion={() => {
+                acceptSuggestion(s.id);
+              }}
+              onDismissSuggestion={() => {
+                dismissSuggestion(s.id);
+              }}
             />
           ))}
         </ul>
@@ -145,7 +160,12 @@ export function SessionList() {
 /// agent, then a model/tuning preset for that agent; picking creates the session
 /// right away. There is no silent default — both choices are explicit. The model
 /// per-project default is remembered separately for each agent.
-function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
+function AgentModelChooser({
+  projectRoot,
+  lastAgent,
+  onPick,
+  onCancel,
+}: {
   projectRoot: string;
   lastAgent: AgentKind;
   onPick: (agent: AgentKind, model?: string, wt?: WorktreePick) => void;
@@ -166,7 +186,8 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
   // Load branches on first worktree opt-in; default the base to the current one.
   useEffect(() => {
     if (!wtOn || branches !== null) return;
-    ipc.gitBranches()
+    ipc
+      .gitBranches()
       .then((bs) => {
         setBranches(bs);
         const current = bs.find((b) => b.current);
@@ -196,7 +217,10 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
               role="tab"
               aria-selected={agent === p.kind}
               className={`agent-chooser-tab ${agent === p.kind ? "active" : ""}`}
-              onClick={() => { setAgent(p.kind); setShowCustom(false); }}
+              onClick={() => {
+                setAgent(p.kind);
+                setShowCustom(false);
+              }}
             >
               <span className="agent-chooser-tab-icon">{p.icon}</span>
               <span>{p.label}</span>
@@ -217,17 +241,17 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
             <span className="model-chooser-intent">{p.intent}</span>
             <span className="model-chooser-model">{p.label}</span>
           </span>
-          {lastModel === p.value && <span className="model-chooser-last-dot" title="last used">●</span>}
+          {lastModel === p.value && (
+            <span className="model-chooser-last-dot" title="last used">
+              ●
+            </span>
+          )}
         </button>
       ))}
 
       <div className="wt-opt">
         <label className="wt-opt-toggle">
-          <input
-            type="checkbox"
-            checked={wtOn}
-            onChange={(e) => setWtOn(e.target.checked)}
-          />
+          <input type="checkbox" checked={wtOn} onChange={(e) => setWtOn(e.target.checked)} />
           <span>Isolated worktree</span>
         </label>
         {wtOn && (
@@ -237,7 +261,9 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
               placeholder="branch name (agent/…)"
               value={wtName}
               onChange={(e) => setWtName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") onCancel();
+              }}
             />
             <select
               className="wt-opt-base"
@@ -247,7 +273,9 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
             >
               {branches === null && <option value="">loading branches…</option>}
               {branches?.map((b) => (
-                <option key={b.name} value={b.name}>{b.current ? `${b.name} (current)` : b.name}</option>
+                <option key={b.name} value={b.name}>
+                  {b.current ? `${b.name} (current)` : b.name}
+                </option>
               ))}
             </select>
             <span className="wt-opt-hint">
@@ -258,15 +286,23 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
       </div>
 
       <div className="model-chooser-foot">
-        <button className="model-chooser-link btn btn-ghost" onClick={() => onPick(agent, undefined, worktreePick())}>
+        <button
+          className="model-chooser-link btn btn-ghost"
+          onClick={() => onPick(agent, undefined, worktreePick())}
+        >
           {agent === "codex" ? "Config default" : "Account default"}
         </button>
         <span className="model-chooser-sep">·</span>
-        <button className="model-chooser-link btn btn-ghost" onClick={() => setShowCustom((v) => !v)}>
+        <button
+          className="model-chooser-link btn btn-ghost"
+          onClick={() => setShowCustom((v) => !v)}
+        >
           Custom…
         </button>
         <span className="spacer" />
-        <button className="model-chooser-link btn btn-ghost" onClick={onCancel}>Cancel</button>
+        <button className="model-chooser-link btn btn-ghost" onClick={onCancel}>
+          Cancel
+        </button>
       </div>
 
       {showCustom && (
@@ -274,7 +310,11 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
           <input
             className="wb-search-input"
             autoFocus
-            placeholder={agent === "codex" ? "reasoning effort (e.g. xhigh)" : "model id (e.g. claude-opus-4-8)"}
+            placeholder={
+              agent === "codex"
+                ? "reasoning effort (e.g. xhigh)"
+                : "model id (e.g. claude-opus-4-8)"
+            }
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
             onKeyDown={(e) => {
@@ -288,7 +328,16 @@ function AgentModelChooser({ projectRoot, lastAgent, onPick, onCancel }: {
   );
 }
 
-function SessionRow({ session, active, blocked, onActivate, onClose, onRename, onAcceptSuggestion, onDismissSuggestion }: {
+function SessionRow({
+  session,
+  active,
+  blocked,
+  onActivate,
+  onClose,
+  onRename,
+  onAcceptSuggestion,
+  onDismissSuggestion,
+}: {
   session: TerminalSession;
   active: boolean;
   /// A queued approval is attributed to this session — it's waiting on you.
@@ -302,9 +351,8 @@ function SessionRow({ session, active, blocked, onActivate, onClose, onRename, o
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.name);
   const now = useNow(30_000);
-  const meta = session.status === "live"
-    ? formatUptime(Math.max(0, now - session.createdAtMs))
-    : "stopped";
+  const meta =
+    session.status === "live" ? formatUptime(Math.max(0, now - session.createdAtMs)) : "stopped";
 
   const commit = () => {
     const v = draft.trim();
@@ -328,15 +376,23 @@ function SessionRow({ session, active, blocked, onActivate, onClose, onRename, o
           onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === "Enter") commit();
-            if (e.key === "Escape") { setDraft(session.name); setEditing(false); }
+            if (e.key === "Escape") {
+              setDraft(session.name);
+              setEditing(false);
+            }
           }}
           onClick={(e) => e.stopPropagation()}
         />
       ) : (
         <span
           className="session-name"
-          onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
-        >{session.name}</span>
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            setEditing(true);
+          }}
+        >
+          {session.name}
+        </span>
       )}
       <span className="session-agent" title={`Agent: ${profileFor(session.agent).label}`}>
         {profileFor(session.agent).icon}
@@ -345,25 +401,34 @@ function SessionRow({ session, active, blocked, onActivate, onClose, onRename, o
         <span
           className="session-branch"
           title={`Isolated worktree · ${session.worktree.branch} → ${session.worktree.baseBranch}\n${session.worktree.path}`}
-        >⎇</span>
+        >
+          ⎇
+        </span>
       )}
       {session.model && (
-        <span className="session-model" title={`${profileFor(session.agent).label} · ${modelLabel(session.model, session.agent)}`}>
+        <span
+          className="session-model"
+          title={`${profileFor(session.agent).label} · ${modelLabel(session.model, session.agent)}`}
+        >
           {modelLabel(session.model, session.agent)}
         </span>
       )}
       {blocked && (
-        <span
-          className="session-blocked"
-          title="Waiting for you to approve an action"
-        >waiting</span>
+        <span className="session-blocked" title="Waiting for you to approve an action">
+          waiting
+        </span>
       )}
       <span className="session-meta">{meta}</span>
       <button
         className="session-close"
-        onClick={(e) => { e.stopPropagation(); onClose(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
         title="Close session"
-      >×</button>
+      >
+        ×
+      </button>
       {session.suggestedName && session.suggestedName !== session.name && !editing && (
         <div className="session-suggestion" onClick={(e) => e.stopPropagation()}>
           <span className="session-suggestion-label">
@@ -373,12 +438,16 @@ function SessionRow({ session, active, blocked, onActivate, onClose, onRename, o
             className="session-suggestion-accept"
             onClick={onAcceptSuggestion}
             title="Accept suggestion"
-          >✓</button>
+          >
+            ✓
+          </button>
           <button
             className="session-suggestion-dismiss"
             onClick={onDismissSuggestion}
             title="Dismiss"
-          >✕</button>
+          >
+            ✕
+          </button>
         </div>
       )}
     </li>

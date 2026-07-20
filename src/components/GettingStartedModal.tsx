@@ -167,7 +167,10 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
       </div>
 
       <div className="gs-progress">
-        <div className="gs-progress-fill" style={{ width: `${(completed / steps.length) * 100}%` }} />
+        <div
+          className="gs-progress-fill"
+          style={{ width: `${(completed / steps.length) * 100}%` }}
+        />
       </div>
 
       <div className="gs-section-label">The first ten minutes</div>

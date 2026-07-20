@@ -9,8 +9,16 @@ type Scope = "project" | "global";
 type Effect = "allow" | "deny" | "ask";
 
 const KNOWN_TOOLS = [
-  "Bash", "Edit", "Write", "MultiEdit", "Read", "NotebookEdit",
-  "WebFetch", "WebSearch", "Glob", "Grep",
+  "Bash",
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "Read",
+  "NotebookEdit",
+  "WebFetch",
+  "WebSearch",
+  "Glob",
+  "Grep",
 ];
 
 interface FilterState {
@@ -30,7 +38,9 @@ export function PermissionsPanel() {
   const move = usePermissionsStore((s) => s.move);
   const clearError = usePermissionsStore((s) => s.clearError);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<StoredRule | null>(null);
@@ -43,37 +53,57 @@ export function PermissionsPanel() {
 
   const allRules = useMemo(() => snapshot?.rules ?? [], [snapshot]);
 
-  const counts = useMemo(() => ({
-    total: allRules.length,
-    allow: allRules.filter((r) => r.effect === "allow").length,
-    deny: allRules.filter((r) => r.effect === "deny").length,
-    ask: allRules.filter((r) => r.effect === "ask").length,
-    external: allRules.filter((r) => r.source === "external").length,
-  }), [allRules]);
-
-  const flaggedCount = useMemo(
-    () => allRules.filter((r) => {
-      if (r.effect !== "allow") return false;
-      const p = parseRaw(r.raw);
-      if (!p) return false;
-      const risk = classify({ scope: r.scope, effect: r.effect, tool: p.tool, pattern: p.pattern, raw: r.raw }).risk;
-      return risk === "broad" || risk === "dangerous";
-    }).length,
+  const counts = useMemo(
+    () => ({
+      total: allRules.length,
+      allow: allRules.filter((r) => r.effect === "allow").length,
+      deny: allRules.filter((r) => r.effect === "deny").length,
+      ask: allRules.filter((r) => r.effect === "ask").length,
+      external: allRules.filter((r) => r.source === "external").length,
+    }),
     [allRules],
   );
 
-  const filteredRules = useMemo(() => allRules.filter((r) => {
-    if (!filter.effects[r.effect]) return false;
-    if (!filter.showExternal && r.source === "external") return false;
-    if (filter.query && !r.raw.toLowerCase().includes(filter.query.toLowerCase())) return false;
-    if (onlyFlagged) {
-      const p = parseRaw(r.raw);
-      if (!p) return false;
-      const risk = classify({ scope: r.scope, effect: r.effect, tool: p.tool, pattern: p.pattern, raw: r.raw }).risk;
-      if (r.effect !== "allow" || (risk !== "broad" && risk !== "dangerous")) return false;
-    }
-    return true;
-  }), [allRules, filter, onlyFlagged]);
+  const flaggedCount = useMemo(
+    () =>
+      allRules.filter((r) => {
+        if (r.effect !== "allow") return false;
+        const p = parseRaw(r.raw);
+        if (!p) return false;
+        const risk = classify({
+          scope: r.scope,
+          effect: r.effect,
+          tool: p.tool,
+          pattern: p.pattern,
+          raw: r.raw,
+        }).risk;
+        return risk === "broad" || risk === "dangerous";
+      }).length,
+    [allRules],
+  );
+
+  const filteredRules = useMemo(
+    () =>
+      allRules.filter((r) => {
+        if (!filter.effects[r.effect]) return false;
+        if (!filter.showExternal && r.source === "external") return false;
+        if (filter.query && !r.raw.toLowerCase().includes(filter.query.toLowerCase())) return false;
+        if (onlyFlagged) {
+          const p = parseRaw(r.raw);
+          if (!p) return false;
+          const risk = classify({
+            scope: r.scope,
+            effect: r.effect,
+            tool: p.tool,
+            pattern: p.pattern,
+            raw: r.raw,
+          }).risk;
+          if (r.effect !== "allow" || (risk !== "broad" && risk !== "dangerous")) return false;
+        }
+        return true;
+      }),
+    [allRules, filter, onlyFlagged],
+  );
 
   const grouped = useMemo(() => {
     const project: StoredRule[] = [];
@@ -95,19 +125,26 @@ export function PermissionsPanel() {
         <span className="workbench-title">permissions</span>
         <span className="spacer" />
         {lastOp && (
-          <button className="workbench-action" onClick={undo} title="Undo last change">↶</button>
+          <button className="workbench-action" onClick={undo} title="Undo last change">
+            ↶
+          </button>
         )}
-        <button className="workbench-action" onClick={() => refresh()} disabled={loading} title="Refresh">↻</button>
         <button
-          className="workbench-action perm-add"
-          onClick={() => onAdd()}
-          title="Add new rule"
-        >+ add</button>
+          className="workbench-action"
+          onClick={() => refresh()}
+          disabled={loading}
+          title="Refresh"
+        >
+          ↻
+        </button>
+        <button className="workbench-action perm-add" onClick={() => onAdd()} title="Add new rule">
+          + add
+        </button>
       </div>
 
       <p className="wb-hint wb-trust" style={{ margin: "0 10px 4px" }}>
-        Rules edit only your local <code>settings.json</code> — every change is
-        reversible and nothing here runs the agent.
+        Rules edit only your local <code>settings.json</code> — every change is reversible and
+        nothing here runs the agent.
       </p>
 
       {error && (
@@ -122,8 +159,8 @@ export function PermissionsPanel() {
           onClick={() => setOnlyFlagged((v) => !v)}
           title="Click to filter"
         >
-          ⚠ {flaggedCount} broad/dangerous allow rule{flaggedCount === 1 ? "" : "s"} —
-          {" "}{onlyFlagged ? "showing only flagged" : "review them"}
+          ⚠ {flaggedCount} broad/dangerous allow rule{flaggedCount === 1 ? "" : "s"} —{" "}
+          {onlyFlagged ? "showing only flagged" : "review them"}
         </div>
       )}
 
@@ -132,16 +169,26 @@ export function PermissionsPanel() {
       {filter.query && (
         <div className="perm-result-count">
           {filteredRules.length} of {counts.total} rules
-          <button className="btn btn-link" onClick={() => setFilter({ ...filter, query: "" })}>clear</button>
+          <button className="btn btn-link" onClick={() => setFilter({ ...filter, query: "" })}>
+            clear
+          </button>
         </div>
       )}
 
       {(formOpen || editTarget) && (
         <RuleForm
           edit={editTarget}
-          defaultScope={editTarget?.scope ?? newScopeOverride ?? (snapshot?.projectSettingsPath ? "project" : "global")}
+          defaultScope={
+            editTarget?.scope ??
+            newScopeOverride ??
+            (snapshot?.projectSettingsPath ? "project" : "global")
+          }
           hasProject={!!snapshot?.projectSettingsPath}
-          onClose={() => { setFormOpen(false); setEditTarget(null); setNewScopeOverride(null); }}
+          onClose={() => {
+            setFormOpen(false);
+            setEditTarget(null);
+            setNewScopeOverride(null);
+          }}
         />
       )}
 
@@ -155,7 +202,14 @@ export function PermissionsPanel() {
             rules={grouped.project}
             totalInScope={allRules.filter((r) => r.scope === "project").length}
             disabled={!snapshot.projectSettingsPath}
-            filtered={!!filter.query || onlyFlagged || !filter.effects.allow || !filter.effects.deny || !filter.effects.ask || !filter.showExternal}
+            filtered={
+              !!filter.query ||
+              onlyFlagged ||
+              !filter.effects.allow ||
+              !filter.effects.deny ||
+              !filter.effects.ask ||
+              !filter.showExternal
+            }
             onRemove={(r) => remove(r.scope, r.effect, r.raw)}
             onEdit={(r) => setEditTarget(r)}
             onMove={(r) => move(r, "global")}
@@ -168,7 +222,14 @@ export function PermissionsPanel() {
             rules={grouped.global}
             totalInScope={allRules.filter((r) => r.scope === "global").length}
             disabled={false}
-            filtered={!!filter.query || onlyFlagged || !filter.effects.allow || !filter.effects.deny || !filter.effects.ask || !filter.showExternal}
+            filtered={
+              !!filter.query ||
+              onlyFlagged ||
+              !filter.effects.allow ||
+              !filter.effects.deny ||
+              !filter.effects.ask ||
+              !filter.showExternal
+            }
             onRemove={(r) => remove(r.scope, r.effect, r.raw)}
             onEdit={(r) => setEditTarget(r)}
             onMove={snapshot.projectSettingsPath ? (r) => move(r, "project") : undefined}
@@ -214,7 +275,9 @@ function FilterBar({
             className="perm-search-clear"
             onClick={() => setFilter({ ...filter, query: "" })}
             title="Clear"
-          >×</button>
+          >
+            ×
+          </button>
         )}
       </div>
       <div className="perm-filter-toggles">
@@ -223,7 +286,9 @@ function FilterBar({
             key={e}
             type="button"
             className={`perm-chip eff-${e} ${filter.effects[e] ? "on" : ""}`}
-            onClick={() => setFilter({ ...filter, effects: { ...filter.effects, [e]: !filter.effects[e] } })}
+            onClick={() =>
+              setFilter({ ...filter, effects: { ...filter.effects, [e]: !filter.effects[e] } })
+            }
             disabled={counts[e] === 0}
             title={filter.effects[e] ? `Hide ${e}` : `Show ${e}`}
           >
@@ -270,19 +335,19 @@ function RuleForm({ edit, defaultScope, hasProject, onClose }: RuleFormProps) {
   const patternOrNull = pattern.trim() === "" ? null : pattern;
   const raw = buildRaw(tool, patternOrNull);
   const { risk, reason } = classify({ scope, effect, tool, pattern: patternOrNull, raw });
-  const hd = effect === "allow" ? isHardDenyAllow(raw) : { hard: false } as const;
+  const hd = effect === "allow" ? isHardDenyAllow(raw) : ({ hard: false } as const);
   const blocked = hd.hard;
   const strict = risk === "broad" || risk === "dangerous";
-  const requiresTyping = !blocked && (
-    risk === "dangerous" ||
-    (effect === "allow" && scope === "global" && (tool === "Bash" || tool === "Write"))
-  );
+  const requiresTyping =
+    !blocked &&
+    (risk === "dangerous" ||
+      (effect === "allow" && scope === "global" && (tool === "Bash" || tool === "Write")));
 
-  const canSave = !blocked && (
-    (requiresTyping && confirmText === raw) ||
-    (!requiresTyping && strict && confirmText === "ok") ||
-    (!requiresTyping && !strict)
-  );
+  const canSave =
+    !blocked &&
+    ((requiresTyping && confirmText === raw) ||
+      (!requiresTyping && strict && confirmText === "ok") ||
+      (!requiresTyping && !strict));
 
   const onSave = async () => {
     setBusy(true);
@@ -306,17 +371,22 @@ function RuleForm({ edit, defaultScope, hasProject, onClose }: RuleFormProps) {
             className={scope === "project" ? "on" : ""}
             disabled={!hasProject}
             onClick={() => setScope("project")}
-          >project</button>
-          <button
-            className={scope === "global" ? "on" : ""}
-            onClick={() => setScope("global")}
-          >global</button>
+          >
+            project
+          </button>
+          <button className={scope === "global" ? "on" : ""} onClick={() => setScope("global")}>
+            global
+          </button>
         </div>
 
-        <span className="label" style={{ marginLeft: 10 }}>Effect</span>
+        <span className="label" style={{ marginLeft: 10 }}>
+          Effect
+        </span>
         <div className="seg">
           {(["allow", "deny", "ask"] as const).map((e) => (
-            <button key={e} className={effect === e ? "on" : ""} onClick={() => setEffect(e)}>{e}</button>
+            <button key={e} className={effect === e ? "on" : ""} onClick={() => setEffect(e)}>
+              {e}
+            </button>
           ))}
         </div>
       </div>
@@ -324,9 +394,15 @@ function RuleForm({ edit, defaultScope, hasProject, onClose }: RuleFormProps) {
       <div className="perm-form-row">
         <span className="label">Tool</span>
         <select value={tool} onChange={(e) => setTool(e.target.value)}>
-          {KNOWN_TOOLS.map((t) => <option key={t} value={t}>{t}</option>)}
+          {KNOWN_TOOLS.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
         </select>
-        <span className="label" style={{ marginLeft: 10 }}>Pattern</span>
+        <span className="label" style={{ marginLeft: 10 }}>
+          Pattern
+        </span>
         <input
           value={pattern}
           onChange={(e) => setPattern(e.target.value)}
@@ -358,8 +434,14 @@ function RuleForm({ edit, defaultScope, hasProject, onClose }: RuleFormProps) {
 
       {requiresTyping && !blocked && (
         <div className="approval-typegate">
-          <label>Type the rule exactly: <code>{raw}</code></label>
-          <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={raw} />
+          <label>
+            Type the rule exactly: <code>{raw}</code>
+          </label>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={raw}
+          />
         </div>
       )}
 
@@ -377,7 +459,9 @@ function RuleForm({ edit, defaultScope, hasProject, onClose }: RuleFormProps) {
       )}
 
       <div className="perm-form-actions">
-        <button className="btn btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+        <button className="btn btn-secondary" onClick={onClose} disabled={busy}>
+          Cancel
+        </button>
         <button className="btn btn-success" disabled={!canSave || busy} onClick={onSave}>
           {edit ? "Save changes" : "Add rule"}
         </button>
@@ -403,8 +487,17 @@ interface GroupProps {
 }
 
 function RuleGroup({
-  title, path, rules, totalInScope, disabled, filtered,
-  onRemove, onEdit, onMove, onAdd, moveLabel,
+  title,
+  path,
+  rules,
+  totalInScope,
+  disabled,
+  filtered,
+  onRemove,
+  onEdit,
+  onMove,
+  onAdd,
+  moveLabel,
 }: GroupProps) {
   return (
     <div className="rule-group">
@@ -416,7 +509,9 @@ function RuleGroup({
             : rules.length}
         </span>
         <span className="spacer" />
-        <code className="rule-group-path" title={path}>{path}</code>
+        <code className="rule-group-path" title={path}>
+          {path}
+        </code>
       </div>
       {disabled ? (
         <div className="placeholder">—</div>
@@ -425,7 +520,9 @@ function RuleGroup({
           {totalInScope === 0 ? (
             <>
               <span>No {title.toLowerCase()} rules yet.</span>
-              <button className="btn btn-link" onClick={onAdd}>+ add one</button>
+              <button className="btn btn-link" onClick={onAdd}>
+                + add one
+              </button>
             </>
           ) : (
             <span>No rules match the current filter.</span>
@@ -436,7 +533,13 @@ function RuleGroup({
           {rules.map((r) => {
             const p = parseRaw(r.raw);
             const risk = p
-              ? classify({ scope: r.scope, effect: r.effect, tool: p.tool, pattern: p.pattern, raw: r.raw }).risk
+              ? classify({
+                  scope: r.scope,
+                  effect: r.effect,
+                  tool: p.tool,
+                  pattern: p.pattern,
+                  raw: r.raw,
+                }).risk
               : "safe";
             return (
               <li key={`${r.effect}::${r.raw}`} className="rule-item">
@@ -445,11 +548,23 @@ function RuleGroup({
                 {(risk === "broad" || risk === "dangerous") && r.effect === "allow" && (
                   <span className={`risk risk-${risk}`}>{risk}</span>
                 )}
-                {r.source === "external" && <span className="rule-src" title="External: added outside Agent Console">ext</span>}
+                {r.source === "external" && (
+                  <span className="rule-src" title="External: added outside Agent Console">
+                    ext
+                  </span>
+                )}
                 <div className="rule-actions">
-                  <button className="rule-act" title="Edit" onClick={() => onEdit(r)}>✎</button>
-                  {onMove && <button className="rule-act" title="Move scope" onClick={() => onMove(r)}>{moveLabel}</button>}
-                  <button className="rule-rm" title="Remove rule" onClick={() => onRemove(r)}>×</button>
+                  <button className="rule-act" title="Edit" onClick={() => onEdit(r)}>
+                    ✎
+                  </button>
+                  {onMove && (
+                    <button className="rule-act" title="Move scope" onClick={() => onMove(r)}>
+                      {moveLabel}
+                    </button>
+                  )}
+                  <button className="rule-rm" title="Remove rule" onClick={() => onRemove(r)}>
+                    ×
+                  </button>
                 </div>
               </li>
             );

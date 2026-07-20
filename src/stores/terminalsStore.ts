@@ -179,9 +179,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   resume: (id) => {
     const { sessions } = get();
     set({
-      sessions: sessions.map((s) =>
-        s.id === id ? { ...s, status: "live" as const } : s,
-      ),
+      sessions: sessions.map((s) => (s.id === id ? { ...s, status: "live" as const } : s)),
       activeId: id,
     });
   },
@@ -202,11 +200,13 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     const { sessions } = get();
     const target = sessions.find((s) => s.id === id);
     if (!target) return;
-    if (target.nameSuggested) return;               // already had its shot
-    if (target.name === trimmed) return;            // already named that
-    if (target.suggestedName === trimmed) return;   // same suggestion already pending
+    if (target.nameSuggested) return; // already had its shot
+    if (target.name === trimmed) return; // already named that
+    if (target.suggestedName === trimmed) return; // same suggestion already pending
     set({
-      sessions: sessions.map((s) => (s.id === id ? { ...s, suggestedName: trimmed, nameSuggested: true } : s)),
+      sessions: sessions.map((s) =>
+        s.id === id ? { ...s, suggestedName: trimmed, nameSuggested: true } : s,
+      ),
     });
     get().persist();
   },
@@ -233,9 +233,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   markLive: (id) => {
     const { sessions } = get();
     set({
-      sessions: sessions.map((s) =>
-        s.id === id ? { ...s, status: "live" as const } : s,
-      ),
+      sessions: sessions.map((s) => (s.id === id ? { ...s, status: "live" as const } : s)),
     });
   },
 
@@ -244,9 +242,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     const target = sessions.find((s) => s.id === id);
     if (!target || target.claudeSessionId === claudeId) return;
     set({
-      sessions: sessions.map((s) =>
-        s.id === id ? { ...s, claudeSessionId: claudeId } : s,
-      ),
+      sessions: sessions.map((s) => (s.id === id ? { ...s, claudeSessionId: claudeId } : s)),
     });
     // Persist immediately so a crash doesn't lose the association.
     get().persist();
@@ -277,8 +273,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   close: async (id) => {
     const { sessions, activeId } = get();
     const remaining = sessions.filter((s) => s.id !== id);
-    const nextActive =
-      activeId === id ? (remaining[remaining.length - 1]?.id ?? null) : activeId;
+    const nextActive = activeId === id ? (remaining[remaining.length - 1]?.id ?? null) : activeId;
     set({ sessions: remaining, activeId: nextActive });
     await get().persist();
   },

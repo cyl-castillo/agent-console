@@ -16,7 +16,9 @@ function loadInitial(): Set<string> {
 function persist(set: Set<string>) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(set)));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 /// Pin key is `${kind}:${source}:${name}` so a project skill and a user skill

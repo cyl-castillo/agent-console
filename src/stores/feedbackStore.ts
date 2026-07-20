@@ -21,7 +21,9 @@ interface FeedbackState {
 
   init: () => Promise<void>;
   refreshContext: () => Promise<void>;
-  setField: (patch: Partial<Pick<FeedbackState, "title" | "description" | "category" | "severity">>) => void;
+  setField: (
+    patch: Partial<Pick<FeedbackState, "title" | "description" | "category" | "severity">>,
+  ) => void;
   reset: () => void;
   submit: () => Promise<void>;
 }
@@ -52,15 +54,25 @@ export const useFeedbackStore = create<FeedbackState>((set, get) => ({
 
   refreshContext: async () => {
     if (!get().devEnabled) return;
-    try { set({ ctx: await ipc.feedbackContext() }); } catch { /* ignore */ }
+    try {
+      set({ ctx: await ipc.feedbackContext() });
+    } catch {
+      /* ignore */
+    }
   },
 
   setField: (patch) => set(patch),
 
-  reset: () => set({
-    title: "", description: "", category: "bug", severity: "medium",
-    status: "idle", error: null, lastUrl: null,
-  }),
+  reset: () =>
+    set({
+      title: "",
+      description: "",
+      category: "bug",
+      severity: "medium",
+      status: "idle",
+      error: null,
+      lastUrl: null,
+    }),
 
   submit: async () => {
     const { title, description, category, severity } = get();
@@ -78,8 +90,10 @@ export const useFeedbackStore = create<FeedbackState>((set, get) => ({
     try {
       const url = await ipc.feedbackSubmit(input);
       set({
-        status: "success", lastUrl: url,
-        title: "", description: "",
+        status: "success",
+        lastUrl: url,
+        title: "",
+        description: "",
       });
     } catch (e) {
       set({ status: "error", error: String(e) });

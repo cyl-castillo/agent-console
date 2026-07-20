@@ -24,21 +24,33 @@ describe("intentForIssue", () => {
     expect(intentForIssue(issue())).toBe("implement");
   });
   it("any status containing 'review' is 'review' (the reported bug)", () => {
-    expect(intentForIssue(issue({ status: "Code Review", statusCategory: "indeterminate" }))).toBe("review");
-    expect(intentForIssue(issue({ status: "In Review", statusCategory: "indeterminate" }))).toBe("review");
+    expect(intentForIssue(issue({ status: "Code Review", statusCategory: "indeterminate" }))).toBe(
+      "review",
+    );
+    expect(intentForIssue(issue({ status: "In Review", statusCategory: "indeterminate" }))).toBe(
+      "review",
+    );
     // Review wins even for a bug — you review the fix, not re-debug it.
     expect(intentForIssue(issue({ status: "Peer Review", issueType: "Bug" }))).toBe("review");
   });
   it("testing/QA statuses are 'test'", () => {
     expect(intentForIssue(issue({ status: "QA", statusCategory: "indeterminate" }))).toBe("test");
-    expect(intentForIssue(issue({ status: "Testing", statusCategory: "indeterminate" }))).toBe("test");
+    expect(intentForIssue(issue({ status: "Testing", statusCategory: "indeterminate" }))).toBe(
+      "test",
+    );
   });
   it("a bug (not in review/test) is 'debug' regardless of stage", () => {
     expect(intentForIssue(issue({ issueType: "Bug", statusCategory: "new" }))).toBe("debug");
-    expect(intentForIssue(issue({ issueType: "Defect", status: "In Progress", statusCategory: "indeterminate" }))).toBe("debug");
+    expect(
+      intentForIssue(
+        issue({ issueType: "Defect", status: "In Progress", statusCategory: "indeterminate" }),
+      ),
+    ).toBe("debug");
   });
   it("a non-bug already in progress is 'continue'", () => {
-    expect(intentForIssue(issue({ status: "In Progress", statusCategory: "indeterminate" }))).toBe("continue");
+    expect(intentForIssue(issue({ status: "In Progress", statusCategory: "indeterminate" }))).toBe(
+      "continue",
+    );
   });
 });
 

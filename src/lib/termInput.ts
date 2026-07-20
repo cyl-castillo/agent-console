@@ -17,7 +17,11 @@ export async function typeIntoActiveSession(
   const { activeId } = useTerminalsStore.getState();
   useUIStore.getState().setTab("terminal");
   if (!activeId) {
-    try { await navigator.clipboard.writeText(trimmed); } catch { /* ignore */ }
+    try {
+      await navigator.clipboard.writeText(trimmed);
+    } catch {
+      /* ignore */
+    }
     useToastStore.getState().show("No active session — text copied instead", "info");
     return false;
   }
