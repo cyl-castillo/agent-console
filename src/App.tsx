@@ -8,6 +8,7 @@ import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { attachSchedulerListeners, useSchedulerStore } from "./stores/schedulerStore";
 import { attachApprovalListener, useApprovalStore } from "./stores/approvalStore";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { attachVoiceListeners, attachVoiceApprovalWatcher } from "./stores/voiceStore";
 import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
@@ -262,10 +263,21 @@ export default function App() {
     attachSkillsListeners().then((u) => { if (disposed) u(); else offSkills = u; });
     attachApprovalListener().then((u) => { if (disposed) u(); else offApproval = u; });
     attachGitWatcherListener().then((u) => { if (disposed) u(); else offGit = u; });
+    // Corrupt session history was quarantined so saving could resume — the
+    // one situation that must never pass silently again (#72).
+    let offQuarantine: (() => void) | null = null;
+    void listen<{ path: string }>("sessions://quarantined", (e) => {
+      useToastStore
+        .getState()
+        .show(
+          `Session history file was corrupt; it was set aside at ${e.payload.path} and saving has resumed.`,
+          "error",
+        );
+    }).then((u) => { if (disposed) u(); else offQuarantine = u; });
     attachVoiceListeners().then((u) => { if (disposed) u(); else offVoice = u; });
     attachSchedulerListeners().then((u) => { if (disposed) u(); else offScheduler = u; });
     const offVoiceApproval = attachVoiceApprovalWatcher();
-    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); offVoice?.(); offScheduler?.(); offVoiceApproval(); };
+    return () => { disposed = true; offSkills?.(); offApproval?.(); offGit?.(); offVoice?.(); offScheduler?.(); offVoiceApproval(); offQuarantine?.(); };
   }, []);
 
   useEffect(() => {

@@ -54,6 +54,14 @@ struct SessionsFile {
 /// trailing slash). POSIX paths are case-sensitive, so there we only trim a
 /// trailing slash and never touch case.
 fn normalize_key(raw: &str) -> String {
+    // Windows verbatim/UNC-drive prefix (\\?\C:\...): pickers and recents can
+    // disagree on it for the SAME folder, and with the prefix present the
+    // drive-letter check below never fires — the two spellings then never
+    // match, not even normalized. Strip it first.
+    let raw = raw
+        .strip_prefix(r"\\?\")
+        .or_else(|| raw.strip_prefix("//?/"))
+        .unwrap_or(raw);
     let bytes = raw.as_bytes();
     let is_windows_path = bytes.len() >= 3
         && bytes[0].is_ascii_alphabetic()
@@ -177,10 +185,48 @@ impl SessionsService {
     }
 
     pub fn list(&self, project_root: &str) -> AppResult<Vec<PersistedSession>> {
+        self.list_recovering(project_root).map(|(v, _)| v)
+    }
+
+    /// list(), plus self-healing for the failure mode behind issue #72 round
+    /// two: when BOTH sessions.json and its .bak are unparseable, load fails →
+    /// the frontend's ready-gate blocks every persist — silently and forever
+    /// (no toast fired because sessionsSave was never even called; the user
+    /// worked all day, closed, and lost everything, reproducibly). Instead of
+    /// holding all future persistence hostage to an old corrupt file:
+    /// quarantine it (renamed, kept for recovery — evidence is never deleted)
+    /// and start fresh so saving resumes. Returns the quarantine path so the
+    /// UI can tell the user out loud.
+    pub fn list_recovering(
+        &self,
+        project_root: &str,
+    ) -> AppResult<(Vec<PersistedSession>, Option<String>)> {
         let _g = self.lock.lock();
-        let file = Self::load_file()?;
+        match Self::load_file() {
+            Ok(file) => Ok((Self::pick(&file, project_root), None)),
+            Err(_) => {
+                let path = Self::path()?;
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let quarantine = path.with_extension(format!("json.corrupt-{ts}"));
+                // If even the rename fails, keep the old behavior (error out,
+                // never overwrite) — but a successful quarantine unblocks
+                // persistence for good.
+                fs::rename(&path, &quarantine)?;
+                eprintln!(
+                    "sessions: corrupt history quarantined to {} — starting fresh",
+                    quarantine.display()
+                );
+                Ok((Vec::new(), Some(quarantine.display().to_string())))
+            }
+        }
+    }
+
+    fn pick(file: &SessionsFile, project_root: &str) -> Vec<PersistedSession> {
         if let Some(v) = file.by_project.get(project_root) {
-            return Ok(v.clone());
+            return v.clone();
         }
         // No exact match: the path may be stored under an equivalent but
         // differently-spelled key (Windows drive-letter case / slash direction
@@ -190,10 +236,10 @@ impl SessionsService {
         let target = normalize_key(project_root);
         for (k, v) in &file.by_project {
             if normalize_key(k) == target {
-                return Ok(v.clone());
+                return v.clone();
             }
         }
-        Ok(Vec::new())
+        Vec::new()
     }
 
     pub fn save(&self, project_root: &str, mut sessions: Vec<PersistedSession>) -> AppResult<()> {
@@ -332,18 +378,26 @@ mod tests {
             "corrupt main must recover from backup, not return empty"
         );
 
-        // 5. CRITICAL: corrupt main AND no usable backup → ERROR (not empty), and
-        //    save must ABORT rather than clobber unreadable history.
+        // 5. CRITICAL (contract revised for #72 round two): corrupt main AND
+        //    no usable backup used to ERROR forever — which silently disabled
+        //    ALL future persistence (the frontend ready-gate blocked every
+        //    save, no signal, total loss on close). New contract: quarantine
+        //    the corrupt file (bytes preserved for recovery), report it, and
+        //    start fresh so saving RESUMES.
         std::fs::write(&path, "garbage").unwrap();
         std::fs::write(&bak, "also garbage").unwrap();
-        assert!(
-            svc.list(proj).is_err(),
-            "unreadable history must error, never look empty"
+        let (sessions, quarantined) = svc.list_recovering(proj).unwrap();
+        assert!(sessions.is_empty(), "fresh start after quarantine");
+        let qpath = quarantined.expect("corrupt history must be quarantined, not fatal");
+        assert_eq!(
+            std::fs::read_to_string(&qpath).unwrap(),
+            "garbage",
+            "quarantine preserves the corrupt bytes for recovery"
         );
-        assert!(
-            svc.save(proj, vec![sample("x")]).is_err(),
-            "save must not overwrite history it could not read"
-        );
+        assert!(!path.exists(), "corrupt file moved aside");
+        // …and persistence works again immediately.
+        svc.save(proj, vec![sample("post-recovery")]).unwrap();
+        assert_eq!(svc.list(proj).unwrap().len(), 1, "saving resumed");
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -363,6 +417,12 @@ mod tests {
         // A bare drive root stays a drive root.
         assert_eq!(normalize_key("C:\\"), "c:/");
         assert_eq!(normalize_key("c:/"), "c:/");
+
+        // Windows verbatim prefix (\\?\C:\…) collapses to the same key as the
+        // plain spelling — pickers and recents can disagree on it for the
+        // same folder, which made history look erased.
+        assert_eq!(normalize_key(r"\\?\C:\Users\Foo\Proj"), canon);
+        assert_eq!(normalize_key("//?/c:/users/foo/proj/"), canon);
 
         // POSIX: trailing slash trimmed, but case is preserved (case-sensitive FS).
         assert_eq!(normalize_key("/proj/a/"), "/proj/a");

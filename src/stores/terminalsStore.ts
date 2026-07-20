@@ -121,7 +121,16 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       // Read failed (corrupt/unreadable file). Do NOT touch the saved history:
       // leave ready=false so persist() is blocked and the app won't auto-spawn
       // a session that would otherwise overwrite the file on the next save.
+      // This state disables ALL saving — it must never be silent again: the
+      // user works normally, closes, and loses everything with no signal
+      // (issue #72, round two).
       console.error("[sessions] hydrate failed; not overwriting saved history:", e);
+      useToastStore
+        .getState()
+        .show(
+          `Session history couldn't be read — new sessions are NOT being saved. ${String(e).slice(0, 100)}`,
+          "error",
+        );
       set({ projectRoot, sessions: [], activeId: null, ready: false });
       return;
     }
