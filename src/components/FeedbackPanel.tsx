@@ -26,24 +26,24 @@ export function FeedbackPanel() {
         <h3>Feedback</h3>
         <p className="feedback-help">
           Crea un issue en <code>cyl-castillo/agent-console</code> con el contexto adjunto.
-          Sólo visible para el equipo de desarrollo (<code>AGENT_CONSOLE_DEV=1</code>).
+          Only visible to the dev team (<code>AGENT_CONSOLE_DEV=1</code>).
         </p>
       </div>
 
       <label className="feedback-label">
-        Título
+        Title
         <input
           className="feedback-input"
           value={title}
           onChange={(e) => setField({ title: e.target.value })}
-          placeholder="Resumen corto (1 línea)"
+          placeholder="Short summary (one line)"
           disabled={disabled}
         />
       </label>
 
       <div className="feedback-row">
         <label className="feedback-label">
-          Categoría
+          Category
           <select
             className="feedback-input"
             value={category}
@@ -72,12 +72,12 @@ export function FeedbackPanel() {
       </div>
 
       <label className="feedback-label">
-        Descripción
+        Description
         <textarea
           className="feedback-input feedback-textarea"
           value={description}
           onChange={(e) => setField({ description: e.target.value })}
-          placeholder="Qué pasa, qué esperabas, pasos para reproducir si es bug…"
+          placeholder="What happens, what you expected, repro steps if it's a bug…"
           rows={8}
           disabled={disabled}
         />
@@ -85,7 +85,7 @@ export function FeedbackPanel() {
 
       {ctx && (
         <div className="feedback-context">
-          <div className="feedback-context-title">Se adjuntará:</div>
+          <div className="feedback-context-title">Will be attached:</div>
           <ul>
             <li>App: <code>v{ctx.appVersion}</code></li>
             <li>OS: <code>{ctx.os}</code></li>

@@ -48,18 +48,36 @@ Principles:
 - **Human control mandatory** before risky actions.
 - **Local-first, fast, developer-centric.** No accounts, no cloud sync, no marketplace.
 
-## What's in v0.1
+## The core
 
-- Open any local repository (folder picker, recents list).
-- Built-in PTY terminal that runs `npm test`, `vim`, `git status`, anything.
-- Git diff viewer with badges (M/A/D/U), per-file revert, revert-all.
-- Chat panel powered by `claude -p` running inside the repo with full tool access.
-- **Per-tool approval modal** for `Bash`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit` via a PreToolUse hook. Safe reads (`Read`, `Grep`, `Glob`, `LS`, `WebFetch`, `WebSearch`) pass through.
-- **Per-turn snapshot** of the working tree (captures tracked + untracked), with one-click restore from the user message bubble.
-- **Auto-switch** to Changes tab the first time the agent mutates files in a turn.
-- Markdown rendering for assistant text (headings, lists, code blocks, inline code).
-- Keyboard shortcuts (terminal-first navigation).
-- Persisted "recent projects" list across launches.
+The center of the screen is deliberately small, and it hasn't grown since v0.1:
+
+- Open any local repository; a built-in PTY terminal that auto-runs your agent
+  (Claude Code or Codex, per session) and also runs `npm test`, `vim`, anything.
+- Git diff viewer with per-file revert; per-turn working-tree snapshots with
+  one-click restore.
+- **Per-tool approval modal** with keyboard flow, live countdown, and durable
+  audit trail — the human decides before anything risky runs.
+- Multiple sessions per project (isolated worktrees optional), resumable across
+  restarts, with the agent conversation rebound automatically.
+
+## The workbench (the control plane)
+
+Around that core sits a side panel of workbench tabs — all local, all
+suggest-only, none of them able to block the core:
+
+- **Tasks + Agenda** — your Jira queue as one-click seeded agent sessions.
+- **Proof** — every session witnessed into a hash-chained evidence ledger
+  ([Testigo](https://github.com/cyl-castillo/testigo)); export signed proof
+  packets anyone verifies in a browser.
+- **Skills, Advisor, Learning** — the agent's playbook: generated from your
+  project, curated from your actual usage.
+- **Room** — you plus N agents (mixed engines) on one problem; working rooms
+  edit on an isolated branch you review and merge (see below).
+- **Schedule** — agentic jobs on a clock, physically restricted to plan mode.
+- **Permissions, Vault, Plugins, MCP** — trust and extension management.
+- Notes, Context (CLAUDE.md & memories), Transfer (export/import), and voice
+  input (push-to-talk + spoken approvals).
 
 ## Rooms & cowork
 
@@ -213,20 +231,16 @@ For non-git repos, only layer 1 applies — there is no snapshot to make.
 
 ## Roadmap
 
+Shipped from earlier roadmaps: per-tool decision history (the Proof ledger),
+multi-terminal sessions, worktree management, multi-agent rooms, MCP
+configuration UI, Jira integration, auto-update.
+
 Near term:
 
-- Per-tool decision history ("show me everything claude has done this session")
-- Multi-terminal tabs
-- Markdown click-to-insert from chat (`open the file referenced in this block`)
+- Workbench consolidation (fewer, denser tabs)
 - File viewer pane when clicking a file in the tree
 - Watchdog on agent CPU/cost runaway
-
-Maybe:
-
-- Multi-agent panes (sub-agents in parallel)
-- Worktree management — branch off + agent per worktree
-- MCP server configuration UI
-- GitHub issue/PR integration
+- Testigo protocol v0.2 items (see [TESTIGO.md](./TESTIGO.md))
 
 Not on the list:
 
@@ -236,7 +250,12 @@ Not on the list:
 
 ## Status
 
-**Early preview · v0.1.** Single user, local only, no telemetry, no auto-update. Suitable for daily personal use and demos. Not packaged for distribution channels (Snap/Flatpak/Homebrew/MS Store) yet. APIs and event names may still change between minor releases.
+**Early preview**, releasing continuously (see
+[releases](https://github.com/cyl-castillo/agent-console/releases)) with
+auto-update on all three platforms (on Linux, the AppImage self-updates;
+deb/rpm get a download prompt). Single user, local only, no telemetry. Not in
+distribution channels (Snap/Flatpak/Homebrew/MS Store) yet. APIs and event
+names may still change between minor releases.
 
 ## Support
 

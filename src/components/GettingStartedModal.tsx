@@ -6,12 +6,16 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { useAdvisorStore } from "../stores/advisorStore";
 import { useSkillsStore } from "../stores/skillsStore";
+import { useSchedulerStore } from "../stores/schedulerStore";
 import { usePreflightStore, toolStatus } from "../stores/preflightStore";
+import type { WorkbenchTab } from "../lib/workbenchTabs";
 
 interface Props {
   onClose: () => void;
   /// Called when a checklist item asks the user to switch to a workbench tab.
-  onJumpToTab: (tab: "skills" | "permissions" | "advisor") => void;
+  /// Any tab: the guide's second section points at the app's differentiators
+  /// (Proof, Rooms, Schedule) — the old narrow type couldn't reach them.
+  onJumpToTab: (tab: WorkbenchTab) => void;
 }
 
 interface Step {
@@ -28,6 +32,7 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
   const advisorItems = useAdvisorStore((s) => s.items);
   const installedSkills = useSkillsStore((s) => s.installed);
   const recentPromptsCount = useSkillsStore((s) => s.recent.length);
+  const scheduledJobs = useSchedulerStore((s) => s.jobs.length);
   const preflight = usePreflightStore((s) => s.result);
   const checkPreflight = usePreflightStore((s) => s.check);
 
@@ -41,91 +46,141 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
   const requirementsReady =
     !!toolStatus(preflight, "claude")?.found && !!toolStatus(preflight, "node")?.found;
 
-  const steps: Step[] = useMemo(() => [
-    {
-      key: "requirements",
-      title: "Instalá los requisitos",
-      description: "Necesitás el CLI de Claude (`npm i -g @anthropic-ai/claude-code`, después `claude` una vez para loguearte) y Node ≥ 20.",
-      done: requirementsReady,
-    },
-    {
-      key: "open-project",
-      title: "Abrí un proyecto",
-      description: "Cada terminal arranca con el cwd del proyecto activo.",
-      done: !!project,
-    },
-    {
-      key: "talk-to-claude",
-      title: "Charlá con Claude en la terminal",
-      description: "Cada terminal nueva auto-ejecuta `claude`. Escribí una pregunta y dale enter.",
-      done: onboarding.promptedClaude || recentPromptsCount > 0,
-    },
-    {
-      key: "advisor",
-      title: "Generá skills con el Advisor",
-      description: "El Advisor analiza tu proyecto y sugiere skills concretas. Click para abrir.",
-      done: onboarding.triggeredAdvisor || advisorItems.length > 0,
-      action: { label: "Abrir Advisor →", onClick: () => { onJumpToTab("advisor"); onClose(); } },
-    },
-    {
-      key: "create-skill",
-      title: "Creá tu primera skill",
-      description: "Desde la lista del Advisor, revisá una recomendación y dale Create.",
-      done: onboarding.createdSkill || installedSkills.length > 0,
-      action: { label: "Ver skills →", onClick: () => { onJumpToTab("skills"); onClose(); } },
-    },
-    {
-      key: "permissions",
-      title: "Revisá tus permisos",
-      description: "Mirá qué herramientas Claude puede usar sin pedirte y ajustá según necesites.",
-      done: onboarding.visitedPermissions,
-      action: { label: "Abrir Permissions →", onClick: () => { onJumpToTab("permissions"); onClose(); } },
-    },
-  ], [project, onboarding, advisorItems.length, installedSkills.length, recentPromptsCount, requirementsReady, onJumpToTab, onClose]);
+  const jump = (tab: WorkbenchTab) => () => {
+    onJumpToTab(tab);
+    onClose();
+  };
 
+  const firstSteps: Step[] = useMemo(
+    () => [
+      {
+        key: "requirements",
+        title: "Install the requirements",
+        description:
+          "You need the Claude CLI (`npm i -g @anthropic-ai/claude-code`, then run `claude` once to log in) and Node ≥ 20.",
+        done: requirementsReady,
+      },
+      {
+        key: "open-project",
+        title: "Open a project",
+        description: "Every terminal starts in the active project's directory.",
+        done: !!project,
+      },
+      {
+        key: "talk-to-claude",
+        title: "Talk to Claude in the terminal",
+        description: "New terminals auto-run `claude`. Type a question and hit enter.",
+        done: onboarding.promptedClaude || recentPromptsCount > 0,
+      },
+      {
+        key: "permissions",
+        title: "Review your permissions",
+        description: "See which tools Claude can use without asking, and tune to taste.",
+        done: onboarding.visitedPermissions,
+        action: { label: "Open Permissions →", onClick: jump("permissions") },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [project, onboarding, recentPromptsCount, requirementsReady],
+  );
+
+  const staySteps: Step[] = useMemo(
+    () => [
+      {
+        key: "proof",
+        title: "See your work witnessed (Proof)",
+        description:
+          "Every prompt, approval and result lands in a local evidence ledger. Export a signed proof packet anyone can verify in a browser — attach it to a PR.",
+        done: onboarding.visitedProof,
+        action: {
+          label: "Open Proof →",
+          onClick: () => {
+            onboarding.markVisitedProof();
+            onJumpToTab("proof");
+            onClose();
+          },
+        },
+      },
+      {
+        key: "advisor",
+        title: "Generate skills with the Advisor",
+        description: "The Advisor analyzes your project and proposes concrete skills.",
+        done: onboarding.triggeredAdvisor || advisorItems.length > 0,
+        action: { label: "Open Advisor →", onClick: jump("advisor") },
+      },
+      {
+        key: "create-skill",
+        title: "Create your first skill",
+        description: "From the Advisor's list, review a recommendation and hit Create.",
+        done: onboarding.createdSkill || installedSkills.length > 0,
+        action: { label: "See skills →", onClick: jump("skills") },
+      },
+      {
+        key: "schedule",
+        title: "Put an agent on a schedule",
+        description:
+          "Suggest-only jobs on a clock — a nightly review, a weekly dependency check. Nothing mutates without you.",
+        done: scheduledJobs > 0,
+        action: { label: "Open Schedule →", onClick: jump("schedule") },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onboarding, advisorItems.length, installedSkills.length, scheduledJobs],
+  );
+
+  const steps = [...firstSteps, ...staySteps];
   const completed = steps.filter((s) => s.done).length;
+
+  const renderSteps = (list: Step[]) => (
+    <ul className="gs-steps">
+      {list.map((step) => (
+        <li key={step.key} className={`gs-step ${step.done ? "done" : ""}`}>
+          <span className="gs-check" aria-hidden>
+            {step.done ? "✓" : "○"}
+          </span>
+          <div className="gs-step-body">
+            <div className="gs-step-title">{step.title}</div>
+            <div className="gs-step-desc">{step.description}</div>
+          </div>
+          {step.action && !step.done && (
+            <button className="wb-cta wb-cta-sm" onClick={step.action.onClick}>
+              {step.action.label}
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <Modal onClose={onClose} className="getting-started-modal" ariaLabel="Getting Started">
-        <div className="gs-head">
-          <div>
-            <div className="gs-title">Getting Started</div>
-            <div className="gs-subtitle">
-              {completed} de {steps.length} completados
-            </div>
+      <div className="gs-head">
+        <div>
+          <div className="gs-title">Getting Started</div>
+          <div className="gs-subtitle">
+            {completed} of {steps.length} done
           </div>
-          <button className="gs-close" onClick={onClose} title="Cerrar" aria-label="Cerrar">
-            <Icon name="x" size={14} />
-          </button>
         </div>
+        <button className="gs-close" onClick={onClose} title="Close" aria-label="Close">
+          <Icon name="x" size={14} />
+        </button>
+      </div>
 
-        <div className="gs-progress">
-          <div className="gs-progress-fill" style={{ width: `${(completed / steps.length) * 100}%` }} />
-        </div>
+      <div className="gs-progress">
+        <div className="gs-progress-fill" style={{ width: `${(completed / steps.length) * 100}%` }} />
+      </div>
 
-        <ul className="gs-steps">
-          {steps.map((step) => (
-            <li key={step.key} className={`gs-step ${step.done ? "done" : ""}`}>
-              <span className="gs-check" aria-hidden>{step.done ? "✓" : "○"}</span>
-              <div className="gs-step-body">
-                <div className="gs-step-title">{step.title}</div>
-                <div className="gs-step-desc">{step.description}</div>
-              </div>
-              {step.action && !step.done && (
-                <button className="wb-cta wb-cta-sm" onClick={step.action.onClick}>
-                  {step.action.label}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+      <div className="gs-section-label">The first ten minutes</div>
+      {renderSteps(firstSteps)}
+      <div className="gs-section-label">What makes it yours</div>
+      {renderSteps(staySteps)}
 
-        <div className="gs-foot">
-          <p className="gs-hint">
-            Esta guía vive en el icono <strong>?</strong> del topbar. Volvé cuando quieras.
-          </p>
-          <button onClick={onClose}>Cerrar</button>
-        </div>
+      <div className="gs-foot">
+        <p className="gs-hint">
+          This guide lives under the <strong>?</strong> icon in the topbar. Come back anytime.
+        </p>
+        <button onClick={onClose}>Close</button>
+      </div>
     </Modal>
   );
 }
