@@ -1,6 +1,5 @@
-use std::collections::hash_map::DefaultHasher;
 use std::fs::{self, OpenOptions};
-use std::hash::{Hash, Hasher};
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use parking_lot::Mutex;
@@ -64,28 +63,8 @@ impl ActivityService {
         Ok(dir)
     }
 
-    /// Stable per-project filename: a human-readable prefix (last path segment)
-    /// plus a hash of the full root, so two projects sharing a basename never
-    /// collide and the file is still recognizable on disk.
-    fn key_for(project_root: &str) -> String {
-        let mut h = DefaultHasher::new();
-        project_root.hash(&mut h);
-        let hash = h.finish();
-        let last = project_root
-            .trim_end_matches(['/', '\\'])
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("root");
-        let clean: String = last
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .take(24)
-            .collect();
-        format!("{clean}-{hash:016x}.jsonl")
-    }
-
     fn path(project_root: &str) -> AppResult<PathBuf> {
-        Ok(Self::dir()?.join(Self::key_for(project_root)))
+        Ok(Self::dir()?.join(crate::services::persistence::project_file_key(project_root)))
     }
 
     /// Append one event. Best-effort durability: a torn final line from a crash
@@ -110,20 +89,10 @@ impl ActivityService {
         Ok(())
     }
 
-    /// Rewrite the ledger keeping only the most recent KEEP_EVENTS, atomically
-    /// (temp file + rename) so a crash mid-trim can't truncate live history.
+    /// Rewrite the ledger keeping only the most recent KEEP_EVENTS (shared
+    /// atomic trim from the persistence module).
     fn trim(path: &Path) -> AppResult<()> {
-        let content = fs::read_to_string(path)?;
-        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
-        if lines.len() <= KEEP_EVENTS {
-            return Ok(());
-        }
-        let start = lines.len() - KEEP_EVENTS;
-        let kept = lines[start..].join("\n");
-        let tmp = path.with_extension("jsonl.tmp");
-        fs::write(&tmp, format!("{kept}\n"))?;
-        fs::rename(&tmp, path)?;
-        Ok(())
+        crate::services::persistence::trim_jsonl(path, KEEP_EVENTS)
     }
 
     /// Most recent events in chronological order (oldest first), capped at

@@ -23,10 +23,8 @@
 //! dependency). Daily/weekly `hour`/`minute` are therefore interpreted as UTC;
 //! the frontend converts to/from the user's local zone for display and editing.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -230,20 +228,8 @@ impl SchedulerService {
     /// Stable, human-recognizable per-project ledger filename (same scheme as
     /// the activity ledger): a cleaned basename plus a hash of the full root.
     fn history_path(project_root: &str) -> AppResult<PathBuf> {
-        let mut h = DefaultHasher::new();
-        project_root.hash(&mut h);
-        let hash = h.finish();
-        let last = project_root
-            .trim_end_matches(['/', '\\'])
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("root");
-        let clean: String = last
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .take(24)
-            .collect();
-        Ok(Self::history_dir()?.join(format!("{clean}-{hash:016x}.jsonl")))
+        Ok(Self::history_dir()?
+            .join(crate::services::persistence::project_file_key(project_root)))
     }
 
     // ---- jobs file (crash-safe, mirrors sessions_service) ----------------
@@ -420,16 +406,7 @@ impl SchedulerService {
     }
 
     fn trim_history(path: &Path) -> AppResult<()> {
-        let content = fs::read_to_string(path)?;
-        let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
-        if lines.len() <= HISTORY_KEEP {
-            return Ok(());
-        }
-        let kept = lines[lines.len() - HISTORY_KEEP..].join("\n");
-        let tmp = path.with_extension("jsonl.tmp");
-        fs::write(&tmp, format!("{kept}\n"))?;
-        fs::rename(&tmp, path)?;
-        Ok(())
+        crate::services::persistence::trim_jsonl(path, HISTORY_KEEP)
     }
 
     /// Run a job immediately by id (UI "run now"). Honors the cap-of-1 run lock.

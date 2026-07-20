@@ -11,6 +11,7 @@ pub mod learning_service;
 pub mod mcp_service;
 pub mod memory_service;
 pub mod palette_service;
+pub mod persistence;
 pub mod permissions_service;
 pub mod plugins_service;
 pub mod proc;
