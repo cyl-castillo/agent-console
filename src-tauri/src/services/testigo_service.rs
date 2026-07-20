@@ -1,7 +1,6 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::hash::{Hash, Hasher};
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use parking_lot::Mutex;
@@ -157,27 +156,9 @@ impl TestigoService {
         Ok(dir)
     }
 
-    /// Same stable per-project key scheme as the activity ledger.
-    fn key_for(project_root: &str) -> String {
-        let mut h = DefaultHasher::new();
-        project_root.hash(&mut h);
-        let hash = h.finish();
-        let last = project_root
-            .trim_end_matches(['/', '\\'])
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("root");
-        let clean: String = last
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .take(24)
-            .collect();
-        format!("{clean}-{hash:016x}.jsonl")
-    }
-
     /// pub(crate): the export module reads raw ledger lines byte-exactly.
     pub(crate) fn ledger_path(project_root: &str) -> AppResult<PathBuf> {
-        Ok(Self::dir()?.join(Self::key_for(project_root)))
+        Ok(Self::dir()?.join(crate::services::persistence::project_file_key(project_root)))
     }
 
     fn settings_path() -> AppResult<PathBuf> {
