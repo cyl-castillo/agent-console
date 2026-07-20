@@ -4778,7 +4778,67 @@ select:focus-visible,
   color: var(--accent);
 }
 
-/* Grouped strip sections — so the 11 tabs read as 3 clusters, not a flat wall. */
+/* Sub-switcher for merged strip groups (Tasks, Coach, Trust, Add-ons). */
+.wb-subtabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 10px 0;
+  border-bottom: 1px solid var(--border, #2a2f37);
+  flex-shrink: 0;
+}
+.wb-subtab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim, #8a93a0);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px 6px;
+  cursor: pointer;
+  border-radius: 0;
+}
+.wb-subtab:hover { color: var(--text); }
+.wb-subtab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.wb-subtab-count {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--text, #e7eaee);
+  border-radius: 8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.wb-subtab.active .wb-subtab-count {
+  background: var(--accent-soft, rgba(96,165,250,0.25));
+  color: var(--accent);
+}
+.wb-subtab-flag {
+  background: var(--warn);
+  color: #1c1f24;
+  border-radius: 8px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* Grouped strip sections — the 9 group buttons read as 3 clusters, not a flat wall. */
 .wb-strip-group { display: flex; flex-direction: column; gap: 2px; }
 .wb-strip-group + .wb-strip-group { margin-top: 6px; }
 .wb-strip-group-label {
