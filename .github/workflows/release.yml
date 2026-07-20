@@ -107,16 +107,109 @@ jobs:
           # compile ggml-backend-reg.cpp. Harmless on Linux/Windows.
           MACOSX_DEPLOYMENT_TARGET: '10.15'
         with:
-          # Upload into the pre-created draft. tauri-action merges each platform
-          # into the release's existing latest.json, so the updater feed ends up
-          # complete regardless of job finish order.
+          # Upload into the pre-created draft. The updater feed (latest.json) is
+          # deliberately NOT touched here: each job merging its platforms into
+          # the release's latest.json was a read-modify-write race that 404'd
+          # the mac job on v0.52.0 and could publish half-complete feeds. The
+          # assemble-updater-json job below builds it once, from the uploaded
+          # assets, after every build finished.
+          includeUpdaterJson: false
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
 
-  # Stage 3: every platform uploaded — flip the draft to published so the release
-  # (and its updater feed) go live all at once, complete.
-  publish-release:
+  # Stage 3: single writer for the updater feed. Assembles latest.json from the
+  # uploaded assets (+ their .sig companions) once all platform builds are done
+  # — no concurrent merges, and the feed is complete by construction or this
+  # job fails loudly (publish then stays skipped and the release stays draft).
+  assemble-updater-json:
     needs: [create-release, build-tauri]
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Assemble and upload latest.json
+        uses: actions/github-script@v7
+        env:
+          release_id: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const release_id = Number(process.env.release_id);
+            const version = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner, repo, release_id, per_page: 100,
+            });
+            const byName = new Map(assets.map((a) => [a.name, a]));
+
+            const find = (re) => {
+              const hit = assets.find((a) => re.test(a.name));
+              if (!hit) throw new Error(`missing release asset matching ${re}`);
+              return hit.name;
+            };
+            // Draft-release assets aren't downloadable via browser URL; fetch
+            // the .sig content through the API with an octet-stream accept.
+            const sigOf = async (name) => {
+              const a = byName.get(`${name}.sig`);
+              if (!a) throw new Error(`missing signature asset: ${name}.sig`);
+              const res = await github.request(
+                "GET /repos/{owner}/{repo}/releases/assets/{asset_id}",
+                { owner, repo, asset_id: a.id, headers: { accept: "application/octet-stream" } },
+              );
+              return Buffer.from(res.data).toString("utf8");
+            };
+            const entry = async (name) => ({
+              signature: await sigOf(name),
+              url: `https://github.com/${owner}/${repo}/releases/latest/download/${name}`,
+            });
+
+            const macX64 = await entry(find(/_x64\.app\.tar\.gz$/));
+            const macArm = await entry(find(/_aarch64\.app\.tar\.gz$/));
+            const appimage = await entry(find(/\.AppImage$/));
+            const deb = await entry(find(/\.deb$/));
+            const rpm = await entry(find(/\.rpm$/));
+            const msi = await entry(find(/\.msi$/));
+            const nsis = await entry(find(/-setup\.exe$/));
+
+            // Exactly the key set tauri-action used to produce (v0.58.0 feed),
+            // so existing installs keep resolving their platform + alias keys.
+            const platforms = {
+              "darwin-x86_64": macX64,
+              "darwin-x86_64-app": macX64,
+              "darwin-aarch64": macArm,
+              "darwin-aarch64-app": macArm,
+              "linux-x86_64": appimage,
+              "linux-x86_64-appimage": appimage,
+              "linux-x86_64-deb": deb,
+              "linux-x86_64-rpm": rpm,
+              "windows-x86_64": msi,
+              "windows-x86_64-msi": msi,
+              "windows-x86_64-nsis": nsis,
+            };
+            const latest = {
+              version,
+              notes: "",
+              pub_date: new Date().toISOString(),
+              platforms,
+            };
+
+            // Idempotent re-runs: replace any existing latest.json.
+            const existing = byName.get("latest.json");
+            if (existing) {
+              await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+            }
+            await github.rest.repos.uploadReleaseAsset({
+              owner, repo, release_id,
+              name: "latest.json",
+              data: JSON.stringify(latest, null, 2),
+              headers: { "content-type": "application/json" },
+            });
+            core.info(`latest.json uploaded: version ${version}, ${Object.keys(platforms).length} platforms`);
+
+  # Stage 4: every platform uploaded and the updater feed assembled — flip the
+  # draft to published so the release goes live all at once, complete.
+  publish-release:
+    needs: [create-release, build-tauri, assemble-updater-json]
     permissions:
       contents: write
     runs-on: ubuntu-22.04
