@@ -14,3 +14,27 @@ export type WorkbenchTab = (typeof WORKBENCH_TABS)[number];
 export function isWorkbenchTab(v: unknown): v is WorkbenchTab {
   return typeof v === "string" && (WORKBENCH_TABS as readonly string[]).includes(v);
 }
+
+/// Strip consolidation: the strip shows one button per GROUP; merged groups
+/// open with an inner sub-switcher. Tab ids above remain the routing currency
+/// (palette events, persisted active tab, onboarding deep links) — a group is
+/// only how the strip presents them. "transfer" and "feedback" belong to no
+/// group on purpose: they're occasional actions, reachable from the command
+/// palette, not workspaces that earn a permanent button.
+export const WORKBENCH_GROUPS = [
+  { key: "tasks", tabs: ["jira", "agenda"] },
+  { key: "notes", tabs: ["notes"] },
+  { key: "proof", tabs: ["proof"] },
+  { key: "context", tabs: ["context"] },
+  { key: "coach", tabs: ["skills", "advisor", "learning"] },
+  { key: "room", tabs: ["roundtable"] },
+  { key: "schedule", tabs: ["schedule"] },
+  { key: "trust", tabs: ["permissions", "vault"] },
+  { key: "addons", tabs: ["plugins", "mcp"] },
+] as const;
+
+export type WorkbenchGroupKey = (typeof WORKBENCH_GROUPS)[number]["key"];
+
+export function groupForTab(tab: WorkbenchTab) {
+  return WORKBENCH_GROUPS.find((g) => (g.tabs as readonly string[]).includes(tab));
+}

@@ -37,7 +37,7 @@ import { Composer } from "./components/Composer";
 import { McpPanel } from "./components/McpPanel";
 import { ExportImportPanel } from "./components/ExportImportPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
-import { WorkbenchTabs } from "./components/WorkbenchTabs";
+import { WorkbenchTabs, WorkbenchSubTabs } from "./components/WorkbenchTabs";
 import { isWorkbenchTab, type WorkbenchTab } from "./lib/workbenchTabs";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
@@ -568,6 +568,7 @@ export default function App() {
             <div className="workbench-layout">
               <WorkbenchTabs active={workbenchTab} onChange={setWorkbenchTab} />
               <div className="workbench-content">
+                <WorkbenchSubTabs active={workbenchTab} onChange={setWorkbenchTab} />
                 {workbenchTab === "skills" && <SkillsPanel />}
                 {workbenchTab === "permissions" && <PermissionsPanel />}
                 {workbenchTab === "advisor" && <AdvisorPanel />}

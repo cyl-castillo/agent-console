@@ -63,21 +63,23 @@ The center of the screen is deliberately small, and it hasn't grown since v0.1:
 
 ## The workbench (the control plane)
 
-Around that core sits a side panel of workbench tabs — all local, all
+Around that core sits a side panel of nine workbench tabs — all local, all
 suggest-only, none of them able to block the core:
 
-- **Tasks + Agenda** — your Jira queue as one-click seeded agent sessions.
+- **Tasks** — your Jira queue as one-click seeded agent sessions, plus an
+  agenda of due dates and scheduled runs.
 - **Proof** — every session witnessed into a hash-chained evidence ledger
   ([Testigo](https://github.com/cyl-castillo/testigo)); export signed proof
   packets anyone verifies in a browser.
-- **Skills, Advisor, Learning** — the agent's playbook: generated from your
-  project, curated from your actual usage.
+- **Coach** — the agent's playbook: skills generated from your project
+  (Advisor), curated from your actual usage (Learning).
 - **Room** — you plus N agents (mixed engines) on one problem; working rooms
   edit on an isolated branch you review and merge (see below).
 - **Schedule** — agentic jobs on a clock, physically restricted to plan mode.
-- **Permissions, Vault, Plugins, MCP** — trust and extension management.
-- Notes, Context (CLAUDE.md & memories), Transfer (export/import), and voice
-  input (push-to-talk + spoken approvals).
+- **Trust** — permissions + secrets vault: what the agent can touch.
+- **Add-ons** — plugins + MCP servers.
+- **Notes** and **Context** (CLAUDE.md & memories); export/import and voice
+  input (push-to-talk + spoken approvals) live in the command palette.
 
 ## Rooms & cowork
 
@@ -233,11 +235,11 @@ For non-git repos, only layer 1 applies — there is no snapshot to make.
 
 Shipped from earlier roadmaps: per-tool decision history (the Proof ledger),
 multi-terminal sessions, worktree management, multi-agent rooms, MCP
-configuration UI, Jira integration, auto-update.
+configuration UI, Jira integration, auto-update, workbench consolidation
+(16 tabs → 9 groups).
 
 Near term:
 
-- Workbench consolidation (fewer, denser tabs)
 - File viewer pane when clicking a file in the tree
 - Watchdog on agent CPU/cost runaway
 - Testigo protocol v0.2 items (see [TESTIGO.md](./TESTIGO.md))
