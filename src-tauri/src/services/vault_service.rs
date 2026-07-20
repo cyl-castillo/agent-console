@@ -329,3 +329,231 @@ fn regenerate_vault_md(
     fs::write(&path, md)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fresh project root per test. Keys use an AC_TEST_ prefix so the
+    /// best-effort keyring cleanup in upsert/delete can never collide with a
+    /// real credential on a developer machine.
+    fn temp_root(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ac-vault-{tag}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn project_entries(root: &Path) -> Vec<VaultEntryView> {
+        list(Some(root))
+            .unwrap()
+            .into_iter()
+            .filter(|v| v.scope == Scope::Project)
+            .collect()
+    }
+
+    #[test]
+    fn key_validation_rejects_bad_names() {
+        for bad in ["", "1KEY", "has-dash", "has space", "KÉ", "a.b"] {
+            assert!(validate_key(bad).is_err(), "{bad:?} should be rejected");
+        }
+        for good in ["_PRIVATE", "DB_URL", "a1"] {
+            assert!(validate_key(good).is_ok(), "{good:?} should be accepted");
+        }
+    }
+
+    #[test]
+    fn plain_entry_roundtrip_and_vault_md_never_leaks_values() {
+        let root = temp_root("plain");
+        upsert(
+            Some(&root),
+            Scope::Project,
+            "AC_TEST_DB_URL".into(),
+            "Staging database".into(),
+            false,
+            Some("postgres://leak-canary".into()),
+        )
+        .unwrap();
+
+        let mine = project_entries(&root);
+        assert_eq!(mine.len(), 1);
+        assert!(mine[0].has_value);
+        assert!(!mine[0].secret);
+        assert_eq!(
+            get_value(Some(&root), Scope::Project, "AC_TEST_DB_URL").unwrap(),
+            "postgres://leak-canary"
+        );
+
+        // The agent-facing index lists keys and descriptions — never values.
+        let md = fs::read_to_string(root.join(".claude").join(VAULT_MD)).unwrap();
+        assert!(md.contains("$AC_TEST_DB_URL"));
+        assert!(md.contains("Staging database"));
+        assert!(!md.contains("leak-canary"), "VAULT.md leaked a value:\n{md}");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn update_preserves_created_at_and_keeps_old_value_when_none_given() {
+        let root = temp_root("update");
+        let first = upsert(
+            Some(&root),
+            Scope::Project,
+            "AC_TEST_KEY".into(),
+            "v1".into(),
+            false,
+            Some("original".into()),
+        )
+        .unwrap();
+        let second = upsert(
+            Some(&root),
+            Scope::Project,
+            "AC_TEST_KEY".into(),
+            "v2".into(),
+            false,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(second.created_at_ms, first.created_at_ms);
+        assert!(second.updated_at_ms >= first.updated_at_ms);
+        assert_eq!(second.description, "v2");
+        // Metadata-only update must not wipe the stored value.
+        assert_eq!(
+            get_value(Some(&root), Scope::Project, "AC_TEST_KEY").unwrap(),
+            "original"
+        );
+        assert_eq!(project_entries(&root).len(), 1, "update must not duplicate");
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn delete_removes_entry_and_is_idempotent() {
+        let root = temp_root("delete");
+        upsert(
+            Some(&root),
+            Scope::Project,
+            "AC_TEST_GONE".into(),
+            "bye".into(),
+            false,
+            Some("x".into()),
+        )
+        .unwrap();
+
+        delete(Some(&root), Scope::Project, "AC_TEST_GONE").unwrap();
+        assert!(project_entries(&root).is_empty());
+        let md = fs::read_to_string(root.join(".claude").join(VAULT_MD)).unwrap();
+        assert!(md.contains("no entries"));
+
+        // Deleting again (or a key that never existed) is a quiet no-op.
+        delete(Some(&root), Scope::Project, "AC_TEST_GONE").unwrap();
+        delete(Some(&root), Scope::Project, "AC_TEST_NEVER").unwrap();
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn get_value_unknown_key_is_not_found() {
+        let root = temp_root("notfound");
+        let err = get_value(Some(&root), Scope::Project, "AC_TEST_MISSING").unwrap_err();
+        assert!(matches!(err, AppError::NotFound(_)));
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn secret_create_without_value_is_rejected_before_anything_persists() {
+        let root = temp_root("secreterr");
+        let err = upsert(
+            Some(&root),
+            Scope::Project,
+            "AC_TEST_SECRET".into(),
+            "needs a value".into(),
+            true,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::InvalidArgument(_)));
+        assert!(project_entries(&root).is_empty());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn project_scope_without_project_is_rejected() {
+        let err = upsert(
+            None,
+            Scope::Project,
+            "AC_TEST_NOPROJ".into(),
+            String::new(),
+            false,
+            Some("x".into()),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::InvalidArgument(_)));
+    }
+
+    /// One test fn — it mutates the process-global HOME so the Global scope
+    /// lands in a temp dir instead of the developer's real ~/.claude.
+    #[test]
+    fn env_for_spawn_project_overrides_global() {
+        let _env = crate::test_support::lock_env();
+        let fake_home = temp_root("home");
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &fake_home);
+
+        let run = || -> AppResult<()> {
+            let root = temp_root("envspawn");
+            upsert(
+                None,
+                Scope::Global,
+                "AC_TEST_SHARED".into(),
+                String::new(),
+                false,
+                Some("from-global".into()),
+            )?;
+            upsert(
+                None,
+                Scope::Global,
+                "AC_TEST_GLOBAL_ONLY".into(),
+                String::new(),
+                false,
+                Some("global-only".into()),
+            )?;
+            upsert(
+                Some(&root),
+                Scope::Project,
+                "AC_TEST_SHARED".into(),
+                String::new(),
+                false,
+                Some("from-project".into()),
+            )?;
+
+            let env = env_for_spawn(Some(&root))?;
+            assert_eq!(
+                env.get("AC_TEST_SHARED").map(String::as_str),
+                Some("from-project"),
+                "project entry must win the key collision"
+            );
+            assert_eq!(
+                env.get("AC_TEST_GLOBAL_ONLY").map(String::as_str),
+                Some("global-only")
+            );
+            fs::remove_dir_all(&root).ok();
+            Ok(())
+        };
+        let result = run();
+
+        match prev_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+        fs::remove_dir_all(&fake_home).ok();
+        result.unwrap();
+    }
+}

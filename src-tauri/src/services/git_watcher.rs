@@ -122,7 +122,7 @@ impl GitWatcher {
                 }
             };
 
-            register_watches(debouncer.watcher(), &root);
+            let _ = register_watches(debouncer.watcher(), &root);
 
             // A newer watch request may have superseded us while we walked;
             // only install if we're still the latest generation.
@@ -163,8 +163,9 @@ impl GitWatcher {
 /// On macOS/Windows the backend (FSEvents / ReadDirectoryChangesW) handles
 /// recursion natively and efficiently with a single watch, so thousands of
 /// per-directory watches would be a regression — we keep one recursive watch.
+/// Returns the number of directories actually watched (for tests/telemetry).
 #[cfg(target_os = "linux")]
-fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) {
+fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) -> usize {
     let mut count = 0usize;
     let walker = WalkDir::new(root)
         .follow_links(false)
@@ -205,13 +206,16 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) {
             root.display()
         );
     }
+    count
 }
 
 #[cfg(not(target_os = "linux"))]
-fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) {
+fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) -> usize {
     if let Err(e) = watcher.watch(root, RecursiveMode::Recursive) {
         eprintln!("git_watcher: failed to watch {}: {e}", root.display());
+        return 0;
     }
+    1
 }
 
 /// Events we don't want to bubble up as "git changed":
@@ -246,5 +250,96 @@ fn ignored(path: &Path, root: &Path) -> bool {
             parts[0].as_str(),
             "node_modules" | "target" | "dist" | "build" | ".next" | ".venv" | ".idea" | ".vscode"
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ig(path: &str, root: &str) -> bool {
+        ignored(Path::new(path), Path::new(root))
+    }
+
+    #[test]
+    fn ignored_rejects_paths_outside_the_root_and_the_root_itself() {
+        assert!(ig("/elsewhere/file.rs", "/repo"));
+        assert!(ig("/repo", "/repo"));
+    }
+
+    #[test]
+    fn ignored_lets_working_tree_edits_through() {
+        assert!(!ig("/repo/src/main.rs", "/repo"));
+        assert!(!ig("/repo/README.md", "/repo"));
+    }
+
+    #[test]
+    fn ignored_filters_heavy_build_dirs() {
+        for p in [
+            "/repo/node_modules/x/y.js",
+            "/repo/target/debug/foo",
+            "/repo/dist/bundle.js",
+            "/repo/build/out",
+            "/repo/.next/cache",
+            "/repo/.venv/bin/python",
+            "/repo/.idea/workspace.xml",
+            "/repo/.vscode/settings.json",
+        ] {
+            assert!(ig(p, "/repo"), "{p} should be ignored");
+        }
+    }
+
+    #[test]
+    fn ignored_keeps_commit_and_checkout_signals_but_drops_git_churn() {
+        // A commit / checkout / merge must refresh the UI immediately…
+        for p in [
+            "/repo/.git/HEAD",
+            "/repo/.git/ORIG_HEAD",
+            "/repo/.git/index",
+            "/repo/.git/MERGE_HEAD",
+            "/repo/.git/FETCH_HEAD",
+        ] {
+            assert!(!ig(p, "/repo"), "{p} should pass through");
+        }
+        // …while gc / status internals must not cause event storms.
+        for p in [
+            "/repo/.git",
+            "/repo/.git/objects/ab/cdef",
+            "/repo/.git/refs/heads/main",
+            "/repo/.git/logs/HEAD",
+        ] {
+            assert!(ig(p, "/repo"), "{p} should be ignored");
+        }
+    }
+
+    /// Linux-only: the manual walk must skip churn dirs entirely (that's the
+    /// inotify-descriptor budget) while still watching real source dirs.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn register_watches_skips_churn_dirs() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "ac-gitwatch-{}-{nanos}",
+            std::process::id()
+        ));
+        for d in [
+            "src/sub",
+            "node_modules/pkg/lib",
+            "target/debug",
+            ".git/objects",
+        ] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+
+        let mut w = notify::recommended_watcher(|_res| {}).unwrap();
+        let count = register_watches(&mut w, &root);
+        // root + src + src/sub — node_modules/target skipped, .git excluded
+        // from the walk (it gets its own shallow watch, not counted).
+        assert_eq!(count, 3);
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

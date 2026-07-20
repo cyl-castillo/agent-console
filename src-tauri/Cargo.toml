@@ -42,3 +42,8 @@ whisper-rs = "0.16"
 tauri-plugin-clipboard-manager = "2.3.2"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-single-instance = "2.4.3"
+
+[dev-dependencies]
+# `test` unlocks tauri::test::{mock_builder, MockRuntime} for the terminal
+# lifecycle tests. Dev-only: release builds never enable it.
+tauri = { version = "2", features = ["test"] }
