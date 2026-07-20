@@ -15,7 +15,10 @@ pub fn sessions_list(
         // Corrupt history was set aside so persistence could resume — say so
         // loudly; this exact failure used to be silent and permanent (#72).
         use tauri::Emitter;
-        let _ = app.emit("sessions://quarantined", serde_json::json!({ "path": path }));
+        let _ = app.emit(
+            "sessions://quarantined",
+            serde_json::json!({ "path": path }),
+        );
     }
     Ok(sessions)
 }

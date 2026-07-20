@@ -226,11 +226,15 @@ fn validate_plugin_id(id: &str) -> AppResult<()> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '/'))
     {
-        return Err(AppError::InvalidArgument(format!("invalid plugin id: {id}")));
+        return Err(AppError::InvalidArgument(format!(
+            "invalid plugin id: {id}"
+        )));
     }
     // A leading '-' would be parsed by the CLI as a flag, not an id.
     if id.starts_with('-') {
-        return Err(AppError::InvalidArgument(format!("invalid plugin id: {id}")));
+        return Err(AppError::InvalidArgument(format!(
+            "invalid plugin id: {id}"
+        )));
     }
     Ok(())
 }
@@ -272,7 +276,11 @@ pub fn update_marketplaces() -> AppResult<String> {
 /// the documented "start standalone, convert to a plugin when it's worth
 /// sharing" path. Single-skill layout: a `.claude-plugin/plugin.json` manifest
 /// plus a starter `SKILL.md` at the plugin root.
-pub fn scaffold_plugin(name: &str, description: &str, skill_md: &str) -> AppResult<std::path::PathBuf> {
+pub fn scaffold_plugin(
+    name: &str,
+    description: &str,
+    skill_md: &str,
+) -> AppResult<std::path::PathBuf> {
     let base = dirs::home_dir()
         .ok_or_else(|| AppError::Other("no home dir".into()))?
         .join(".claude")
@@ -289,7 +297,9 @@ fn scaffold_plugin_at(
     // Plugin names become directory names AND skill namespaces: strict kebab-case.
     if name.is_empty()
         || name.starts_with('-')
-        || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     {
         return Err(AppError::InvalidArgument(format!(
             "plugin name must be kebab-case (got '{name}')"
@@ -361,8 +371,13 @@ mod tests {
             .as_nanos();
         let base = std::env::temp_dir().join(format!("ac-plugin-scaffold-{nanos}"));
 
-        let dir = scaffold_plugin_at(&base, "my-tool", "does things", "---\nname: my-tool\n---\n\nBody")
-            .expect("scaffold ok");
+        let dir = scaffold_plugin_at(
+            &base,
+            "my-tool",
+            "does things",
+            "---\nname: my-tool\n---\n\nBody",
+        )
+        .expect("scaffold ok");
         let manifest: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(dir.join(".claude-plugin/plugin.json")).unwrap(),
         )

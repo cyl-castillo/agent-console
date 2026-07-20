@@ -224,17 +224,24 @@ mod tests {
     fn archive_moves_and_hides_from_list() {
         let root = temp_root();
         write(&root, "stale", "---\nname: stale\n---\n\nbody").unwrap();
-        assert!(list(Some(&root))
-            .unwrap()
-            .iter()
-            .any(|s| s.name == "stale"));
+        assert!(list(Some(&root)).unwrap().iter().any(|s| s.name == "stale"));
 
         let dest = archive(&root, "stale").unwrap();
         assert!(dest.exists(), "archived copy exists");
-        assert!(!root.join(".claude/skills/stale").exists(), "original moved");
+        assert!(
+            !root.join(".claude/skills/stale").exists(),
+            "original moved"
+        );
         // Gone from the active corpus; `_archived` itself isn't listed as a skill.
-        let names: Vec<String> = list(Some(&root)).unwrap().into_iter().map(|s| s.name).collect();
-        assert!(!names.iter().any(|n| n == "stale" || n == "_archived"), "{names:?}");
+        let names: Vec<String> = list(Some(&root))
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(
+            !names.iter().any(|n| n == "stale" || n == "_archived"),
+            "{names:?}"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 

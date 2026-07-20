@@ -62,8 +62,8 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
     if !message.contains("Testigo-Case:") {
         let project = state.inner.lock().project.clone();
         // Trailers are repo marks: per-project opt-in, off by default.
-        let project = project
-            .filter(|p| state.testigo.repo_marks(p.root.to_string_lossy().as_ref()));
+        let project =
+            project.filter(|p| state.testigo.repo_marks(p.root.to_string_lossy().as_ref()));
         if let Some(p) = project {
             let staged = git_service::staged_files(&repo).unwrap_or_default();
             let now = std::time::SystemTime::now()
@@ -71,11 +71,12 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
             let root = p.root.to_string_lossy();
-            if let Ok(Some(case)) =
-                state
-                    .testigo
-                    .case_for_files(root.as_ref(), &staged, now, TESTIGO_TRAILER_MAX_AGE_MS)
-            {
+            if let Ok(Some(case)) = state.testigo.case_for_files(
+                root.as_ref(),
+                &staged,
+                now,
+                TESTIGO_TRAILER_MAX_AGE_MS,
+            ) {
                 message = format!("{}\n\nTestigo-Case: {case}", message.trim_end());
                 // V2-A: carry the ledger head into pushed history — the
                 // distributed half of the anchor (the local half lives in

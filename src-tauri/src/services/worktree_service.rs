@@ -136,7 +136,12 @@ pub fn current_branch(repo: &Path) -> AppResult<String> {
 }
 
 /// Create `<branch>` off `<base>` and check it out at `dest`.
-pub fn create(repo: &Path, dest: &Path, branch: &str, base: Option<&str>) -> AppResult<WorktreeInfo> {
+pub fn create(
+    repo: &Path,
+    dest: &Path,
+    branch: &str,
+    base: Option<&str>,
+) -> AppResult<WorktreeInfo> {
     let base_branch = match base {
         Some(b) if !b.trim().is_empty() => b.trim().to_string(),
         _ => current_branch(repo)?,
@@ -330,7 +335,11 @@ pub fn merge_back(
 
 /// Registered worktrees of the repo (excluding the main checkout itself).
 pub fn list(repo: &Path) -> AppResult<Vec<WorktreeEntry>> {
-    let out = git_ok(repo, &["worktree", "list", "--porcelain"], "git worktree list")?;
+    let out = git_ok(
+        repo,
+        &["worktree", "list", "--porcelain"],
+        "git worktree list",
+    )?;
     let raw = String::from_utf8_lossy(&out.stdout);
     let mut entries = Vec::new();
     let mut path: Option<String> = None;
@@ -359,7 +368,9 @@ pub fn list(repo: &Path) -> AppResult<Vec<WorktreeEntry>> {
 }
 
 fn assert_registered(repo: &Path, worktree: &Path) -> AppResult<()> {
-    let wt = worktree.canonicalize().unwrap_or_else(|_| worktree.to_path_buf());
+    let wt = worktree
+        .canonicalize()
+        .unwrap_or_else(|_| worktree.to_path_buf());
     let registered = list(repo)?.into_iter().any(|e| {
         let p = PathBuf::from(&e.path);
         p.canonicalize().unwrap_or(p) == wt
@@ -571,7 +582,10 @@ mod tests {
         // One committed edit → ahead 1, clean.
         fs::write(dest.join("a.txt"), "edited").unwrap();
         assert!(commit_all(&dest, "work").unwrap());
-        assert!(!commit_all(&dest, "noop").unwrap(), "clean tree → no commit");
+        assert!(
+            !commit_all(&dest, "noop").unwrap(),
+            "clean tree → no commit"
+        );
         let st = status(&repo, &dest, "agent/s1", "main").unwrap();
         assert_eq!((st.ahead, st.behind), (1, 0));
 
@@ -594,12 +608,19 @@ mod tests {
         let outcome = merge_back(&repo, &dest, "agent/s2", "main", "Merge session s2").unwrap();
         assert!(outcome.merged, "detail: {}", outcome.detail);
         assert!(outcome.merge_commit.is_some());
-        assert_eq!(fs::read_to_string(repo.join("feature.txt")).unwrap(), "done");
+        assert_eq!(
+            fs::read_to_string(repo.join("feature.txt")).unwrap(),
+            "done"
+        );
 
         discard(&repo, &dest, "agent/s2", true).unwrap();
         assert!(!dest.exists(), "checkout dir removed");
         let br = run(&["branch", "--list", "agent/s2"], &repo);
-        assert_eq!(String::from_utf8_lossy(&br.stdout).trim(), "", "branch deleted");
+        assert_eq!(
+            String::from_utf8_lossy(&br.stdout).trim(),
+            "",
+            "branch deleted"
+        );
 
         cleanup(&[&repo]);
     }
@@ -621,10 +642,17 @@ mod tests {
         assert_eq!(outcome.conflict_files, vec!["a.txt".to_string()]);
 
         // Aborted: no in-progress merge, tree back to the main-side content.
-        assert!(!repo.join(".git/MERGE_HEAD").exists(), "merge fully aborted");
+        assert!(
+            !repo.join(".git/MERGE_HEAD").exists(),
+            "merge fully aborted"
+        );
         assert_eq!(fs::read_to_string(repo.join("a.txt")).unwrap(), "from-main");
         let st = run(&["status", "--porcelain"], &repo);
-        assert_eq!(String::from_utf8_lossy(&st.stdout).trim(), "", "main checkout clean");
+        assert_eq!(
+            String::from_utf8_lossy(&st.stdout).trim(),
+            "",
+            "main checkout clean"
+        );
 
         discard(&repo, &dest, "agent/s3", true).unwrap();
         cleanup(&[&repo]);
@@ -638,7 +666,10 @@ mod tests {
         run(&["checkout", "-qb", "other"], &repo);
 
         let err = merge_back(&repo, &dest, "agent/s4", "main", "m").unwrap_err();
-        assert!(err.to_string().contains("not the base branch"), "got: {err}");
+        assert!(
+            err.to_string().contains("not the base branch"),
+            "got: {err}"
+        );
 
         run(&["checkout", "-q", "main"], &repo);
         discard(&repo, &dest, "agent/s4", true).unwrap();
@@ -651,7 +682,10 @@ mod tests {
         let stranger = repo.parent().unwrap().join("ac-wt-stranger-dir");
         fs::create_dir_all(&stranger).unwrap();
         let err = discard(&repo, &stranger, "agent/x", false).unwrap_err();
-        assert!(err.to_string().contains("not a registered worktree"), "got: {err}");
+        assert!(
+            err.to_string().contains("not a registered worktree"),
+            "got: {err}"
+        );
         assert!(stranger.exists(), "stranger dir untouched");
         cleanup(&[&stranger, &repo]);
     }
@@ -718,7 +752,10 @@ mod tests {
 
     #[test]
     fn sanitize_branch_component_cases() {
-        assert_eq!(sanitize_branch_component("Fix login flow"), "Fix-login-flow");
+        assert_eq!(
+            sanitize_branch_component("Fix login flow"),
+            "Fix-login-flow"
+        );
         assert_eq!(sanitize_branch_component("  weird//name?! "), "weird--name");
         assert_eq!(sanitize_branch_component("---"), "session");
         assert_eq!(sanitize_branch_component(""), "session");
@@ -727,8 +764,14 @@ mod tests {
     #[test]
     fn sanitize_branch_ref_preserves_slashes() {
         assert_eq!(sanitize_branch_ref("feature/ABC-123"), "feature/ABC-123");
-        assert_eq!(sanitize_branch_ref("feature/fix login"), "feature/fix-login");
-        assert_eq!(sanitize_branch_ref("/leading/trailing/"), "leading/trailing");
+        assert_eq!(
+            sanitize_branch_ref("feature/fix login"),
+            "feature/fix-login"
+        );
+        assert_eq!(
+            sanitize_branch_ref("/leading/trailing/"),
+            "leading/trailing"
+        );
         assert_eq!(sanitize_branch_ref("bad??/name!!"), "bad/name");
         assert_eq!(sanitize_branch_ref(""), "session");
     }
@@ -736,12 +779,22 @@ mod tests {
     #[test]
     fn apply_branch_template_fills_placeholders() {
         assert_eq!(
-            apply_branch_template("feature/{key}", "ABC-123", "Fix the login redirect", "Story"),
+            apply_branch_template(
+                "feature/{key}",
+                "ABC-123",
+                "Fix the login redirect",
+                "Story"
+            ),
             "feature/ABC-123"
         );
         // {slug} takes up to the first 6 summary words.
         assert_eq!(
-            apply_branch_template("{key}-{slug}", "ABC-1", "Fix the login redirect bug now please", "Bug"),
+            apply_branch_template(
+                "{key}-{slug}",
+                "ABC-1",
+                "Fix the login redirect bug now please",
+                "Bug"
+            ),
             "ABC-1-fix-the-login-redirect-bug-now"
         );
         assert_eq!(
@@ -766,7 +819,10 @@ mod tests {
         let repo = init_repo("br-config");
         save_setup_config(
             &repo,
-            &SetupConfig { branch_template: Some("feature/{key}-{slug}".into()), ..Default::default() },
+            &SetupConfig {
+                branch_template: Some("feature/{key}-{slug}".into()),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(

@@ -95,7 +95,12 @@ pub fn worktree_suggest_branch(
     state: State<'_, AppState>,
 ) -> AppResult<String> {
     let repo = repo(&state)?;
-    Ok(worktree_service::suggest_branch(&repo, &key, &summary, &issue_type))
+    Ok(worktree_service::suggest_branch(
+        &repo,
+        &key,
+        &summary,
+        &issue_type,
+    ))
 }
 
 #[tauri::command]

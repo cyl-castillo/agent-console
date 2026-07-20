@@ -76,7 +76,12 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
     let existing_skills = list_existing_skills(project_root);
     let existing_memories = list_existing_memories(project_root);
     let installed_plugins = list_installed_plugins();
-    let prompt = build_prompt(&digest, &existing_skills, &existing_memories, &installed_plugins);
+    let prompt = build_prompt(
+        &digest,
+        &existing_skills,
+        &existing_memories,
+        &installed_plugins,
+    );
 
     // Same resolver/flags as the Advisor: a GUI launch doesn't inherit the
     // login-shell PATH, so the bare `claude` name would fail to spawn.
@@ -522,7 +527,11 @@ fn find_broken_refs(root: &Path, content: &str) -> Vec<String> {
     let mut missing = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for raw in content.split(|c: char| {
-        c.is_whitespace() || matches!(c, '`' | '"' | '\'' | '(' | ')' | '[' | ']' | ',' | '<' | '>')
+        c.is_whitespace()
+            || matches!(
+                c,
+                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | ',' | '<' | '>'
+            )
     }) {
         let tok = raw.trim_matches(|c: char| matches!(c, '.' | ':' | ';' | '#' | '*' | '!'));
         if !looks_like_path(tok) {

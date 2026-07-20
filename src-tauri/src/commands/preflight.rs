@@ -46,7 +46,8 @@ fn probe(bin: &str) -> ToolStatus {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
     // `command -v` keeps the &&-chain honest: if the binary isn't on PATH the
     // chain short-circuits and the shell exits non-zero → found = false.
-    let script = format!("command -v {bin} >/dev/null 2>&1 && {bin} --version 2>/dev/null | head -n1");
+    let script =
+        format!("command -v {bin} >/dev/null 2>&1 && {bin} --version 2>/dev/null | head -n1");
     match proc::command(&shell).args(["-lc", &script]).output() {
         Ok(o) if o.status.success() => status(bin, true, &String::from_utf8_lossy(&o.stdout)),
         _ => status(bin, false, ""),
@@ -64,11 +65,6 @@ fn probe(bin: &str) -> ToolStatus {
 #[tauri::command]
 pub fn preflight_check() -> Preflight {
     Preflight {
-        tools: vec![
-            probe("claude"),
-            probe("node"),
-            probe("git"),
-            probe("codex"),
-        ],
+        tools: vec![probe("claude"), probe("node"), probe("git"), probe("codex")],
     }
 }

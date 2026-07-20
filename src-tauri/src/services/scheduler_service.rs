@@ -23,12 +23,12 @@
 //! dependency). Daily/weekly `hour`/`minute` are therefore interpreted as UTC;
 //! the frontend converts to/from the user's local zone for display and editing.
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use parking_lot::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -64,7 +64,11 @@ pub enum Trigger {
     Daily { hour: u32, minute: u32 },
     /// Weekly on `weekday` (0=Sunday..6=Saturday, JS getUTCDay convention) at
     /// `hour`:`minute` (UTC).
-    Weekly { weekday: u32, hour: u32, minute: u32 },
+    Weekly {
+        weekday: u32,
+        hour: u32,
+        minute: u32,
+    },
     /// Fires when a named app event arrives (e.g. "corpus_grew"). Inert until
     /// Phase 3; stored and editable now.
     Event { name: String },
@@ -228,8 +232,7 @@ impl SchedulerService {
     /// Stable, human-recognizable per-project ledger filename (same scheme as
     /// the activity ledger): a cleaned basename plus a hash of the full root.
     fn history_path(project_root: &str) -> AppResult<PathBuf> {
-        Ok(Self::history_dir()?
-            .join(crate::services::persistence::project_file_key(project_root)))
+        Ok(Self::history_dir()?.join(crate::services::persistence::project_file_key(project_root)))
     }
 
     // ---- jobs file (crash-safe, mirrors sessions_service) ----------------
@@ -279,7 +282,11 @@ impl SchedulerService {
     pub fn list(&self, project_root: &str) -> AppResult<Vec<Job>> {
         let _g = self.lock.lock();
         let file = Self::load_file()?;
-        Ok(file.by_project.get(project_root).cloned().unwrap_or_default())
+        Ok(file
+            .by_project
+            .get(project_root)
+            .cloned()
+            .unwrap_or_default())
     }
 
     /// Create (or replace, if the id already exists) a job. Fills id/created_at
@@ -385,7 +392,10 @@ impl SchedulerService {
     pub fn set_paused(&self, app: &AppHandle, paused: bool) -> AppResult<()> {
         self.paused.store(paused, Ordering::Relaxed);
         save_paused_flag(paused)?;
-        let _ = app.emit("scheduler://paused_changed", serde_json::json!({ "paused": paused }));
+        let _ = app.emit(
+            "scheduler://paused_changed",
+            serde_json::json!({ "paused": paused }),
+        );
         Ok(())
     }
 
@@ -521,8 +531,10 @@ impl SchedulerService {
                 j.next_due_ms = compute_next_due(&j.trigger, rec.started_ms);
                 if rec.status == "error" {
                     j.consecutive_failures = j.consecutive_failures.saturating_add(1);
-                    j.backoff_until_ms =
-                        Some(rec.started_ms.saturating_add(backoff_delay(j.consecutive_failures)));
+                    j.backoff_until_ms = Some(
+                        rec.started_ms
+                            .saturating_add(backoff_delay(j.consecutive_failures)),
+                    );
                 } else {
                     j.consecutive_failures = 0;
                     j.backoff_until_ms = None;
@@ -705,7 +717,10 @@ fn run_pipeline(project_root: &Path, steps: &[PipelineStep]) -> (String, String)
     for (i, step) in steps.iter().enumerate() {
         let prev = last.as_ref().map(|(s, o)| (s.as_str(), o.as_str()));
         if !step_should_run(&step.when, prev) {
-            out.push_str(&format!("\n--- step {} (skipped: condition not met) ---", i + 1));
+            out.push_str(&format!(
+                "\n--- step {} (skipped: condition not met) ---",
+                i + 1
+            ));
             continue;
         }
         let (st, o) = run_action(project_root, &step.action);
@@ -746,7 +761,9 @@ fn run_claude(project_root: &Path, prompt: &str) -> (String, String) {
     ]);
     cmd.current_dir(project_root);
     match cmd.output() {
-        Ok(o) if o.status.success() => ("ok".into(), String::from_utf8_lossy(&o.stdout).to_string()),
+        Ok(o) if o.status.success() => {
+            ("ok".into(), String::from_utf8_lossy(&o.stdout).to_string())
+        }
         Ok(o) => (
             "error".into(),
             format!(
@@ -806,7 +823,9 @@ fn config_path() -> AppResult<PathBuf> {
 
 /// Read the persisted global pause flag (default false / not paused).
 fn load_paused_flag() -> bool {
-    let Ok(path) = config_path() else { return false };
+    let Ok(path) = config_path() else {
+        return false;
+    };
     let Ok(txt) = fs::read_to_string(&path) else {
         return false;
     };
@@ -828,9 +847,7 @@ fn save_paused_flag(paused: bool) -> AppResult<()> {
 /// Next firing strictly after `after` (epoch ms), or None for non-time triggers.
 fn compute_next_due(trigger: &Trigger, after: u64) -> Option<u64> {
     match trigger {
-        Trigger::Interval { every_ms } => {
-            Some(after.saturating_add((*every_ms).max(1)))
-        }
+        Trigger::Interval { every_ms } => Some(after.saturating_add((*every_ms).max(1))),
         Trigger::Daily { hour, minute } => Some(next_daily(after, *hour, *minute)),
         Trigger::Weekly {
             weekday,
@@ -925,7 +942,12 @@ mod tests {
 
     #[test]
     fn interval_next_is_after_plus_period() {
-        let t = compute_next_due(&Trigger::Interval { every_ms: 3_600_000 }, 1_000);
+        let t = compute_next_due(
+            &Trigger::Interval {
+                every_ms: 3_600_000,
+            },
+            1_000,
+        );
         assert_eq!(t, Some(3_601_000));
         // Event triggers are not time-scheduled.
         assert_eq!(
@@ -950,9 +972,18 @@ mod tests {
         assert!(!step_should_run(&c, None));
 
         // PrevFailed / PrevOk branch on the prior status.
-        assert!(step_should_run(&Some(StepCondition::PrevFailed), Some(("error", ""))));
-        assert!(!step_should_run(&Some(StepCondition::PrevFailed), Some(("ok", ""))));
-        assert!(step_should_run(&Some(StepCondition::PrevOk), Some(("ok", ""))));
+        assert!(step_should_run(
+            &Some(StepCondition::PrevFailed),
+            Some(("error", ""))
+        ));
+        assert!(!step_should_run(
+            &Some(StepCondition::PrevFailed),
+            Some(("ok", ""))
+        ));
+        assert!(step_should_run(
+            &Some(StepCondition::PrevOk),
+            Some(("ok", ""))
+        ));
         assert!(!step_should_run(&Some(StepCondition::PrevOk), None));
     }
 

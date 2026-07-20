@@ -1,9 +1,9 @@
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use parking_lot::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -162,9 +162,12 @@ impl HooksRuntime {
         let codex_installed =
             is_hook_installed(&codex_hooks_path, "UserPromptSubmit", &self.script_path)
                 .unwrap_or(false);
-        let codex_pretooluse_installed =
-            is_hook_installed(&codex_hooks_path, "PreToolUse", &self.pretooluse_script_path)
-                .unwrap_or(false);
+        let codex_pretooluse_installed = is_hook_installed(
+            &codex_hooks_path,
+            "PreToolUse",
+            &self.pretooluse_script_path,
+        )
+        .unwrap_or(false);
         HooksStatus {
             session_dir: self.session_dir.clone(),
             script_path: self.script_path.clone(),
@@ -283,7 +286,9 @@ impl HooksRuntime {
     /// prompt — noise for people who never use codex). Observer only; the
     /// PreToolUse bridge stays opt-in, exactly like Claude's.
     pub fn ensure_codex_autoinstalled(&self) -> AppResult<()> {
-        let marker = self.script_path.with_file_name(".userprompt-codex-autoinstalled");
+        let marker = self
+            .script_path
+            .with_file_name(".userprompt-codex-autoinstalled");
         if marker.exists() || !codex_available() {
             return Ok(());
         }
@@ -329,7 +334,9 @@ impl HooksRuntime {
     /// it records what tools produced and changes no behavior — so it's safe
     /// to enable by default. Feeds the Testigo turn evidence.
     pub fn ensure_posttooluse_autoinstalled(&self) -> AppResult<()> {
-        let marker = self.script_path.with_file_name(".posttooluse-autoinstalled");
+        let marker = self
+            .script_path
+            .with_file_name(".posttooluse-autoinstalled");
         if marker.exists() {
             return Ok(());
         }
@@ -788,7 +795,9 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 str_field(v, "sessionId").as_deref(),
                 str_field(v, "tool").as_deref(),
                 str_field(v, "excerpt").as_deref(),
-                v.get("truncated").and_then(|t| t.as_bool()).unwrap_or(false),
+                v.get("truncated")
+                    .and_then(|t| t.as_bool())
+                    .unwrap_or(false),
             );
         }
     }

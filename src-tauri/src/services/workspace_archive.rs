@@ -415,8 +415,12 @@ pub fn build_manifest(
 
     let sessions = match &b.sessions {
         Some(items) => {
-            let existing: HashSet<String> =
-                state.sessions.list(dest_root)?.into_iter().map(|s| s.id).collect();
+            let existing: HashSet<String> = state
+                .sessions
+                .list(dest_root)?
+                .into_iter()
+                .map(|s| s.id)
+                .collect();
             BlockManifest {
                 present: true,
                 total: items.len(),
@@ -446,8 +450,12 @@ pub fn build_manifest(
 
     let schedules = match &b.schedules {
         Some(items) => {
-            let existing: HashSet<String> =
-                state.scheduler.list(dest_root)?.into_iter().map(|j| j.id).collect();
+            let existing: HashSet<String> = state
+                .scheduler
+                .list(dest_root)?
+                .into_iter()
+                .map(|j| j.id)
+                .collect();
             BlockManifest {
                 present: true,
                 total: items.len(),
@@ -557,8 +565,12 @@ pub fn apply_archive(
     //     disabled (scrubbed at export), so nothing fires on import.
     if let (Some(items), d) = (&b.schedules, decisions.schedules) {
         if d != Decision::Skip {
-            let existing: HashSet<String> =
-                state.scheduler.list(dest_root)?.into_iter().map(|j| j.id).collect();
+            let existing: HashSet<String> = state
+                .scheduler
+                .list(dest_root)?
+                .into_iter()
+                .map(|j| j.id)
+                .collect();
             for job in items {
                 if existing.contains(&job.id) && d == Decision::Merge {
                     continue;
@@ -757,7 +769,11 @@ mod tests {
 
         let docs = read_memory(&project);
         let names: Vec<_> = docs.iter().map(|d| d.name.as_str()).collect();
-        assert_eq!(names, vec!["feature-a.md"], "only entry .md files, no index");
+        assert_eq!(
+            names,
+            vec!["feature-a.md"],
+            "only entry .md files, no index"
+        );
         assert_eq!(docs[0].content, "fact A");
 
         let _ = std::fs::remove_dir_all(&home);
@@ -792,8 +808,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let base =
-            std::env::temp_dir().join(format!("ac-wsa-rt-{}-{}", std::process::id(), nanos));
+        let base = std::env::temp_dir().join(format!("ac-wsa-rt-{}-{}", std::process::id(), nanos));
         let home = base.join("home");
         let data = base.join("data");
         std::fs::create_dir_all(&home).unwrap();
@@ -858,7 +873,10 @@ mod tests {
 
         // Idempotency: a second Merge import adds nothing.
         let r2 = apply_archive(&state, &dest_s, &archive, decide).unwrap();
-        assert_eq!(r2.sessions, 0, "merge re-import must not duplicate sessions");
+        assert_eq!(
+            r2.sessions, 0,
+            "merge re-import must not duplicate sessions"
+        );
         assert_eq!(state.sessions.list(&dest_s).unwrap().len(), 2);
 
         let _ = std::fs::remove_dir_all(&base);

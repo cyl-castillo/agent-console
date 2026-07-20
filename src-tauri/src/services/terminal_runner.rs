@@ -1,7 +1,7 @@
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
-use parking_lot::Mutex;
 use std::thread;
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -225,7 +225,10 @@ mod tests {
             reg.resize("nope", 80, 24),
             Err(AppError::InvalidArgument(_))
         ));
-        assert!(matches!(reg.kill("nope"), Err(AppError::InvalidArgument(_))));
+        assert!(matches!(
+            reg.kill("nope"),
+            Err(AppError::InvalidArgument(_))
+        ));
     }
 
     #[cfg(unix)]

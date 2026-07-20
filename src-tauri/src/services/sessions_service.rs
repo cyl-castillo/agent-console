@@ -1,7 +1,7 @@
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use parking_lot::Mutex;
 
 use serde::{Deserialize, Serialize};
 
@@ -473,7 +473,11 @@ mod tests {
             file.by_project.contains_key(new_key),
             "data should live under the current spelling after save"
         );
-        assert_eq!(svc.list(old_key).unwrap().len(), 1, "old spelling still resolves");
+        assert_eq!(
+            svc.list(old_key).unwrap().len(),
+            1,
+            "old spelling still resolves"
+        );
         assert_eq!(svc.list(new_key).unwrap().len(), 1, "new spelling resolves");
 
         let _ = std::fs::remove_dir_all(&base);
