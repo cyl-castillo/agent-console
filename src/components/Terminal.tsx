@@ -164,17 +164,24 @@ export function Terminal({ session, visible }: Props) {
     let disposed = false;
 
     (async () => {
-      unlistenOutput = await listen<TermOutput>("term://output", (e) => {
+      // Each `await listen` can resolve AFTER the component unmounted (fast
+      // close, StrictMode). Assign-then-forget leaked one listener per lost
+      // race; check `disposed` at every resolution point instead.
+      const uOut = await listen<TermOutput>("term://output", (e) => {
         if (e.payload.id === termId) {
           term.write(e.payload.data);
           appendOutput(session.id, e.payload.data);
         }
       });
-      unlistenExit = await listen<TermExit>("term://exit", (e) => {
+      if (disposed) { uOut(); return; }
+      unlistenOutput = uOut;
+      const uExit = await listen<TermExit>("term://exit", (e) => {
         if (e.payload.id === termId) {
           term.write(`\r\n\x1b[90m[process exited: ${e.payload.code ?? "?"}]\x1b[0m\r\n`);
         }
       });
+      if (disposed) { uExit(); return; }
+      unlistenExit = uExit;
 
       // Drop files/folders onto this terminal: type their quoted paths into
       // the composer (same flow as the clipboard-image paste below). Tauri
@@ -182,7 +189,7 @@ export function Terminal({ session, visible }: Props) {
       // HTML5 drop events never fire and this webview event — which carries
       // real OS paths — is the only source. Every mounted Terminal listens;
       // the visibility + hit-test gate picks the one under the cursor.
-      unlistenDragDrop = await getCurrentWebview().onDragDropEvent((e) => {
+      const uDrop = await getCurrentWebview().onDragDropEvent((e) => {
         if (e.payload.type !== "drop" || !termId) return;
         if (host.style.display === "none") return;
         const scale = window.devicePixelRatio || 1;
@@ -193,6 +200,8 @@ export function Terminal({ session, visible }: Props) {
         const text = e.payload.paths.map((p) => `"${p}"`).join(" ");
         if (text) ipc.termWrite(termId, `${text} `).catch(() => {});
       });
+      if (disposed) { uDrop(); return; }
+      unlistenDragDrop = uDrop;
 
       try {
         termId = await ipc.termSpawn(session.cwd, session.id);

@@ -196,7 +196,13 @@ export function ApprovalModal() {
   // keyboard flow continues where the interruption started.
   const decideAndRefocus = (id: string, decision: "allow" | "deny" | "ask", reason: string) => {
     const wasLast = queue.length <= 1;
-    void decide(id, decision, reason).then(() => {
+    void decide(id, decision, reason).then((delivered) => {
+      if (!delivered) {
+        // Delivery failed; the request stays queued (the store toasted). Unlock
+        // the buttons so the user can retry — busy used to stick forever here.
+        setBusy(false);
+        return;
+      }
       if (wasLast) window.dispatchEvent(new CustomEvent("ac:focus-terminal"));
     });
   };
