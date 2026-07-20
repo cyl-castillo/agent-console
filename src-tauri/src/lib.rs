@@ -10,6 +10,16 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
+        // MUST be the first plugin. A second launch (very common on Windows —
+        // click the icon again) focuses the existing window instead of
+        // spawning a rival instance whose stale close-time persist would
+        // overwrite the real one's session history (#72 hazard class).
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
