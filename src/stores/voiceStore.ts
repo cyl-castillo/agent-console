@@ -166,7 +166,8 @@ async function announceApproval(req: ApprovalRequest): Promise<void> {
 }
 
 /// Short spoken description of what the agent wants to do.
-function speechFor(req: ApprovalRequest, es: boolean): string {
+/// Exported for tests — pure.
+export function speechFor(req: ApprovalRequest, es: boolean): string {
   const inp = req.input ?? {};
   if (req.tool === "Bash") {
     const desc = typeof inp.description === "string" && inp.description ? inp.description : null;
@@ -191,7 +192,8 @@ function speechFor(req: ApprovalRequest, es: boolean): string {
 
 /// Tolerant yes/no parser. Diacritics are stripped ("sí" → "si"); a negative
 /// anywhere wins over a positive ("no, dale" must not approve).
-function parseYesNo(transcript: string): "yes" | "no" | "unclear" {
+/// Exported for tests — pure.
+export function parseYesNo(transcript: string): "yes" | "no" | "unclear" {
   const norm = transcript.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const words = norm.split(/[^a-zñ]+/).filter(Boolean);
   const NO = new Set(["no", "nope", "cancela", "cancelar", "niega", "deny", "denegar", "para"]);

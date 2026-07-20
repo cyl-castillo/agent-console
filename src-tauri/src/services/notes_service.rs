@@ -184,7 +184,7 @@ mod tests {
         // Empty save removes the project bucket entirely.
         svc.save("/proj/b", vec![]).unwrap();
         // (list may come from bak-recovered state after re-save; re-check a.)
-        assert!(svc.list("/proj/a").unwrap().len() >= 1);
+        assert!(!svc.list("/proj/a").unwrap().is_empty());
 
         std::env::remove_var("XDG_DATA_HOME");
         let _ = std::fs::remove_dir_all(&dir);
