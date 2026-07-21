@@ -1,0 +1,8 @@
+# Statically link the MSVC C/C++ runtime on Windows so the shipped exe has no
+# VCRedist dependency (MSVCP140/VCRUNTIME140 get embedded). Without this, the
+# app fails with STATUS_DLL_NOT_FOUND on machines without the VC++ redist —
+# fresh Windows installs and the winget validation sandbox included (the
+# import comes from whisper.cpp's C++ via whisper-rs). The cc crate honors
+# crt-static and compiles bundled C/C++ with /MT to match.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
