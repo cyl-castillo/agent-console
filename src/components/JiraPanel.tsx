@@ -5,9 +5,11 @@ import { ipc } from "../ipc/tauri";
 import { useJiraStore } from "../stores/jiraStore";
 import { useToastStore } from "../stores/toastStore";
 import { useChangesStore } from "../stores/changesStore";
+import { useSessionStore } from "../stores/sessionStore";
 import { startSessionForIssue } from "../lib/startSessionForIssue";
 import {
   dueState,
+  formatSecondsForWorklog,
   groupIssuesByStatus,
   intentForIssue,
   intentVerb,
@@ -235,6 +237,30 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
   const [logging, setLogging] = useState(false);
   const logWork = useJiraStore((s) => s.logWork);
   const showToast = useToastStore((s) => s.show);
+  const projectRoot = useSessionStore((s) => s.project?.root ?? null);
+  // Assisted logging: what the Testigo ledger witnessed for this ticket on the
+  // selected day. Suggestion only — it fills the field, never submits.
+  const [suggest, setSuggest] = useState<{ seconds: number; events: number } | null>(null);
+  const logDate = log?.date ?? null;
+  useEffect(() => {
+    setSuggest(null);
+    if (!logDate || !projectRoot) return;
+    const [y, m, d] = logDate.split("-").map(Number);
+    if (!y || !m || !d) return;
+    const start = new Date(y, m - 1, d).getTime();
+    let alive = true;
+    ipc
+      .jiraWorklogSuggestion(projectRoot, issue.key, start, start + 86_400_000)
+      .then((sug) => {
+        if (alive) setSuggest(sug);
+      })
+      .catch(() => {
+        if (alive) setSuggest(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [logDate, projectRoot, issue.key]);
 
   const submitLog = async () => {
     if (!log || logging) return;
@@ -329,6 +355,17 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
             onChange={(e) => setLog({ ...log, date: e.target.value })}
             title="Day the work happened"
           />
+          {suggest && (
+            <button
+              className="jira-log-suggest"
+              onClick={() =>
+                setLog((l) => l && { ...l, duration: formatSecondsForWorklog(suggest.seconds) })
+              }
+              title={`Witnessed activity for ${issue.key} that day: ${suggest.events} ledger events. Click to fill.`}
+            >
+              ◈ {formatSecondsForWorklog(suggest.seconds)}
+            </button>
+          )}
           <input
             className="jira-log-comment"
             value={log.comment}

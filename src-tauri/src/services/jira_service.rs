@@ -366,6 +366,31 @@ pub async fn log_work(
     }
 }
 
+/// Estimate seconds actually worked from witnessed event timestamps (the
+/// Testigo ledger events of a `jira:<KEY>` case): sort, merge events closer
+/// than `gap_ms` into one burst, and total the burst spans. A burst never
+/// counts less than `min_burst_ms` — a lone prompt still took real time.
+/// Deliberately an ESTIMATE feeding a human-editable field, never auto-submitted.
+pub fn estimate_worked_seconds(mut ts_ms: Vec<i64>, gap_ms: i64, min_burst_ms: i64) -> u64 {
+    ts_ms.retain(|t| *t > 0);
+    if ts_ms.is_empty() {
+        return 0;
+    }
+    ts_ms.sort_unstable();
+    let mut total_ms: i64 = 0;
+    let mut burst_start = ts_ms[0];
+    let mut prev = ts_ms[0];
+    for &t in &ts_ms[1..] {
+        if t - prev > gap_ms {
+            total_ms += (prev - burst_start).max(min_burst_ms);
+            burst_start = t;
+        }
+        prev = t;
+    }
+    total_ms += (prev - burst_start).max(min_burst_ms);
+    (total_ms / 1000).max(0) as u64
+}
+
 fn flatten(site: &str, i: RawIssue) -> JiraIssue {
     let f = i.fields;
     JiraIssue {
@@ -532,5 +557,27 @@ mod tests {
         assert!(valid_date("2026-07-22"));
         assert!(!valid_date("22/07/2026"));
         assert!(!valid_date("2026-7-22"));
+    }
+
+    #[test]
+    fn worked_time_estimation_clusters_bursts() {
+        const M: i64 = 60_000;
+        // Empty / junk-only → zero.
+        assert_eq!(estimate_worked_seconds(vec![], 15 * M, M), 0);
+        assert_eq!(estimate_worked_seconds(vec![0, -5], 15 * M, M), 0);
+        // A lone event counts the minimum burst (1m).
+        assert_eq!(estimate_worked_seconds(vec![1_000_000], 15 * M, M), 60);
+        // Events within the gap merge into one burst spanning first→last.
+        // (Base offset because ts == 0 is the "hook gave no timestamp"
+        // sentinel and gets filtered as junk.)
+        const B: i64 = 100 * M;
+        let burst = vec![B, B + 5 * M, B + 10 * M];
+        assert_eq!(estimate_worked_seconds(burst, 15 * M, M), 600);
+        // A >gap silence splits bursts; each contributes its own span.
+        let two = vec![B, B + 10 * M, B + 60 * M, B + 70 * M];
+        assert_eq!(estimate_worked_seconds(two, 15 * M, M), 1200);
+        // Unsorted input is fine.
+        let unsorted = vec![B + 70 * M, B, B + 60 * M, B + 10 * M];
+        assert_eq!(estimate_worked_seconds(unsorted, 15 * M, M), 1200);
     }
 }
