@@ -52,6 +52,9 @@ export interface AgentProfile {
   /// Bare binary name — resolved from the user's PATH by the login shell that
   /// runs the PTY (we type this as text, we do not spawn it ourselves).
   binName: string;
+  /// Command that repairs authentication interactively (browser OAuth can't be
+  /// fixed headless). Typed into a fresh PTY by the "fix login" flow.
+  loginCmd: string;
   /// Model/tuning presets for the chooser and the pill.
   models: AgentModelPreset[];
   /// Whether picking a model on a *live* session can be pushed into the running
@@ -84,6 +87,9 @@ const CLAUDE: AgentProfile = {
   label: "Claude",
   icon: "✶",
   binName: "claude",
+  // Plain interactive claude detects broken credentials and walks through the
+  // re-login itself (a dedicated `login` subcommand doesn't exist).
+  loginCmd: "claude",
   models: CLAUDE_MODELS,
   supportsLiveModelSwitch: true,
   liveModelSwitchInput: (m) => `/model ${m}\r`,
@@ -116,6 +122,7 @@ const CODEX: AgentProfile = {
   label: "Codex",
   icon: "◆",
   binName: "codex",
+  loginCmd: "codex login",
   models: CODEX_MODELS,
   // Codex has no `/model` slash command we can push reliably; the choice only
   // takes effect on (re)launch.

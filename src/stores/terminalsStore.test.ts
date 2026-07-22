@@ -227,3 +227,18 @@ describe("claude session binding", () => {
     expect(world.saved.length).toBe(1);
   });
 });
+
+describe("login-only sessions", () => {
+  it("add carries the transient loginOnly flag and persist never saves it", async () => {
+    const id = useTerminalsStore
+      .getState()
+      .add("/repo", "claude login", undefined, "claude", undefined, undefined, undefined, true);
+    expect(useTerminalsStore.getState().sessions.find((s) => s.id === id)!.loginOnly).toBe(true);
+    await useTerminalsStore.getState().persist();
+    const saved = world.saved[world.saved.length - 1].payload[0] as unknown as Record<
+      string,
+      unknown
+    >;
+    expect("loginOnly" in saved).toBe(false);
+  });
+});
