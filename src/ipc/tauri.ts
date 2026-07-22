@@ -212,6 +212,16 @@ export const ipc = {
   jiraListIssues: () => invoke<JiraIssue[]>("jira_list_issues"),
   jiraLogWork: (issueKey: string, duration: string, started: string, comment?: string) =>
     invoke<string>("jira_log_work", { issueKey, duration, started, comment: comment ?? null }),
+  jiraWorklogSuggestion: (
+    projectRoot: string,
+    issueKey: string,
+    dayStartMs: number,
+    dayEndMs: number,
+  ) =>
+    invoke<{ seconds: number; events: number; firstTs: number; lastTs: number } | null>(
+      "jira_worklog_suggestion",
+      { projectRoot, issueKey, dayStartMs, dayEndMs },
+    ),
 
   notesList: (projectRoot: string) => invoke<StickyNote[]>("notes_list", { projectRoot }),
   notesSave: (projectRoot: string, notes: StickyNote[]) =>

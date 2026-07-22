@@ -4,6 +4,7 @@ import {
   intentForIssue,
   seedForIssue,
   groupIssuesByStatus,
+  formatSecondsForWorklog,
   priorityLevel,
   dueState,
   typeDotClass,
@@ -139,5 +140,15 @@ describe("typeDotClass", () => {
     expect(typeDotClass("Sub-task")).toBe("type-task");
     expect(typeDotClass("Epic")).toBe("type-epic");
     expect(typeDotClass("Spike")).toBe("type-other");
+  });
+});
+
+describe("formatSecondsForWorklog (rounds UP to 5m)", () => {
+  it("formats and rounds up", () => {
+    expect(formatSecondsForWorklog(45 * 60)).toBe("45m");
+    expect(formatSecondsForWorklog(2 * 3600 + 11 * 60)).toBe("2h 15m");
+    expect(formatSecondsForWorklog(3600)).toBe("1h");
+    expect(formatSecondsForWorklog(61)).toBe("5m");
+    expect(formatSecondsForWorklog(7 * 3600 + 56 * 60)).toBe("8h");
   });
 });

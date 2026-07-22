@@ -8965,3 +8965,20 @@ select:focus-visible,
   font-size: 10.5px;
   color: var(--text-faint);
 }
+
+/* Assisted-worklog suggestion chip (fills the duration from witnessed activity). */
+.jira-log-suggest {
+  flex: none;
+  background: var(--accent-12, var(--accent-soft));
+  color: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.jira-log-suggest:hover {
+  border-color: var(--accent);
+}

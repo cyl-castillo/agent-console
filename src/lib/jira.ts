@@ -149,3 +149,14 @@ export function typeDotClass(issueType: string): string {
   if (/task|sub/.test(t)) return "type-task";
   return "type-other";
 }
+
+/// Seconds → worklog-friendly label, rounded UP to 5-minute granularity
+/// ("2h 15m", "45m"). Suggestion display + one-click fill share this.
+export function formatSecondsForWorklog(seconds: number): string {
+  const s5 = Math.ceil(seconds / 300) * 300;
+  const h = Math.floor(s5 / 3600);
+  const m = Math.round((s5 % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
