@@ -8982,3 +8982,79 @@ select:focus-visible,
 .jira-log-suggest:hover {
   border-color: var(--accent);
 }
+
+/* Role selector for the Jira queue. */
+.jira-role-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 2px;
+  flex-wrap: wrap;
+}
+.jira-role-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+.jira-role-chip {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.jira-role-chip:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+.jira-role-chip.active {
+  background: var(--accent-12, var(--accent-soft));
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.jira-role-adv {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.jira-role-adv:hover,
+.jira-role-adv.open {
+  color: var(--text-dim);
+}
+.jira-role-adv.custom {
+  color: var(--accent);
+}
+.jira-jql-editor {
+  margin: 4px 0;
+}
+.jira-jql-input {
+  width: 100%;
+  resize: vertical;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  line-height: 1.4;
+}
+.jira-jql-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.jira-jql-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
+}

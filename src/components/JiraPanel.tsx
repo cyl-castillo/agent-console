@@ -6,6 +6,7 @@ import { useJiraStore } from "../stores/jiraStore";
 import { useToastStore } from "../stores/toastStore";
 import { useChangesStore } from "../stores/changesStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { useRoleStore } from "../stores/roleStore";
 import { startSessionForIssue } from "../lib/startSessionForIssue";
 import {
   dueState,
@@ -13,8 +14,11 @@ import {
   groupIssuesByStatus,
   intentForIssue,
   intentVerb,
+  jqlForRole,
   priorityLevel,
+  ROLE_LABELS,
   typeDotClass,
+  type ProjectRole,
 } from "../lib/jira";
 import { PanelError } from "./PanelError";
 import type { JiraIssue } from "../types/domain";
@@ -153,6 +157,29 @@ function IssueList() {
   const [filter, setFilter] = useState("");
   // The worktree action only makes sense in a git repo.
   const isRepo = useChangesStore((s) => s.status?.isRepo ?? false);
+  const projectRoot = useSessionStore((s) => s.project?.root ?? null);
+  const roleFor = useRoleStore((s) => s.roleFor);
+  const setRoleFor = useRoleStore((s) => s.setRoleFor);
+  const jqlFor = useRoleStore((s) => s.jqlFor);
+  const hasCustomJql = useRoleStore((s) => s.hasCustomJql);
+  const setJqlFor = useRoleStore((s) => s.setJqlFor);
+  const setJql = useJiraStore((s) => s.setJql);
+  const role = projectRoot ? roleFor(projectRoot) : "developer";
+  const effectiveJql = projectRoot ? jqlFor(projectRoot, role) : jqlForRole(role);
+  const [jqlOpen, setJqlOpen] = useState(false);
+  const [jqlDraft, setJqlDraft] = useState<string | null>(null);
+
+  // The store fetches with whatever JQL the current (project, role) demands;
+  // this also covers the very first load and role/JQL switches.
+  useEffect(() => {
+    void setJql(effectiveJql);
+  }, [effectiveJql, setJql]);
+
+  const pickRole = (r: ProjectRole) => {
+    if (!projectRoot) return;
+    setRoleFor(projectRoot, r);
+    setJqlDraft(null);
+  };
 
   const q = filter.trim().toLowerCase();
   const visible = q
@@ -179,6 +206,69 @@ function IssueList() {
           disconnect
         </button>
       </div>
+
+      <div className="jira-role-row">
+        <span className="jira-role-label">role</span>
+        {(Object.keys(ROLE_LABELS) as ProjectRole[]).map((r) => (
+          <button
+            key={r}
+            className={`jira-role-chip ${role === r ? "active" : ""}`}
+            onClick={() => pickRole(r)}
+            title={
+              r === "po" || r === "pm"
+                ? `${ROLE_LABELS[r]} — sees the whole project`
+                : `${ROLE_LABELS[r]} — sees their own assigned issues`
+            }
+          >
+            {ROLE_LABELS[r]}
+          </button>
+        ))}
+        <button
+          className={`jira-role-adv ${jqlOpen ? "open" : ""} ${projectRoot && hasCustomJql(projectRoot, role) ? "custom" : ""}`}
+          onClick={() => {
+            setJqlOpen((v) => !v);
+            setJqlDraft(null);
+          }}
+          title="Show / edit the JQL this view uses"
+        >
+          jql
+        </button>
+      </div>
+      {jqlOpen && (
+        <div className="jira-jql-editor">
+          <textarea
+            className="jira-jql-input"
+            rows={2}
+            spellCheck={false}
+            value={jqlDraft ?? effectiveJql}
+            onChange={(e) => setJqlDraft(e.target.value)}
+          />
+          <div className="jira-jql-actions">
+            <button
+              className="wb-link"
+              onClick={() => {
+                if (!projectRoot) return;
+                setJqlFor(projectRoot, role, jqlDraft);
+                setJqlDraft(null);
+              }}
+              disabled={jqlDraft === null || !jqlDraft.trim()}
+            >
+              save
+            </button>
+            <button
+              className="wb-link"
+              onClick={() => {
+                if (!projectRoot) return;
+                setJqlFor(projectRoot, role, null);
+                setJqlDraft(null);
+              }}
+              title="Back to this role's preset"
+            >
+              reset to preset
+            </button>
+          </div>
+        </div>
+      )}
 
       {issuesError && <PanelError message={issuesError} onRetry={() => void refreshIssues()} />}
 

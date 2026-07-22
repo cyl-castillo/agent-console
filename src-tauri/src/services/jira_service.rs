@@ -182,11 +182,37 @@ pub async fn test_connection() -> AppResult<String> {
     Ok(me.display_name.unwrap_or_else(|| cfg.email.clone()))
 }
 
-/// Issues assigned to the current user that aren't Done, soonest due first.
-pub async fn list_assigned() -> AppResult<Vec<JiraIssue>> {
+const DEFAULT_JQL: &str = "assignee = currentUser() AND statusCategory != Done ORDER BY duedate ASC, priority DESC, updated DESC";
+
+/// Guard a caller-supplied JQL before it becomes a request body: length-capped
+/// and free of control characters. Jira itself is the real parser — this only
+/// keeps junk and log-breaking bytes out.
+fn validate_jql(jql: &str) -> AppResult<&str> {
+    let j = jql.trim();
+    if j.is_empty() {
+        return Err(AppError::InvalidArgument("JQL is empty".into()));
+    }
+    if j.len() > 1000 {
+        return Err(AppError::InvalidArgument("JQL is too long".into()));
+    }
+    if j.chars().any(|c| c.is_control()) {
+        return Err(AppError::InvalidArgument(
+            "JQL contains control characters".into(),
+        ));
+    }
+    Ok(j)
+}
+
+/// Issues for the given JQL (role presets / user-tuned), or the classic
+/// "assigned to me, not Done" when none is provided.
+pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
     let (cfg, token) = creds()?;
+    let jql = match jql {
+        Some(j) => validate_jql(j)?,
+        None => DEFAULT_JQL,
+    };
     let body = serde_json::json!({
-        "jql": "assignee = currentUser() AND statusCategory != Done ORDER BY duedate ASC, priority DESC, updated DESC",
+        "jql": jql,
         "maxResults": 50,
         "fields": ["summary", "status", "priority", "duedate", "issuetype", "project", "updated"],
     });
@@ -579,5 +605,13 @@ mod tests {
         // Unsorted input is fine.
         let unsorted = vec![B + 70 * M, B, B + 60 * M, B + 10 * M];
         assert_eq!(estimate_worked_seconds(unsorted, 15 * M, M), 1200);
+    }
+
+    #[test]
+    fn jql_validation_guards_junk() {
+        assert!(validate_jql("assignee = currentUser()").is_ok());
+        assert!(validate_jql("  ").is_err());
+        assert!(validate_jql(&"x".repeat(1001)).is_err());
+        assert!(validate_jql("a = b\u{0007}").is_err());
     }
 }

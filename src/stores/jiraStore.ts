@@ -14,6 +14,10 @@ interface JiraState {
   /// Error from the last issue fetch (shown above the list).
   issuesError: string | null;
 
+  /// Effective JQL for the Queue (role preset or hand-tuned). null = backend
+  /// default ("assigned to me, not Done"). Changing it triggers a refresh.
+  jql: string | null;
+  setJql: (jql: string | null) => Promise<void>;
   loadStatus: () => Promise<void>;
   connect: (siteUrl: string, email: string, token: string) => Promise<boolean>;
   disconnect: () => Promise<void>;
@@ -78,10 +82,17 @@ export const useJiraStore = create<JiraState>((set, get) => ({
     });
   },
 
+  jql: null,
+  setJql: async (jql) => {
+    if (get().jql === jql) return;
+    set({ jql });
+    if (get().status?.configured) await get().refreshIssues();
+  },
+
   refreshIssues: async () => {
     set({ loadingIssues: true, issuesError: null });
     try {
-      const issues = await ipc.jiraListIssues();
+      const issues = await ipc.jiraListIssues(get().jql ?? undefined);
       set({ issues, loadingIssues: false });
     } catch (e) {
       set({ loadingIssues: false, issuesError: String(e) });

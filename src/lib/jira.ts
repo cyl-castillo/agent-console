@@ -1,5 +1,29 @@
 import type { JiraIssue } from "../types/domain";
 
+/// Who is driving the console for this project. Changes which tickets the
+/// Queue shows (PO/PM see the whole project; everyone else their own) and
+/// what the seeded session sets out to do.
+export type ProjectRole = "developer" | "qa" | "analyst" | "po" | "pm";
+
+export const ROLE_LABELS: Record<ProjectRole, string> = {
+  developer: "Developer",
+  qa: "QA",
+  analyst: "Functional Analyst",
+  po: "PO",
+  pm: "PM",
+};
+
+const JQL_OWN =
+  "assignee = currentUser() AND statusCategory != Done ORDER BY duedate ASC, priority DESC, updated DESC";
+const JQL_ALL = "statusCategory != Done ORDER BY priority DESC, duedate ASC, updated DESC";
+
+/// The JQL preset a role starts from. Always shown editable in the panel —
+/// Jira workflows are project-customizable, so presets are starting points,
+/// not gospel.
+export function jqlForRole(role: ProjectRole): string {
+  return role === "po" || role === "pm" ? JQL_ALL : JQL_OWN;
+}
+
 /// What the user is most likely doing with a ticket, inferred from its stage.
 /// Drives the prompt an agent session is seeded with — reviewing a ticket in
 /// "Code Review" is a different job than implementing one in "To Do".
@@ -32,8 +56,42 @@ function context(issue: JiraIssue): string {
 /// The prompt the agent's input is seeded with. Stage-aware, so a Code Review
 /// ticket asks for a review, not an implementation. Typed without a trailing
 /// newline — the user reviews and extends it before sending.
-export function seedForIssue(issue: JiraIssue): string {
+export function seedForIssue(issue: JiraIssue, role: ProjectRole = "developer"): string {
   const ctx = context(issue);
+  // Role trumps stage: a QA opening any ticket is there to verify it; an
+  // analyst to pin the requirement down; PO/PM to shape or report it.
+  switch (role) {
+    case "qa":
+      return (
+        `I need to verify Jira issue ${ctx}\n\n` +
+        `Help me test this properly: derive a test plan from the acceptance criteria, run and ` +
+        `extend the relevant tests, and probe edge cases. Report what passes, what fails, and ` +
+        `what isn't covered.`
+      );
+    case "analyst":
+      return (
+        `I'm analyzing Jira issue ${ctx}\n\n` +
+        `Help me pin the requirement down: what the change actually asks for, which parts of the ` +
+        `system it touches, open questions to raise, and a draft of functional acceptance ` +
+        `criteria. Read the relevant code to ground it in reality — don't change anything.`
+      );
+    case "po":
+      return (
+        `I'm refining Jira issue ${ctx}\n\n` +
+        `Help me get this story ready: sharpen the description, write or tighten the acceptance ` +
+        `criteria, flag hidden complexity by reading the relevant code, and propose a split if ` +
+        `it's too big. Don't change any code.`
+      );
+    case "pm":
+      return (
+        `I need a status picture of Jira issue ${ctx}\n\n` +
+        `Read the repo (branches, recent commits, open changes) and tell me the REAL state of ` +
+        `this work: what's done, what's in flight, what's blocked or risky. Summarize it in ` +
+        `plain language I can share with stakeholders. Don't change anything.`
+      );
+    default:
+      break;
+  }
   switch (intentForIssue(issue)) {
     case "review":
       return (
