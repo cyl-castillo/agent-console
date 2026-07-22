@@ -14,6 +14,7 @@ const world = vi.hoisted(() => ({
   indexedFiles: [] as string[],
   indexCalls: 0,
   indexError: null as string | null,
+  logins: [] as string[],
 }));
 
 vi.mock("../ipc/tauri", () => ({
@@ -78,6 +79,11 @@ vi.mock("./updaterStore", () => ({
   useUpdaterStore: { getState: () => ({ check: async () => {}, phase: "idle" }) },
 }));
 vi.mock("../lib/reportProblem", () => ({ reportProblem: () => {} }));
+vi.mock("../lib/loginSession", () => ({
+  startLoginSession: (agent: string) => {
+    world.logins.push(agent);
+  },
+}));
 vi.mock("../lib/termInput", () => ({ typeIntoActiveSession: async () => {} }));
 
 import { usePaletteStore } from "./paletteStore";
@@ -99,6 +105,7 @@ beforeEach(() => {
   world.indexedFiles = [];
   world.indexCalls = 0;
   world.indexError = null;
+  world.logins = [];
   usePaletteStore.setState({
     open: false,
     query: "",
@@ -263,5 +270,25 @@ describe("execute", () => {
       }),
     ).rejects.toThrow("boom");
     expect(usePaletteStore.getState().open).toBe(false);
+  });
+});
+
+describe("engine login repair actions", () => {
+  it("'>fix login' surfaces both engines when a project is open", () => {
+    const labels = results(">fix login").map((i) => i.label);
+    expect(labels).toContain("Fix Claude login");
+    expect(labels).toContain("Fix Codex login");
+  });
+
+  it("hidden without a project (a login session needs a cwd)", () => {
+    world.projectRoot = null;
+    const labels = results(">fix login").map((i) => i.label);
+    expect(labels).not.toContain("Fix Claude login");
+  });
+
+  it("executing the action starts the login session for the right engine", async () => {
+    const item = results(">fix codex").find((i) => i.label === "Fix Codex login")!;
+    await usePaletteStore.getState().execute(item);
+    expect(world.logins).toEqual(["codex"]);
   });
 });

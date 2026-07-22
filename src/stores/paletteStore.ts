@@ -11,6 +11,7 @@ import { useToastStore } from "./toastStore";
 import { useUpdaterStore } from "./updaterStore";
 import { reportProblem } from "../lib/reportProblem";
 import { typeIntoActiveSession } from "../lib/termInput";
+import { startLoginSession } from "../lib/loginSession";
 
 export type PaletteItemKind = "file" | "action" | "session" | "branch";
 
@@ -261,6 +262,22 @@ const ACTIONS: PaletteAction[] = [
     keywords: ["cwd", "folder", "root"],
     available: () => !!useSessionStore.getState().project,
     run: () => emit("ac:copy-project-path", null),
+  },
+  {
+    id: "auth.claude_login",
+    label: "Fix Claude login",
+    hint: "Open a terminal running claude to repair an expired login",
+    keywords: ["auth", "login", "oauth", "expired", "credentials", "authenticate"],
+    available: () => !!useSessionStore.getState().project,
+    run: () => startLoginSession("claude"),
+  },
+  {
+    id: "auth.codex_login",
+    label: "Fix Codex login",
+    hint: "Open a terminal running codex login",
+    keywords: ["auth", "login", "oauth", "expired", "credentials", "authenticate"],
+    available: () => !!useSessionStore.getState().project,
+    run: () => startLoginSession("codex"),
   },
   {
     id: "app.check_updates",

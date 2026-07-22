@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { isAuthError, startLoginSession } from "../lib/loginSession";
 import { useAdvisorStore, type AdvisorItem } from "../stores/advisorStore";
 
 export function AdvisorPanel() {
@@ -83,6 +84,15 @@ export function AdvisorPanel() {
             <button className="wb-cta" onClick={analyze}>
               Retry
             </button>
+            {isAuthError(errorMessage) && (
+              <button
+                className="wb-cta"
+                style={{ marginLeft: 8 }}
+                onClick={() => startLoginSession("claude")}
+              >
+                Fix Claude login
+              </button>
+            )}
           </section>
         )}
 

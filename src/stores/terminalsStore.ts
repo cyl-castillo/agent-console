@@ -50,6 +50,9 @@ export interface TerminalSession {
   /// FIRST spawn only (e.g. a Jira ticket's context). Typed WITHOUT a trailing
   /// newline so the human reviews and sends it. Never persisted.
   seedPrompt?: string;
+  /// Run the profile's loginCmd instead of the normal agent launch — the
+  /// "fix login" flow. Transient by nature; never persisted.
+  loginOnly?: boolean;
 }
 
 interface TerminalsState {
@@ -72,6 +75,7 @@ interface TerminalsState {
     worktree?: WorktreeRef,
     setupCmd?: string,
     seedPrompt?: string,
+    loginOnly?: boolean,
   ) => string;
   /// Marks a stopped session as live again so Terminal mounts and spawns.
   resume: (id: string) => void;
@@ -155,7 +159,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     set({ projectRoot: null, sessions: [], activeId: null, ready: false });
   },
 
-  add: (cwd, name, model, agent, worktree, setupCmd, seedPrompt) => {
+  add: (cwd, name, model, agent, worktree, setupCmd, seedPrompt, loginOnly) => {
     const id = genId();
     const { sessions } = get();
     const session: TerminalSession = {
@@ -171,6 +175,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       worktree,
       setupCmd,
       seedPrompt,
+      loginOnly,
     };
     set({ sessions: [...sessions, session], activeId: id });
     return id;

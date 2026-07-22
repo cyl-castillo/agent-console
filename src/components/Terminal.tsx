@@ -253,15 +253,20 @@ export function Terminal({ session, visible }: Props) {
       // type the command as text into the login-shell PTY, which resolves the
       // bare binary (`claude`/`codex`) from the user's PATH.
       if (termId) {
+        const profile = profileFor(session.agent);
         const {
           cmd: launchCmd,
           label: launchLabel,
           note: launchNote,
-        } = profileFor(session.agent).buildLaunch({
-          agentSessionId: session.claudeSessionId,
-          model: session.model,
-          hasScrollback: Boolean(session.initialScrollback),
-        });
+        } = session.loginOnly
+          ? // "Fix login" session: run the profile's interactive login flow
+            // instead of a normal agent launch (browser OAuth can't be headless).
+            { cmd: profile.loginCmd, label: profile.loginCmd, note: "fixing login —" }
+          : profile.buildLaunch({
+              agentSessionId: session.claudeSessionId,
+              model: session.model,
+              hasScrollback: Boolean(session.initialScrollback),
+            });
         const tid = termId;
         // Fresh worktree sessions may carry a one-shot install command (from
         // .claude/worktree-setup.json). Chain it before the agent launch so it

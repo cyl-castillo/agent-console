@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { isAuthError, startLoginSession } from "../lib/loginSession";
 import { useLearningStore, type CurationItem, type LearningItem } from "../stores/learningStore";
 
 export function LearningPanel() {
@@ -103,6 +104,15 @@ export function LearningPanel() {
             <button className="wb-cta" onClick={reflect}>
               Retry
             </button>
+            {isAuthError(errorMessage) && (
+              <button
+                className="wb-cta"
+                style={{ marginLeft: 8 }}
+                onClick={() => startLoginSession("claude")}
+              >
+                Fix Claude login
+              </button>
+            )}
           </section>
         )}
 
@@ -231,6 +241,15 @@ function CurationSection() {
           <button className="wb-cta" onClick={curate}>
             Retry
           </button>
+          {isAuthError(error) && (
+            <button
+              className="wb-cta"
+              style={{ marginLeft: 8 }}
+              onClick={() => startLoginSession("claude")}
+            >
+              Fix Claude login
+            </button>
+          )}
         </>
       )}
 
