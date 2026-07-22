@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { ipc } from "../ipc/tauri";
 import { useJiraStore } from "../stores/jiraStore";
+import { useToastStore } from "../stores/toastStore";
 import { useChangesStore } from "../stores/changesStore";
 import { startSessionForIssue } from "../lib/startSessionForIssue";
 import { groupIssuesByStatus, intentForIssue, intentVerb } from "../lib/jira";
@@ -184,11 +185,38 @@ function IssueList() {
   );
 }
 
+/// Today as YYYY-MM-DD in local time (what a date input expects).
+function todayISO(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
   const verb = intentVerb(intentForIssue(issue));
   // null = editor closed. A string = open, holding the (editable) branch name.
   const [branch, setBranch] = useState<string | null>(null);
   const [proposing, setProposing] = useState(false);
+  // Worklog editor state (null = closed).
+  const [log, setLog] = useState<{ duration: string; date: string; comment: string } | null>(null);
+  const [logging, setLogging] = useState(false);
+  const logWork = useJiraStore((s) => s.logWork);
+  const showToast = useToastStore((s) => s.show);
+
+  const submitLog = async () => {
+    if (!log || logging) return;
+    if (!log.duration.trim()) return;
+    setLogging(true);
+    const label = await logWork(issue.key, log.duration, log.date, log.comment || undefined);
+    setLogging(false);
+    if (label) {
+      setLog(null);
+      showToast(`Logged ${label} on ${issue.key}`, "success");
+    } else {
+      const err = useJiraStore.getState().logError ?? "unknown error";
+      showToast(`Worklog failed: ${err.slice(0, 140)}`, "error");
+    }
+  };
 
   const openWorktreeEditor = async () => {
     setProposing(true);
@@ -229,7 +257,52 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
       </div>
       <div className="jira-summary">{issue.summary}</div>
 
-      {branch !== null ? (
+      {log !== null ? (
+        <div className="jira-log-editor" onClick={(e) => e.stopPropagation()}>
+          <input
+            className="jira-log-duration"
+            value={log.duration}
+            placeholder="1h 30m"
+            autoFocus
+            spellCheck={false}
+            onChange={(e) => setLog({ ...log, duration: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submitLog();
+              if (e.key === "Escape") setLog(null);
+            }}
+            title='Time spent — "1h 30m", "90m", "2h"'
+          />
+          <input
+            className="jira-log-date"
+            type="date"
+            value={log.date}
+            onChange={(e) => setLog({ ...log, date: e.target.value })}
+            title="Day the work happened"
+          />
+          <input
+            className="jira-log-comment"
+            value={log.comment}
+            placeholder="comment (optional)"
+            spellCheck={false}
+            onChange={(e) => setLog({ ...log, comment: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submitLog();
+              if (e.key === "Escape") setLog(null);
+            }}
+          />
+          <button
+            className="jira-start"
+            onClick={() => void submitLog()}
+            disabled={logging || !log.duration.trim()}
+            title={`Log this time on ${issue.key}`}
+          >
+            {logging ? "…" : "Log"}
+          </button>
+          <button className="jira-wt-cancel" onClick={() => setLog(null)} title="Cancel">
+            ✕
+          </button>
+        </div>
+      ) : branch !== null ? (
         <div className="jira-wt-editor" onClick={(e) => e.stopPropagation()}>
           <span className="jira-wt-label">branch</span>
           <input
@@ -262,6 +335,13 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
             <span> · {issue.project}</span>
           </div>
           <div className="jira-issue-actions">
+            <button
+              className="jira-start jira-start-log"
+              onClick={() => setLog({ duration: "", date: todayISO(), comment: "" })}
+              title={`Log time spent on ${issue.key}`}
+            >
+              ⏱ log
+            </button>
             {isRepo && (
               <button
                 className="jira-start jira-start-wt"

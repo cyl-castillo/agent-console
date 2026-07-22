@@ -149,6 +149,7 @@ pub fn run() {
             commands::jira::jira_connect,
             commands::jira::jira_disconnect,
             commands::jira::jira_list_issues,
+            commands::jira::jira_log_work,
             commands::notes::notes_list,
             commands::notes::notes_save,
             commands::hooks::approvals_pending,

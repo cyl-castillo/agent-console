@@ -18,6 +18,15 @@ interface JiraState {
   connect: (siteUrl: string, email: string, token: string) => Promise<boolean>;
   disconnect: () => Promise<void>;
   refreshIssues: () => Promise<void>;
+  /// Log time on an issue. Resolves to the normalized label logged ("1h 30m")
+  /// or null on failure (error surfaced via the returned message in `logError`).
+  logWork: (
+    issueKey: string,
+    duration: string,
+    started: string,
+    comment?: string,
+  ) => Promise<string | null>;
+  logError: string | null;
 }
 
 export const useJiraStore = create<JiraState>((set, get) => ({
@@ -76,6 +85,17 @@ export const useJiraStore = create<JiraState>((set, get) => ({
       set({ issues, loadingIssues: false });
     } catch (e) {
       set({ loadingIssues: false, issuesError: String(e) });
+    }
+  },
+
+  logError: null,
+  logWork: async (issueKey, duration, started, comment) => {
+    set({ logError: null });
+    try {
+      return await ipc.jiraLogWork(issueKey, duration, started, comment);
+    } catch (e) {
+      set({ logError: String(e) });
+      return null;
     }
   },
 }));
