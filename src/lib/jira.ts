@@ -108,3 +108,44 @@ export function groupIssuesByStatus(issues: JiraIssue[]): IssueGroup[] {
         a.status.localeCompare(b.status),
     );
 }
+
+/// Normalized priority tier for visual treatment. Jira priority names are
+/// project-customizable, so classify by keywords with a neutral fallback.
+export type PriorityLevel = "critical" | "high" | "medium" | "low" | "none";
+
+export function priorityLevel(priority: string | null | undefined): PriorityLevel {
+  const p = (priority ?? "").toLowerCase();
+  if (!p) return "none";
+  if (/highest|blocker|critical|urgent|p0/.test(p)) return "critical";
+  if (/high|major|p1/.test(p)) return "high";
+  if (/lowest|low|minor|trivial|p[34]/.test(p)) return "low";
+  if (/medium|normal|p2/.test(p)) return "medium";
+  return "none";
+}
+
+/// Due-date urgency for the semaphore. Day-granular, local time.
+export type DueState = "overdue" | "today" | "soon" | "later";
+
+export function dueState(due: string | null | undefined, nowMs: number): DueState | null {
+  if (!due) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(due);
+  if (!m) return null;
+  const dueDay = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();
+  const now = new Date(nowMs);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const DAY = 86_400_000;
+  if (dueDay < today) return "overdue";
+  if (dueDay === today) return "today";
+  if (dueDay <= today + 3 * DAY) return "soon";
+  return "later";
+}
+
+/// CSS modifier for the colored type dot. Same keyword approach as intents.
+export function typeDotClass(issueType: string): string {
+  const t = issueType.toLowerCase();
+  if (/bug|defect|incident|hotfix/.test(t)) return "type-bug";
+  if (/story/.test(t)) return "type-story";
+  if (/epic/.test(t)) return "type-epic";
+  if (/task|sub/.test(t)) return "type-task";
+  return "type-other";
+}

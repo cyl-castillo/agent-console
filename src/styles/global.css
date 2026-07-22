@@ -8435,6 +8435,83 @@ select:focus-visible,
   margin-left: auto;
   font-size: 10px;
   color: var(--text-faint);
+  white-space: nowrap;
+}
+/* Due-date semaphore: overdue screams, today warns, soon is visible, later fades. */
+.jira-due.due-overdue {
+  color: var(--danger, #e5484d);
+  font-weight: 600;
+}
+.jira-due.due-today {
+  color: var(--warn);
+  font-weight: 600;
+}
+.jira-due.due-soon {
+  color: var(--text-dim);
+}
+
+/* Colored dot standing in for the issue type (bug red, story green, …). */
+.jira-type-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.jira-type-dot.type-bug {
+  background: var(--danger, #e5484d);
+}
+.jira-type-dot.type-story {
+  background: var(--ok);
+}
+.jira-type-dot.type-task {
+  background: var(--accent);
+}
+.jira-type-dot.type-epic {
+  background: #a78bfa;
+}
+.jira-type-dot.type-other {
+  background: color-mix(in srgb, var(--text) 35%, transparent);
+}
+
+/* Priority chip — only surfaced when it carries signal (not medium/none). */
+.jira-prio {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.jira-prio.prio-critical {
+  background: color-mix(in srgb, var(--danger, #e5484d) 18%, transparent);
+  color: var(--danger, #e5484d);
+  font-weight: 700;
+}
+.jira-prio.prio-high {
+  background: var(--warn-12);
+  color: var(--warn);
+  font-weight: 600;
+}
+.jira-prio.prio-low {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-faint);
+}
+
+/* Quick filter over the queue. */
+.jira-filter {
+  width: 100%;
+  margin: 6px 0 2px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.jira-filter:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .jira-summary {
   font-size: 12.5px;
@@ -8597,7 +8674,28 @@ select:focus-visible,
   padding: 4px 0 6px;
 }
 .agenda-group-title.overdue {
-  color: var(--warn);
+  color: var(--danger, #e5484d);
+}
+.agenda-group-title.today {
+  color: var(--accent);
+}
+.agenda-group-count {
+  margin-left: 6px;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+.agenda-kind-icon {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-faint);
+  padding-top: 1px;
+}
+.agenda-item.overdue .agenda-when {
+  color: var(--danger, #e5484d);
+  font-weight: 600;
 }
 .agenda-items {
   list-style: none;

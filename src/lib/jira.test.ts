@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { intentForIssue, seedForIssue, groupIssuesByStatus } from "./jira";
+import {
+  intentForIssue,
+  seedForIssue,
+  groupIssuesByStatus,
+  priorityLevel,
+  dueState,
+  typeDotClass,
+} from "./jira";
 import type { JiraIssue } from "../types/domain";
 
 function issue(over: Partial<JiraIssue> = {}): JiraIssue {
@@ -96,5 +103,41 @@ describe("groupIssuesByStatus", () => {
   });
   it("empty in, empty out", () => {
     expect(groupIssuesByStatus([])).toEqual([]);
+  });
+});
+
+describe("priorityLevel (visual tier from customizable names)", () => {
+  it("classifies common Jira priority names", () => {
+    expect(priorityLevel("Highest")).toBe("critical");
+    expect(priorityLevel("Blocker")).toBe("critical");
+    expect(priorityLevel("High")).toBe("high");
+    expect(priorityLevel("Medium")).toBe("medium");
+    expect(priorityLevel("Low")).toBe("low");
+    expect(priorityLevel("Lowest")).toBe("low");
+    expect(priorityLevel(null)).toBe("none");
+    expect(priorityLevel("Weird Custom")).toBe("none");
+  });
+});
+
+describe("dueState (day-granular semaphore)", () => {
+  const now = new Date(2026, 6, 22, 15, 0).getTime(); // Jul 22 2026, 3pm local
+  it("classifies against local days, not raw hours", () => {
+    expect(dueState("2026-07-21", now)).toBe("overdue");
+    expect(dueState("2026-07-22", now)).toBe("today");
+    expect(dueState("2026-07-24", now)).toBe("soon");
+    expect(dueState("2026-08-15", now)).toBe("later");
+    expect(dueState(null, now)).toBeNull();
+    expect(dueState("garbage", now)).toBeNull();
+  });
+});
+
+describe("typeDotClass", () => {
+  it("maps common types and falls back", () => {
+    expect(typeDotClass("Bug")).toBe("type-bug");
+    expect(typeDotClass("Story")).toBe("type-story");
+    expect(typeDotClass("Task")).toBe("type-task");
+    expect(typeDotClass("Sub-task")).toBe("type-task");
+    expect(typeDotClass("Epic")).toBe("type-epic");
+    expect(typeDotClass("Spike")).toBe("type-other");
   });
 });
