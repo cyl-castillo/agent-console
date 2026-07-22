@@ -51,10 +51,8 @@ pub fn analyze(project_root: &Path) -> AppResult<AnalysisResult> {
         .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Other(format!(
-            "claude exited with status {}: {}",
-            output.status, stderr
+        return Err(AppError::Other(crate::services::claude_cli::exit_error(
+            &output,
         )));
     }
 

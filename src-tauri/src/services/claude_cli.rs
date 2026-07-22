@@ -263,3 +263,65 @@ fn scan_version_manager(root: &Path, base: &str) -> Option<std::path::PathBuf> {
     }
     None
 }
+
+/// Build the error message for a non-zero `claude -p` exit. Claude Code often
+/// prints the actual reason (auth expiry, usage limits) to STDOUT, not stderr
+/// — the old stderr-only message reduced a real "OAuth session expired and
+/// could not be refreshed" to a bare "exit status 1:". Prefer stderr, fall
+/// back to stdout, cap the length, and add the fix-it hint for auth failures.
+pub fn exit_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw = if stderr.trim().is_empty() {
+        stdout.trim()
+    } else {
+        stderr.trim()
+    };
+    let reason: String = raw.chars().take(300).collect();
+    let mut msg = if reason.is_empty() {
+        format!("claude exited with status {} (no output)", output.status)
+    } else {
+        format!("claude exited with status {}: {reason}", output.status)
+    };
+    let lower = reason.to_lowercase();
+    if lower.contains("authenticate") || lower.contains("oauth") || lower.contains("logged in") {
+        msg.push_str(" — run `claude` in a terminal and log in again");
+    }
+    msg
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    fn fake_output(code: &str, stdout: &str, stderr: &str) -> std::process::Output {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "printf %s '{stdout}'; printf %s '{stderr}' >&2; exit {code}"
+            ))
+            .output()
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_error_prefers_stderr_but_surfaces_stdout_reasons() {
+        let both = fake_output("1", "stdout says A", "stderr says B");
+        assert!(exit_error(&both).contains("stderr says B"));
+
+        // The real-world case: auth errors land on stdout with empty stderr.
+        let auth = fake_output(
+            "1",
+            "Failed to authenticate: OAuth session expired and could not be refreshed",
+            "",
+        );
+        let msg = exit_error(&auth);
+        assert!(msg.contains("OAuth session expired"), "{msg}");
+        assert!(msg.contains("log in again"), "{msg}");
+
+        let silent = fake_output("1", "", "");
+        assert!(exit_error(&silent).contains("no output"));
+    }
+}
