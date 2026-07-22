@@ -27,8 +27,8 @@ pub fn jira_disconnect() -> AppResult<()> {
 }
 
 #[tauri::command]
-pub async fn jira_list_issues() -> AppResult<Vec<JiraIssue>> {
-    jira_service::list_assigned().await
+pub async fn jira_list_issues(jql: Option<String>) -> AppResult<Vec<JiraIssue>> {
+    jira_service::list_assigned(jql.as_deref()).await
 }
 
 /// Log time on an issue. `duration` is human ("1h 30m"), `started` is

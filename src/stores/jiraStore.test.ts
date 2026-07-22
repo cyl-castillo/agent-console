@@ -7,6 +7,7 @@ const world = vi.hoisted(() => ({
   disconnectError: null as string | null,
   issues: [] as { key: string }[],
   issuesError: null as string | null,
+  jqls: [] as (string | null)[],
   logged: [] as string[],
   logError: null as string | null,
 }));
@@ -29,8 +30,9 @@ vi.mock("../ipc/tauri", () => ({
     jiraDisconnect: async () => {
       if (world.disconnectError) throw new Error(world.disconnectError);
     },
-    jiraListIssues: async () => {
+    jiraListIssues: async (jql?: string) => {
       if (world.issuesError) throw new Error(world.issuesError);
+      world.jqls.push(jql ?? null);
       return world.issues;
     },
   },
@@ -47,6 +49,7 @@ beforeEach(() => {
   world.issuesError = null;
   world.logged = [];
   world.logError = null;
+  world.jqls = [];
   useJiraStore.setState({
     status: null,
     issues: [],
@@ -56,6 +59,7 @@ beforeEach(() => {
     connectError: null,
     issuesError: null,
     logError: null,
+    jql: null,
   });
 });
 
@@ -134,5 +138,22 @@ describe("worklog", () => {
     const label = await useJiraStore.getState().logWork("FIX-1", "1h", "2026-07-22");
     expect(label).toBeNull();
     expect(useJiraStore.getState().logError).toContain("401");
+  });
+});
+
+describe("role-driven JQL", () => {
+  it("setJql refreshes the queue with the new query when connected", async () => {
+    useJiraStore.setState({ status: { configured: true, siteUrl: "https://x", email: "a@b.c" } });
+    await useJiraStore.getState().setJql("statusCategory != Done");
+    expect(world.jqls).toEqual(["statusCategory != Done"]);
+    // Same JQL again: no redundant fetch.
+    await useJiraStore.getState().setJql("statusCategory != Done");
+    expect(world.jqls).toHaveLength(1);
+  });
+
+  it("setJql while not configured just stores it for the next refresh", async () => {
+    await useJiraStore.getState().setJql("anything");
+    expect(world.jqls).toEqual([]);
+    expect(useJiraStore.getState().jql).toBe("anything");
   });
 });

@@ -6,6 +6,7 @@ import { useUIStore } from "../stores/uiStore";
 import { useToastStore } from "../stores/toastStore";
 import { ipc } from "../ipc/tauri";
 import { seedForIssue, intentForIssue, intentVerb } from "./jira";
+import { useRoleStore } from "../stores/roleStore";
 import type { JiraIssue } from "../types/domain";
 
 export interface StartOptions {
@@ -33,7 +34,8 @@ export async function startSessionForIssue(
   const models = useModelStore.getState();
   const agent = models.defaultAgentFor(project.root) ?? DEFAULT_AGENT;
   const model = models.defaultFor(project.root, agent);
-  const seed = seedForIssue(issue);
+  const role = useRoleStore.getState().roleFor(project.root);
+  const seed = seedForIssue(issue, role);
   const verb = intentVerb(intentForIssue(issue));
   const terminals = useTerminalsStore.getState();
   const toast = useToastStore.getState();

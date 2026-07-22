@@ -209,7 +209,7 @@ export const ipc = {
   jiraConnect: (siteUrl: string, email: string, token: string) =>
     invoke<string>("jira_connect", { siteUrl, email, token }),
   jiraDisconnect: () => invoke<void>("jira_disconnect"),
-  jiraListIssues: () => invoke<JiraIssue[]>("jira_list_issues"),
+  jiraListIssues: (jql?: string) => invoke<JiraIssue[]>("jira_list_issues", { jql: jql ?? null }),
   jiraLogWork: (issueKey: string, duration: string, started: string, comment?: string) =>
     invoke<string>("jira_log_work", { issueKey, duration, started, comment: comment ?? null }),
   jiraWorklogSuggestion: (

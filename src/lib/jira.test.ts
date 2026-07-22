@@ -8,6 +8,7 @@ import {
   priorityLevel,
   dueState,
   typeDotClass,
+  jqlForRole,
 } from "./jira";
 import type { JiraIssue } from "../types/domain";
 
@@ -150,5 +151,44 @@ describe("formatSecondsForWorklog (rounds UP to 5m)", () => {
     expect(formatSecondsForWorklog(3600)).toBe("1h");
     expect(formatSecondsForWorklog(61)).toBe("5m");
     expect(formatSecondsForWorklog(7 * 3600 + 56 * 60)).toBe("8h");
+  });
+});
+
+describe("roles", () => {
+  const issue = {
+    key: "FIX-9",
+    summary: "Cobrar en dos monedas",
+    status: "To Do",
+    statusCategory: "new",
+    priority: "High",
+    issueType: "Story",
+    dueDate: null,
+    project: "Fixy",
+    updated: null,
+    url: "https://x.atlassian.net/browse/FIX-9",
+  };
+
+  it("PO and PM see the whole project; everyone else their own queue", () => {
+    expect(jqlForRole("po")).not.toContain("currentUser()");
+    expect(jqlForRole("pm")).not.toContain("currentUser()");
+    for (const r of ["developer", "qa", "analyst"] as const) {
+      expect(jqlForRole(r)).toContain("assignee = currentUser()");
+    }
+  });
+
+  it("role trumps stage in the seeded prompt", () => {
+    expect(seedForIssue(issue, "qa")).toContain("test plan");
+    expect(seedForIssue(issue, "analyst")).toContain("functional acceptance");
+    expect(seedForIssue(issue, "po")).toContain("acceptance");
+    expect(seedForIssue(issue, "pm")).toContain("stakeholders");
+    // Developer keeps the stage-aware behavior (To Do -> implement).
+    expect(seedForIssue(issue, "developer")).toContain("plan and implement");
+    expect(seedForIssue(issue)).toContain("plan and implement");
+  });
+
+  it("read-only roles tell the agent not to change code", () => {
+    for (const r of ["analyst", "po", "pm"] as const) {
+      expect(seedForIssue(issue, r).toLowerCase()).toContain("don't change any");
+    }
   });
 });
