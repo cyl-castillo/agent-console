@@ -8502,6 +8502,50 @@ select:focus-visible,
   gap: 5px;
   margin-top: 5px;
 }
+/* Inline worklog editor — same visual family as the branch editor. */
+.jira-log-editor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  flex-wrap: wrap;
+}
+.jira-log-duration,
+.jira-log-date,
+.jira-log-comment {
+  min-width: 0;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+.jira-log-duration {
+  width: 64px;
+  flex: none;
+}
+.jira-log-date {
+  flex: none;
+  color-scheme: dark;
+}
+:root[data-theme="light"] .jira-log-date {
+  color-scheme: light;
+}
+.jira-log-comment {
+  flex: 1;
+  min-width: 90px;
+}
+.jira-log-duration:focus-visible,
+.jira-log-date:focus-visible,
+.jira-log-comment:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.jira-log-editor .jira-start {
+  opacity: 1;
+}
 .jira-wt-label {
   font-size: 9.5px;
   text-transform: uppercase;

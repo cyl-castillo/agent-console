@@ -7,10 +7,17 @@ const world = vi.hoisted(() => ({
   disconnectError: null as string | null,
   issues: [] as { key: string }[],
   issuesError: null as string | null,
+  logged: [] as string[],
+  logError: null as string | null,
 }));
 
 vi.mock("../ipc/tauri", () => ({
   ipc: {
+    jiraLogWork: async (issueKey: string, duration: string) => {
+      if (world.logError) throw new Error(world.logError);
+      world.logged.push(`${issueKey}:${duration}`);
+      return "1h 30m";
+    },
     jiraStatus: async () => {
       if (world.statusError) throw new Error(world.statusError);
       return world.status;
@@ -38,6 +45,8 @@ beforeEach(() => {
   world.disconnectError = null;
   world.issues = [];
   world.issuesError = null;
+  world.logged = [];
+  world.logError = null;
   useJiraStore.setState({
     status: null,
     issues: [],
@@ -46,6 +55,7 @@ beforeEach(() => {
     connecting: false,
     connectError: null,
     issuesError: null,
+    logError: null,
   });
 });
 
@@ -109,5 +119,20 @@ describe("jira connection", () => {
     const s = useJiraStore.getState();
     expect(s.issuesError).toContain("jql rejected");
     expect(s.connectError).toBeNull();
+  });
+});
+describe("worklog", () => {
+  it("logWork resolves to the normalized label on success", async () => {
+    const label = await useJiraStore.getState().logWork("FIX-1", "90m", "2026-07-22");
+    expect(label).toBe("1h 30m");
+    expect(world.logged).toEqual(["FIX-1:90m"]);
+    expect(useJiraStore.getState().logError).toBeNull();
+  });
+
+  it("logWork failure returns null and surfaces the error", async () => {
+    world.logError = "401 unauthorized";
+    const label = await useJiraStore.getState().logWork("FIX-1", "1h", "2026-07-22");
+    expect(label).toBeNull();
+    expect(useJiraStore.getState().logError).toContain("401");
   });
 });

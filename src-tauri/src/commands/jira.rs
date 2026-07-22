@@ -30,3 +30,15 @@ pub fn jira_disconnect() -> AppResult<()> {
 pub async fn jira_list_issues() -> AppResult<Vec<JiraIssue>> {
     jira_service::list_assigned().await
 }
+
+/// Log time on an issue. `duration` is human ("1h 30m"), `started` is
+/// YYYY-MM-DD. Returns the normalized label that was logged.
+#[tauri::command]
+pub async fn jira_log_work(
+    issue_key: String,
+    duration: String,
+    started: String,
+    comment: Option<String>,
+) -> AppResult<String> {
+    jira_service::log_work(&issue_key, &duration, &started, comment.as_deref()).await
+}

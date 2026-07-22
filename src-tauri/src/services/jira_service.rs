@@ -220,6 +220,152 @@ pub async fn list_assigned() -> AppResult<Vec<JiraIssue>> {
         .collect())
 }
 
+/// Parse a human duration into seconds: "1h 30m", "1h30m", "90m", "2h",
+/// "1.5h", or a bare number (minutes). Rejects zero, negatives and garbage —
+/// this feeds a billing-adjacent API, better to ask again than to guess.
+pub fn parse_duration_to_seconds(input: &str) -> AppResult<u64> {
+    let s = input.trim().to_lowercase();
+    if s.is_empty() {
+        return Err(AppError::InvalidArgument("empty duration".into()));
+    }
+    // Bare number = minutes ("45" → 45m).
+    if let Ok(mins) = s.parse::<f64>() {
+        return finish_duration(mins * 60.0);
+    }
+    let mut total = 0.0f64;
+    let mut rest = s.as_str();
+    for unit_secs in [("h", 3600.0), ("m", 60.0)] {
+        let (unit, secs_per) = unit_secs;
+        if let Some(pos) = rest.find(unit) {
+            let (num_part, tail) = rest.split_at(pos);
+            let num = num_part.trim();
+            if !num.is_empty() {
+                let v: f64 = num
+                    .parse()
+                    .map_err(|_| AppError::InvalidArgument(format!("bad duration near '{num}'")))?;
+                if v < 0.0 {
+                    return Err(AppError::InvalidArgument(
+                        "duration must be positive".into(),
+                    ));
+                }
+                total += v * secs_per;
+            }
+            rest = tail[unit.len()..].trim_start();
+        }
+    }
+    if !rest.trim().is_empty() {
+        return Err(AppError::InvalidArgument(format!(
+            "couldn't parse duration '{input}' — use forms like \"1h 30m\", \"90m\", \"2h\""
+        )));
+    }
+    finish_duration(total)
+}
+
+/// Shared tail: round, and reject non-finite, zero/negative, or absurd
+/// (> 999h) durations before they reach a billing-adjacent API.
+fn finish_duration(total_secs: f64) -> AppResult<u64> {
+    let secs = total_secs.round();
+    if !secs.is_finite() || secs <= 0.0 {
+        return Err(AppError::InvalidArgument(
+            "duration must be positive".into(),
+        ));
+    }
+    if secs > 999.0 * 3600.0 {
+        return Err(AppError::InvalidArgument(
+            "duration is implausibly large".into(),
+        ));
+    }
+    Ok(secs as u64)
+}
+
+/// Seconds → Jira-style compact label ("1h 30m", "45m").
+pub fn format_duration(secs: u64) -> String {
+    let h = secs / 3600;
+    let m = (secs % 3600 + 30) / 60; // round to the minute for display
+    match (h, m) {
+        (0, m) => format!("{m}m"),
+        (h, 0) => format!("{h}h"),
+        (h, m) => format!("{h}h {m}m"),
+    }
+}
+
+fn valid_issue_key(key: &str) -> bool {
+    let mut parts = key.splitn(2, '-');
+    let (Some(proj), Some(num)) = (parts.next(), parts.next()) else {
+        return false;
+    };
+    !proj.is_empty()
+        && proj.chars().all(|c| c.is_ascii_alphanumeric())
+        && proj.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        && !num.is_empty()
+        && num.chars().all(|c| c.is_ascii_digit())
+}
+
+fn valid_date(d: &str) -> bool {
+    let b = d.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && d.chars()
+            .enumerate()
+            .all(|(i, c)| matches!(i, 4 | 7) || c.is_ascii_digit())
+}
+
+/// Log work on an issue. `duration` is human ("1h 30m"); `started_date` is
+/// YYYY-MM-DD (logged at 12:00 local-agnostic to dodge timezone day flips);
+/// `comment` optional. Returns the label actually logged ("1h 30m").
+pub async fn log_work(
+    issue_key: &str,
+    duration: &str,
+    started_date: &str,
+    comment: Option<&str>,
+) -> AppResult<String> {
+    let key = issue_key.trim().to_uppercase();
+    if !valid_issue_key(&key) {
+        return Err(AppError::InvalidArgument(format!(
+            "'{issue_key}' doesn't look like an issue key"
+        )));
+    }
+    if !valid_date(started_date) {
+        return Err(AppError::InvalidArgument(
+            "started date must be YYYY-MM-DD".into(),
+        ));
+    }
+    let secs = parse_duration_to_seconds(duration)?;
+
+    let mut body = serde_json::json!({
+        "timeSpentSeconds": secs,
+        "started": format!("{started_date}T12:00:00.000+0000"),
+    });
+    if let Some(text) = comment.map(str::trim).filter(|t| !t.is_empty()) {
+        body["comment"] = serde_json::json!({
+            "type": "doc",
+            "version": 1,
+            "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": text }] }],
+        });
+    }
+
+    let (cfg, token) = creds()?;
+    let resp = client()?
+        .post(format!("{}/rest/api/3/issue/{key}/worklog", cfg.site_url))
+        .basic_auth(&cfg.email, Some(&token))
+        .header("Accept", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| AppError::Other(format!("Jira request failed: {e}")))?;
+    match resp.status() {
+        s if s.is_success() => Ok(format_duration(secs)),
+        reqwest::StatusCode::UNAUTHORIZED => Err(AppError::Other(
+            "Jira rejected the credentials (401)".into(),
+        )),
+        reqwest::StatusCode::NOT_FOUND => Err(AppError::Other(format!(
+            "Jira says {key} doesn't exist (404)"
+        ))),
+        s => Err(AppError::Other(format!("Jira worklog returned {s}"))),
+    }
+}
+
 fn flatten(site: &str, i: RawIssue) -> JiraIssue {
     let f = i.fields;
     JiraIssue {
@@ -340,5 +486,51 @@ mod tests {
         assert_eq!(out.status_category, "indeterminate");
         assert_eq!(out.priority, None);
         assert_eq!(out.issue_type, "Bug");
+    }
+
+    #[test]
+    fn duration_parsing_accepts_human_forms() {
+        for (input, want) in [
+            ("1h 30m", 5400),
+            ("1h30m", 5400),
+            ("90m", 5400),
+            ("2h", 7200),
+            ("1.5h", 5400),
+            ("45", 2700),
+            (" 15m ", 900),
+        ] {
+            assert_eq!(parse_duration_to_seconds(input).unwrap(), want, "{input}");
+        }
+    }
+
+    #[test]
+    fn duration_parsing_rejects_garbage_zero_and_absurd() {
+        for bad in ["", "abc", "0", "0m", "-1h", "1h what", "m", "inf", "1000h"] {
+            assert!(
+                parse_duration_to_seconds(bad).is_err(),
+                "{bad:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn duration_formatting_round_trips_for_display() {
+        assert_eq!(format_duration(5400), "1h 30m");
+        assert_eq!(format_duration(2700), "45m");
+        assert_eq!(format_duration(7200), "2h");
+    }
+
+    #[test]
+    fn issue_key_and_date_validation() {
+        assert!(valid_issue_key("FIX-123"));
+        assert!(valid_issue_key("A2B-9"));
+        assert!(!valid_issue_key("FIX"));
+        assert!(!valid_issue_key("-123"));
+        assert!(!valid_issue_key("2FIX-1"));
+        assert!(!valid_issue_key("FIX-12a"));
+        assert!(!valid_issue_key("FIX-1; rm"));
+        assert!(valid_date("2026-07-22"));
+        assert!(!valid_date("22/07/2026"));
+        assert!(!valid_date("2026-7-22"));
     }
 }
