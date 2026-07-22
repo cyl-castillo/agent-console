@@ -6,7 +6,14 @@ import { useJiraStore } from "../stores/jiraStore";
 import { useToastStore } from "../stores/toastStore";
 import { useChangesStore } from "../stores/changesStore";
 import { startSessionForIssue } from "../lib/startSessionForIssue";
-import { groupIssuesByStatus, intentForIssue, intentVerb } from "../lib/jira";
+import {
+  dueState,
+  groupIssuesByStatus,
+  intentForIssue,
+  intentVerb,
+  priorityLevel,
+  typeDotClass,
+} from "../lib/jira";
 import { PanelError } from "./PanelError";
 import type { JiraIssue } from "../types/domain";
 
@@ -141,8 +148,19 @@ function IssueList() {
   const refreshIssues = useJiraStore((s) => s.refreshIssues);
   const disconnect = useJiraStore((s) => s.disconnect);
   const status = useJiraStore((s) => s.status);
+  const [filter, setFilter] = useState("");
   // The worktree action only makes sense in a git repo.
   const isRepo = useChangesStore((s) => s.status?.isRepo ?? false);
+
+  const q = filter.trim().toLowerCase();
+  const visible = q
+    ? issues.filter(
+        (i) =>
+          i.key.toLowerCase().includes(q) ||
+          i.summary.toLowerCase().includes(q) ||
+          i.project.toLowerCase().includes(q),
+      )
+    : issues;
 
   return (
     <div className="jira-list">
@@ -162,12 +180,27 @@ function IssueList() {
 
       {issuesError && <PanelError message={issuesError} onRetry={() => void refreshIssues()} />}
 
+      {issues.length > 3 && (
+        <input
+          className="jira-filter"
+          value={filter}
+          placeholder="Filter by key, summary, project…"
+          spellCheck={false}
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setFilter("");
+          }}
+        />
+      )}
+
       {loadingIssues && issues.length === 0 ? (
         <div className="wb-hint">Loading assigned issues…</div>
       ) : issues.length === 0 && !issuesError ? (
         <div className="wb-empty">No open issues assigned to you. Nice.</div>
+      ) : visible.length === 0 ? (
+        <div className="wb-empty">Nothing matches “{filter.trim()}”.</div>
       ) : (
-        groupIssuesByStatus(issues).map((g) => (
+        groupIssuesByStatus(visible).map((g) => (
           <section key={g.status} className="jira-group">
             <div className={`jira-group-title cat-${g.statusCategory}`}>
               {g.status}
@@ -239,9 +272,17 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
     void startSessionForIssue(issue, { worktree: true, branch: b });
   };
 
+  const prio = priorityLevel(issue.priority);
+  const due = dueState(issue.dueDate, Date.now());
+
   return (
     <li className="jira-issue" title={issue.summary}>
       <div className="jira-issue-top">
+        <span
+          className={`jira-type-dot ${typeDotClass(issue.issueType)}`}
+          title={issue.issueType}
+          aria-hidden
+        />
         <button
           className="jira-key"
           onClick={() => void openUrl(issue.url)}
@@ -249,9 +290,18 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
         >
           {issue.key}
         </button>
-        {issue.dueDate && (
-          <span className="jira-due" title="Due date">
-            ⏱ {issue.dueDate}
+        {prio !== "none" && prio !== "medium" && (
+          <span className={`jira-prio prio-${prio}`} title={`${issue.priority} priority`}>
+            {issue.priority}
+          </span>
+        )}
+        {issue.dueDate && due && (
+          <span className={`jira-due due-${due}`} title={`Due ${issue.dueDate}`}>
+            {due === "overdue"
+              ? `overdue · ${issue.dueDate}`
+              : due === "today"
+                ? "due today"
+                : `⏱ ${issue.dueDate}`}
           </span>
         )}
       </div>
@@ -331,7 +381,6 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
         <div className="jira-issue-bottom">
           <div className="jira-meta">
             <span>{issue.issueType}</span>
-            {issue.priority && <span> · {issue.priority}</span>}
             <span> · {issue.project}</span>
           </div>
           <div className="jira-issue-actions">

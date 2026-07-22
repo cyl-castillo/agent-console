@@ -63,8 +63,11 @@ export function AgendaPanel() {
         ) : (
           BUCKET_ORDER.filter((b) => grouped.has(b)).map((b) => (
             <section key={b} className="agenda-group">
-              <div className={`agenda-group-title ${b === "overdue" ? "overdue" : ""}`}>
+              <div
+                className={`agenda-group-title ${b === "overdue" ? "overdue" : ""} ${b === "today" ? "today" : ""}`}
+              >
                 {BUCKET_LABELS[b]}
+                <span className="agenda-group-count">{grouped.get(b)!.length}</span>
               </div>
               <ul className="agenda-items">
                 {grouped.get(b)!.map((it) => (
@@ -91,7 +94,10 @@ function AgendaRow({ item }: { item: AgendaItem }) {
       });
 
   return (
-    <li className={`agenda-item kind-${item.kind}`}>
+    <li className={`agenda-item kind-${item.kind} ${item.bucket === "overdue" ? "overdue" : ""}`}>
+      <span className="agenda-kind-icon" aria-hidden>
+        {item.kind === "job" ? "⏱" : "◈"}
+      </span>
       <span className="agenda-when">{label}</span>
       <div className="agenda-main">
         <div className="agenda-title">{item.title}</div>
