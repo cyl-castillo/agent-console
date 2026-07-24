@@ -110,6 +110,27 @@ cowork loop survives across sessions. If the worktree can't be remounted (e.g. t
 branch was deleted), the room comes back read-only but **Share** still works by
 branch name; you'll see a one-line notice.
 
+## Installing
+
+- **Linux**: AppImage / `.deb` / `.rpm` from
+  [Releases](https://github.com/cyl-castillo/agent-console/releases/latest), or
+  on Arch: `yay -S agent-console-bin`.
+- **Windows**: the `-setup.exe` from Releases. SmartScreen may warn about an
+  unknown publisher (the binaries aren't code-signed yet) — "More info → Run
+  anyway".
+- **macOS**: download the `.dmg`, drag the app to Applications, then **one
+  extra step** — the app isn't notarized by Apple yet, so Gatekeeper blocks it
+  with a misleading *"Agent Console is damaged and can't be opened"* message.
+  It isn't damaged. Either run:
+
+  ```bash
+  xattr -cr "/Applications/Agent Console.app"
+  ```
+
+  and open it normally, or try to open it once and then allow it under
+  **System Settings → Privacy & Security → "Open Anyway"**. This is needed
+  only on first launch; updates keep working normally afterwards.
+
 ## Requirements
 
 - **Claude Code CLI** installed and authenticated:

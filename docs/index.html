@@ -599,7 +599,10 @@ agent-console</pre>
       </div>
 
       <p style="margin-top: 24px; font-size: 13px;">
-        macOS and Windows native bundles (.dmg, .msi, .exe) are attached to the <a href="https://github.com/cyl-castillo/agent-console/releases/latest">latest release</a>. Or build from source with <code>npm run tauri build</code>.
+        macOS and Windows native bundles (.dmg, .msi, .exe) are attached to the <a href="https://github.com/cyl-castillo/agent-console/releases/latest">latest release</a>. Arch Linux: <code>yay -S agent-console-bin</code>. Or build from source with <code>npm run tauri build</code>.
+      </p>
+      <p style="margin-top: 8px; font-size: 12.5px; opacity: 0.85;">
+        <strong>macOS note:</strong> the app isn't notarized by Apple yet, so on first launch Gatekeeper shows a misleading <em>"Agent Console is damaged"</em> message. It isn't — run <code>xattr -cr "/Applications/Agent Console.app"</code> once (or allow it under System Settings → Privacy &amp; Security → "Open Anyway") and it opens normally from then on.
       </p>
     </div>
   </section>
