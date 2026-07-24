@@ -180,36 +180,77 @@ describe("session lifecycle", () => {
   });
 });
 
-describe("name suggestions (one shot per session)", () => {
-  it("suggests once, then never again for that session", () => {
+describe("silent auto-naming (only ever replaces a default 'shell N')", () => {
+  it("renames a default-named session once, silently", () => {
     const id = useTerminalsStore.getState().add("/repo");
-    useTerminalsStore.getState().suggestName(id, "fix login bug");
-    expect(useTerminalsStore.getState().sessions[0].suggestedName).toBe("fix login bug");
-
-    useTerminalsStore.getState().dismissSuggestion(id);
-    useTerminalsStore.getState().suggestName(id, "second try");
-    expect(useTerminalsStore.getState().sessions[0].suggestedName).toBeUndefined();
+    useTerminalsStore.getState().autoName(id, "Fix login bug");
+    expect(useTerminalsStore.getState().sessions[0].name).toBe("Fix login bug");
+    // One shot: a later (different) first-prompt heuristic can't rename again.
+    useTerminalsStore.getState().autoName(id, "Something else");
+    expect(useTerminalsStore.getState().sessions[0].name).toBe("Fix login bug");
   });
 
-  it("never suggests the name the session already has, and accept applies it", () => {
-    const id = useTerminalsStore.getState().add("/repo", "already");
-    useTerminalsStore.getState().suggestName(id, "already");
-    expect(useTerminalsStore.getState().sessions[0].suggestedName).toBeUndefined();
-
-    useTerminalsStore.getState().suggestName(id, "better name");
-    useTerminalsStore.getState().acceptSuggestion(id);
-    const s = useTerminalsStore.getState().sessions[0];
-    expect(s.name).toBe("better name");
-    expect(s.suggestedName).toBeUndefined();
+  it("never touches a user-chosen or ticket name", () => {
+    const id = useTerminalsStore.getState().add("/repo", "FIX-123");
+    useTerminalsStore.getState().autoName(id, "Renamed by robot");
+    expect(useTerminalsStore.getState().sessions[0].name).toBe("FIX-123");
   });
 
-  it("manual rename clears a pending suggestion", () => {
+  it("manual rename closes the auto-name window for good", () => {
     const id = useTerminalsStore.getState().add("/repo");
-    useTerminalsStore.getState().suggestName(id, "suggested");
-    useTerminalsStore.getState().rename(id, "manual");
-    const s = useTerminalsStore.getState().sessions[0];
-    expect(s.name).toBe("manual");
-    expect(s.suggestedName).toBeUndefined();
+    useTerminalsStore.getState().rename(id, "shell 1");
+    // Still shaped like a default name, but the USER typed it — hands off.
+    useTerminalsStore.getState().autoName(id, "Robot name");
+    expect(useTerminalsStore.getState().sessions[0].name).toBe("shell 1");
+  });
+});
+
+describe("archive / history", () => {
+  it("archive hides a stopped session and persists; resume brings it back", async () => {
+    world.listResult = [persisted("a")];
+    await useTerminalsStore.getState().hydrate("/repo");
+    world.saved = [];
+
+    useTerminalsStore.getState().archive("a");
+    let s = useTerminalsStore.getState().sessions[0];
+    expect(s.archived).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(world.saved.length).toBe(1);
+    expect(world.saved[0].payload[0].archived).toBe(true);
+
+    useTerminalsStore.getState().resume("a");
+    s = useTerminalsStore.getState().sessions[0];
+    expect(s.archived).toBe(false);
+    expect(s.status).toBe("live");
+  });
+
+  it("live sessions cannot be archived (close them first)", () => {
+    const id = useTerminalsStore.getState().add("/repo");
+    useTerminalsStore.getState().archive(id);
+    expect(useTerminalsStore.getState().sessions[0].archived).toBeUndefined();
+  });
+
+  it("hydrate auto-archives sessions stale for over 7 days, keeps recent ones", async () => {
+    const DAY = 86_400_000;
+    world.listResult = [
+      persisted("old", { lastActiveMs: Date.now() - 8 * DAY }),
+      persisted("fresh", { lastActiveMs: Date.now() - 2 * DAY }),
+      // Pre-lastActiveMs sessions fall back to createdAtMs (ancient here).
+      persisted("ancient"),
+    ];
+    await useTerminalsStore.getState().hydrate("/repo");
+    const byId = new Map(useTerminalsStore.getState().sessions.map((s) => [s.id, s]));
+    expect(byId.get("old")!.archived).toBe(true);
+    expect(byId.get("fresh")!.archived).toBe(false);
+    expect(byId.get("ancient")!.archived).toBe(true);
+  });
+
+  it("persist stamps live sessions' lastActiveMs at save time", async () => {
+    const id = useTerminalsStore.getState().add("/repo");
+    const before = Date.now();
+    await useTerminalsStore.getState().persist();
+    const saved = world.saved[world.saved.length - 1].payload.find((p) => p.id === id)!;
+    expect(saved.lastActiveMs).toBeGreaterThanOrEqual(before);
   });
 });
 

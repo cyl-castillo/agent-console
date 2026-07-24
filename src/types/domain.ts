@@ -140,6 +140,10 @@ export interface PersistedSession {
   agent?: string;
   claudeSessionId?: string;
   nameSuggested?: boolean;
+  /// Archived = lives in the sidebar's History section, not the main list.
+  archived?: boolean;
+  /// Last real activity (spawn/resume/prompt/live persist); drives auto-archive.
+  lastActiveMs?: number;
   /// Model alias / tuning value last chosen for this session, encoded by the
   /// agent profile on launch. Undefined = account/config default.
   model?: string;

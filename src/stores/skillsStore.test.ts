@@ -32,7 +32,7 @@ vi.mock("./toastStore", () => ({
 }));
 
 import { ipc } from "../ipc/tauri";
-import { useSkillsStore } from "./skillsStore";
+import { useSkillsStore, deriveSessionLabel } from "./skillsStore";
 
 const mockRestore = vi.mocked(ipc.snapshotRestore);
 const store = () => useSkillsStore.getState();
@@ -73,5 +73,27 @@ describe("restoreSnapshot (UX P0.1 — undoable restore)", () => {
     expect(store().undoRestoreSha).toBe("previous-undo");
     expect(refresh).not.toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining("Restore failed"), "error");
+  });
+});
+
+describe("deriveSessionLabel (silent auto-name quality)", () => {
+  it("strips leading filler and keeps the substance", () => {
+    expect(deriveSessionLabel("dale, arreglá el login de windows")).toBe(
+      "Arreglá el login de windows",
+    );
+    expect(deriveSessionLabel("hola! necesito migrar la base de datos")).toBe(
+      "Necesito migrar la base de",
+    );
+  });
+
+  it("refuses to name from vague or greeting-only prompts", () => {
+    for (const p of ["hola", "listo", "dale", "ok si", "seguimos", "arregla eso"]) {
+      expect(deriveSessionLabel(p)).toBe("");
+    }
+  });
+
+  it("drops code, urls and markdown before deciding", () => {
+    expect(deriveSessionLabel("```const x = 1```")).toBe("");
+    expect(deriveSessionLabel("mira https://ejemplo.com/x")).toBe("");
   });
 });
