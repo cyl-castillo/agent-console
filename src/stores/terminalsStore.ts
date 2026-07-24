@@ -6,6 +6,9 @@ import { asAgentKind, type AgentKind } from "../agents/profiles";
 
 const MAX_SCROLLBACK = 50_000;
 
+/// Stopped sessions untouched this long get auto-archived on hydrate.
+const AUTO_ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
 /// Consecutive sessionsSave failures. Persisting is best-effort per call, but
 /// SILENT persistent failure means every close loses all session history with
 /// zero signal (the invisible half of issue #72) — so the first failure and
@@ -30,9 +33,6 @@ export interface TerminalSession {
   /// resuming this terminal auto-runs `claude --resume <id>` after spawn.
   /// Codex sessions never populate this (no hook to capture it).
   claudeSessionId?: string;
-  /// Derived from the first user prompt; offered inline as a rename suggestion.
-  /// Cleared once accepted, dismissed, or when the user renames manually.
-  suggestedName?: string;
   /// True after the very first auto-suggestion fires for this session. Keeps
   /// us from re-suggesting on every subsequent prompt.
   nameSuggested?: boolean;
@@ -53,6 +53,10 @@ export interface TerminalSession {
   /// Run the profile's loginCmd instead of the normal agent launch — the
   /// "fix login" flow. Transient by nature; never persisted.
   loginOnly?: boolean;
+  /// Archived = hidden from the main list, shown in the History section.
+  archived?: boolean;
+  /// Last real activity; drives auto-archiving of stale stopped sessions.
+  lastActiveMs?: number;
 }
 
 interface TerminalsState {
@@ -87,9 +91,12 @@ interface TerminalsState {
   setClaudeSessionId: (id: string, claudeId: string) => void;
   /// Set (or clear, with undefined) the model for a session and persist it.
   setModel: (id: string, model: string | undefined) => void;
-  suggestName: (id: string, name: string) => void;
-  acceptSuggestion: (id: string) => void;
-  dismissSuggestion: (id: string) => void;
+  /// Silently rename a session that still wears its default "shell N" name —
+  /// derived from its first prompt. Never touches a user-chosen name, never
+  /// fires twice (nameSuggested marker), never asks.
+  autoName: (id: string, name: string) => void;
+  /// Hide a stopped session in the History section (nothing is deleted).
+  archive: (id: string) => void;
   /// Buffer output bytes into the live scrollback (called frequently — does not notify subscribers).
   appendOutput: (id: string, chunk: string) => void;
   /// Remove session entirely (kill+delete).
@@ -138,20 +145,28 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       set({ projectRoot, sessions: [], activeId: null, ready: false });
       return;
     }
-    const sessions: TerminalSession[] = persisted.map((p) => ({
-      id: p.id,
-      name: p.name,
-      cwd: p.cwd,
-      createdAtMs: p.createdAtMs,
-      nameSuggested: p.nameSuggested,
-      initialScrollback: p.scrollback,
-      liveScrollback: "",
-      status: "stopped",
-      agent: asAgentKind(p.agent),
-      claudeSessionId: p.claudeSessionId,
-      model: p.model,
-      worktree: p.worktree,
-    }));
+    const now = Date.now();
+    const sessions: TerminalSession[] = persisted.map((p) => {
+      const lastActiveMs = p.lastActiveMs ?? p.createdAtMs;
+      return {
+        id: p.id,
+        name: p.name,
+        cwd: p.cwd,
+        createdAtMs: p.createdAtMs,
+        nameSuggested: p.nameSuggested,
+        initialScrollback: p.scrollback,
+        liveScrollback: "",
+        status: "stopped" as const,
+        agent: asAgentKind(p.agent),
+        claudeSessionId: p.claudeSessionId,
+        model: p.model,
+        worktree: p.worktree,
+        lastActiveMs,
+        // Auto-archive: stopped and untouched for 7 days -> History. Hidden,
+        // never deleted; resuming brings it right back.
+        archived: p.archived || now - lastActiveMs > AUTO_ARCHIVE_AFTER_MS,
+      };
+    });
     set({ projectRoot, sessions, activeId: null, ready: true });
   },
 
@@ -176,6 +191,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       setupCmd,
       seedPrompt,
       loginOnly,
+      lastActiveMs: Date.now(),
     };
     set({ sessions: [...sessions, session], activeId: id });
     return id;
@@ -184,7 +200,11 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   resume: (id) => {
     const { sessions } = get();
     set({
-      sessions: sessions.map((s) => (s.id === id ? { ...s, status: "live" as const } : s)),
+      sessions: sessions.map((s) =>
+        s.id === id
+          ? { ...s, status: "live" as const, archived: false, lastActiveMs: Date.now() }
+          : s,
+      ),
       activeId: id,
     });
   },
@@ -194,51 +214,45 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   rename: (id, name) => {
     const { sessions } = get();
     set({
-      // Manual rename clears any pending suggestion.
-      sessions: sessions.map((s) => (s.id === id ? { ...s, name, suggestedName: undefined } : s)),
+      // Manual rename also closes the auto-name window for this session.
+      sessions: sessions.map((s) => (s.id === id ? { ...s, name, nameSuggested: true } : s)),
     });
   },
 
-  suggestName: (id, name) => {
+  autoName: (id, name) => {
     const trimmed = name.trim();
     if (!trimmed) return;
     const { sessions } = get();
     const target = sessions.find((s) => s.id === id);
     if (!target) return;
-    if (target.nameSuggested) return; // already had its shot
-    if (target.name === trimmed) return; // already named that
-    if (target.suggestedName === trimmed) return; // same suggestion already pending
+    if (target.nameSuggested) return; // one shot per session
+    // Only a default name gets replaced — a user-chosen or ticket name never.
+    if (!/^shell \d+$/.test(target.name)) return;
     set({
       sessions: sessions.map((s) =>
-        s.id === id ? { ...s, suggestedName: trimmed, nameSuggested: true } : s,
+        s.id === id ? { ...s, name: trimmed, nameSuggested: true } : s,
       ),
     });
     get().persist();
   },
 
-  acceptSuggestion: (id) => {
-    const { sessions } = get();
+  archive: (id) => {
+    const { sessions, activeId } = get();
     const target = sessions.find((s) => s.id === id);
-    if (!target?.suggestedName) return;
+    if (!target || target.status !== "stopped") return;
     set({
-      sessions: sessions.map((s) =>
-        s.id === id ? { ...s, name: s.suggestedName ?? s.name, suggestedName: undefined } : s,
-      ),
+      sessions: sessions.map((s) => (s.id === id ? { ...s, archived: true } : s)),
+      activeId: activeId === id ? null : activeId,
     });
     get().persist();
-  },
-
-  dismissSuggestion: (id) => {
-    const { sessions } = get();
-    set({
-      sessions: sessions.map((s) => (s.id === id ? { ...s, suggestedName: undefined } : s)),
-    });
   },
 
   markLive: (id) => {
     const { sessions } = get();
     set({
-      sessions: sessions.map((s) => (s.id === id ? { ...s, status: "live" as const } : s)),
+      sessions: sessions.map((s) =>
+        s.id === id ? { ...s, status: "live" as const, lastActiveMs: Date.now() } : s,
+      ),
     });
   },
 
@@ -305,6 +319,10 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         nameSuggested: s.nameSuggested,
         model: s.model,
         worktree: s.worktree,
+        archived: s.archived || undefined,
+        // A live session is active right now — stamp it at save time so the
+        // 7-day auto-archive clock starts from the last real use.
+        lastActiveMs: s.status === "live" ? Date.now() : s.lastActiveMs,
       };
     });
     try {

@@ -41,8 +41,7 @@ export function SessionList() {
   const close = useTerminalsStore((s) => s.close);
   const rename = useTerminalsStore((s) => s.rename);
   const persist = useTerminalsStore((s) => s.persist);
-  const acceptSuggestion = useTerminalsStore((s) => s.acceptSuggestion);
-  const dismissSuggestion = useTerminalsStore((s) => s.dismissSuggestion);
+  const archive = useTerminalsStore((s) => s.archive);
   const project = useSessionStore((s) => s.project);
   const setTab = useUIStore((s) => s.setTab);
   const setDefaultFor = useModelStore((s) => s.setDefaultFor);
@@ -94,6 +93,9 @@ export function SessionList() {
   };
 
   const liveCount = sessions.filter((s) => s.status === "live").length;
+  const visible = sessions.filter((s) => !s.archived);
+  const archived = sessions.filter((s) => s.archived);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   return (
     <div className="sessions">
@@ -117,11 +119,11 @@ export function SessionList() {
           onCancel={() => setChoosing(false)}
         />
       )}
-      {sessions.length === 0 ? (
+      {visible.length === 0 && archived.length === 0 ? (
         <div className="sessions-empty">No sessions yet. Click + new.</div>
       ) : (
         <ul className="sessions-list">
-          {sessions.map((s) => (
+          {visible.map((s) => (
             <SessionRow
               key={s.id}
               session={s}
@@ -140,15 +142,54 @@ export function SessionList() {
                 rename(s.id, name);
                 persist();
               }}
-              onAcceptSuggestion={() => {
-                acceptSuggestion(s.id);
-              }}
-              onDismissSuggestion={() => {
-                dismissSuggestion(s.id);
-              }}
+              onArchive={s.status === "stopped" ? () => archive(s.id) : undefined}
             />
           ))}
         </ul>
+      )}
+
+      {archived.length > 0 && (
+        <div className="sessions-history">
+          <button
+            className={`sessions-history-toggle ${historyOpen ? "open" : ""}`}
+            onClick={() => setHistoryOpen((v) => !v)}
+            title="Archived sessions — resumable anytime, never auto-deleted"
+          >
+            {historyOpen ? "▾" : "▸"} History
+            <span className="sessions-history-count">{archived.length}</span>
+          </button>
+          {historyOpen && (
+            <ul className="sessions-list sessions-history-list">
+              {archived.map((s) => (
+                <li key={s.id} className="session-row stopped history">
+                  <span className="session-name" title={s.name}>
+                    {s.name}
+                  </span>
+                  <span className="session-meta">
+                    {formatUptime(Math.max(0, Date.now() - (s.lastActiveMs ?? s.createdAtMs)))} ago
+                  </span>
+                  <button
+                    className="session-resume"
+                    onClick={() => onActivate(s)}
+                    title="Resume this session (moves it back to the list)"
+                  >
+                    ▸
+                  </button>
+                  <button
+                    className="session-close"
+                    onClick={async () => {
+                      if (confirm(`Delete archived session "${s.name}"? This is permanent.`))
+                        await close(s.id);
+                    }}
+                    title="Delete permanently"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   );
@@ -335,8 +376,7 @@ function SessionRow({
   onActivate,
   onClose,
   onRename,
-  onAcceptSuggestion,
-  onDismissSuggestion,
+  onArchive,
 }: {
   session: TerminalSession;
   active: boolean;
@@ -345,8 +385,8 @@ function SessionRow({
   onActivate: () => void;
   onClose: () => void;
   onRename: (name: string) => void;
-  onAcceptSuggestion: () => void;
-  onDismissSuggestion: () => void;
+  /// Present only for stopped sessions (live ones must be closed first).
+  onArchive?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.name);
@@ -419,6 +459,18 @@ function SessionRow({
         </span>
       )}
       <span className="session-meta">{meta}</span>
+      {onArchive && (
+        <button
+          className="session-archive"
+          onClick={(e) => {
+            e.stopPropagation();
+            onArchive();
+          }}
+          title="Archive — hide in History, resumable anytime"
+        >
+          ↓
+        </button>
+      )}
       <button
         className="session-close"
         onClick={(e) => {
@@ -429,27 +481,6 @@ function SessionRow({
       >
         ×
       </button>
-      {session.suggestedName && session.suggestedName !== session.name && !editing && (
-        <div className="session-suggestion" onClick={(e) => e.stopPropagation()}>
-          <span className="session-suggestion-label">
-            Rename to <strong>“{session.suggestedName}”</strong>?
-          </span>
-          <button
-            className="session-suggestion-accept"
-            onClick={onAcceptSuggestion}
-            title="Accept suggestion"
-          >
-            ✓
-          </button>
-          <button
-            className="session-suggestion-dismiss"
-            onClick={onDismissSuggestion}
-            title="Dismiss"
-          >
-            ✕
-          </button>
-        </div>
-      )}
     </li>
   );
 }

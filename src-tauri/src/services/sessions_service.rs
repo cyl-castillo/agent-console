@@ -28,6 +28,14 @@ pub struct PersistedSession {
     /// we don't re-suggest on every subsequent prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name_suggested: Option<bool>,
+    /// Archived sessions live in the sidebar's History section instead of the
+    /// main list. Hidden, never auto-deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
+    /// Last time the session saw real activity (spawn, resume, prompt, or the
+    /// close-time persist for live sessions). Drives auto-archiving.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active_ms: Option<u64>,
     /// Model alias or full id last chosen for this session, replayed as
     /// `claude --model <model>` when the terminal spawns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -319,6 +327,8 @@ mod tests {
             name_suggested: None,
             model: None,
             worktree: None,
+            archived: None,
+            last_active_ms: None,
         }
     }
 

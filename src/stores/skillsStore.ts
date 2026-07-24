@@ -31,8 +31,7 @@ let lastSkillCount = -1;
 
 /// Turn a user prompt into a short, file-name-ish label for the session row.
 /// Local & instant — first ~5 meaningful words, trimmed, capitalised.
-function deriveSessionLabel(prompt: string): string {
-  if (!prompt) return "";
+export function deriveSessionLabel(prompt: string): string {
   let s = prompt
     .replace(/```[\s\S]*?```/g, " ") // drop fenced code blocks
     .replace(/`[^`]*`/g, " ") // drop inline code
@@ -40,13 +39,51 @@ function deriveSessionLabel(prompt: string): string {
     .replace(/[#*_>`~|]/g, " ") // drop markdown punctuation
     .replace(/[\r\n]+/g, " ")
     .trim();
-  // Cut at the first sentence boundary if present.
+  // Strip leading filler FIRST — greetings often carry the sentence
+  // punctuation ("hola! …"), and cutting at that boundary first would leave
+  // nothing ("dale, arreglá el login" → "arreglá el login").
+  const FILLER = new Set([
+    "hola",
+    "hey",
+    "hi",
+    "hello",
+    "buenas",
+    "dale",
+    "listo",
+    "ok",
+    "okay",
+    "bueno",
+    "porfa",
+    "please",
+    "pls",
+    "seguimos",
+    "vamos",
+    "ahora",
+    "si",
+    "sí",
+    "no",
+    "y",
+    "e",
+    "a",
+    "ver",
+  ]);
+  let words = s.split(/\s+/).filter(Boolean);
+  while (words.length > 0 && FILLER.has(words[0].toLowerCase().replace(/[,.:;!¡¿?]+$/, "")))
+    words.shift();
+  s = words.join(" ");
+  // Then cut at the first sentence boundary if present.
   const m = s.match(/^[^.!?\n]{3,}/);
   if (m) s = m[0];
-  const words = s.split(/\s+/).filter(Boolean).slice(0, 5);
-  let label = words.join(" ").slice(0, 40).trim();
-  if (!label) return "";
-  // Capitalise first letter, leave the rest as the user wrote it.
+  words = s.split(/\s+/).filter(Boolean);
+  // A name needs substance: a vague or greeting-only prompt names nothing —
+  // better to stay "shell N" than to wear a junk label.
+  const meaningful = words.slice(0, 5);
+  let label = meaningful
+    .join(" ")
+    .slice(0, 40)
+    .trim()
+    .replace(/[,.:;]+$/, "");
+  if (meaningful.length < 3 || label.length < 12) return "";
   label = label.charAt(0).toUpperCase() + label.slice(1);
   return label;
 }
@@ -163,18 +200,11 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const targetId = e.termId && sessions.some((s) => s.id === e.termId) ? e.termId : activeId;
       if (targetId) {
         useTerminalsStore.getState().setClaudeSessionId(targetId, e.sessionId);
-        // Offer a meaningful rename derived from the first prompt — only if
-        // this is still the first prompt (the session had no claudeSessionId
-        // before we just set it).
-        const target = useTerminalsStore.getState().sessions.find((s) => s.id === targetId);
-        const hadNoPriorClaude =
-          !!target && target.claudeSessionId === e.sessionId && !target.suggestedName; // not yet suggested
-        if (hadNoPriorClaude) {
-          const label = deriveSessionLabel(e.prompt);
-          if (label && label !== target.name) {
-            useTerminalsStore.getState().suggestName(targetId, label);
-          }
-        }
+        // Silently name the session from its first prompt — autoName only ever
+        // replaces a default "shell N" name, never a user- or ticket-chosen
+        // one, and only once (nameSuggested marker).
+        const label = deriveSessionLabel(e.prompt);
+        if (label) useTerminalsStore.getState().autoName(targetId, label);
       }
     }
   },

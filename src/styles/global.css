@@ -9058,3 +9058,60 @@ select:focus-visible,
   gap: 10px;
   margin-top: 2px;
 }
+
+/* Sessions history (archived) — collapsed at the sidebar's bottom. */
+.sessions-history {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+.sessions-history-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 4px 2px;
+  cursor: pointer;
+}
+.sessions-history-toggle:hover {
+  color: var(--text-dim);
+}
+.sessions-history-count {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-weight: 600;
+}
+.sessions-history-list .session-row.history {
+  opacity: 0.75;
+}
+.session-resume {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 3px;
+}
+.session-resume:hover {
+  color: var(--accent);
+}
+.session-archive {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 3px;
+}
+.session-archive:hover {
+  color: var(--accent);
+}
