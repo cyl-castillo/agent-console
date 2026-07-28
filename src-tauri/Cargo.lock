@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agent-console"
-version = "0.65.0"
+version = "0.66.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
