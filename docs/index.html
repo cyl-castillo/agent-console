@@ -463,7 +463,8 @@
     <h1>Agent Console</h1>
     <p class="tagline">
       Direct AI agents inside any repository.<br />
-      Terminal-first. Diff-first. Not an IDE.
+      Terminal-first. Diff-first. Not an IDE.<br />
+      <span style="color: var(--text);">And every session leaves <strong>verifiable proof</strong>.</span>
     </p>
     <div class="badges">
       <span class="badge badge-preview" data-version-badge>Early Preview</span>
@@ -541,25 +542,40 @@
     </div>
   </section>
 
+  <section id="proof">
+    <div class="container">
+      <h2>Proof, not promises</h2>
+      <p style="font-size: 16px; max-width: 640px; color: var(--text); margin-bottom: 16px;">
+        Agent Console is the reference implementation of <a href="https://github.com/cyl-castillo/testigo" target="_blank" rel="noopener"><strong>Testigo</strong></a>, an open intent-to-proof protocol: every prompt, human approval, tool result and per-turn diff lands in a <strong>hash-chained evidence ledger</strong> on your machine.
+      </p>
+      <ul class="features" style="grid-template-columns: 1fr; max-width: 640px;">
+        <li>Export any ticket's work as a <strong>signed proof packet</strong> <span class="dim">— what was asked, what you approved, what changed</span></li>
+        <li>Anyone verifies it <a href="https://cyl-castillo.github.io/testigo/verifier/testigo-verifier.html" target="_blank" rel="noopener">in a browser</a> <span class="dim">— no install, no account</span></li>
+        <li>Redact sensitive content, keep the chain verifiable <span class="dim">— selective disclosure by design</span></li>
+        <li>Off by default for shared repos <span class="dim">— witnessing is per-project, your call</span></li>
+      </ul>
+    </div>
+  </section>
+
   <section>
     <div class="container">
       <h2>What you get</h2>
       <ul class="features">
-        <li>Open any local repo <span class="dim">— folder picker, recents list</span></li>
-        <li>Multi-agent rooms <span class="dim">— you + several AIs work one problem together</span></li>
-        <li>Roundtable <span class="dim">— two agents debate in twin worktrees; apply the winner's diff</span></li>
-        <li>Worktree-per-agent <span class="dim">— opt-in isolated worktree, auto-commit per turn</span></li>
-        <li>MCP servers <span class="dim">— manage and connect MCP tools from the workbench</span></li>
-        <li>Multiple engines <span class="dim">— Claude or Codex, per session</span></li>
-        <li>Integrated PTY terminal <span class="dim">— colors, vim, htop</span></li>
+        <li>Per-tool approval modal <span class="dim">— Bash, Edit, Write blocked until you OK; keyboard flow + countdown</span></li>
+        <li>Per-turn working-tree snapshot <span class="dim">— restore with one click, undo the restore too</span></li>
+        <li>Proof ledger (Testigo) <span class="dim">— witnessed sessions, signed exportable packets</span></li>
+        <li>Multiple engines <span class="dim">— Claude or Codex, per session; one-click login repair</span></li>
+        <li>Multi-agent rooms <span class="dim">— you + several AIs on one problem; working rooms edit on an isolated branch</span></li>
+        <li>Jira as an actionable queue <span class="dim">— ticket → seeded session; log hours with evidence-backed suggestions</span></li>
+        <li>Project roles <span class="dim">— Developer, QA, Analyst, PO, PM: the queue and the prompts adapt</span></li>
+        <li>Semantic memory <span class="dim">— search memories &amp; skills by meaning (local embeddings, es/en)</span></li>
+        <li>Coach <span class="dim">— skills generated from your repo and your actual usage, dedup-aware</span></li>
+        <li>Scheduled agent jobs <span class="dim">— suggest-only, physically restricted to plan mode</span></li>
+        <li>Integrated PTY terminal <span class="dim">— colors, vim, htop; session history with auto-archive</span></li>
         <li>Git diff viewer <span class="dim">— badges, revert per file, revert all</span></li>
-        <li>Chat via <code>claude -p</code> <span class="dim">— stream-json bidirectional IO</span></li>
-        <li>Per-tool approval modal <span class="dim">— Bash, Edit, Write blocked until you OK</span></li>
-        <li>Per-turn working-tree snapshot <span class="dim">— restore with one click</span></li>
-        <li>File preview tab <span class="dim">— diff if modified, content if clean</span></li>
-        <li>Markdown rendering <span class="dim">— headings, lists, code blocks</span></li>
-        <li>Keyboard shortcuts <span class="dim">— Ctrl+1/2/3, K, L, R, Esc</span></li>
-        <li>Recent projects <span class="dim">— remembered across launches</span></li>
+        <li>Voice input <span class="dim">— push-to-talk transcription and spoken approvals, all local</span></li>
+        <li>Worktree-per-agent <span class="dim">— opt-in isolated worktree, auto-commit per turn</span></li>
+        <li>MCP servers &amp; plugins <span class="dim">— managed from the workbench</span></li>
       </ul>
     </div>
   </section>
@@ -698,8 +714,8 @@ agent-console</pre>
     <div class="container">
       <h2>Roadmap</h2>
       <ul class="features" style="grid-template-columns: 1fr;">
-        <li><strong>Near</strong> <span class="dim">— multi-terminal tabs, decision history, watchdog on cost runaway</span></li>
-        <li><strong>Maybe</strong> <span class="dim">— GitHub issue/PR integration</span></li>
+        <li><strong>Near</strong> <span class="dim">— Apple notarization, winget catalog entry, file viewer pane, cost watchdog</span></li>
+        <li><strong>Maybe</strong> <span class="dim">— GitHub issue/PR integration, prompt-time memory recall, review/merge UI for rooms</span></li>
         <li><strong>Never</strong> <span class="dim">— code editing UI, marketplace, cloud sync of conversations</span></li>
       </ul>
     </div>
