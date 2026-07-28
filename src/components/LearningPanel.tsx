@@ -416,6 +416,14 @@ function LearningRow({ item }: { item: LearningItem }) {
             <KindTag kind={item.kind} /> {item.title}
           </div>
           <div className="wb-advisor-desc">{item.rationale}</div>
+          {item.similarTo && (
+            <div
+              className="wb-similar-badge"
+              title={`Semantically close to existing corpus content (${Math.round((item.similarity ?? 0) * 100)}% similarity)`}
+            >
+              ≈ similar to <strong>{item.similarTo}</strong>
+            </div>
+          )}
         </div>
         <StatusBadge status={item.status} />
       </div>

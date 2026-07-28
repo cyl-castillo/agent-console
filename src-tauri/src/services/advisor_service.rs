@@ -15,6 +15,12 @@ pub struct SkillRecommendation {
     /// "project" | "user"
     pub scope: String,
     pub skill_md_content: String,
+    /// Set when an installed skill is semantically close to this suggestion —
+    /// the UI marks it instead of letting near-duplicates pile up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similar_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similarity: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,11 +63,54 @@ pub fn analyze(project_root: &Path) -> AppResult<AnalysisResult> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let recommendations = parse_recommendations(&stdout)?;
+    let mut recommendations = parse_recommendations(&stdout)?;
+    annotate_similarity(project_root, &mut recommendations);
     Ok(AnalysisResult {
         recommendations,
         raw_excerpt: truncate(&stdout, 4000),
     })
+}
+
+/// Similarity threshold above which a suggestion is flagged as a near-dup of
+/// an installed skill. Doc-vs-doc cosine with e5 runs high; 0.85 marks real
+/// overlap without nuking legitimately-adjacent skills.
+const SIMILAR_SKILL_THRESHOLD: f32 = 0.85;
+
+/// Best-effort: mark suggestions that already exist in spirit. Similarity is
+/// an enhancement — a missing model or failed index must never fail analysis.
+fn annotate_similarity(project_root: &Path, recs: &mut [SkillRecommendation]) {
+    use crate::services::embedding_service::CandleEmbedder;
+    use crate::services::semantic_index;
+
+    let root = project_root.to_string_lossy();
+    let mut embedder = CandleEmbedder::new();
+    if let Err(e) = semantic_index::ensure_fresh(&root, &mut embedder) {
+        eprintln!("advisor: semantic annotate skipped (index): {e}");
+        return;
+    }
+    for rec in recs.iter_mut() {
+        let text = format!(
+            "{}\n{}\n{}",
+            rec.name, rec.description, rec.skill_md_content
+        );
+        match semantic_index::most_similar(
+            &root,
+            &text,
+            &["skill"],
+            SIMILAR_SKILL_THRESHOLD,
+            &mut embedder,
+        ) {
+            Ok(Some((title, score))) => {
+                rec.similar_to = Some(title);
+                rec.similarity = Some(score);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("advisor: semantic annotate skipped (query): {e}");
+                return;
+            }
+        }
+    }
 }
 
 /// Write a single recommendation to disk as a Claude skill.

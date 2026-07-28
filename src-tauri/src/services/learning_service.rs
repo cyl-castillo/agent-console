@@ -45,6 +45,12 @@ pub struct LearningSuggestion {
     /// Starter SKILL.md for the plugin (single-skill layout at the plugin root).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_skill_md: Option<String>,
+    /// Set when something in the corpus is semantically close to this
+    /// suggestion — surfaced instead of letting near-duplicates pile up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similar_to: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similarity: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,12 +82,18 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
     let existing_skills = list_existing_skills(project_root);
     let existing_memories = list_existing_memories(project_root);
     let installed_plugins = list_installed_plugins();
-    let prompt = build_prompt(
+    let mut prompt = build_prompt(
         &digest,
         &existing_skills,
         &existing_memories,
         &installed_plugins,
     );
+    // Ground the reflection: retrieve what the corpus ALREADY covers for this
+    // activity, so suggestions build on it instead of reinventing it.
+    // Best-effort — a missing model must never fail a reflection.
+    if let Some(context) = semantic_context_for(project_root, events) {
+        prompt.push_str(&context);
+    }
 
     // Same resolver/flags as the Advisor: a GUI launch doesn't inherit the
     // login-shell PATH, so the bare `claude` name would fail to spawn.
@@ -105,7 +117,8 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let suggestions = parse_suggestions(&stdout)?;
+    let mut suggestions = parse_suggestions(&stdout)?;
+    annotate_similarity(project_root, &mut suggestions);
     Ok(ReflectionResult {
         suggestions,
         events_analyzed: events.len(),
@@ -402,6 +415,76 @@ struct CorpusEntry {
 
 /// Curate the existing skill/memory corpus and propose improvements. Read-only:
 /// it never mutates the corpus — it returns suggestions the user applies.
+/// Similarity threshold for flagging a suggestion as a near-dup of existing
+/// corpus content (doc-vs-doc cosine with e5 runs high).
+const SIMILAR_THRESHOLD: f32 = 0.85;
+
+/// Best-effort semantic grounding for the reflection prompt: top corpus
+/// entries similar to the recent prompts. None on any failure.
+fn semantic_context_for(project_root: &Path, events: &[ActivityEvent]) -> Option<String> {
+    use crate::services::embedding_service::CandleEmbedder;
+    use crate::services::semantic_index;
+
+    let query: String = events
+        .iter()
+        .rev()
+        .filter_map(|e| e.prompt.as_deref())
+        .take(5)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if query.trim().is_empty() {
+        return None;
+    }
+    let root = project_root.to_string_lossy();
+    let mut embedder = CandleEmbedder::new();
+    semantic_index::ensure_fresh(&root, &mut embedder).ok()?;
+    let hits = semantic_index::search(&root, &query, 5, &mut embedder).ok()?;
+    if hits.is_empty() {
+        return None;
+    }
+    let mut out = String::from(
+        "\n\nSEMANTICALLY RELEVANT EXISTING CORPUS (retrieved by local embeddings — do NOT \
+         re-suggest near-duplicates of these; build on or extend them instead):\n",
+    );
+    for h in hits {
+        out.push_str(&format!("- [{}] {} — {}\n", h.kind, h.title, h.snippet));
+    }
+    Some(out)
+}
+
+/// Best-effort: mark suggestions that already exist in spirit (skills AND
+/// memories). Never fails the reflection.
+fn annotate_similarity(project_root: &Path, suggestions: &mut [LearningSuggestion]) {
+    use crate::services::embedding_service::CandleEmbedder;
+    use crate::services::semantic_index;
+
+    let root = project_root.to_string_lossy();
+    let mut embedder = CandleEmbedder::new();
+    for sug in suggestions.iter_mut() {
+        let body = sug
+            .skill_md_content
+            .as_deref()
+            .or(sug.memory_content.as_deref())
+            .or(sug.plugin_skill_md.as_deref())
+            .unwrap_or("");
+        if body.is_empty() {
+            continue;
+        }
+        let text = format!("{}\n{}", sug.title, body);
+        match semantic_index::most_similar(&root, &text, &[], SIMILAR_THRESHOLD, &mut embedder) {
+            Ok(Some((title, score))) => {
+                sug.similar_to = Some(title);
+                sug.similarity = Some(score);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("learning: semantic annotate skipped: {e}");
+                return;
+            }
+        }
+    }
+}
+
 pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<CurationResult> {
     if !project_root.is_dir() {
         return Err(AppError::NotADirectory(project_root.display().to_string()));
@@ -422,7 +505,31 @@ pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Curati
         });
     }
 
-    let prompt = build_curation_prompt(&entries);
+    let mut prompt = build_curation_prompt(&entries);
+    // Point the model at REAL merge candidates: top similar memory pairs from
+    // the stored vectors (exhaustive over the corpus, no LLM tokens spent
+    // finding them). Best-effort — without an index the prompt stands alone.
+    {
+        use crate::services::embedding_service::CandleEmbedder;
+        use crate::services::semantic_index;
+        let root = project_root.to_string_lossy();
+        let _ = semantic_index::ensure_fresh(&root, &mut CandleEmbedder::new());
+        if let Ok(pairs) = semantic_index::similar_memory_pairs(&root, 0.80, 10) {
+            if !pairs.is_empty() {
+                prompt.push_str(
+                    "\n\nPRIORITY MERGE CANDIDATES (these memory pairs are semantically close \
+                     per local embeddings — judge EACH pair explicitly: merge, or state why they \
+                     should stay separate):\n",
+                );
+                for p in pairs {
+                    prompt.push_str(&format!(
+                        "- \"{}\" <-> \"{}\" (similarity {:.2})\n",
+                        p.a_title, p.b_title, p.score
+                    ));
+                }
+            }
+        }
+    }
     let mut cmd = crate::services::claude_cli::command(&[
         "-p",
         &prompt,
