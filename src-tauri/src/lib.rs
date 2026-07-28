@@ -142,6 +142,8 @@ pub fn run() {
             commands::context::memory_read,
             commands::context::memory_delete,
             commands::palette::palette_index_files,
+            commands::semantic::semantic_reindex,
+            commands::semantic::semantic_search,
             commands::feedback::feedback_dev_enabled,
             commands::feedback::feedback_context,
             commands::feedback::feedback_submit,

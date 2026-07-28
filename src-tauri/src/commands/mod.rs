@@ -15,6 +15,7 @@ pub mod project;
 pub mod projects;
 pub mod roundtable;
 pub mod scheduler;
+pub mod semantic;
 pub mod sessions;
 pub mod skills;
 pub mod snapshot;

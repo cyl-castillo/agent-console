@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  SemanticHit,
   ActivityEvent,
   AdvisorAnalysisResult,
   ApprovalRequest,
@@ -98,6 +99,13 @@ export const ipc = {
   gitBranches: () => invoke<BranchInfo[]>("git_branches"),
   gitCheckoutBranch: (name: string) => invoke<void>("git_checkout_branch", { name }),
 
+  semanticSearch: (projectRoot: string, query: string, k?: number) =>
+    invoke<SemanticHit[]>("semantic_search", { projectRoot, query, k: k ?? null }),
+  semanticReindex: (projectRoot: string) =>
+    invoke<{ indexed: number; reused: number; removed: number; total: number }>(
+      "semantic_reindex",
+      { projectRoot },
+    ),
   paletteIndexFiles: (limit?: number) =>
     invoke<string[]>("palette_index_files", { limit: limit ?? null }),
 

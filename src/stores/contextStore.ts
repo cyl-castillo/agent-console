@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
 import { ipc } from "../ipc/tauri";
-import type { ContextStatus, MemoryEntry } from "../types/domain";
+import type { ContextStatus, MemoryEntry, SemanticHit } from "../types/domain";
+import { useSessionStore } from "./sessionStore";
 import { useLearningStore } from "./learningStore";
 import { fireSchedulerEvent } from "./schedulerStore";
 
@@ -24,6 +25,16 @@ interface ContextState {
   generateStarter: () => Promise<string>;
   readMemory: (name: string) => Promise<string>;
   deleteMemory: (name: string) => Promise<void>;
+
+  /// Semantic (embedding) search over memories + skills. First use downloads
+  /// the local model (~100MB) — `searching` covers that too.
+  searchHits: SemanticHit[];
+  searching: boolean;
+  searchError: string | null;
+  semanticSearch: (query: string) => Promise<void>;
+  clearSearch: () => void;
+  reindexing: boolean;
+  semanticReindex: () => Promise<string | null>;
 }
 
 export const useContextStore = create<ContextState>((set, get) => ({
@@ -64,5 +75,37 @@ export const useContextStore = create<ContextState>((set, get) => ({
   deleteMemory: async (name) => {
     await ipc.memoryDelete(name);
     await get().refresh();
+  },
+
+  searchHits: [],
+  searching: false,
+  searchError: null,
+  semanticSearch: async (query) => {
+    const root = useSessionStore.getState().project?.root;
+    const q = query.trim();
+    if (!root || !q) return;
+    set({ searching: true, searchError: null });
+    try {
+      const hits = await ipc.semanticSearch(root, q, 8);
+      set({ searchHits: hits, searching: false });
+    } catch (e) {
+      set({ searching: false, searchError: String(e) });
+    }
+  },
+  clearSearch: () => set({ searchHits: [], searchError: null }),
+
+  reindexing: false,
+  semanticReindex: async () => {
+    const root = useSessionStore.getState().project?.root;
+    if (!root) return null;
+    set({ reindexing: true, searchError: null });
+    try {
+      const r = await ipc.semanticReindex(root);
+      set({ reindexing: false });
+      return `${r.total} indexed (${r.indexed} new, ${r.reused} unchanged)`;
+    } catch (e) {
+      set({ reindexing: false, searchError: String(e) });
+      return null;
+    }
   },
 }));

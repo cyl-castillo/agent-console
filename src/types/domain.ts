@@ -767,3 +767,12 @@ export interface SyncResult {
   conflicts: string[];
   message: string;
 }
+
+/// One semantic search result over the project's memories and skills.
+export interface SemanticHit {
+  id: string;
+  kind: "memory" | "skill" | string;
+  title: string;
+  snippet: string;
+  score: number;
+}

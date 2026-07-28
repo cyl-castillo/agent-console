@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useContextStore } from "../stores/contextStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { useToastStore } from "../stores/toastStore";
+import { typeIntoActiveSession } from "../lib/termInput";
 import { PanelError } from "./PanelError";
 import type { ContextFileStat, MemoryEntry } from "../types/domain";
 import { MarkdownText } from "./MarkdownText";
@@ -40,6 +42,8 @@ export function ContextPanel() {
             <PanelError message={error} onRetry={refresh} />
           </section>
         )}
+
+        <SemanticSearch />
 
         <section className="wb-section">
           <button className="ctx-section-head scope-project" onClick={() => setProjOpen((v) => !v)}>
@@ -457,4 +461,116 @@ function formatRelative(ms: number): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   if (diff < 7 * 86400) return `${Math.floor(diff / 86400)}d`;
   return new Date(ms).toLocaleDateString();
+}
+
+/// Semantic (embedding) search over the project's memories and skills.
+/// Local model, local index — nothing leaves the machine.
+function SemanticSearch() {
+  const searchHits = useContextStore((s) => s.searchHits);
+  const searching = useContextStore((s) => s.searching);
+  const searchError = useContextStore((s) => s.searchError);
+  const semanticSearch = useContextStore((s) => s.semanticSearch);
+  const clearSearch = useContextStore((s) => s.clearSearch);
+  const reindexing = useContextStore((s) => s.reindexing);
+  const semanticReindex = useContextStore((s) => s.semanticReindex);
+  const readMemory = useContextStore((s) => s.readMemory);
+  const showToast = useToastStore((s) => s.show);
+  const [query, setQuery] = useState("");
+  const [everSearched, setEverSearched] = useState(false);
+
+  const run = () => {
+    if (!query.trim() || searching) return;
+    setEverSearched(true);
+    void semanticSearch(query);
+  };
+
+  const sendToComposer = async (hit: (typeof searchHits)[number]) => {
+    if (hit.kind !== "memory") return;
+    const name = hit.id.replace(/^memory:/, "");
+    try {
+      const content = await readMemory(name);
+      const clipped = content.length > 1500 ? `${content.slice(0, 1500)}…` : content;
+      await typeIntoActiveSession(`Relevant saved memory (${name}):\n${clipped}\n`);
+      showToast("Memory typed into the active session — review and send", "success");
+    } catch (e) {
+      showToast(`Couldn't load memory: ${String(e).slice(0, 120)}`, "error");
+    }
+  };
+
+  return (
+    <section className="wb-section">
+      <div className="ctx-search-row">
+        <input
+          className="ctx-search-input"
+          value={query}
+          placeholder="Search memories & skills by meaning…"
+          spellCheck={false}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") run();
+            if (e.key === "Escape") {
+              setQuery("");
+              clearSearch();
+              setEverSearched(false);
+            }
+          }}
+        />
+        <button
+          className="wb-cta wb-cta-sm"
+          onClick={run}
+          disabled={searching || !query.trim()}
+          title="Semantic search (local embeddings — nothing leaves this machine)"
+        >
+          {searching ? "…" : "Search"}
+        </button>
+        <button
+          className="workbench-action"
+          onClick={async () => {
+            const summary = await semanticReindex();
+            if (summary) showToast(`Semantic index: ${summary}`, "success");
+          }}
+          disabled={reindexing}
+          title="Rebuild the semantic index (incremental — only changed items re-embed)"
+        >
+          {reindexing ? "…" : "⟳"}
+        </button>
+      </div>
+      {(searching || reindexing) && (
+        <div className="wb-hint">
+          Working… the first run downloads a small local model (~100 MB), which can take a minute.
+        </div>
+      )}
+      {searchError && <PanelError message={searchError} />}
+      {everSearched && !searching && searchHits.length === 0 && !searchError && (
+        <div className="wb-hint">No matches.</div>
+      )}
+      {searchHits.length > 0 && (
+        <ul className="ctx-search-hits">
+          {searchHits.map((h) => (
+            <li key={h.id} className="ctx-search-hit">
+              <div className="ctx-hit-top">
+                <span className={`ctx-hit-kind kind-${h.kind}`}>{h.kind}</span>
+                <span className="ctx-hit-title" title={h.title}>
+                  {h.title}
+                </span>
+                <span className="ctx-hit-score" title={`similarity ${h.score.toFixed(3)}`}>
+                  {(h.score * 100).toFixed(0)}%
+                </span>
+              </div>
+              <div className="ctx-hit-snippet">{h.snippet}</div>
+              {h.kind === "memory" && (
+                <button
+                  className="wb-link"
+                  onClick={() => void sendToComposer(h)}
+                  title="Type this memory into the active session's input (you review, then send)"
+                >
+                  ▸ to composer
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
