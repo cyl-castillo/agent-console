@@ -137,6 +137,14 @@ function AdvisorRow({ item }: { item: AdvisorItem }) {
         <div className="wb-advisor-text">
           <div className="wb-advisor-name">{item.name}</div>
           <div className="wb-advisor-desc">{item.description}</div>
+          {item.similarTo && (
+            <div
+              className="wb-similar-badge"
+              title={`Semantically close to an installed skill (${Math.round((item.similarity ?? 0) * 100)}% similarity) — consider extending it instead`}
+            >
+              ≈ similar to <strong>{item.similarTo}</strong>
+            </div>
+          )}
         </div>
         <StatusBadge status={item.status} />
       </div>

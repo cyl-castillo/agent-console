@@ -17,8 +17,10 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use crate::error::{AppError, AppResult};
+use crate::services::context_service::memory_dir_for;
 use crate::services::embedding_service::{cosine, Embedder, EMBEDDING_SCHEME};
 use crate::services::persistence::project_file_key;
+use crate::services::{memory_service, skills_service};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -231,6 +233,145 @@ pub fn search(
     Ok(hits)
 }
 
+/// Embedding input cap: e5-small attends ~512 tokens anyway, and memories can
+/// carry long tails — the head of a document is where its identity lives.
+const MAX_DOC_CHARS: usize = 2000;
+
+fn clip(text: &str) -> String {
+    if text.chars().count() <= MAX_DOC_CHARS {
+        text.to_string()
+    } else {
+        text.chars().take(MAX_DOC_CHARS).collect()
+    }
+}
+
+/// Gather everything indexable for a project: memory .md files (minus the
+/// index) and skill/command/agent definitions, project- and user-level.
+pub fn project_sources(project_root: &str) -> AppResult<Vec<SourceDoc>> {
+    let root = Path::new(project_root);
+    let mut out: Vec<SourceDoc> = Vec::new();
+
+    let mem_dir = memory_dir_for(root)?;
+    for m in memory_service::list(root)? {
+        if m.is_index {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(mem_dir.join(&m.name)) else {
+            continue;
+        };
+        out.push(SourceDoc {
+            id: format!("memory:{}", m.name),
+            kind: "memory".into(),
+            title: m
+                .description
+                .clone()
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| m.name.clone()),
+            text: clip(&text),
+        });
+    }
+
+    for sk in skills_service::list(Some(root))? {
+        let Ok(text) = fs::read_to_string(&sk.path) else {
+            continue;
+        };
+        out.push(SourceDoc {
+            id: format!("skill:{}:{}:{}", sk.kind, sk.source, sk.name),
+            kind: "skill".into(),
+            title: match &sk.description {
+                Some(d) if !d.is_empty() => format!("{} — {}", sk.name, d),
+                _ => sk.name.clone(),
+            },
+            text: clip(&text),
+        });
+    }
+
+    Ok(out)
+}
+
+/// Refresh the index from the project's current sources. Best-effort variant
+/// for Coach flows: similarity is an enhancement there, never a reason to fail
+/// an analysis (e.g. the model isn't downloaded yet and there's no network).
+pub fn ensure_fresh(project_root: &str, embedder: &mut dyn Embedder) -> AppResult<ReindexReport> {
+    let sources = project_sources(project_root)?;
+    reindex(project_root, &sources, embedder)
+}
+
+/// The single most similar indexed entry (optionally restricted to `kinds`)
+/// for a free-form text, compared passage-vs-passage. None when the index is
+/// empty or nothing clears `threshold`.
+pub fn most_similar(
+    project_root: &str,
+    text: &str,
+    kinds: &[&str],
+    threshold: f32,
+    embedder: &mut dyn Embedder,
+) -> AppResult<Option<(String, f32)>> {
+    let file = load(&index_path(project_root)?);
+    if file.entries.is_empty() || file.scheme != EMBEDDING_SCHEME {
+        return Ok(None);
+    }
+    let mut vecs = embedder.embed_passages(&[clip(text)])?;
+    let Some(qv) = vecs.pop() else {
+        return Ok(None);
+    };
+    let best = file
+        .entries
+        .iter()
+        .filter(|e| kinds.is_empty() || kinds.contains(&e.kind.as_str()))
+        .map(|e| (e.title.clone(), cosine(&qv, &e.vector)))
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(best.filter(|(_, score)| *score >= threshold))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SimilarPair {
+    pub a_id: String,
+    pub a_title: String,
+    pub b_id: String,
+    pub b_title: String,
+    pub score: f32,
+}
+
+/// Top similar memory pairs straight from the STORED vectors — no embedder,
+/// exhaustive over the corpus (N is hundreds; N²/2 is nothing). This is what
+/// points the curator at real merge candidates instead of asking an LLM to
+/// eyeball the whole corpus.
+pub fn similar_memory_pairs(
+    project_root: &str,
+    threshold: f32,
+    max_pairs: usize,
+) -> AppResult<Vec<SimilarPair>> {
+    let file = load(&index_path(project_root)?);
+    if file.scheme != EMBEDDING_SCHEME {
+        return Ok(Vec::new());
+    }
+    let mems: Vec<&IndexEntry> = file.entries.iter().filter(|e| e.kind == "memory").collect();
+    let mut pairs: Vec<SimilarPair> = Vec::new();
+    for i in 0..mems.len() {
+        for j in (i + 1)..mems.len() {
+            let score = cosine(&mems[i].vector, &mems[j].vector);
+            if score >= threshold {
+                pairs.push(SimilarPair {
+                    a_id: mems[i].id.clone(),
+                    a_title: mems[i].title.clone(),
+                    b_id: mems[j].id.clone(),
+                    b_title: mems[j].title.clone(),
+                    score,
+                });
+            }
+        }
+    }
+    pairs.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    pairs.truncate(max_pairs);
+    Ok(pairs)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,6 +453,26 @@ mod tests {
 
             // Unknown project: empty, not an error.
             assert!(search("/proj/none", "q", 5, &mut emb)?.is_empty());
+
+            // most_similar: exact text is the hit; threshold and kind filters gate.
+            let hit = most_similar(&root, "alpha text EDITED", &["memory"], 0.9, &mut emb)?;
+            assert_eq!(hit.map(|(t, _)| t), Some("a".to_string()));
+            assert!(most_similar(&root, "alpha text EDITED", &["skill"], 0.9, &mut emb)?.is_none());
+
+            // similar_memory_pairs: add a duplicate-content doc — identical
+            // fake vectors → a perfect pair; the unrelated doc pairs with
+            // nothing at a high threshold.
+            let sources = vec![
+                doc("a", "alpha text EDITED"),
+                doc("dup", "alpha text EDITED"),
+                doc("c", "gamma text"),
+            ];
+            reindex(&root, &sources, &mut emb)?;
+            let pairs = similar_memory_pairs(&root, 0.999, 10)?;
+            assert_eq!(pairs.len(), 1);
+            assert!(pairs[0].score > 0.999);
+            let ids = [pairs[0].a_id.as_str(), pairs[0].b_id.as_str()];
+            assert!(ids.contains(&"a") && ids.contains(&"dup"));
             Ok(())
         };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));

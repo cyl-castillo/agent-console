@@ -9193,3 +9193,14 @@ select:focus-visible,
   color: var(--text-dim);
   line-height: 1.4;
 }
+
+/* "≈ similar to X" badge on Coach suggestions (semantic dedup). */
+.wb-similar-badge {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--warn);
+  background: var(--warn-12);
+  border-radius: 4px;
+  padding: 2px 7px;
+}

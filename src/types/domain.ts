@@ -347,6 +347,9 @@ export interface AdvisorRecommendation {
   whyItFits: string;
   scope: "project" | "user";
   skillMdContent: string;
+  /// An installed skill that is semantically close to this suggestion.
+  similarTo?: string;
+  similarity?: number;
 }
 
 export interface AdvisorAnalysisResult {
@@ -370,6 +373,9 @@ export interface LearningSuggestion {
   pluginName?: string;
   pluginDescription?: string;
   pluginSkillMd?: string;
+  /// Existing corpus content semantically close to this suggestion.
+  similarTo?: string;
+  similarity?: number;
 }
 
 export interface ReflectionResult {
