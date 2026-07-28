@@ -284,7 +284,6 @@ names may still change between minor releases.
 
 If Agent Console is useful to you and you'd like to help shape where it goes, you can sponsor the project. Sponsorships fund focused time on the roadmap above — more tools, better safety, broader platforms.
 
-- [GitHub Sponsors](https://github.com/sponsors/cyl-castillo)
 - [Buy Me a Coffee](https://www.buymeacoffee.com/cylcastillo)
 
 Non-financial support also counts: a ⭐ on the repo, a thoughtful issue, a workflow shared in [Discussions](https://github.com/cyl-castillo/agent-console/discussions).
