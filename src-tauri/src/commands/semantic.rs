@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::error::AppResult;
 use crate::services::context_service::memory_dir_for;
-use crate::services::embedding_service::FastembedEmbedder;
+use crate::services::embedding_service::CandleEmbedder;
 use crate::services::semantic_index::{self, ReindexReport, SearchHit, SourceDoc};
 use crate::services::{memory_service, skills_service};
 
@@ -72,7 +72,7 @@ fn gather_sources(project_root: &str) -> AppResult<Vec<SourceDoc>> {
 #[tauri::command]
 pub fn semantic_reindex(project_root: String) -> AppResult<ReindexReport> {
     let sources = gather_sources(&project_root)?;
-    semantic_index::reindex(&project_root, &sources, &mut FastembedEmbedder)
+    semantic_index::reindex(&project_root, &sources, &mut CandleEmbedder::new())
 }
 
 /// Top-k semantic search. Auto-builds the index when missing so the first
@@ -84,7 +84,7 @@ pub fn semantic_search(
     k: Option<usize>,
 ) -> AppResult<Vec<SearchHit>> {
     let k = k.unwrap_or(8).clamp(1, 50);
-    let hits = semantic_index::search(&project_root, &query, k, &mut FastembedEmbedder)?;
+    let hits = semantic_index::search(&project_root, &query, k, &mut CandleEmbedder::new())?;
     if !hits.is_empty() {
         return Ok(hits);
     }
@@ -93,6 +93,6 @@ pub fn semantic_search(
     if sources.is_empty() {
         return Ok(Vec::new());
     }
-    semantic_index::reindex(&project_root, &sources, &mut FastembedEmbedder)?;
-    semantic_index::search(&project_root, &query, k, &mut FastembedEmbedder)
+    semantic_index::reindex(&project_root, &sources, &mut CandleEmbedder::new())?;
+    semantic_index::search(&project_root, &query, k, &mut CandleEmbedder::new())
 }
