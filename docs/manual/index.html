@@ -369,6 +369,15 @@
         </ul>
       </div>
       <div class="toc-group">
+        <p class="toc-title">The workbench</p>
+        <ul>
+          <li><a href="#workbench">The nine groups</a></li>
+          <li><a href="#tasks">Tasks: Jira, roles &amp; hours</a></li>
+          <li><a href="#proof">Proof (Testigo)</a></li>
+          <li><a href="#memory">Context &amp; semantic memory</a></li>
+        </ul>
+      </div>
+      <div class="toc-group">
         <p class="toc-title">Reference</p>
         <ul>
           <li><a href="#shortcuts">Keyboard shortcuts</a></li>
@@ -598,6 +607,46 @@
         </table>
       </section>
 
+      <!-- ============ WORKBENCH ============ -->
+      <section id="workbench">
+        <h2>The workbench: nine groups</h2>
+        <p>The right-hand panel is the control plane. Everything in it is local and suggest-only — nothing there can block the core loop. The strip shows nine groups in three clusters; merged groups open with a small sub-tab switcher at the top.</p>
+        <ul>
+          <li><strong>Work</strong> — <em>Tasks</em> (Jira queue | agenda), <em>Notes</em> (per-project scratchpad; a note can be typed into the agent with one click), <em>Proof</em> (the evidence ledger), <em>Context</em> (CLAUDE.md, memories, semantic search).</li>
+          <li><strong>Agents</strong> — <em>Coach</em> (skills | advisor | learning: the agent's playbook, generated from your repo and your real usage), <em>Room</em> (you + N agents on one problem), <em>Schedule</em> (agentic jobs on a clock, physically restricted to plan mode).</li>
+          <li><strong>Config</strong> — <em>Trust</em> (permissions | secrets vault: what the agent can touch), <em>Add-ons</em> (plugins | MCP servers).</li>
+        </ul>
+        <p>Export/import and the feedback form left the strip — reach them from the command palette (<code>Ctrl+P</code>).</p>
+      </section>
+
+      <!-- ============ TASKS ============ -->
+      <section id="tasks">
+        <h2>Tasks: Jira, roles &amp; hours</h2>
+        <p>Connect Jira Cloud with your site URL, email and an API token (stored in the OS keychain, never in a file). Your queue becomes actionable: <strong>▸ Start session</strong> opens a terminal seeded with a stage-aware prompt for that ticket — a ticket in review seeds a review, a bug seeds a diagnosis. <strong>⎇ worktree</strong> does the same on an isolated branch you confirm first.</p>
+        <h3>Roles</h3>
+        <p>Pick who's driving per project: <em>Developer, QA, Functional Analyst, PO, PM</em>. Developer/QA/Analyst see their own assigned issues; PO and PM see the whole project by priority. The seeded prompts change with the role — QA gets a test plan, the Analyst pins requirements down, the PM gets the real progress read from the repo in stakeholder language (non-coding roles instruct the agent not to change code). The JQL behind each view is visible and editable (<code>jql</code> toggle) so custom workflows fit.</p>
+        <h3>Logging hours</h3>
+        <p><strong>⏱ log</strong> on any ticket opens an inline editor: duration ("1h 30m", "90m"), day, optional comment. If the session for that ticket was witnessed, an accent chip like <code>◈ 2h 15m</code> suggests the duration measured from your actual activity — click to fill, edit if you like, then log. Suggestions are estimates feeding an editable field; nothing is ever submitted for you.</p>
+      </section>
+
+      <!-- ============ PROOF ============ -->
+      <section id="proof">
+        <h2>Proof (Testigo)</h2>
+        <p>Agent Console implements <a href="https://github.com/cyl-castillo/testigo" target="_blank" rel="noopener">Testigo</a>, an open intent-to-proof protocol. When witnessing is on for a project, every prompt, approval, tool result and per-turn diff is appended to a <strong>hash-chained ledger</strong> — each event sealing the one before it. Sessions seeded from a Jira ticket group their events into a case.</p>
+        <ul>
+          <li><strong>Export</strong> a case (or the whole ledger) as a signed proof packet — an in-toto/DSSE statement anyone can verify <a href="https://cyl-castillo.github.io/testigo/verifier/testigo-verifier.html" target="_blank" rel="noopener">in a browser</a>, no install.</li>
+          <li><strong>Redact</strong> sensitive events before signing: content is withheld, the chain stays verifiable — selective disclosure.</li>
+          <li><strong>Defaults are conservative</strong>: witnessing is per-project, and repo marks (commit trailers, git refs) are off by default so shared repositories are never touched without an explicit choice.</li>
+        </ul>
+      </section>
+
+      <!-- ============ MEMORY ============ -->
+      <section id="memory">
+        <h2>Context &amp; semantic memory</h2>
+        <p>The Context tab manages CLAUDE.md (project and global) and your saved memories. On top of it sits <strong>semantic search</strong>: type what you mean — in Spanish or English — and the relevant memory or skill surfaces even with zero shared words. Powered by a local embedding model (downloaded once, ~470&nbsp;MB; nothing ever leaves your machine). <strong>▸ to composer</strong> types a memory into the active session's input for you to review and send.</p>
+        <p>The same index makes the Coach self-aware: suggestions that already exist in spirit get an <em>"≈ similar to X"</em> badge instead of piling up as near-duplicates, and the corpus curator is pointed at the memory pairs that genuinely overlap.</p>
+      </section>
+
       <!-- ============ BUILD ============ -->
       <section id="build">
         <h2>Build from source</h2>
@@ -629,6 +678,12 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <p>The approval hook is a Node script — make sure <strong>Node.js ≥ 20</strong> is on your <code>PATH</code>. If you installed via the <code>.deb</code>, the <code>nodejs</code> dependency should pull it in; on other distros install Node yourself.</p>
         <h3>No diff or no restore handle</h3>
         <p>The diff viewer and per-turn snapshots only work inside a <strong>git repository</strong>. Open a folder that has been <code>git init</code>'d (or any existing repo).</p>
+        <h3>macOS says the app "is damaged and can't be opened"</h3>
+        <p>It isn't damaged — the app isn't notarized by Apple yet, and Gatekeeper words it badly. Run <code>xattr -cr "/Applications/Agent Console.app"</code> once, or allow it under System Settings → Privacy &amp; Security → "Open Anyway". First launch only.</p>
+        <h3>Windows SmartScreen warns about an unknown publisher</h3>
+        <p>The binaries aren't code-signed yet. "More info → Run anyway" — the installer is the one published on the GitHub Releases page.</p>
+        <h3>Advisor / Learning fail with an authentication error</h3>
+        <p>Your engine login expired. The error itself offers a <strong>Fix Claude login</strong> button, and the palette has <em>Fix Claude login</em> / <em>Fix Codex login</em> — each opens a terminal running the engine's interactive login flow.</p>
         <h3>A shortcut isn't doing what I expect</h3>
         <p>Several shortcuts pass through to the shell when the terminal is focused (see the note under <a href="#terminal">Terminal &amp; sessions</a>). Click outside the terminal to get the app-level action.</p>
       </section>
