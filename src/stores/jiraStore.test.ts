@@ -8,12 +8,30 @@ const world = vi.hoisted(() => ({
   issues: [] as { key: string }[],
   issuesError: null as string | null,
   jqls: [] as (string | null)[],
+  projectRoot: "/repo" as string | null,
+  digest: [] as { issueKey: string; seconds: number; events: number; logged: boolean }[],
+  digestCalls: [] as string[],
+  loggedDays: [] as string[],
+  logDayFail: false,
   logged: [] as string[],
   logError: null as string | null,
 }));
 
+vi.mock("./sessionStore", () => ({
+  useSessionStore: {
+    getState: () => ({ project: world.projectRoot ? { root: world.projectRoot } : null }),
+  },
+}));
 vi.mock("../ipc/tauri", () => ({
   ipc: {
+    jiraDailyDigest: async (_root: string, _s: number, _e: number, date: string) => {
+      world.digestCalls.push(date);
+      return world.digest;
+    },
+    jiraLogDay: async (_root: string, date: string, entries: { issueKey: string }[]) => {
+      world.loggedDays.push(`${date}:${entries.map((x) => x.issueKey).join("+")}`);
+      return entries.map((x) => ({ issueKey: x.issueKey, ok: !world.logDayFail, message: "1h" }));
+    },
     jiraLogWork: async (issueKey: string, duration: string) => {
       if (world.logError) throw new Error(world.logError);
       world.logged.push(`${issueKey}:${duration}`);
@@ -50,6 +68,11 @@ beforeEach(() => {
   world.logged = [];
   world.logError = null;
   world.jqls = [];
+  world.projectRoot = "/repo";
+  world.digest = [];
+  world.digestCalls = [];
+  world.loggedDays = [];
+  world.logDayFail = false;
   useJiraStore.setState({
     status: null,
     issues: [],
@@ -60,6 +83,9 @@ beforeEach(() => {
     issuesError: null,
     logError: null,
     jql: null,
+    digestDate: null,
+    digest: [],
+    loadingDigest: false,
   });
 });
 
@@ -155,5 +181,33 @@ describe("role-driven JQL", () => {
     await useJiraStore.getState().setJql("anything");
     expect(world.jqls).toEqual([]);
     expect(useJiraStore.getState().jql).toBe("anything");
+  });
+});
+
+describe("daily worklog digest", () => {
+  it("loadDigest fetches the local day and stores entries", async () => {
+    world.digest = [{ issueKey: "FIX-1", seconds: 5400, events: 12, logged: false }];
+    await useJiraStore.getState().loadDigest(0);
+    expect(world.digestCalls).toHaveLength(1);
+    expect(useJiraStore.getState().digest).toHaveLength(1);
+    expect(useJiraStore.getState().digestDate).toBe(world.digestCalls[0]);
+  });
+
+  it("logDay posts the entries for the loaded date and reloads", async () => {
+    world.digest = [{ issueKey: "FIX-1", seconds: 5400, events: 12, logged: false }];
+    await useJiraStore.getState().loadDigest(0);
+    const [ok, failed] = await useJiraStore
+      .getState()
+      .logDay([{ issueKey: "FIX-1", duration: "1h 30m" }]);
+    expect([ok, failed]).toEqual([1, 0]);
+    expect(world.loggedDays[0]).toContain("FIX-1");
+    // Reload happened (marks refresh).
+    expect(world.digestCalls.length).toBeGreaterThan(1);
+  });
+
+  it("logDay without a loaded date or entries is a no-op", async () => {
+    const r = await useJiraStore.getState().logDay([]);
+    expect(r).toEqual([0, 0]);
+    expect(world.loggedDays).toEqual([]);
   });
 });

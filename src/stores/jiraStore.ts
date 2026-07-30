@@ -1,7 +1,21 @@
 import { create } from "zustand";
 
 import { ipc } from "../ipc/tauri";
-import type { JiraIssue, JiraStatus } from "../types/domain";
+import type { JiraIssue, JiraStatus, WorklogDigestEntry } from "../types/domain";
+import { useSessionStore } from "./sessionStore";
+
+/// Local-midnight bounds + YYYY-MM-DD for "today minus offsetDays".
+export function localDay(offsetDays: number): { startMs: number; endMs: number; date: string } {
+  const now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - offsetDays);
+  const startMs = d.getTime();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return {
+    startMs,
+    endMs: startMs + 86_400_000,
+    date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+  };
+}
 
 interface JiraState {
   status: JiraStatus | null;
@@ -31,6 +45,15 @@ interface JiraState {
     comment?: string,
   ) => Promise<string | null>;
   logError: string | null;
+
+  /// The "⏱ Today / Yesterday" digest: witnessed time per ticket for a local
+  /// day, prefilled and human-reviewed before anything reaches Jira.
+  digestDate: string | null;
+  digest: WorklogDigestEntry[];
+  loadingDigest: boolean;
+  loadDigest: (offsetDays: number) => Promise<void>;
+  /// Log the given entries for the loaded day. Returns [ok, failed] counts.
+  logDay: (entries: { issueKey: string; duration: string }[]) => Promise<[number, number]>;
 }
 
 export const useJiraStore = create<JiraState>((set, get) => ({
@@ -96,6 +119,41 @@ export const useJiraStore = create<JiraState>((set, get) => ({
       set({ issues, loadingIssues: false });
     } catch (e) {
       set({ loadingIssues: false, issuesError: String(e) });
+    }
+  },
+
+  digestDate: null,
+  digest: [],
+  loadingDigest: false,
+  loadDigest: async (offsetDays) => {
+    const root = useSessionStore.getState().project?.root;
+    if (!root) return;
+    const day = localDay(offsetDays);
+    set({ loadingDigest: true, digestDate: day.date });
+    try {
+      const digest = await ipc.jiraDailyDigest(root, day.startMs, day.endMs, day.date);
+      // A slow response for a day the user already navigated away from must
+      // not clobber the currently-shown one.
+      if (get().digestDate === day.date) set({ digest, loadingDigest: false });
+    } catch {
+      if (get().digestDate === day.date) set({ digest: [], loadingDigest: false });
+    }
+  },
+  logDay: async (entries) => {
+    const root = useSessionStore.getState().project?.root;
+    const date = get().digestDate;
+    if (!root || !date || entries.length === 0) return [0, 0];
+    try {
+      const results = await ipc.jiraLogDay(root, date, entries);
+      const ok = results.filter((r) => r.ok).length;
+      // Refresh marks state for the same day.
+      const day = localDay(0);
+      const offset = date === day.date ? 0 : 1;
+      await get().loadDigest(offset);
+      return [ok, results.length - ok];
+    } catch (e) {
+      set({ logError: String(e) });
+      return [0, entries.length];
     }
   },
 

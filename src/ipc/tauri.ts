@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   SemanticHit,
+  WorklogDigestEntry,
   ActivityEvent,
   AdvisorAnalysisResult,
   ApprovalRequest,
@@ -220,6 +221,18 @@ export const ipc = {
   jiraListIssues: (jql?: string) => invoke<JiraIssue[]>("jira_list_issues", { jql: jql ?? null }),
   jiraLogWork: (issueKey: string, duration: string, started: string, comment?: string) =>
     invoke<string>("jira_log_work", { issueKey, duration, started, comment: comment ?? null }),
+  jiraDailyDigest: (projectRoot: string, dayStartMs: number, dayEndMs: number, date: string) =>
+    invoke<WorklogDigestEntry[]>("jira_daily_digest", { projectRoot, dayStartMs, dayEndMs, date }),
+  jiraLogDay: (
+    projectRoot: string,
+    date: string,
+    entries: { issueKey: string; duration: string }[],
+  ) =>
+    invoke<{ issueKey: string; ok: boolean; message: string }[]>("jira_log_day", {
+      projectRoot,
+      date,
+      entries,
+    }),
   jiraWorklogSuggestion: (
     projectRoot: string,
     issueKey: string,

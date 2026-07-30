@@ -782,3 +782,12 @@ export interface SemanticHit {
   snippet: string;
   score: number;
 }
+
+/// One row of the daily worklog digest: a ticket with witnessed activity.
+export interface WorklogDigestEntry {
+  issueKey: string;
+  seconds: number;
+  events: number;
+  logged: boolean;
+  loggedSeconds?: number | null;
+}

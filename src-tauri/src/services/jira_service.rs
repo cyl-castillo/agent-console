@@ -417,6 +417,127 @@ pub fn estimate_worked_seconds(mut ts_ms: Vec<i64>, gap_ms: i64, min_burst_ms: i
     (total_ms / 1000).max(0) as u64
 }
 
+// ---------------------------------------------------------------------------
+// Daily worklog digest: which tickets saw witnessed activity on a given local
+// day, how long, and whether their time was already logged. The estimation is
+// the same burst-clustering the per-ticket suggestion uses; the "already
+// logged" marks live in a small per-project JSON so the digest never nags
+// about (or double-logs) a (ticket, day) that's been submitted.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorklogMark {
+    pub issue_key: String,
+    /// Local day the work happened (YYYY-MM-DD), NOT when it was logged.
+    pub date: String,
+    pub seconds: u64,
+    pub logged_at_ms: i64,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MarksFile {
+    #[serde(default)]
+    marks: Vec<WorklogMark>,
+}
+
+fn marks_path(project_root: &str) -> AppResult<PathBuf> {
+    let dir = dirs::data_local_dir()
+        .ok_or_else(|| AppError::Other("cannot resolve data dir".into()))?
+        .join("agent-console")
+        .join("worklog-marks");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join(format!(
+        "{}.json",
+        crate::services::persistence::project_file_key(project_root)
+    )))
+}
+
+pub fn load_marks(project_root: &str) -> Vec<WorklogMark> {
+    let Ok(path) = marks_path(project_root) else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<MarksFile>(&raw).ok())
+        .map(|f| f.marks)
+        .unwrap_or_default()
+}
+
+/// Record that (issue, day) was logged. Idempotent by (issue_key, date):
+/// re-logging the same day replaces the mark.
+pub fn add_mark(project_root: &str, mark: WorklogMark) -> AppResult<()> {
+    let path = marks_path(project_root)?;
+    let mut marks = load_marks(project_root);
+    marks.retain(|m| !(m.issue_key == mark.issue_key && m.date == mark.date));
+    marks.push(mark);
+    let raw = serde_json::to_string_pretty(&MarksFile { marks })
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, raw)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DigestEntry {
+    pub issue_key: String,
+    pub seconds: u64,
+    pub events: usize,
+    /// Already submitted for this (ticket, day) — shown as done, never re-logged.
+    pub logged: bool,
+    pub logged_seconds: Option<u64>,
+}
+
+/// Build the digest for one local day from witnessed (case_id, ts) pairs.
+/// Pure — the command layer feeds it from the Testigo ledger. Entries under a
+/// minute are noise, not work.
+pub fn build_daily_digest(
+    case_events: &[(String, i64)],
+    day_start_ms: i64,
+    day_end_ms: i64,
+    date: &str,
+    marks: &[WorklogMark],
+) -> Vec<DigestEntry> {
+    use std::collections::BTreeMap;
+    let mut by_key: BTreeMap<String, Vec<i64>> = BTreeMap::new();
+    for (case_id, ts) in case_events {
+        if *ts < day_start_ms || *ts >= day_end_ms {
+            continue;
+        }
+        let Some(key) = case_id.strip_prefix("jira:") else {
+            continue;
+        };
+        by_key.entry(key.to_string()).or_default().push(*ts);
+    }
+    let mut out: Vec<DigestEntry> = Vec::new();
+    for (key, ts_list) in by_key {
+        let events = ts_list.len();
+        let seconds = parse_free_seconds(ts_list);
+        if seconds < 60 {
+            continue;
+        }
+        let mark = marks.iter().find(|m| m.issue_key == key && m.date == date);
+        out.push(DigestEntry {
+            issue_key: key,
+            seconds,
+            events,
+            logged: mark.is_some(),
+            logged_seconds: mark.map(|m| m.seconds),
+        });
+    }
+    // Biggest chunks of the day first.
+    out.sort_by_key(|e| std::cmp::Reverse(e.seconds));
+    out
+}
+
+/// Burst-clustering with the digest's standard knobs (15min gap, 1min floor).
+fn parse_free_seconds(ts: Vec<i64>) -> u64 {
+    estimate_worked_seconds(ts, 15 * 60 * 1000, 60 * 1000)
+}
+
 fn flatten(site: &str, i: RawIssue) -> JiraIssue {
     let f = i.fields;
     JiraIssue {
@@ -613,5 +734,91 @@ mod tests {
         assert!(validate_jql("  ").is_err());
         assert!(validate_jql(&"x".repeat(1001)).is_err());
         assert!(validate_jql("a = b\u{0007}").is_err());
+    }
+
+    #[test]
+    fn daily_digest_groups_marks_and_filters() {
+        const M: i64 = 60_000;
+        const B: i64 = 1_000 * M;
+        let events = vec![
+            ("jira:FIX-1".to_string(), B),
+            ("jira:FIX-1".to_string(), B + 10 * M),
+            ("jira:FIX-2".to_string(), B + 5 * M),
+            // Outside the day window.
+            ("jira:FIX-1".to_string(), B - 100 * M),
+            // Non-jira cases are ignored.
+            ("term:t-1".to_string(), B + 2 * M),
+        ];
+        let marks = vec![WorklogMark {
+            issue_key: "FIX-2".into(),
+            date: "2026-07-29".into(),
+            seconds: 900,
+            logged_at_ms: 1,
+        }];
+        let digest = build_daily_digest(&events, B - 50 * M, B + 50 * M, "2026-07-29", &marks);
+        assert_eq!(digest.len(), 2);
+        // FIX-1: burst 0..10m = 600s, biggest first.
+        assert_eq!(digest[0].issue_key, "FIX-1");
+        assert_eq!(digest[0].seconds, 600);
+        assert_eq!(digest[0].events, 2);
+        assert!(!digest[0].logged);
+        // FIX-2: lone event = 1min floor, already marked logged for that date.
+        assert_eq!(digest[1].issue_key, "FIX-2");
+        assert_eq!(digest[1].seconds, 60);
+        assert!(digest[1].logged);
+        assert_eq!(digest[1].logged_seconds, Some(900));
+        // A different date: FIX-2 counts as unlogged again.
+        let digest = build_daily_digest(&events, B - 50 * M, B + 50 * M, "2026-07-30", &marks);
+        assert!(!digest[1].logged);
+    }
+
+    /// One test fn — it mutates the process-global XDG_DATA_HOME.
+    #[test]
+    fn worklog_marks_round_trip_and_replace() {
+        let _env = crate::test_support::lock_env();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let data = std::env::temp_dir().join(format!("ac-marks-{}-{nanos}", std::process::id()));
+        let prev = std::env::var("XDG_DATA_HOME").ok();
+        std::env::set_var("XDG_DATA_HOME", &data);
+        let root = format!("/proj/marks-{nanos}");
+
+        let run = || -> AppResult<()> {
+            assert!(load_marks(&root).is_empty());
+            add_mark(
+                &root,
+                WorklogMark {
+                    issue_key: "FIX-1".into(),
+                    date: "2026-07-29".into(),
+                    seconds: 3600,
+                    logged_at_ms: 1,
+                },
+            )?;
+            add_mark(
+                &root,
+                WorklogMark {
+                    issue_key: "FIX-1".into(),
+                    date: "2026-07-29".into(),
+                    seconds: 5400,
+                    logged_at_ms: 2,
+                },
+            )?;
+            let marks = load_marks(&root);
+            assert_eq!(marks.len(), 1, "same (issue, date) replaces");
+            assert_eq!(marks[0].seconds, 5400);
+            Ok(())
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
+        match prev {
+            Some(v) => std::env::set_var("XDG_DATA_HOME", v),
+            None => std::env::remove_var("XDG_DATA_HOME"),
+        }
+        std::fs::remove_dir_all(&data).ok();
+        match result {
+            Ok(inner) => inner.unwrap(),
+            Err(p) => std::panic::resume_unwind(p),
+        }
     }
 }

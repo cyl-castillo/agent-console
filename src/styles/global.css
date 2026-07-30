@@ -9204,3 +9204,84 @@ select:focus-visible,
   border-radius: 4px;
   padding: 2px 7px;
 }
+
+/* Daily worklog digest card ("Witnessed time"). */
+.jira-digest {
+  margin: 8px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev-1);
+}
+.jira-digest-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 9px;
+}
+.jira-digest-toggle {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.jira-digest-toggle:hover {
+  color: var(--text);
+}
+.jira-digest-day {
+  display: flex;
+  gap: 4px;
+}
+.jira-digest-chip {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 10px;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+.jira-digest-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.jira-digest-body {
+  padding: 2px 9px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.jira-digest-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.jira-digest-row.logged {
+  opacity: 0.7;
+}
+.jira-digest-check {
+  color: var(--ok);
+  font-weight: 700;
+}
+.jira-digest-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 64px;
+}
+.jira-digest-done {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.jira-digest-events {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+}
+.jira-digest-log {
+  align-self: flex-end;
+  margin-top: 2px;
+}
