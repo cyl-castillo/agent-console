@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { ipc } from "../ipc/tauri";
@@ -21,7 +21,7 @@ import {
   type ProjectRole,
 } from "../lib/jira";
 import { PanelError } from "./PanelError";
-import type { JiraIssue } from "../types/domain";
+import type { JiraIssue, WorklogDigestEntry } from "../types/domain";
 
 export function JiraPanel() {
   const status = useJiraStore((s) => s.status);
@@ -269,6 +269,8 @@ function IssueList() {
           </div>
         </div>
       )}
+
+      <WorklogDigest />
 
       {issuesError && <PanelError message={issuesError} onRetry={() => void refreshIssues()} />}
 
@@ -539,5 +541,169 @@ function IssueRow({ issue, isRepo }: { issue: JiraIssue; isRepo: boolean }) {
         </div>
       )}
     </li>
+  );
+}
+
+/// The daily worklog card: what the ledger witnessed per ticket for today or
+/// yesterday, prefilled and editable — one click logs the checked rows.
+/// Human-reviewed by design; nothing reaches Jira unattended.
+function WorklogDigest() {
+  const digest = useJiraStore((s) => s.digest);
+  const digestDate = useJiraStore((s) => s.digestDate);
+  const loadingDigest = useJiraStore((s) => s.loadingDigest);
+  const loadDigest = useJiraStore((s) => s.loadDigest);
+  const logDay = useJiraStore((s) => s.logDay);
+  const showToast = useToastStore((s) => s.show);
+  const [offset, setOffset] = useState(0);
+  const [open, setOpen] = useState(true);
+  const [rows, setRows] = useState<Record<string, { include: boolean; duration: string }>>({});
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void loadDigest(offset);
+  }, [offset, loadDigest]);
+
+  // Rebuild editable rows when a new digest arrives.
+  useEffect(() => {
+    const next: Record<string, { include: boolean; duration: string }> = {};
+    for (const e of digest) {
+      if (!e.logged)
+        next[e.issueKey] = { include: true, duration: formatSecondsForWorklog(e.seconds) };
+    }
+    setRows(next);
+  }, [digest]);
+
+  const pending = digest.filter((e) => !e.logged);
+  const selected = pending.filter(
+    (e) => rows[e.issueKey]?.include && rows[e.issueKey]?.duration.trim(),
+  );
+  if (digest.length === 0 && !loadingDigest && offset === 0) return null;
+
+  const submit = async () => {
+    if (busy || selected.length === 0) return;
+    setBusy(true);
+    const [ok, failed] = await logDay(
+      selected.map((e) => ({ issueKey: e.issueKey, duration: rows[e.issueKey].duration })),
+    );
+    setBusy(false);
+    if (ok > 0) showToast(`Logged ${ok} ticket${ok === 1 ? "" : "s"} for ${digestDate}`, "success");
+    if (failed > 0)
+      showToast(`${failed} entr${failed === 1 ? "y" : "ies"} failed — check and retry`, "error");
+  };
+
+  return (
+    <div className="jira-digest">
+      <div className="jira-digest-head">
+        <button className="jira-digest-toggle" onClick={() => setOpen((v) => !v)}>
+          {open ? "▾" : "▸"} ⏱ Witnessed time
+        </button>
+        <span className="jira-digest-day">
+          <button
+            className={`jira-digest-chip ${offset === 0 ? "active" : ""}`}
+            onClick={() => {
+              setOffset(0);
+              setOpen(true);
+            }}
+          >
+            today
+          </button>
+          <button
+            className={`jira-digest-chip ${offset === 1 ? "active" : ""}`}
+            onClick={() => {
+              setOffset(1);
+              setOpen(true);
+            }}
+          >
+            yesterday
+          </button>
+        </span>
+      </div>
+      {open && (
+        <div className="jira-digest-body">
+          {loadingDigest ? (
+            <div className="wb-hint">Reading the ledger…</div>
+          ) : digest.length === 0 ? (
+            <div className="wb-hint">
+              No witnessed activity {offset === 0 ? "today" : "yesterday"}.
+            </div>
+          ) : (
+            <>
+              {digest.map((e) => (
+                <DigestRow key={e.issueKey} entry={e} row={rows[e.issueKey]} setRows={setRows} />
+              ))}
+              {pending.length > 0 && (
+                <button
+                  className="wb-cta wb-cta-sm jira-digest-log"
+                  onClick={() => void submit()}
+                  disabled={busy || selected.length === 0}
+                  title={`Log the checked tickets for ${digestDate}`}
+                >
+                  {busy ? "…" : `Log ${selected.length} ticket${selected.length === 1 ? "" : "s"}`}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DigestRow({
+  entry,
+  row,
+  setRows,
+}: {
+  entry: WorklogDigestEntry;
+  row?: { include: boolean; duration: string };
+  setRows: Dispatch<SetStateAction<Record<string, { include: boolean; duration: string }>>>;
+}) {
+  if (entry.logged) {
+    return (
+      <div className="jira-digest-row logged">
+        <span className="jira-digest-check">✓</span>
+        <span className="jira-digest-key">{entry.issueKey}</span>
+        <span className="jira-digest-done">
+          logged {formatSecondsForWorklog(entry.loggedSeconds ?? entry.seconds)}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="jira-digest-row">
+      <input
+        type="checkbox"
+        checked={row?.include ?? false}
+        onChange={(e) =>
+          setRows((r) => ({
+            ...r,
+            [entry.issueKey]: {
+              include: e.target.checked,
+              duration: r[entry.issueKey]?.duration ?? "",
+            },
+          }))
+        }
+        title="Include in Log all"
+      />
+      <span className="jira-digest-key">{entry.issueKey}</span>
+      <input
+        className="jira-log-duration"
+        value={row?.duration ?? ""}
+        spellCheck={false}
+        onChange={(e) =>
+          setRows((r) => ({
+            ...r,
+            [entry.issueKey]: {
+              include: r[entry.issueKey]?.include ?? true,
+              duration: e.target.value,
+            },
+          }))
+        }
+        title={`Estimated from ${entry.events} witnessed events — edit freely`}
+      />
+      <span className="jira-digest-events" title="Witnessed ledger events">
+        ◈ {entry.events}
+      </span>
+    </div>
   );
 }

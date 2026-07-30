@@ -45,6 +45,7 @@ import { ExportImportPanel } from "./components/ExportImportPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
 import { WorkbenchTabs, WorkbenchSubTabs } from "./components/WorkbenchTabs";
 import { isWorkbenchTab, type WorkbenchTab } from "./lib/workbenchTabs";
+import { maybeWorklogNudge } from "./lib/worklogNudge";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
@@ -135,6 +136,12 @@ export default function App() {
   const resetPaletteForProject = usePaletteStore((s) => s.resetForProject);
   const showToast = useToastStore((s) => s.show);
   const blockedCount = useApprovalStore((s) => s.queue.length);
+
+  // Morning worklog nudge: once per day, if yesterday's witnessed ticket time
+  // was never logged, say so (Tasks → Witnessed time). Courtesy only.
+  useEffect(() => {
+    if (project?.root) void maybeWorklogNudge(project.root);
+  }, [project?.root]);
 
   // Mirror the "waiting on you" state into the window title, so the taskbar /
   // Alt-Tab entry says it even when the app isn't visible.
