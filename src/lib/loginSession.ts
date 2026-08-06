@@ -1,4 +1,5 @@
-import { profileFor, type AgentKind } from "../agents/profiles";
+import { profileFor, type AgentKind, type AgentProfile } from "../agents/profiles";
+import { ipc } from "../ipc/tauri";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useToastStore } from "../stores/toastStore";
@@ -8,6 +9,21 @@ import { useToastStore } from "../stores/toastStore";
 export function isAuthError(message: string | null | undefined): boolean {
   if (!message) return false;
   return /log in again|authenticate|oauth|logged in|login/i.test(message);
+}
+
+/// Which command the "fix login" terminal should run for this agent. Prefers
+/// the profile's modern command, but only once the backend probe proves the
+/// installed CLI understands it: `claude auth status` answering at all means
+/// the `auth` subcommand exists (2.1.41+). An unknown answer — old CLI, binary
+/// missing, probe failed — keeps the command that works everywhere.
+export async function resolveLoginCmd(profile: AgentProfile): Promise<string> {
+  if (!profile.modernLoginCmd || profile.kind !== "claude") return profile.loginCmd;
+  try {
+    const status = await ipc.claudeAuthStatus();
+    return status ? profile.modernLoginCmd : profile.loginCmd;
+  } catch {
+    return profile.loginCmd;
+  }
 }
 
 /// One-click login repair: open a terminal session that runs the engine's

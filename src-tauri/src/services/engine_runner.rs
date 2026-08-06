@@ -406,10 +406,19 @@ fn finish(
     let status = status?;
     let err = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
     if !status.success() {
-        return Err(AppError::Other(format!(
+        let mut msg = format!(
             "{bin} exited with status {status}: {}",
             truncate(err.trim(), 600)
-        )));
+        );
+        // Background runs (scheduler, digests) are where an expired login hurts
+        // most — nobody is watching the terminal. Ask the CLI directly instead
+        // of hoping its stderr names the real cause.
+        if bin == "claude" {
+            if let Some(hint) = crate::services::claude_cli::logged_out_hint() {
+                msg.push_str(&hint);
+            }
+        }
+        return Err(AppError::Other(msg));
     }
     Ok(())
 }

@@ -39,6 +39,15 @@ export interface Preflight {
   tools: PreflightTool[];
 }
 
+/// Structured login state reported by `claude auth status --json`. The IPC call
+/// returns `null` when the CLI can't answer (missing, or older than 2.1.41) —
+/// that is "unknown", never "logged out".
+export interface ClaudeAuthStatus {
+  loggedIn: boolean;
+  method: string | null;
+  account: string | null;
+}
+
 export interface BranchInfo {
   name: string;
   current: boolean;

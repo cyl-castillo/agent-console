@@ -101,6 +101,7 @@ pub fn run() {
             commands::worktree::set_active_repo,
             commands::worktree::worktree_prune_orphans,
             commands::preflight::preflight_check,
+            commands::preflight::claude_auth_status,
             commands::projects::projects_recent,
             commands::projects::projects_last,
             commands::projects::projects_forget,

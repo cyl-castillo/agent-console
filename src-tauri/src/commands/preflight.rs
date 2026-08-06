@@ -68,3 +68,12 @@ pub fn preflight_check() -> Preflight {
         tools: vec![probe("claude"), probe("node"), probe("git"), probe("codex")],
     }
 }
+
+/// Structured login state from `claude auth status --json`. `null` means the
+/// question couldn't be answered — CLI missing, or older than the 2.1.41 that
+/// made `claude auth` scriptable — and callers must treat that as "unknown",
+/// not as "logged out".
+#[tauri::command]
+pub fn claude_auth_status() -> Option<crate::services::claude_cli::AuthStatus> {
+    crate::services::claude_cli::auth_status()
+}
