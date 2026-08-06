@@ -29,7 +29,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 ### Quick wins (candidatos para la mejora diaria)
 
 - [ ] **W1 — Hook exec-form `args` (Claude 2.1.139)**: reemplaza nuestro workaround `node "<path>"` (PR #109) por `{command, args: [path]}` sin shell. CUIDADO compat: versiones <2.1.122 invalidan settings.json entero ante entradas que no entienden → gatear por versión detectada (`claude --version`) o esperar adopción. Codex: quoting Windows arreglado en 0.145 con el formato actual.
-- [x] **W2 — Auth detección estructurada** (PR #138, 2026-08-06): `claude auth status --json` → `claude_cli::auth_status()` (probe acotado a 8s, `None` = "no sé", nunca "deslogueado"); `exit_error` y `engine_runner::finish` nombran la expiración aunque el CLI culpe a otra cosa; "Fix Claude login" usa `claude auth login` cuando el probe prueba que el subcomando existe, con fallback a `claude` pelado. Queda como opcional: mostrar cuenta/método en la GUI (el comando IPC `claude_auth_status` ya los devuelve).
+- [x] **W2 — Auth detección estructurada** (PR #139, 2026-08-06): `claude auth status --json` → `claude_cli::auth_status()` (probe acotado a 8s, `None` = "no sé", nunca "deslogueado"); `exit_error` y `engine_runner::finish` nombran la expiración aunque el CLI culpe a otra cosa; "Fix Claude login" usa `claude auth login` cuando el probe prueba que el subcomando existe, con fallback a `claude` pelado. Queda como opcional: mostrar cuenta/método en la GUI (el comando IPC `claude_auth_status` ya los devuelve).
 - [ ] **W3 — `sessionTitle` writeback (Claude 2.1.94)**: nuestro auto-naming puede devolver `hookSpecificOutput.sessionTitle` desde el UserPromptSubmit hook → el nombre queda también en `/resume` y `claude agents` del propio CLI. Campo ignorado por versiones viejas (seguro).
 - [ ] **W4 — `last_assistant_message` en Stop (Claude 2.1.47)**: el Stop hook ya recibe el texto final del turno → habilita resumen hablado fin-de-turno (hito 3 de voz) y digest sin parsear jsonl. Codex: verificar si su Stop lo incluye (su set de eventos creció: sessionEnd, permissionRequest, subagentStart/Stop, postCompact).
 - [ ] **W5 — Trust de workspace**: hooks NO corren en directorios no confiados (Claude 2.1.3/2.1.51/2.1.218) → detectar y avisar en la GUI en vez de asumir que el hook disparó (hoy el fallo es silencioso; misma clase de bug que el de Windows/Melissa).
@@ -62,7 +62,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 
 | Fecha | Item | PR |
 |---|---|---|
-| 2026-08-06 | W2 — auth estructurada (`claude auth status --json`) + `claude auth login` gateado por probe | #138 |
+| 2026-08-06 | W2 — auth estructurada (`claude auth status --json`) + `claude auth login` gateado por probe | #139 |
 
 ## Protocolo de la tarea diaria
 
