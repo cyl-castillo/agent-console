@@ -40,6 +40,7 @@ import type {
   MemoryEntry,
   PermissionsSnapshot,
   Preflight,
+  ClaudeAuthStatus,
   PersistedRoom,
   PersistedSession,
   Project,
@@ -116,6 +117,9 @@ export const ipc = {
   snapshotDelete: (id: string) => invoke<void>("snapshot_delete", { id }),
 
   preflightCheck: () => invoke<Preflight>("preflight_check"),
+
+  // null = the CLI couldn't tell us (not installed, or predates `claude auth`).
+  claudeAuthStatus: () => invoke<ClaudeAuthStatus | null>("claude_auth_status"),
 
   // Per-session isolated worktrees. Destructive ops (merge/discard) validate
   // on the Rust side that the path is a registered worktree of the repo.

@@ -53,8 +53,13 @@ export interface AgentProfile {
   /// runs the PTY (we type this as text, we do not spawn it ourselves).
   binName: string;
   /// Command that repairs authentication interactively (browser OAuth can't be
-  /// fixed headless). Typed into a fresh PTY by the "fix login" flow.
+  /// fixed headless). Typed into a fresh PTY by the "fix login" flow. This is
+  /// the floor: it must work on every version of the CLI we might meet.
   loginCmd: string;
+  /// Better login command, available only on recent CLIs — used when a runtime
+  /// probe proves the CLI understands it (see resolveLoginCmd). Undefined when
+  /// the agent has nothing newer to offer.
+  modernLoginCmd?: string;
   /// Model/tuning presets for the chooser and the pill.
   models: AgentModelPreset[];
   /// Whether picking a model on a *live* session can be pushed into the running
@@ -87,9 +92,12 @@ const CLAUDE: AgentProfile = {
   label: "Claude",
   icon: "✶",
   binName: "claude",
-  // Plain interactive claude detects broken credentials and walks through the
-  // re-login itself (a dedicated `login` subcommand doesn't exist).
+  // Fallback for old CLIs: plain interactive claude detects broken credentials
+  // and walks through the re-login itself. Claude Code 2.1.41 added the real
+  // thing — `claude auth login` goes straight to the OAuth flow instead of
+  // booting a whole TUI session, so we prefer it whenever it exists.
   loginCmd: "claude",
+  modernLoginCmd: "claude auth login",
   models: CLAUDE_MODELS,
   supportsLiveModelSwitch: true,
   liveModelSwitchInput: (m) => `/model ${m}\r`,

@@ -10,6 +10,7 @@ import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStor
 import { useThemeStore } from "../stores/themeStore";
 import { useToastStore } from "../stores/toastStore";
 import { profileFor } from "../agents/profiles";
+import { resolveLoginCmd } from "../lib/loginSession";
 import { clipboardActionFor } from "./terminalClipboard";
 import {
   readText as clipboardReadText,
@@ -259,9 +260,14 @@ export function Terminal({ session, visible }: Props) {
           label: launchLabel,
           note: launchNote,
         } = session.loginOnly
-          ? // "Fix login" session: run the profile's interactive login flow
+          ? // "Fix login" session: run the engine's interactive login flow
             // instead of a normal agent launch (browser OAuth can't be headless).
-            { cmd: profile.loginCmd, label: profile.loginCmd, note: "fixing login —" }
+            // The exact command depends on how new the installed CLI is, so it
+            // is resolved against the backend rather than assumed.
+            await (async () => {
+              const loginCmd = await resolveLoginCmd(profile);
+              return { cmd: loginCmd, label: loginCmd, note: "fixing login —" };
+            })()
           : profile.buildLaunch({
               agentSessionId: session.claudeSessionId,
               model: session.model,

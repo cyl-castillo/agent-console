@@ -264,12 +264,87 @@ fn scan_version_manager(root: &Path, base: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Structured authentication state, straight from `claude auth status --json`
+/// (scriptable since Claude Code 2.1.41). Absence of this — see `auth_status`
+/// returning `None` — means "we could not tell", never "logged out".
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthStatus {
+    pub logged_in: bool,
+    /// How the CLI is authenticated ("claude.ai", "console", …), when reported.
+    pub method: Option<String>,
+    /// Account label to show in the UI (email, falling back to org name).
+    pub account: Option<String>,
+}
+
+/// How long we wait for the auth probe before giving up and reporting
+/// "unknown". The command is local and answers in milliseconds; the bound only
+/// exists so a wedged CLI can never freeze a failure path.
+const AUTH_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Parse `claude auth status --json` output. Tolerant by design: any shape we
+/// don't recognise (a usage error from a CLI predating the subcommand, a future
+/// schema, an empty pipe) yields `None` = unknown.
+fn parse_auth_status(stdout: &str) -> Option<AuthStatus> {
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
+    // `loggedIn` is the one field we insist on: without it the payload isn't an
+    // auth status and guessing would be worse than admitting we don't know.
+    let logged_in = v.get("loggedIn")?.as_bool()?;
+    let str_field = |k: &str| {
+        v.get(k)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    Some(AuthStatus {
+        logged_in,
+        method: str_field("authMethod"),
+        account: str_field("email").or_else(|| str_field("orgName")),
+    })
+}
+
+/// Ask the CLI whether it is logged in. `None` when the answer isn't
+/// trustworthy: binary missing, subcommand unsupported (CLI < 2.1.41), probe
+/// timed out, or output we can't parse.
+pub fn auth_status() -> Option<AuthStatus> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Run the probe off-thread and bound only our own wait: an abandoned child
+    // exits on its own, and we never block a caller behind a stuck CLI.
+    std::thread::spawn(move || {
+        let _ = tx.send(command(&["auth", "status", "--json"]).output());
+    });
+    let output = rx.recv_timeout(AUTH_PROBE_TIMEOUT).ok()?.ok()?;
+    // Parse regardless of exit status: a logged-out CLI may well exit non-zero
+    // while still printing a perfectly good `{"loggedIn": false}`.
+    parse_auth_status(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Definitive auth diagnosis for a failed `claude` run, or `None` when the
+/// probe can't prove anything. This is what closes the gap the text heuristics
+/// leave: expired credentials have surfaced as unrelated-looking errors ("issue
+/// with the selected model") across several 2.1.x builds, so a run that failed
+/// while the CLI reports itself logged out gets named for what it is.
+pub fn logged_out_hint() -> Option<String> {
+    let status = auth_status()?;
+    if status.logged_in {
+        return None;
+    }
+    Some(" — `claude auth status` reports you are not logged in; run `claude auth login` in a terminal (or use \"Fix Claude login\") and retry".to_string())
+}
+
 /// Build the error message for a non-zero `claude -p` exit. Claude Code often
 /// prints the actual reason (auth expiry, usage limits) to STDOUT, not stderr
 /// — the old stderr-only message reduced a real "OAuth session expired and
 /// could not be refreshed" to a bare "exit status 1:". Prefer stderr, fall
 /// back to stdout, cap the length, and add the fix-it hint for auth failures.
 pub fn exit_error(output: &std::process::Output) -> String {
+    exit_error_with(output, logged_out_hint())
+}
+
+/// Pure core of `exit_error`: `auth_hint` is the structured verdict from
+/// `logged_out_hint`, injected so the formatting can be tested without a CLI.
+fn exit_error_with(output: &std::process::Output, auth_hint: Option<String>) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let raw = if stderr.trim().is_empty() {
@@ -283,9 +358,14 @@ pub fn exit_error(output: &std::process::Output) -> String {
     } else {
         format!("claude exited with status {}: {reason}", output.status)
     };
+    if let Some(hint) = auth_hint {
+        // The structured answer beats the text heuristic — say it and stop.
+        msg.push_str(&hint);
+        return msg;
+    }
     let lower = reason.to_lowercase();
     if lower.contains("authenticate") || lower.contains("oauth") || lower.contains("logged in") {
-        msg.push_str(" — run `claude` in a terminal and log in again");
+        msg.push_str(" — run `claude auth login` in a terminal and log in again");
     }
     msg
 }
@@ -309,7 +389,7 @@ mod tests {
     #[test]
     fn exit_error_prefers_stderr_but_surfaces_stdout_reasons() {
         let both = fake_output("1", "stdout says A", "stderr says B");
-        assert!(exit_error(&both).contains("stderr says B"));
+        assert!(exit_error_with(&both, None).contains("stderr says B"));
 
         // The real-world case: auth errors land on stdout with empty stderr.
         let auth = fake_output(
@@ -317,11 +397,61 @@ mod tests {
             "Failed to authenticate: OAuth session expired and could not be refreshed",
             "",
         );
-        let msg = exit_error(&auth);
+        let msg = exit_error_with(&auth, None);
         assert!(msg.contains("OAuth session expired"), "{msg}");
         assert!(msg.contains("log in again"), "{msg}");
 
         let silent = fake_output("1", "", "");
-        assert!(exit_error(&silent).contains("no output"));
+        assert!(exit_error_with(&silent, None).contains("no output"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_error_names_a_logged_out_cli_even_when_the_text_blames_something_else() {
+        // The drift this closes: expired credentials reported as a model error.
+        let misleading = fake_output("1", "There was an issue with the selected model", "");
+        let msg = exit_error_with(&misleading, Some(" — not logged in".to_string()));
+        assert!(msg.contains("issue with the selected model"), "{msg}");
+        assert!(msg.contains("not logged in"), "{msg}");
+        // The structured verdict replaces the guess — no double hint.
+        let both_signals = fake_output("1", "Failed to authenticate", "");
+        let msg = exit_error_with(&both_signals, Some(" — not logged in".to_string()));
+        assert_eq!(msg.matches(" — ").count(), 1, "{msg}");
+    }
+
+    #[test]
+    fn parses_a_logged_in_status() {
+        let st = parse_auth_status(
+            r#"{"loggedIn":true,"authMethod":"claude.ai","email":"a@b.c","subscriptionType":"max"}"#,
+        )
+        .expect("parses");
+        assert!(st.logged_in);
+        assert_eq!(st.method.as_deref(), Some("claude.ai"));
+        assert_eq!(st.account.as_deref(), Some("a@b.c"));
+    }
+
+    #[test]
+    fn falls_back_to_org_name_and_tolerates_missing_optionals() {
+        let st = parse_auth_status(r#"{"loggedIn":false,"orgName":"Acme","email":"  "}"#)
+            .expect("parses");
+        assert!(!st.logged_in);
+        assert_eq!(st.method, None);
+        assert_eq!(st.account.as_deref(), Some("Acme"));
+    }
+
+    #[test]
+    fn unknown_shapes_are_unknown_not_logged_out() {
+        // A CLI without the subcommand (usage error), a future schema, silence:
+        // all must read as "can't tell", because callers act on `logged_in`.
+        for raw in [
+            "",
+            "   ",
+            "error: unknown command 'auth'",
+            r#"{"status":"ok"}"#,
+            r#"{"loggedIn":"yes"}"#,
+            "{ truncated",
+        ] {
+            assert_eq!(parse_auth_status(raw), None, "{raw:?}");
+        }
     }
 }
