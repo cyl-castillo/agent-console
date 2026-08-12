@@ -306,6 +306,9 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
 /// transparency half of memory injection: nothing reaches the agent silently.
 function MemoryPill({ termId }: { termId: string }) {
   const record = useInjectStore((s) => s.lastByTerm[termId]);
+  const feedback = useInjectStore((s) => s.feedback);
+  const vote = useInjectStore((s) => s.vote);
+  const project = useSessionStore((s) => s.project);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -335,16 +338,35 @@ function MemoryPill({ termId }: { termId: string }) {
       {open && (
         <div className="model-menu" role="menu">
           <div className="model-menu-head">Injected with “{record.promptHead}”</div>
-          {record.hits.map((h, i) => (
-            <div key={i} className="model-menu-item inject-hit">
-              <span className="model-menu-icon">{h.kind === "skill" ? "▤" : "◆"}</span>
-              <span className="model-menu-intent">{h.title}</span>
-              <span className="model-menu-model">{Math.round(h.score * 100)}%</span>
-            </div>
-          ))}
+          {record.hits.map((h, i) => {
+            const fb = feedback[h.id];
+            return (
+              <div key={i} className="model-menu-item inject-hit">
+                <span className="model-menu-icon">{h.kind === "skill" ? "▤" : "◆"}</span>
+                <span className="model-menu-intent">{h.title}</span>
+                <span className="model-menu-model">{Math.round(h.score * 100)}%</span>
+                <span className="inject-vote">
+                  <button
+                    className="inject-vote-btn"
+                    title={`This was useful${fb?.helpful ? ` (${fb.helpful})` : ""} — useful docs rank higher for injection`}
+                    onClick={() => project && void vote(project.root, h.id, true)}
+                  >
+                    👍{fb?.helpful ? ` ${fb.helpful}` : ""}
+                  </button>
+                  <button
+                    className="inject-vote-btn"
+                    title={`This got in the way${fb?.unhelpful ? ` (${fb.unhelpful})` : ""} — 3× without a 👍 stops it from being injected`}
+                    onClick={() => project && void vote(project.root, h.id, false)}
+                  >
+                    👎{fb?.unhelpful ? ` ${fb.unhelpful}` : ""}
+                  </button>
+                </span>
+              </div>
+            );
+          })}
           <div className="model-menu-note">
-            Retrieved from this project&apos;s memory by semantic match. Toggle in Context → Memory
-            injection.
+            Retrieved from this project&apos;s memory by semantic match. Your votes reweight future
+            injections. Toggle in Context → Memory injection.
           </div>
         </div>
       )}

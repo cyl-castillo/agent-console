@@ -2,6 +2,7 @@ pub mod activity_service;
 pub mod advisor_service;
 pub mod claude_cli;
 pub mod context_service;
+pub mod corpus_feedback;
 pub mod embedding_service;
 pub mod engine_runner;
 pub mod feedback_service;

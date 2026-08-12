@@ -485,6 +485,47 @@ fn annotate_similarity(project_root: &Path, suggestions: &mut [LearningSuggestio
     }
 }
 
+/// Render the corpus outcome stats (E2) as a prompt section for the curator.
+/// None when no doc has any signal — an empty section would be noise. Only
+/// docs with verdicts or real usage make the list, worst performers first,
+/// so the curator reads consequences, not raw counters.
+fn outcome_stats_section(
+    stats: &std::collections::HashMap<String, crate::services::corpus_feedback::DocStats>,
+) -> Option<String> {
+    let mut rows: Vec<(&String, &crate::services::corpus_feedback::DocStats)> = stats
+        .iter()
+        .filter(|(_, s)| s.helpful > 0 || s.unhelpful > 0 || s.injected_count > 0)
+        .collect();
+    if rows.is_empty() {
+        return None;
+    }
+    // Worst first: excluded, then net-negative, then by usage.
+    rows.sort_by_key(|(_, s)| {
+        (
+            std::cmp::Reverse(s.excluded() as u8),
+            s.helpful as i64 - s.unhelpful as i64,
+            std::cmp::Reverse(s.injected_count),
+        )
+    });
+    let mut out = String::from(
+        "
+
+INJECTION OUTCOMES (how each doc performed when auto-injected into prompts;          user verdicts are explicit clicks): docs marked EXCLUDED or with repeated          'unhelpful' verdicts are prime archive/refactor candidates — say so explicitly.          Docs with high use and 'helpful' verdicts are load-bearing: do NOT suggest          archiving them.
+",
+    );
+    for (id, s) in rows.into_iter().take(20) {
+        out.push_str(&format!(
+            "- {id}: injected {}x, helpful {}, unhelpful {}{}
+",
+            s.injected_count,
+            s.helpful,
+            s.unhelpful,
+            if s.excluded() { " — EXCLUDED" } else { "" }
+        ));
+    }
+    Some(out)
+}
+
 pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<CurationResult> {
     if !project_root.is_dir() {
         return Err(AppError::NotADirectory(project_root.display().to_string()));
@@ -529,6 +570,13 @@ pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Curati
                 }
             }
         }
+    }
+    // Outcome signals (E2): tell the curator how each doc actually performed
+    // when injected. Advisory context — archiving stays suggest-only.
+    if let Some(section) = outcome_stats_section(&crate::services::corpus_feedback::stats(
+        &project_root.to_string_lossy(),
+    )) {
+        prompt.push_str(&section);
     }
     let mut cmd = crate::services::claude_cli::command(&[
         "-p",
@@ -995,5 +1043,42 @@ mod tests {
         assert_eq!(got[0].kind, "memory");
         assert_eq!(got[0].memory_name.as_deref(), Some("x.md"));
         assert!(got[0].skill_name.is_none());
+    }
+
+    #[test]
+    fn outcome_section_ranks_worst_first_and_skips_empty() {
+        use crate::services::corpus_feedback::DocStats;
+        use std::collections::HashMap;
+
+        assert_eq!(outcome_stats_section(&HashMap::new()), None);
+        // A doc with zero signal contributes nothing → still None.
+        let mut stats = HashMap::new();
+        stats.insert("memory:silent.md".to_string(), DocStats::default());
+        assert_eq!(outcome_stats_section(&stats), None);
+
+        stats.insert(
+            "memory:good.md".to_string(),
+            DocStats {
+                injected_count: 9,
+                helpful: 4,
+                unhelpful: 0,
+                last_injected_ms: 1,
+            },
+        );
+        stats.insert(
+            "memory:bad.md".to_string(),
+            DocStats {
+                injected_count: 5,
+                helpful: 0,
+                unhelpful: 3,
+                last_injected_ms: 1,
+            },
+        );
+        let section = outcome_stats_section(&stats).expect("has signal");
+        assert!(section.contains("memory:bad.md: injected 5x, helpful 0, unhelpful 3 — EXCLUDED"));
+        assert!(section.contains("memory:good.md: injected 9x, helpful 4, unhelpful 0"));
+        let bad = section.find("memory:bad.md").unwrap();
+        let good = section.find("memory:good.md").unwrap();
+        assert!(bad < good, "worst performer must lead the list");
     }
 }

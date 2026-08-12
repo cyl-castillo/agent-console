@@ -9247,6 +9247,42 @@ select:focus-visible,
 .model-menu-item.inject-hit {
   cursor: default;
 }
+.inject-vote {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+}
+.inject-vote-btn {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 1px 5px;
+  cursor: pointer;
+  margin-left: 4px;
+}
+.inject-vote-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.inject-excluded {
+  margin-left: 4px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--warn);
+  background: var(--warn-12);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.inject-stats-head {
+  margin-top: 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-faint);
+}
 
 /* "≈ similar to X" badge on Coach suggestions (semantic dedup). */
 .wb-similar-badge {

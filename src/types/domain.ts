@@ -795,9 +795,21 @@ export interface SemanticHit {
 /// One memory-injection event: which notes were fed to the agent alongside a
 /// prompt (E1 of the knowledge flywheel). Mirrors the backend InjectionRecord.
 export interface InjectedHit {
+  /// Corpus doc id ("memory:<file>", "skill:…") — what verdicts attach to.
+  id: string;
   title: string;
   kind: "memory" | "skill" | string;
   score: number;
+}
+
+/// Outcome stats for one corpus doc (E2): usage plus explicit verdicts.
+export interface DocFeedback {
+  docId: string;
+  injectedCount: number;
+  helpful: number;
+  unhelpful: number;
+  lastInjectedMs: number;
+  excluded: boolean;
 }
 
 export interface InjectionRecord {
