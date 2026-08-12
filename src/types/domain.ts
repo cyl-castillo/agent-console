@@ -792,6 +792,22 @@ export interface SemanticHit {
   score: number;
 }
 
+/// One memory-injection event: which notes were fed to the agent alongside a
+/// prompt (E1 of the knowledge flywheel). Mirrors the backend InjectionRecord.
+export interface InjectedHit {
+  title: string;
+  kind: "memory" | "skill" | string;
+  score: number;
+}
+
+export interface InjectionRecord {
+  tsMs: number;
+  projectRoot: string;
+  promptHead: string;
+  termId: string | null;
+  hits: InjectedHit[];
+}
+
 /// One row of the daily worklog digest: a ticket with witnessed activity.
 export interface WorklogDigestEntry {
   issueKey: string;

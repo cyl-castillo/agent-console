@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  InjectionRecord,
   SemanticHit,
   WorklogDigestEntry,
   ActivityEvent,
@@ -100,6 +101,13 @@ export const ipc = {
   gitFileLog: (file: string, limit = 5) => invoke<GitCommitInfo[]>("git_file_log", { file, limit }),
   gitBranches: () => invoke<BranchInfo[]>("git_branches"),
   gitCheckoutBranch: (name: string) => invoke<void>("git_checkout_branch", { name }),
+
+  // Memory injection (E1): per-project toggle + the recent-injections feed.
+  memoryInjectionEnabled: (projectRoot: string) =>
+    invoke<boolean>("memory_injection_enabled", { projectRoot }),
+  memoryInjectionSetEnabled: (projectRoot: string, enabled: boolean) =>
+    invoke<void>("memory_injection_set_enabled", { projectRoot, enabled }),
+  memoryInjectionRecent: () => invoke<InjectionRecord[]>("memory_injection_recent"),
 
   semanticSearch: (projectRoot: string, query: string, k?: number) =>
     invoke<SemanticHit[]>("semantic_search", { projectRoot, query, k: k ?? null }),

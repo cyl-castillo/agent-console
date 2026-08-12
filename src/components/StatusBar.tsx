@@ -8,6 +8,7 @@ import { useModelStore, modelLabel } from "../stores/modelStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import { useApprovalStore } from "../stores/approvalStore";
 import { useAgentStatusStore } from "../stores/agentStatusStore";
+import { useInjectStore } from "../stores/injectStore";
 import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
 import type { TermInputDetail } from "./Terminal";
@@ -82,6 +83,7 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
         </button>
       )}
       <AgentStatePill onShowTerminal={() => setTab("terminal")} />
+      {activeSession && <MemoryPill termId={activeSession.id} />}
       {activeSession && <ModelPill session={activeSession} projectRoot={project.root} />}
       {activeSession?.claudeSessionId && (
         <UsagePill
@@ -293,6 +295,57 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
           {live && !profile.supportsLiveModelSwitch && (
             <div className="model-menu-note">Applies the next time this session is resumed.</div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/// What the active session's agent was last fed from workspace memory (E1).
+/// Renders only after an injection actually happened for THIS session — the
+/// transparency half of memory injection: nothing reaches the agent silently.
+function MemoryPill({ termId }: { termId: string }) {
+  const record = useInjectStore((s) => s.lastByTerm[termId]);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  if (!record || record.hits.length === 0) return null;
+
+  return (
+    <div className="model-pill-wrap" ref={wrapRef}>
+      <button
+        className="sb-item sb-clickable"
+        onClick={() => setOpen((v) => !v)}
+        title="Workspace memories injected into this session's last prompt — click to see what the agent was fed"
+      >
+        <span className="model-pill-glyph">◈</span>
+        <span>
+          {record.hits.length} memor{record.hits.length === 1 ? "y" : "ies"}
+        </span>
+      </button>
+      {open && (
+        <div className="model-menu" role="menu">
+          <div className="model-menu-head">Injected with “{record.promptHead}”</div>
+          {record.hits.map((h, i) => (
+            <div key={i} className="model-menu-item inject-hit">
+              <span className="model-menu-icon">{h.kind === "skill" ? "▤" : "◆"}</span>
+              <span className="model-menu-intent">{h.title}</span>
+              <span className="model-menu-model">{Math.round(h.score * 100)}%</span>
+            </div>
+          ))}
+          <div className="model-menu-note">
+            Retrieved from this project&apos;s memory by semantic match. Toggle in Context → Memory
+            injection.
+          </div>
         </div>
       )}
     </div>

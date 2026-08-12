@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useContextStore } from "../stores/contextStore";
+import { useInjectStore } from "../stores/injectStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useToastStore } from "../stores/toastStore";
 import { typeIntoActiveSession } from "../lib/termInput";
@@ -44,6 +45,8 @@ export function ContextPanel() {
         )}
 
         <SemanticSearch />
+
+        <MemoryInjectionSection />
 
         <section className="wb-section">
           <button className="ctx-section-head scope-project" onClick={() => setProjOpen((v) => !v)}>
@@ -461,6 +464,66 @@ function formatRelative(ms: number): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   if (diff < 7 * 86400) return `${Math.floor(diff / 86400)}d`;
   return new Date(ms).toLocaleDateString();
+}
+
+/// Memory injection (E1): the toggle for "feed relevant memories into every
+/// prompt" plus the audit trail of what was recently injected. Transparency is
+/// the contract — this list is why the feature is trustworthy.
+function MemoryInjectionSection() {
+  const project = useSessionStore((s) => s.project);
+  const enabled = useInjectStore((s) => s.enabled);
+  const recent = useInjectStore((s) => s.recent);
+  const setEnabled = useInjectStore((s) => s.setEnabled);
+  const [open, setOpen] = useState(false);
+
+  if (!project) return null;
+  const forProject = recent.filter((r) => r.projectRoot === project.root);
+
+  return (
+    <section className="wb-section">
+      <button className="ctx-section-head scope-project" onClick={() => setOpen((v) => !v)}>
+        <span className="caret">{open ? "▾" : "▸"}</span>
+        <span className="ctx-scope-badge scope-project">◈</span>
+        <span className="ctx-section-title">Memory injection</span>
+        <span className="ctx-section-meta">{enabled ? "on" : "off"}</span>
+      </button>
+      {open && (
+        <div className="inject-body">
+          <label className="inject-toggle">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => void setEnabled(project.root, e.target.checked)}
+            />
+            <span>
+              Feed relevant memories into every prompt (both engines). Retrieval is local; the
+              status bar shows a ◈ chip whenever something was injected.
+            </span>
+          </label>
+          {forProject.length === 0 ? (
+            <p className="wb-hint">
+              Nothing injected yet. Injection needs the semantic index (run a search or ⟳ above
+              once) and kicks in when a prompt clearly matches a saved memory or skill.
+            </p>
+          ) : (
+            <ul className="inject-list">
+              {forProject.map((r, i) => (
+                <li key={i} className="inject-row">
+                  <span className="inject-when">{formatRelative(r.tsMs)}</span>
+                  <span className="inject-prompt" title={r.promptHead}>
+                    “{r.promptHead}”
+                  </span>
+                  <span className="inject-hits">
+                    {r.hits.map((h) => `${h.title} (${Math.round(h.score * 100)}%)`).join(" · ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 /// Semantic (embedding) search over the project's memories and skills.

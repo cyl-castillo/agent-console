@@ -89,6 +89,15 @@ fn ensure_model_files() -> AppResult<PathBuf> {
     Ok(dir)
 }
 
+/// Whether the embedding model is already on disk, without ever downloading.
+/// The memory-injection path runs on every prompt and must answer fast from
+/// local state only — the ~470MB download belongs to the explicit
+/// reindex/search flows, never to a prompt submission.
+pub fn model_ready() -> bool {
+    let Ok(dir) = model_dir() else { return false };
+    MODEL_FILES.iter().all(|f| dir.join(f).exists())
+}
+
 /// Pure-Rust embedder. Loads tokenizer + mmapped weights per instance; create
 /// one per operation and let it drop — cheap to construct, low idle memory.
 pub struct CandleEmbedder {
