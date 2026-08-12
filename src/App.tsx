@@ -12,6 +12,7 @@ import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { attachSchedulerListeners, useSchedulerStore } from "./stores/schedulerStore";
+import { attachInjectListener, useInjectStore } from "./stores/injectStore";
 import { attachApprovalListener, useApprovalStore } from "./stores/approvalStore";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -141,6 +142,11 @@ export default function App() {
   // was never logged, say so (Tasks → Witnessed time). Courtesy only.
   useEffect(() => {
     if (project?.root) void maybeWorklogNudge(project.root);
+  }, [project?.root]);
+
+  // Memory-injection state for this project (toggle + recent injections).
+  useEffect(() => {
+    if (project?.root) void useInjectStore.getState().load(project.root);
   }, [project?.root]);
 
   // Mirror the "waiting on you" state into the window title, so the taskbar /
@@ -299,6 +305,7 @@ export default function App() {
     let offGit: (() => void) | null = null;
     let offVoice: (() => void) | null = null;
     let offScheduler: (() => void) | null = null;
+    let offInject: (() => void) | null = null;
     attachSkillsListeners().then((u) => {
       if (disposed) u();
       else offSkills = u;
@@ -333,6 +340,10 @@ export default function App() {
       if (disposed) u();
       else offScheduler = u;
     });
+    attachInjectListener().then((u) => {
+      if (disposed) u();
+      else offInject = u;
+    });
     const offVoiceApproval = attachVoiceApprovalWatcher();
     return () => {
       disposed = true;
@@ -342,6 +353,7 @@ export default function App() {
       offVoice?.();
       offScheduler?.();
       offVoiceApproval();
+      offInject?.();
       offQuarantine?.();
     };
   }, []);

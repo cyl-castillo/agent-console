@@ -1091,4 +1091,100 @@ mod tests {
         assert!(has_command_path(&canonical, script));
         assert!(!has_command_path(&other, script));
     }
+
+    /// End-to-end over the REAL userprompt bridge: run it under node against a
+    /// fake loopback inject endpoint and assert both of its jobs — the events
+    /// log append and the additionalContext output. Skips silently when node
+    /// isn't installed (the script only ever runs where node exists: hook
+    /// commands are `node "<path>"`).
+    #[cfg(unix)]
+    #[test]
+    fn userprompt_bridge_injects_context_and_degrades_without_port_file() {
+        use std::io::{Read as _, Write as _};
+        use std::process::{Command, Stdio};
+
+        if Command::new("node")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("node not available — skipping bridge test");
+            return;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-bridge-test-{}-{nanos}", std::process::id()));
+        let session_dir = base.join("session");
+        let data_dir = base.join("data").join("agent-console");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::create_dir_all(&data_dir).unwrap();
+
+        // Fake inject endpoint: one connection, fixed answer.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf);
+            let body = r#"{"context":"CTX-FROM-APP"}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = s.write_all(resp.as_bytes());
+        });
+        fs::write(
+            data_dir.join("inject-port.json"),
+            format!("{{\"port\":{port},\"pid\":1}}"),
+        )
+        .unwrap();
+
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/userprompt-hook.cjs");
+        let run = |xdg: &Path| -> String {
+            let mut child = Command::new("node")
+                .arg(&script)
+                .env("AGENT_CONSOLE_SESSION_DIR", &session_dir)
+                .env("XDG_DATA_HOME", xdg)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(br#"{"prompt":"how do we cut a release here?","cwd":"/proj/x","session_id":"s1"}"#)
+                .unwrap();
+            let out = child.wait_with_output().unwrap();
+            assert!(out.status.success(), "bridge must always exit 0");
+            String::from_utf8_lossy(&out.stdout).to_string()
+        };
+
+        // With the port file: context comes back as hookSpecificOutput.
+        let stdout = run(&base.join("data"));
+        let v: Value = serde_json::from_str(stdout.trim()).expect("bridge output is JSON");
+        assert_eq!(
+            v.pointer("/hookSpecificOutput/additionalContext")
+                .and_then(Value::as_str),
+            Some("CTX-FROM-APP")
+        );
+        assert_eq!(
+            v.pointer("/hookSpecificOutput/hookEventName")
+                .and_then(Value::as_str),
+            Some("UserPromptSubmit")
+        );
+        server.join().unwrap();
+
+        // Without a port file (app closed): silent, but the event still logs.
+        let stdout = run(&base.join("nowhere"));
+        assert!(stdout.trim().is_empty(), "no app → no output, no error");
+        let events = fs::read_to_string(session_dir.join("events.jsonl")).unwrap();
+        assert_eq!(events.lines().count(), 2, "both runs must log the prompt");
+        assert!(events.contains("how do we cut a release"));
+    }
 }

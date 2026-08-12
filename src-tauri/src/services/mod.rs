@@ -8,6 +8,7 @@ pub mod feedback_service;
 pub mod git_service;
 pub mod git_watcher;
 pub mod hooks_service;
+pub mod inject_service;
 pub mod jira_service;
 pub mod learning_service;
 pub mod mcp_service;

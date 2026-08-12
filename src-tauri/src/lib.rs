@@ -62,6 +62,10 @@ pub fn run() {
             if let Err(e) = state.hooks.normalize_hook_commands() {
                 eprintln!("hooks: command normalization failed: {e}");
             }
+            // Memory-injection endpoint (loopback only): serves the prompt
+            // hooks the memories relevant to what's being typed. Best-effort —
+            // the app works fine without it.
+            services::inject_service::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -143,6 +147,9 @@ pub fn run() {
             commands::context::memory_read,
             commands::context::memory_delete,
             commands::palette::palette_index_files,
+            commands::inject::memory_injection_enabled,
+            commands::inject::memory_injection_set_enabled,
+            commands::inject::memory_injection_recent,
             commands::semantic::semantic_reindex,
             commands::semantic::semantic_search,
             commands::feedback::feedback_dev_enabled,

@@ -3,6 +3,7 @@ pub mod context;
 pub mod feedback;
 pub mod git;
 pub mod hooks;
+pub mod inject;
 pub mod jira;
 pub mod learning;
 pub mod mcp;

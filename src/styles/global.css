@@ -9194,6 +9194,60 @@ select:focus-visible,
   line-height: 1.4;
 }
 
+/* Memory injection (E1): toggle + audit trail in Context, hits in the pill. */
+.inject-body {
+  padding: 6px 2px 2px;
+}
+.inject-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  cursor: pointer;
+}
+.inject-toggle input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+.inject-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inject-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 9px;
+  background: var(--bg-elev-1);
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.inject-when {
+  font-size: 10px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+.inject-prompt {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inject-hits {
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.model-menu-item.inject-hit {
+  cursor: default;
+}
+
 /* "≈ similar to X" badge on Coach suggestions (semantic dedup). */
 .wb-similar-badge {
   display: inline-block;
