@@ -43,6 +43,16 @@ fn to_doc_feedback(doc_id: String, s: corpus_feedback::DocStats) -> DocFeedback 
     }
 }
 
+/// Flywheel metrics (E4). `day_starts` = ascending LOCAL day boundaries
+/// computed by the frontend (N+1 boundaries → N-day curve).
+#[tauri::command]
+pub fn flywheel_metrics(
+    project_root: String,
+    day_starts: Vec<i64>,
+) -> crate::services::flywheel::FlywheelMetrics {
+    crate::services::flywheel::metrics(&project_root, &day_starts)
+}
+
 #[tauri::command]
 pub fn work_profile_get() -> String {
     crate::services::work_profile::get()

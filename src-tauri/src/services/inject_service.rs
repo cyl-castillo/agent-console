@@ -438,6 +438,13 @@ fn handle_and_render(
         term_id,
         hits,
     };
+    // Durable injection log (E4): one line per served injection, feeding the
+    // 30-day activity curve. Best-effort like everything on this path.
+    crate::services::flywheel::record_injection(
+        &record.project_root,
+        record.ts_ms,
+        record.hits.len() as u32,
+    );
     // Passive usage signal (E2): count corpus injections. The profile is not
     // a corpus doc — verdicts don't apply to it — so it stays out.
     corpus_feedback::record_injected(

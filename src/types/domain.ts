@@ -824,6 +824,25 @@ export interface InjectionRecord {
   hits: InjectedHit[];
 }
 
+/// Flywheel metrics (E4): is the corpus actually learning? Mirrors the Rust
+/// FlywheelMetrics; null rates mean "not enough data to be honest".
+export interface FlywheelDay {
+  startMs: number;
+  count: number;
+}
+
+export interface FlywheelMetrics {
+  corpusMemories: number;
+  corpusSkills: number;
+  excludedDocs: number;
+  injectionsTotal: number;
+  days: FlywheelDay[];
+  helpfulTotal: number;
+  unhelpfulTotal: number;
+  usefulnessPct: number | null;
+  verdictCoveragePct: number | null;
+}
+
 /// One row of the daily worklog digest: a ticket with witnessed activity.
 export interface WorklogDigestEntry {
   issueKey: string;
