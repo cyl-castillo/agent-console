@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
-import type { DocFeedback, InjectionRecord } from "../types/domain";
+import type { DocFeedback, FlywheelMetrics, InjectionRecord } from "../types/domain";
 
 /// Memory injection (E1 of the knowledge flywheel): the backend feeds the
 /// prompt hooks relevant memories; this store keeps what was injected — the
@@ -17,6 +17,8 @@ interface InjectState {
   lastByTerm: Record<string, InjectionRecord>;
   /// Outcome stats per corpus doc id (E2): usage counts + your verdicts.
   feedback: Record<string, DocFeedback>;
+  /// Flywheel metrics (E4) for the current project; null until loaded.
+  metrics: FlywheelMetrics | null;
 
   load: (projectRoot: string) => Promise<void>;
   setEnabled: (projectRoot: string, enabled: boolean) => Promise<void>;
@@ -25,6 +27,8 @@ interface InjectState {
   vote: (projectRoot: string, docId: string, helpful: boolean) => Promise<void>;
   /// Rehabilitate an excluded doc (wipes verdicts, keeps usage history).
   resetVerdicts: (projectRoot: string, docId: string) => Promise<void>;
+  /// Refresh the flywheel metrics (30-day window ending today, local days).
+  loadMetrics: (projectRoot: string) => Promise<void>;
   _onInjected: (r: InjectionRecord) => void;
 }
 
@@ -33,6 +37,7 @@ export const useInjectStore = create<InjectState>((set, get) => ({
   enabled: true,
   lastByTerm: {},
   feedback: {},
+  metrics: null,
 
   load: async (projectRoot) => {
     try {
@@ -76,6 +81,15 @@ export const useInjectStore = create<InjectState>((set, get) => ({
     }
   },
 
+  loadMetrics: async (projectRoot) => {
+    try {
+      const metrics = await ipc.flywheelMetrics(projectRoot, localDayStarts(30));
+      set({ metrics });
+    } catch {
+      /* metrics are a readout — a failed load never surfaces */
+    }
+  },
+
   _onInjected: (r) => {
     set((s) => {
       // Mirror the backend's passive usage bump so counters stay live
@@ -100,6 +114,20 @@ export const useInjectStore = create<InjectState>((set, get) => ({
     });
   },
 }));
+
+/// Ascending local-midnight boundaries for the last `days` days: N+1 entries,
+/// last one = tomorrow's midnight (so today is a complete [start, end) bucket).
+export function localDayStarts(days: number): number[] {
+  const out: number[] = [];
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  for (let i = days - 1; i >= -1; i--) {
+    const day = new Date(d);
+    day.setDate(d.getDate() - i);
+    out.push(day.getTime());
+  }
+  return out;
+}
 
 function byDoc(stats: DocFeedback[]): Record<string, DocFeedback> {
   const out: Record<string, DocFeedback> = {};

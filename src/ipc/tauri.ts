@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
   DocFeedback,
+  FlywheelMetrics,
   InjectionRecord,
   SemanticHit,
   WorklogDigestEntry,
@@ -113,6 +114,8 @@ export const ipc = {
     invoke<DocFeedback[]>("memory_feedback_stats", { projectRoot }),
   memoryFeedbackSet: (projectRoot: string, docId: string, helpful: boolean) =>
     invoke<DocFeedback>("memory_feedback_set", { projectRoot, docId, helpful }),
+  flywheelMetrics: (projectRoot: string, dayStarts: number[]) =>
+    invoke<FlywheelMetrics>("flywheel_metrics", { projectRoot, dayStarts }),
   workProfileGet: () => invoke<string>("work_profile_get"),
   workProfileSet: (content: string) => invoke<void>("work_profile_set", { content }),
   learningApplyProfile: (section: string, line: string) =>

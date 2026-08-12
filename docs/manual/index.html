@@ -375,6 +375,7 @@
           <li><a href="#tasks">Tasks: Jira, roles &amp; hours</a></li>
           <li><a href="#proof">Proof (Testigo)</a></li>
           <li><a href="#memory">Context &amp; semantic memory</a></li>
+          <li><a href="#flywheel">The knowledge flywheel</a></li>
         </ul>
       </div>
       <div class="toc-group">
@@ -645,6 +646,17 @@
         <h2>Context &amp; semantic memory</h2>
         <p>The Context tab manages CLAUDE.md (project and global) and your saved memories. On top of it sits <strong>semantic search</strong>: type what you mean — in Spanish or English — and the relevant memory or skill surfaces even with zero shared words. Powered by a local embedding model (downloaded once, ~470&nbsp;MB; nothing ever leaves your machine). <strong>▸ to composer</strong> types a memory into the active session's input for you to review and send.</p>
         <p>The same index makes the Coach self-aware: suggestions that already exist in spirit get an <em>"≈ similar to X"</em> badge instead of piling up as near-duplicates, and the corpus curator is pointed at the memory pairs that genuinely overlap.</p>
+      </section>
+
+      <!-- ============ FLYWHEEL ============ -->
+      <section id="flywheel">
+        <h2>The knowledge flywheel</h2>
+        <p>Everything the workspace learns flows back into the work — automatically, visibly, and under your veto. Four pieces close the loop:</p>
+        <p><strong>1&nbsp;&#183; Memory injection.</strong> When you send a prompt that clearly matches a saved memory or skill, the agent receives it as background context — for both engines. A <strong>&#9672; chip</strong> in the status bar shows exactly what was injected (nothing ever reaches the agent silently), and Context &#8594; <em>Memory injection</em> keeps the audit trail plus a per-project toggle. Retrieval is local; injected notes carry an explicit "may be stale — verify" caveat.</p>
+        <p><strong>2&nbsp;&#183; Outcome feedback.</strong> Every injected note has &#128077;/&#128078; buttons on the chip and in the audit trail. Useful notes rank slightly higher next time; a note voted unhelpful three times (with no upvote) stops being injected — it stays searchable, shows an <em>excluded</em> badge, and one click restores it. Your verdict only ever nudges near-ties: semantic relevance always dominates.</p>
+        <p><strong>3&nbsp;&#183; Work profile.</strong> Context &#8594; <em>Work profile</em> is one global document about how <em>you</em> work — conventions, cadence, recurring corrections. It's injected once at the start of every session (shown as &#11041; on the chip), in every project. The Coach proposes profile lines from your actual activity; "Add to profile" is always your click.</p>
+        <p><strong>4&nbsp;&#183; The Flywheel card.</strong> At the top of the Coach: corpus size, the 30-day injection curve, the share of injections you judged useful, and its verdict coverage — with an honest "&#8212;" when there isn't enough data to claim a number. Below it, your most useful and most noisy docs.</p>
+        <p>The result: two people running the same app end up with different tools — each shaped by how its owner taught it.</p>
       </section>
 
       <!-- ============ BUILD ============ -->

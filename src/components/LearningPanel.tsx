@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { isAuthError, startLoginSession } from "../lib/loginSession";
+import { useInjectStore } from "../stores/injectStore";
 import { useLearningStore, type CurationItem, type LearningItem } from "../stores/learningStore";
+import { useSessionStore } from "../stores/sessionStore";
 
 export function LearningPanel() {
   const status = useLearningStore((s) => s.status);
@@ -59,6 +61,7 @@ export function LearningPanel() {
       </div>
 
       <div className="workbench-body">
+        <FlywheelCard />
         {status === "idle" && (
           <section className="wb-section">
             <p className="wb-hint">
@@ -500,6 +503,136 @@ function LearningRow({ item }: { item: LearningItem }) {
         </div>
       )}
     </li>
+  );
+}
+
+/// The flywheel readout (E4): corpus size, the 30-day injection curve, and
+/// whether what gets injected is judged useful — with the coverage caveat
+/// spelled out when the verdict base is thin.
+function FlywheelCard() {
+  const project = useSessionStore((s) => s.project);
+  const metrics = useInjectStore((s) => s.metrics);
+  const feedback = useInjectStore((s) => s.feedback);
+  const loadMetrics = useInjectStore((s) => s.loadMetrics);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    if (project?.root) void loadMetrics(project.root);
+  }, [project?.root, loadMetrics]);
+
+  if (!project || !metrics) return null;
+
+  const last30 = metrics.days.reduce((n, d) => n + d.count, 0);
+  const maxDay = Math.max(1, ...metrics.days.map((d) => d.count));
+  const docs = Object.values(feedback);
+  const topHelpful = docs
+    .filter((d) => d.helpful > 0)
+    .sort((a, b) => b.helpful - a.helpful)
+    .slice(0, 3);
+  const topNoisy = docs
+    .filter((d) => d.unhelpful > 0)
+    .sort((a, b) => b.unhelpful - a.unhelpful)
+    .slice(0, 3);
+  const lowCoverage = metrics.verdictCoveragePct !== null && metrics.verdictCoveragePct < 30;
+
+  return (
+    <section className="wb-section fw-card">
+      <button className="ctx-section-head scope-project" onClick={() => setOpen((v) => !v)}>
+        <span className="caret">{open ? "▾" : "▸"}</span>
+        <span className="ctx-scope-badge scope-project">◈</span>
+        <span className="ctx-section-title">Flywheel</span>
+        <span className="ctx-section-meta">
+          {metrics.corpusMemories + metrics.corpusSkills} docs · {last30} injections / 30d
+        </span>
+      </button>
+      {open && (
+        <>
+          <div className="fw-tiles">
+            <div className="fw-tile">
+              <span className="fw-num">{metrics.corpusMemories + metrics.corpusSkills}</span>
+              <span className="fw-label">
+                corpus ({metrics.corpusMemories}m · {metrics.corpusSkills}s
+                {metrics.excludedDocs > 0 ? ` · ${metrics.excludedDocs} excl` : ""})
+              </span>
+            </div>
+            <div className="fw-tile">
+              <span className="fw-num">{last30}</span>
+              <span className="fw-label">injections, 30 days</span>
+            </div>
+            <div className="fw-tile">
+              <span className="fw-num">
+                {metrics.usefulnessPct === null ? "—" : `${Math.round(metrics.usefulnessPct)}%`}
+              </span>
+              <span className="fw-label">
+                judged useful ({metrics.helpfulTotal}👍 {metrics.unhelpfulTotal}👎)
+              </span>
+            </div>
+            <div className="fw-tile">
+              <span className="fw-num">
+                {metrics.verdictCoveragePct === null
+                  ? "—"
+                  : `${Math.round(metrics.verdictCoveragePct)}%`}
+              </span>
+              <span className="fw-label">verdict coverage</span>
+            </div>
+          </div>
+          {last30 > 0 ? (
+            <div className="fw-bars" title="Injections per day, last 30 days (today rightmost)">
+              {metrics.days.map((d) => (
+                <span
+                  key={d.startMs}
+                  className="fw-bar"
+                  style={{ height: `${Math.max(6, (d.count / maxDay) * 100)}%` }}
+                  title={`${new Date(d.startMs).toLocaleDateString()}: ${d.count}`}
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="wb-hint">
+              No injections logged yet — the curve starts counting from the first prompt that pulls
+              a memory in (the log ships with this version).
+            </p>
+          )}
+          {metrics.usefulnessPct === null && metrics.injectionsTotal > 0 && (
+            <p className="wb-hint">
+              No verdicts yet — rate injections with 👍/👎 on the ◈ chip so the corpus can learn
+              what actually helps.
+            </p>
+          )}
+          {lowCoverage && metrics.usefulnessPct !== null && (
+            <p className="wb-hint">
+              Coverage is low — the usefulness number rests on few verdicts. Keep voting on the ◈
+              chip to make it trustworthy.
+            </p>
+          )}
+          {(topHelpful.length > 0 || topNoisy.length > 0) && (
+            <div className="fw-tops">
+              {topHelpful.length > 0 && (
+                <div className="fw-top">
+                  <span className="fw-top-head">most useful</span>
+                  {topHelpful.map((d) => (
+                    <span key={d.docId} className="fw-top-row" title={d.docId}>
+                      👍{d.helpful} {d.docId.replace(/^(memory|skill):/, "")}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {topNoisy.length > 0 && (
+                <div className="fw-top">
+                  <span className="fw-top-head">most noisy</span>
+                  {topNoisy.map((d) => (
+                    <span key={d.docId} className="fw-top-row" title={d.docId}>
+                      👎{d.unhelpful} {d.docId.replace(/^(memory|skill):/, "")}
+                      {d.excluded ? " (excluded)" : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
