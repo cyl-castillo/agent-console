@@ -371,7 +371,7 @@ export interface AdvisorAnalysisResult {
 /// plugin = package a cross-project workflow as a shareable plugin (applyable);
 /// hook = a hand-enforced rule a Claude Code hook could automate (report-only).
 export interface LearningSuggestion {
-  kind: "skill" | "memory" | "plugin" | "hook" | "friction";
+  kind: "skill" | "memory" | "plugin" | "hook" | "friction" | "profile";
   title: string;
   rationale: string;
   evidence: string[];
@@ -382,6 +382,10 @@ export interface LearningSuggestion {
   pluginName?: string;
   pluginDescription?: string;
   pluginSkillMd?: string;
+  /// kind = "profile": section heading + the one line to append to the
+  /// global work profile.
+  profileSection?: string;
+  profileLine?: string;
   /// Existing corpus content semantically close to this suggestion.
   similarTo?: string;
   similarity?: number;

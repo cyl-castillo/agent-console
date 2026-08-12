@@ -342,25 +342,29 @@ function MemoryPill({ termId }: { termId: string }) {
             const fb = feedback[h.id];
             return (
               <div key={i} className="model-menu-item inject-hit">
-                <span className="model-menu-icon">{h.kind === "skill" ? "▤" : "◆"}</span>
+                <span className="model-menu-icon">
+                  {h.kind === "skill" ? "▤" : h.kind === "profile" ? "⬢" : "◆"}
+                </span>
                 <span className="model-menu-intent">{h.title}</span>
                 <span className="model-menu-model">{Math.round(h.score * 100)}%</span>
-                <span className="inject-vote">
-                  <button
-                    className="inject-vote-btn"
-                    title={`This was useful${fb?.helpful ? ` (${fb.helpful})` : ""} — useful docs rank higher for injection`}
-                    onClick={() => project && void vote(project.root, h.id, true)}
-                  >
-                    👍{fb?.helpful ? ` ${fb.helpful}` : ""}
-                  </button>
-                  <button
-                    className="inject-vote-btn"
-                    title={`This got in the way${fb?.unhelpful ? ` (${fb.unhelpful})` : ""} — 3× without a 👍 stops it from being injected`}
-                    onClick={() => project && void vote(project.root, h.id, false)}
-                  >
-                    👎{fb?.unhelpful ? ` ${fb.unhelpful}` : ""}
-                  </button>
-                </span>
+                {h.kind !== "profile" && (
+                  <span className="inject-vote">
+                    <button
+                      className="inject-vote-btn"
+                      title={`This was useful${fb?.helpful ? ` (${fb.helpful})` : ""} — useful docs rank higher for injection`}
+                      onClick={() => project && void vote(project.root, h.id, true)}
+                    >
+                      👍{fb?.helpful ? ` ${fb.helpful}` : ""}
+                    </button>
+                    <button
+                      className="inject-vote-btn"
+                      title={`This got in the way${fb?.unhelpful ? ` (${fb.unhelpful})` : ""} — 3× without a 👍 stops it from being injected`}
+                      onClick={() => project && void vote(project.root, h.id, false)}
+                    >
+                      👎{fb?.unhelpful ? ` ${fb.unhelpful}` : ""}
+                    </button>
+                  </span>
+                )}
               </div>
             );
           })}

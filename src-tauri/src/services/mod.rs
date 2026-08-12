@@ -35,5 +35,6 @@ pub mod testigo_timestamp;
 pub mod usage_service;
 pub mod vault_service;
 pub mod voice_service;
+pub mod work_profile;
 pub mod workspace_archive;
 pub mod worktree_service;

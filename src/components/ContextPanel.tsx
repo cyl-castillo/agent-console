@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { ipc } from "../ipc/tauri";
 import { useContextStore } from "../stores/contextStore";
 import { useInjectStore } from "../stores/injectStore";
 import { useSessionStore } from "../stores/sessionStore";
@@ -47,6 +48,8 @@ export function ContextPanel() {
         <SemanticSearch />
 
         <MemoryInjectionSection />
+
+        <WorkProfileSection />
 
         <section className="wb-section">
           <button className="ctx-section-head scope-project" onClick={() => setProjOpen((v) => !v)}>
@@ -523,28 +526,33 @@ function MemoryInjectionSection() {
                   </span>
                   {r.hits.map((h) => (
                     <span key={h.id} className="inject-hits">
+                      {h.kind === "profile" ? "⬢ " : ""}
                       {h.title} ({Math.round(h.score * 100)}%)
-                      <button
-                        className="inject-vote-btn"
-                        title="Useful — ranks higher for future injections"
-                        onClick={() => void vote(project.root, h.id, true)}
-                      >
-                        👍{feedback[h.id]?.helpful ? ` ${feedback[h.id].helpful}` : ""}
-                      </button>
-                      <button
-                        className="inject-vote-btn"
-                        title="Got in the way — 3× without a 👍 excludes it from injection"
-                        onClick={() => void vote(project.root, h.id, false)}
-                      >
-                        👎{feedback[h.id]?.unhelpful ? ` ${feedback[h.id].unhelpful}` : ""}
-                      </button>
-                      {feedback[h.id]?.excluded && (
-                        <span
-                          className="inject-excluded"
-                          title="No longer injected (still searchable)"
-                        >
-                          excluded
-                        </span>
+                      {h.kind !== "profile" && (
+                        <>
+                          <button
+                            className="inject-vote-btn"
+                            title="Useful — ranks higher for future injections"
+                            onClick={() => void vote(project.root, h.id, true)}
+                          >
+                            👍{feedback[h.id]?.helpful ? ` ${feedback[h.id].helpful}` : ""}
+                          </button>
+                          <button
+                            className="inject-vote-btn"
+                            title="Got in the way — 3× without a 👍 excludes it from injection"
+                            onClick={() => void vote(project.root, h.id, false)}
+                          >
+                            👎{feedback[h.id]?.unhelpful ? ` ${feedback[h.id].unhelpful}` : ""}
+                          </button>
+                          {feedback[h.id]?.excluded && (
+                            <span
+                              className="inject-excluded"
+                              title="No longer injected (still searchable)"
+                            >
+                              excluded
+                            </span>
+                          )}
+                        </>
                       )}
                     </span>
                   ))}
@@ -581,6 +589,77 @@ function MemoryInjectionSection() {
               </ul>
             </>
           )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/// The user's global work profile (E3): how they work, in their words.
+/// Injected once per session; maintained by hand here and by reflect
+/// suggestions in Coach. Global — the same document across all projects.
+function WorkProfileSection() {
+  const showToast = useToastStore((s) => s.show);
+  const [open, setOpen] = useState(false);
+  const [content, setContent] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open || content !== null) return;
+    ipc
+      .workProfileGet()
+      .then((c) => setContent(c))
+      .catch(() => setContent(""));
+  }, [open, content]);
+
+  const save = async () => {
+    if (content === null) return;
+    setSaving(true);
+    try {
+      await ipc.workProfileSet(content);
+      setDirty(false);
+      showToast("Work profile saved — injected at the start of new sessions", "success");
+    } catch (e) {
+      showToast(`Couldn't save profile: ${String(e).slice(0, 120)}`, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="wb-section">
+      <button className="ctx-section-head scope-global" onClick={() => setOpen((v) => !v)}>
+        <span className="caret">{open ? "▾" : "▸"}</span>
+        <span className="ctx-scope-badge scope-global">⬢</span>
+        <span className="ctx-section-title">Work profile</span>
+        <span className="ctx-section-meta">{dirty ? "unsaved" : "global"}</span>
+      </button>
+      {open && (
+        <div className="inject-body">
+          <p className="wb-hint">
+            How you work, in your own words — injected once at the start of every session, in every
+            project. Coach proposes lines for it from your activity; you decide what goes in.
+          </p>
+          <textarea
+            className="profile-editor"
+            value={content ?? "loading…"}
+            disabled={content === null}
+            spellCheck={false}
+            onChange={(e) => {
+              setContent(e.target.value);
+              setDirty(true);
+            }}
+          />
+          <div className="profile-editor-actions">
+            <button
+              className="wb-cta wb-cta-sm"
+              onClick={() => void save()}
+              disabled={!dirty || saving}
+            >
+              {saving ? "…" : "Save"}
+            </button>
+          </div>
         </div>
       )}
     </section>

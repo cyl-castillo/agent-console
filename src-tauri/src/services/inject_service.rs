@@ -34,6 +34,7 @@ use crate::services::corpus_feedback;
 use crate::services::embedding_service::{model_ready, CandleEmbedder, Embedder};
 use crate::services::projects_service;
 use crate::services::semantic_index::{self, SearchHit};
+use crate::services::work_profile;
 
 /// How many hits may be injected into one prompt. Deliberately small: the
 /// point is a nudge in the right direction, not a memory dump.
@@ -180,6 +181,35 @@ pub struct InjectedHit {
 }
 
 static RECENT: Mutex<VecDeque<InjectionRecord>> = Mutex::new(VecDeque::new());
+
+/// Terminal sessions that already received the work profile (E3). In-memory
+/// on purpose: an app restart forgets — and re-serving once per app run is
+/// the safe direction, since resumed sessions may have compacted it away.
+static PROFILE_SERVED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+
+/// The profile block for this terminal, once per app run. None when the
+/// terminal is unknown (can't dedupe → don't inject), already served, or the
+/// profile has no meaningful content.
+fn profile_block_for(term_id: &Option<String>) -> Option<String> {
+    let term = term_id.as_deref()?;
+    let excerpt = work_profile::injectable_excerpt()?;
+    let mut guard = PROFILE_SERVED.lock().ok()?;
+    let served = guard.get_or_insert_with(std::collections::HashSet::new);
+    if !served.insert(term.to_string()) {
+        return None;
+    }
+    Some(format!(
+        "How this user works (their self-maintained Agent Console profile —          follow it unless they say otherwise):
+{excerpt}"
+    ))
+}
+
+#[cfg(test)]
+fn reset_profile_served() {
+    if let Ok(mut g) = PROFILE_SERVED.lock() {
+        *g = None;
+    }
+}
 
 pub fn recent() -> Vec<InjectionRecord> {
     RECENT
@@ -370,33 +400,57 @@ fn handle_and_render(
         .map(|p| p.path)
         .collect();
     let root = resolve_project_root(cwd, &roots);
-    if !is_enabled(&root) || !model_ready() {
+    if !is_enabled(&root) {
         return None;
     }
-    let (kept, context) = answer(&root, prompt, &mut CandleEmbedder::new()).ok()?;
-    let context = context?;
+    let mut blocks: Vec<String> = Vec::new();
+    let mut hits: Vec<InjectedHit> = Vec::new();
+    // The work profile (E3) needs no embeddings — it serves even before the
+    // model is downloaded, once per terminal per app run.
+    if let Some(profile) = profile_block_for(&term_id) {
+        blocks.push(profile);
+        hits.push(InjectedHit {
+            id: "profile".into(),
+            title: "work profile".into(),
+            kind: "profile".into(),
+            score: 1.0,
+        });
+    }
+    // Semantic retrieval (E1/E2) only when the model is already local.
+    if model_ready() {
+        if let Ok((kept, Some(context))) = answer(&root, prompt, &mut CandleEmbedder::new()) {
+            hits.extend(kept.iter().map(|h| InjectedHit {
+                id: h.id.clone(),
+                title: h.title.clone(),
+                kind: h.kind.clone(),
+                score: h.score,
+            }));
+            blocks.push(context);
+        }
+    }
+    if blocks.is_empty() {
+        return None;
+    }
     let record = InjectionRecord {
         ts_ms: now_ms(),
         project_root: root,
         prompt_head: head(prompt, 80),
         term_id,
-        hits: kept
-            .iter()
-            .map(|h| InjectedHit {
-                id: h.id.clone(),
-                title: h.title.clone(),
-                kind: h.kind.clone(),
-                score: h.score,
-            })
-            .collect(),
+        hits,
     };
-    // Passive usage signal (E2): count the injection. Best-effort by design.
+    // Passive usage signal (E2): count corpus injections. The profile is not
+    // a corpus doc — verdicts don't apply to it — so it stays out.
     corpus_feedback::record_injected(
         &record.project_root,
-        &record.hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>(),
+        &record
+            .hits
+            .iter()
+            .filter(|h| h.kind != "profile")
+            .map(|h| h.id.clone())
+            .collect::<Vec<_>>(),
         record.ts_ms,
     );
-    Some((record, context))
+    Some((record, blocks.join("\n\n")))
 }
 
 /// Bind the loopback listener on an ephemeral port, announce it in the port
@@ -622,6 +676,70 @@ mod tests {
             kept.iter().all(|h| h.id != "memory:far.md"),
             "bounded nudge must never overturn a clear semantic gap"
         );
+    }
+
+    #[test]
+    fn profile_injects_once_per_terminal_and_needs_real_content() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-inject-profile-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+        // Isolate the cache too: model_ready() must be deterministically false
+        // so this test proves the profile ships WITHOUT the embedding model.
+        std::env::set_var("XDG_CACHE_HOME", base.join("cache"));
+        reset_profile_served();
+
+        crate::services::work_profile::set("## Conventions\nCommit in English.\n").unwrap();
+
+        let (record, ctx) = handle_and_render(
+            "a prompt long enough to qualify",
+            "/proj/p",
+            Some("t1".into()),
+        )
+        .expect("first prompt of t1 gets the profile");
+        assert_eq!(record.hits.len(), 1);
+        assert_eq!(record.hits[0].kind, "profile");
+        assert!(ctx.contains("How this user works"), "{ctx}");
+        assert!(ctx.contains("Commit in English."), "{ctx}");
+
+        assert!(
+            handle_and_render(
+                "another qualifying prompt here",
+                "/proj/p",
+                Some("t1".into())
+            )
+            .is_none(),
+            "same terminal: profile already served, nothing else to inject"
+        );
+        assert!(
+            handle_and_render(
+                "another qualifying prompt here",
+                "/proj/p",
+                Some("t2".into())
+            )
+            .is_some(),
+            "a different terminal gets its own copy"
+        );
+        assert!(
+            handle_and_render("no terminal id at all here", "/proj/p", None).is_none(),
+            "unknown terminal: can't dedupe, don't inject"
+        );
+
+        // Template-only profile injects nothing at all.
+        reset_profile_served();
+        crate::services::work_profile::set(crate::services::work_profile::PROFILE_TEMPLATE)
+            .unwrap();
+        assert!(handle_and_render(
+            "a prompt long enough to qualify",
+            "/proj/p",
+            Some("t9".into())
+        )
+        .is_none());
     }
 
     #[test]

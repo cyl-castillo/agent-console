@@ -9276,6 +9276,35 @@ select:focus-visible,
   border-radius: 3px;
   padding: 1px 5px;
 }
+.profile-editor {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text);
+  margin-top: 6px;
+}
+.profile-editor:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.profile-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.wb-learning-kind.kind-profile {
+  background: var(--accent-12, var(--accent-soft));
+  color: var(--accent);
+}
+
 .inject-stats-head {
   margin-top: 10px;
   font-size: 10px;

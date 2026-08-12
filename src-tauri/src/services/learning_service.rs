@@ -45,6 +45,13 @@ pub struct LearningSuggestion {
     /// Starter SKILL.md for the plugin (single-skill layout at the plugin root).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_skill_md: Option<String>,
+    /// kind = "profile": exact section heading in work-profile.md
+    /// ("## Conventions" / "## Cadence" / "## Recurring corrections").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_section: Option<String>,
+    /// kind = "profile": the one line to append — short, imperative.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_line: Option<String>,
     /// Set when something in the corpus is semantically close to this
     /// suggestion — surfaced instead of letting near-duplicates pile up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,11 +89,22 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
     let existing_skills = list_existing_skills(project_root);
     let existing_memories = list_existing_memories(project_root);
     let installed_plugins = list_installed_plugins();
+    // Current profile in the prompt so reflect extends it instead of
+    // re-proposing what's already there.
+    let current_profile = {
+        let p = crate::services::work_profile::get();
+        if p.trim().is_empty() {
+            "(empty)".to_string()
+        } else {
+            truncate(&p, 1500)
+        }
+    };
     let mut prompt = build_prompt(
         &digest,
         &existing_skills,
         &existing_memories,
         &installed_plugins,
+        &current_profile,
     );
     // Ground the reflection: retrieve what the corpus ALREADY covers for this
     // activity, so suggestions build on it instead of reinventing it.
@@ -244,9 +262,10 @@ fn build_prompt(
     existing_skills: &str,
     existing_memories: &str,
     installed_plugins: &str,
+    work_profile: &str,
 ) -> String {
     format!(
-        r#"You analyze a developer's recent activity in a project and propose concrete,
+        r###"You analyze a developer's recent activity in a project and propose concrete,
 high-leverage improvements to how Claude Code assists them. You are given a
 digest of the prompts they submitted and the slash-commands they ran.
 
@@ -268,6 +287,12 @@ Propose 3 to 6 suggestions, each of ONE of these kinds:
   describe the event and the check, the user wires it themselves.
 - "friction": a recurring pain point (repeated rewinds/snapshots around the same
   area, repeated failed attempts, the same question asked many ways). Report-only.
+- "profile": a durable trait of HOW THIS PERSON WORKS — a correction they keep
+  making, a convention they enforce, a cadence they insist on — worth one line
+  in their global work profile (injected at the start of every session, across
+  all projects). Personal and cross-project by nature: "runs tests before every
+  commit" is profile; "this repo deploys with X" is memory. Do NOT re-propose
+  lines already in the CURRENT WORK PROFILE below.
 
 Ground EVERY suggestion in the actual activity — cite specific prompts as evidence.
 Do NOT invent generic best-practice advice that isn't supported by what they did.
@@ -281,6 +306,9 @@ INSTALLED PLUGINS: {installed_plugins}
 
 EXISTING MEMORIES:
 {existing_memories}
+
+CURRENT WORK PROFILE:
+{work_profile}
 
 RECENT ACTIVITY DIGEST
 ======================
@@ -304,16 +332,19 @@ Respond with ONLY a JSON object, no prose, no markdown code fences. Shape:
       "memoryContent": "---\nname: kebab-case-name\ndescription: one-line\nmetadata:\n  type: project\n---\n\nThe fact. (only for kind=memory)",
       "pluginName": "kebab-case-name (only for kind=plugin)",
       "pluginDescription": "one-line description for the plugin manifest (only for kind=plugin)",
-      "pluginSkillMd": "---\nname: kebab-case-name\ndescription: what it does AND when to use it\n---\n\nInstructions... (only for kind=plugin; the plugin's starter SKILL.md)"
+      "pluginSkillMd": "---\nname: kebab-case-name\ndescription: what it does AND when to use it\n---\n\nInstructions... (only for kind=plugin; the plugin's starter SKILL.md)",
+      "profileSection": "## Conventions" | "## Cadence" | "## Recurring corrections" (only for kind=profile),
+      "profileLine": "one short imperative line (only for kind=profile)"
     }}
   ]
 }}
 
-Omit the skill*/memory*/plugin* fields for kinds they don't belong to.
-"#,
+Omit the skill*/memory*/plugin*/profile* fields for kinds they don't belong to.
+"###,
         existing_skills = existing_skills,
         existing_memories = existing_memories,
         installed_plugins = installed_plugins,
+        work_profile = work_profile,
         digest = digest,
     )
 }
@@ -1043,6 +1074,26 @@ mod tests {
         assert_eq!(got[0].kind, "memory");
         assert_eq!(got[0].memory_name.as_deref(), Some("x.md"));
         assert!(got[0].skill_name.is_none());
+    }
+
+    #[test]
+    fn parse_profile_suggestion_carries_section_and_line() {
+        let raw = r###"{"suggestions":[{"kind":"profile","title":"t","rationale":"r",
+            "evidence":["said it twice"],
+            "profileSection":"## Recurring corrections",
+            "profileLine":"Never mask exit codes with pipes."}]}"###;
+        let got = parse_suggestions(raw).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].kind, "profile");
+        assert_eq!(
+            got[0].profile_section.as_deref(),
+            Some("## Recurring corrections")
+        );
+        assert_eq!(
+            got[0].profile_line.as_deref(),
+            Some("Never mask exit codes with pipes.")
+        );
+        assert!(got[0].memory_name.is_none());
     }
 
     #[test]
