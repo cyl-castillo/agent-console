@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  DocFeedback,
   InjectionRecord,
   SemanticHit,
   WorklogDigestEntry,
@@ -108,6 +109,12 @@ export const ipc = {
   memoryInjectionSetEnabled: (projectRoot: string, enabled: boolean) =>
     invoke<void>("memory_injection_set_enabled", { projectRoot, enabled }),
   memoryInjectionRecent: () => invoke<InjectionRecord[]>("memory_injection_recent"),
+  memoryFeedbackStats: (projectRoot: string) =>
+    invoke<DocFeedback[]>("memory_feedback_stats", { projectRoot }),
+  memoryFeedbackSet: (projectRoot: string, docId: string, helpful: boolean) =>
+    invoke<DocFeedback>("memory_feedback_set", { projectRoot, docId, helpful }),
+  memoryFeedbackReset: (projectRoot: string, docId: string) =>
+    invoke<DocFeedback>("memory_feedback_reset", { projectRoot, docId }),
 
   semanticSearch: (projectRoot: string, query: string, k?: number) =>
     invoke<SemanticHit[]>("semantic_search", { projectRoot, query, k: k ?? null }),

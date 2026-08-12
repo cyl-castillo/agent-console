@@ -474,10 +474,18 @@ function MemoryInjectionSection() {
   const enabled = useInjectStore((s) => s.enabled);
   const recent = useInjectStore((s) => s.recent);
   const setEnabled = useInjectStore((s) => s.setEnabled);
+  const feedback = useInjectStore((s) => s.feedback);
+  const vote = useInjectStore((s) => s.vote);
+  const resetVerdicts = useInjectStore((s) => s.resetVerdicts);
   const [open, setOpen] = useState(false);
 
   if (!project) return null;
   const forProject = recent.filter((r) => r.projectRoot === project.root);
+  // Corpus outcome stats, most-used first (backend order), verdicted or
+  // excluded docs always shown — exclusions must never be invisible.
+  const statsList = Object.values(feedback).filter(
+    (d) => d.injectedCount > 0 || d.helpful > 0 || d.unhelpful > 0,
+  );
 
   return (
     <section className="wb-section">
@@ -513,12 +521,65 @@ function MemoryInjectionSection() {
                   <span className="inject-prompt" title={r.promptHead}>
                     “{r.promptHead}”
                   </span>
-                  <span className="inject-hits">
-                    {r.hits.map((h) => `${h.title} (${Math.round(h.score * 100)}%)`).join(" · ")}
-                  </span>
+                  {r.hits.map((h) => (
+                    <span key={h.id} className="inject-hits">
+                      {h.title} ({Math.round(h.score * 100)}%)
+                      <button
+                        className="inject-vote-btn"
+                        title="Useful — ranks higher for future injections"
+                        onClick={() => void vote(project.root, h.id, true)}
+                      >
+                        👍{feedback[h.id]?.helpful ? ` ${feedback[h.id].helpful}` : ""}
+                      </button>
+                      <button
+                        className="inject-vote-btn"
+                        title="Got in the way — 3× without a 👍 excludes it from injection"
+                        onClick={() => void vote(project.root, h.id, false)}
+                      >
+                        👎{feedback[h.id]?.unhelpful ? ` ${feedback[h.id].unhelpful}` : ""}
+                      </button>
+                      {feedback[h.id]?.excluded && (
+                        <span
+                          className="inject-excluded"
+                          title="No longer injected (still searchable)"
+                        >
+                          excluded
+                        </span>
+                      )}
+                    </span>
+                  ))}
                 </li>
               ))}
             </ul>
+          )}
+          {statsList.length > 0 && (
+            <>
+              <div className="inject-stats-head">Corpus by usefulness</div>
+              <ul className="inject-list">
+                {statsList.map((d) => (
+                  <li key={d.docId} className="inject-row inject-stat-row">
+                    <span className="inject-prompt" title={d.docId}>
+                      {d.docId.replace(/^(memory|skill):/, "")}
+                    </span>
+                    <span className="inject-hits">
+                      {d.injectedCount}× injected · 👍{d.helpful} · 👎{d.unhelpful}
+                      {d.excluded && (
+                        <>
+                          <span className="inject-excluded">excluded</span>
+                          <button
+                            className="inject-vote-btn"
+                            title="Clear verdicts and let this doc be injected again"
+                            onClick={() => void resetVerdicts(project.root, d.docId)}
+                          >
+                            restore
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
       )}

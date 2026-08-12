@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
 use crate::error::{AppError, AppResult};
+use crate::services::corpus_feedback;
 use crate::services::embedding_service::{model_ready, CandleEmbedder, Embedder};
 use crate::services::projects_service;
 use crate::services::semantic_index::{self, SearchHit};
@@ -37,6 +38,10 @@ use crate::services::semantic_index::{self, SearchHit};
 /// How many hits may be injected into one prompt. Deliberately small: the
 /// point is a nudge in the right direction, not a memory dump.
 const MAX_HITS: usize = 2;
+/// Candidates fetched before outcome adjustment (E2): exclusions and nudges
+/// are applied over this pool, THEN the top MAX_HITS survive — an excluded
+/// doc must not occupy a slot a useful one could take.
+const CANDIDATE_POOL: usize = 8;
 /// Cosine floor below which a hit is noise, not relevance. e5 scores cluster
 /// high; 0.74 keeps genuinely-related notes and drops topic-adjacent ones.
 const SCORE_THRESHOLD: f32 = 0.74;
@@ -167,6 +172,8 @@ pub struct InjectionRecord {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InjectedHit {
+    /// Corpus doc id ("memory:<file>", "skill:…") — what verdicts attach to.
+    pub id: String,
     pub title: String,
     pub kind: String,
     pub score: f32,
@@ -212,7 +219,28 @@ fn answer(
     prompt: &str,
     embedder: &mut dyn Embedder,
 ) -> AppResult<(Vec<SearchHit>, Option<String>)> {
-    let hits = semantic_index::search(project_root, prompt, MAX_HITS, embedder)?;
+    let stats = corpus_feedback::stats(project_root);
+    let mut hits = semantic_index::search(project_root, prompt, CANDIDATE_POOL, embedder)?;
+    // Outcome signals (E2), injection-path only: drop docs the user has
+    // repeatedly voted useless, nudge the rest by their verdict history —
+    // bounded, so semantics still dominate (see corpus_feedback).
+    hits.retain(|h| {
+        !stats
+            .get(&h.id)
+            .map(corpus_feedback::DocStats::excluded)
+            .unwrap_or(false)
+    });
+    for h in &mut hits {
+        if let Some(st) = stats.get(&h.id) {
+            h.score += st.nudge();
+        }
+    }
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits.truncate(MAX_HITS);
     let kept: Vec<SearchHit> = hits
         .into_iter()
         .filter(|h| h.score >= SCORE_THRESHOLD)
@@ -355,12 +383,19 @@ fn handle_and_render(
         hits: kept
             .iter()
             .map(|h| InjectedHit {
+                id: h.id.clone(),
                 title: h.title.clone(),
                 kind: h.kind.clone(),
                 score: h.score,
             })
             .collect(),
     };
+    // Passive usage signal (E2): count the injection. Best-effort by design.
+    corpus_feedback::record_injected(
+        &record.project_root,
+        &record.hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>(),
+        record.ts_ms,
+    );
     Some((record, context))
 }
 
@@ -503,6 +538,90 @@ mod tests {
         assert_eq!(kept.len(), 1, "orthogonal doc must fall below threshold");
         assert_eq!(kept[0].title, "release lessons");
         assert!(context.unwrap().contains("release lessons"));
+
+        // E2 — exclusion: three unhelpful verdicts silence the doc entirely…
+        for _ in 0..3 {
+            crate::services::corpus_feedback::set_verdict(root, "memory:release.md", false)
+                .unwrap();
+        }
+        let (kept, context) = answer(root, "how do we release?", &mut Fake).unwrap();
+        assert!(kept.is_empty(), "excluded doc must not be injected");
+        assert!(context.is_none());
+        // …and rehabilitation brings it straight back.
+        crate::services::corpus_feedback::reset_verdicts(root, "memory:release.md").unwrap();
+        let (kept, _) = answer(root, "how do we release?", &mut Fake).unwrap();
+        assert_eq!(kept.len(), 1);
+    }
+
+    #[test]
+    fn answer_nudge_reorders_near_ties_only() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-inject-nudge-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        // Two near-tied docs (cosine 1.0 vs ~0.996) and one clearly-worse
+        // (~0.7 — inside the pool, far outside nudge range).
+        struct Fake;
+        impl Embedder for Fake {
+            fn embed_passages(&mut self, texts: &[String]) -> AppResult<Vec<Vec<f32>>> {
+                Ok(texts
+                    .iter()
+                    .map(|t| {
+                        if t.contains("alpha") {
+                            vec![1.0, 0.0]
+                        } else if t.contains("beta") {
+                            vec![0.996, 0.0893]
+                        } else {
+                            vec![0.7, 0.714]
+                        }
+                    })
+                    .collect())
+            }
+            fn embed_query(&mut self, _text: &str) -> AppResult<Vec<f32>> {
+                Ok(vec![1.0, 0.0])
+            }
+        }
+
+        let root = "/proj/inject-nudge";
+        let doc = |id: &str, text: &str| crate::services::semantic_index::SourceDoc {
+            id: id.into(),
+            kind: "memory".into(),
+            title: id.into(),
+            text: text.into(),
+        };
+        let docs = vec![
+            doc("memory:alpha.md", "alpha"),
+            doc("memory:beta.md", "beta"),
+            doc("memory:far.md", "far away"),
+        ];
+        semantic_index::reindex(root, &docs, &mut Fake).unwrap();
+
+        // Baseline: alpha wins the near-tie.
+        let (kept, _) = answer(root, "q", &mut Fake).unwrap();
+        assert_eq!(kept[0].id, "memory:alpha.md");
+
+        // Two helpful votes on beta (+0.006) flip the ~0.004 gap…
+        crate::services::corpus_feedback::set_verdict(root, "memory:beta.md", true).unwrap();
+        crate::services::corpus_feedback::set_verdict(root, "memory:beta.md", true).unwrap();
+        let (kept, _) = answer(root, "q", &mut Fake).unwrap();
+        assert_eq!(kept[0].id, "memory:beta.md", "nudge breaks the near-tie");
+
+        // …but even a saturated nudge can never lift the clearly-worse doc
+        // (0.7 + 0.03 is far from both the tie and the threshold).
+        for _ in 0..20 {
+            crate::services::corpus_feedback::set_verdict(root, "memory:far.md", true).unwrap();
+        }
+        let (kept, _) = answer(root, "q", &mut Fake).unwrap();
+        assert!(
+            kept.iter().all(|h| h.id != "memory:far.md"),
+            "bounded nudge must never overturn a clear semantic gap"
+        );
     }
 
     #[test]
