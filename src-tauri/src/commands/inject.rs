@@ -44,6 +44,16 @@ fn to_doc_feedback(doc_id: String, s: corpus_feedback::DocStats) -> DocFeedback 
 }
 
 #[tauri::command]
+pub fn work_profile_get() -> String {
+    crate::services::work_profile::get()
+}
+
+#[tauri::command]
+pub fn work_profile_set(content: String) -> AppResult<()> {
+    crate::services::work_profile::set(&content)
+}
+
+#[tauri::command]
 pub fn memory_feedback_stats(project_root: String) -> Vec<DocFeedback> {
     let mut out: Vec<DocFeedback> = corpus_feedback::stats(&project_root)
         .into_iter()

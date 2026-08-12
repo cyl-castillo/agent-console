@@ -276,6 +276,12 @@ export const useLearningStore = create<LearningState>((set, get) => ({
           item.pluginDescription ?? "",
           item.pluginSkillMd,
         );
+      } else if (item.kind === "profile") {
+        if (!item.profileSection || !item.profileLine) {
+          throw new Error("suggestion is missing profile content");
+        }
+        await ipc.learningApplyProfile(item.profileSection, item.profileLine);
+        path = "work-profile.md";
       } else {
         if (!item.memoryName || !item.memoryContent) {
           throw new Error("suggestion is missing memory content");

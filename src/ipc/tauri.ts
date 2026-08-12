@@ -113,6 +113,10 @@ export const ipc = {
     invoke<DocFeedback[]>("memory_feedback_stats", { projectRoot }),
   memoryFeedbackSet: (projectRoot: string, docId: string, helpful: boolean) =>
     invoke<DocFeedback>("memory_feedback_set", { projectRoot, docId, helpful }),
+  workProfileGet: () => invoke<string>("work_profile_get"),
+  workProfileSet: (content: string) => invoke<void>("work_profile_set", { content }),
+  learningApplyProfile: (section: string, line: string) =>
+    invoke<void>("learning_apply_profile", { section, line }),
   memoryFeedbackReset: (projectRoot: string, docId: string) =>
     invoke<DocFeedback>("memory_feedback_reset", { projectRoot, docId }),
 

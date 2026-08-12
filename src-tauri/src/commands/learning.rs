@@ -102,6 +102,20 @@ pub fn learning_save_memory(
     Ok(path.display().to_string())
 }
 
+/// Apply a reflect "profile" suggestion: append the proposed line to the
+/// user's global work profile. Validates the section against the known set —
+/// a hallucinated heading must not spawn arbitrary sections.
+#[tauri::command]
+pub fn learning_apply_profile(section: String, line: String) -> AppResult<()> {
+    const SECTIONS: [&str; 3] = ["## Conventions", "## Cadence", "## Recurring corrections"];
+    if !SECTIONS.contains(&section.trim()) {
+        return Err(AppError::InvalidArgument(format!(
+            "unknown profile section: {section}"
+        )));
+    }
+    crate::services::work_profile::append_line(&section, &line)
+}
+
 fn unknown_kind(kind: &str) -> AppError {
     AppError::InvalidArgument(format!("unknown target kind: {kind}"))
 }

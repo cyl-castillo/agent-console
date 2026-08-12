@@ -393,19 +393,25 @@ function LearningRow({ item }: { item: LearningItem }) {
         ? item.pluginSkillMd
         : item.kind === "memory"
           ? item.memoryContent
-          : undefined;
+          : item.kind === "profile" && item.profileSection && item.profileLine
+            ? `${item.profileSection}\n${item.profileLine}`
+            : undefined;
   const previewLabel =
     item.kind === "plugin"
       ? "plugin SKILL.md preview"
       : item.kind === "skill"
         ? "SKILL.md preview"
-        : "memory preview";
+        : item.kind === "profile"
+          ? "profile line preview"
+          : "memory preview";
   const applyLabel =
     item.kind === "skill"
       ? "Create skill"
       : item.kind === "plugin"
         ? "Scaffold plugin"
-        : "Save memory";
+        : item.kind === "profile"
+          ? "Add to profile"
+          : "Save memory";
 
   return (
     <li className={`wb-advisor ${dimmed ? "dimmed" : ""}`}>
@@ -451,7 +457,9 @@ function LearningRow({ item }: { item: LearningItem }) {
                     ? "Writes to .claude/skills/"
                     : item.kind === "plugin"
                       ? "Scaffolds ~/.claude/skills/<name>/ — auto-loads next session, shareable via marketplace"
-                      : "Writes to this project's memory"}
+                      : item.kind === "profile"
+                        ? "Appends one line to your global work profile (injected at session start, all projects)"
+                        : "Writes to this project's memory"}
             </span>
 
             <div className="wb-advisor-actions">
