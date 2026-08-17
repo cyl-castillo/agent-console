@@ -9375,6 +9375,17 @@ select:focus-visible,
   color: var(--accent);
 }
 
+.inject-pinned {
+  margin-left: 4px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--accent);
+  background: var(--accent-12, var(--accent-soft));
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
 .inject-stats-head {
   margin-top: 10px;
   font-size: 10px;

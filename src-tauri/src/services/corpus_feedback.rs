@@ -41,18 +41,30 @@ pub struct DocStats {
     pub unhelpful: u32,
     #[serde(default)]
     pub last_injected_ms: u64,
+    /// Pinned by the user: this doc is policy, not preference. Exempt from
+    /// exclusion and from negative nudges — verdicts can lift it, never bury
+    /// it. Only the user sets or clears this.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl DocStats {
-    /// Bounded score adjustment from net verdicts.
+    /// Bounded score adjustment from net verdicts. A pinned doc never ranks
+    /// DOWN from feedback (floor at 0) — pin means "this is policy".
     pub fn nudge(&self) -> f32 {
         let net = self.helpful as f32 - self.unhelpful as f32;
-        (net * NUDGE_STEP).clamp(-NUDGE_CAP, NUDGE_CAP)
+        let raw = (net * NUDGE_STEP).clamp(-NUDGE_CAP, NUDGE_CAP);
+        if self.pinned {
+            raw.max(0.0)
+        } else {
+            raw
+        }
     }
 
-    /// Hard stop: repeatedly voted useless and never once useful.
+    /// Hard stop: repeatedly voted useless and never once useful. Pinned docs
+    /// are exempt — degrading a pinned doc takes the user unpinning it first.
     pub fn excluded(&self) -> bool {
-        self.unhelpful >= EXCLUDE_AFTER && self.helpful == 0
+        !self.pinned && self.unhelpful >= EXCLUDE_AFTER && self.helpful == 0
     }
 }
 
@@ -130,6 +142,17 @@ pub fn set_verdict(project_root: &str, doc_id: &str, helpful: bool) -> AppResult
     Ok(out)
 }
 
+/// Pin or unpin a doc. The pin is the user's word that this doc is policy —
+/// it survives verdicts and rehabilitations until the user says otherwise.
+pub fn set_pinned(project_root: &str, doc_id: &str, pinned: bool) -> AppResult<DocStats> {
+    let mut file = load(project_root);
+    let s = file.docs.entry(doc_id.to_string()).or_default();
+    s.pinned = pinned;
+    let out = s.clone();
+    save(project_root, &file)?;
+    Ok(out)
+}
+
 /// Rehabilitation: wipe the verdicts (usage history stays). The user's manual
 /// override always wins over accumulated clicks.
 pub fn reset_verdicts(project_root: &str, doc_id: &str) -> AppResult<DocStats> {
@@ -174,6 +197,23 @@ mod tests {
     }
 
     #[test]
+    fn pinned_docs_cannot_be_excluded_or_ranked_down() {
+        let mut s = DocStats {
+            unhelpful: EXCLUDE_AFTER + 5,
+            pinned: true,
+            ..Default::default()
+        };
+        assert!(!s.excluded(), "pin beats any pile of downvotes");
+        assert_eq!(s.nudge(), 0.0, "negative nudge floors at zero when pinned");
+        s.helpful = 2;
+        assert!(s.nudge() >= 0.0);
+        s.pinned = false;
+        assert!(s.nudge() < 0.0, "unpinning restores normal semantics");
+        s.helpful = 0;
+        assert!(s.excluded());
+    }
+
+    #[test]
     fn store_roundtrip_verdicts_and_rehab() {
         let _env = crate::test_support::lock_env();
         let nanos = std::time::SystemTime::now()
@@ -203,6 +243,18 @@ mod tests {
         let s = reset_verdicts(root, "memory:a.md").unwrap();
         assert!(!s.excluded());
         assert_eq!(s.injected_count, 2, "usage history survives rehab");
+
+        // Pin roundtrip: survives rehab, only the user clears it.
+        let s = set_pinned(root, "memory:a.md", true).unwrap();
+        assert!(s.pinned);
+        set_verdict(root, "memory:a.md", false).unwrap();
+        set_verdict(root, "memory:a.md", false).unwrap();
+        let s = set_verdict(root, "memory:a.md", false).unwrap();
+        assert!(!s.excluded(), "pinned while downvoted: still injectable");
+        let s = reset_verdicts(root, "memory:a.md").unwrap();
+        assert!(s.pinned, "rehab never clears the pin");
+        let s = set_pinned(root, "memory:a.md", false).unwrap();
+        assert!(!s.pinned);
 
         // Corrupt file degrades to empty, never to an error.
         let path = file_path(root).unwrap();

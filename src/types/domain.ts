@@ -814,6 +814,9 @@ export interface DocFeedback {
   unhelpful: number;
   lastInjectedMs: number;
   excluded: boolean;
+  /// Pinned by the user: policy, not preference — exempt from exclusion and
+  /// negative nudges. Only the user sets or clears it.
+  pinned: boolean;
 }
 
 export interface InjectionRecord {

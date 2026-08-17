@@ -27,6 +27,9 @@ interface InjectState {
   vote: (projectRoot: string, docId: string, helpful: boolean) => Promise<void>;
   /// Rehabilitate an excluded doc (wipes verdicts, keeps usage history).
   resetVerdicts: (projectRoot: string, docId: string) => Promise<void>;
+  /// Pin/unpin a doc: pinned = policy, exempt from exclusion and negative
+  /// nudges. The user's word — verdicts can't override it.
+  setPinned: (projectRoot: string, docId: string, pinned: boolean) => Promise<void>;
   /// Refresh the flywheel metrics (30-day window ending today, local days).
   loadMetrics: (projectRoot: string) => Promise<void>;
   _onInjected: (r: InjectionRecord) => void;
@@ -81,6 +84,15 @@ export const useInjectStore = create<InjectState>((set, get) => ({
     }
   },
 
+  setPinned: async (projectRoot, docId, pinned) => {
+    try {
+      const updated = await ipc.memoryFeedbackPin(projectRoot, docId, pinned);
+      set((s) => ({ feedback: { ...s.feedback, [docId]: updated } }));
+    } catch {
+      /* same as vote */
+    }
+  },
+
   loadMetrics: async (projectRoot) => {
     try {
       const metrics = await ipc.flywheelMetrics(projectRoot, localDayStarts(30));
@@ -103,6 +115,7 @@ export const useInjectStore = create<InjectState>((set, get) => ({
           unhelpful: 0,
           lastInjectedMs: 0,
           excluded: false,
+          pinned: false,
         };
         feedback[h.id] = { ...prev, injectedCount: prev.injectedCount + 1, lastInjectedMs: r.tsMs };
       }

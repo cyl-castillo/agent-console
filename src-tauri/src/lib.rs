@@ -152,6 +152,7 @@ pub fn run() {
             commands::inject::memory_injection_recent,
             commands::inject::memory_feedback_stats,
             commands::inject::memory_feedback_set,
+            commands::inject::memory_feedback_pin,
             commands::inject::memory_feedback_reset,
             commands::inject::flywheel_metrics,
             commands::inject::work_profile_get,
