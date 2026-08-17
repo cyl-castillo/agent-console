@@ -1114,6 +1114,7 @@ mod tests {
                 helpful: 4,
                 unhelpful: 0,
                 last_injected_ms: 1,
+                pinned: false,
             },
         );
         stats.insert(
@@ -1123,6 +1124,7 @@ mod tests {
                 helpful: 0,
                 unhelpful: 3,
                 last_injected_ms: 1,
+                pinned: false,
             },
         );
         let section = outcome_stats_section(&stats).expect("has signal");

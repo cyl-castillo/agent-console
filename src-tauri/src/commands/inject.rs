@@ -30,11 +30,13 @@ pub struct DocFeedback {
     pub unhelpful: u32,
     pub last_injected_ms: u64,
     pub excluded: bool,
+    pub pinned: bool,
 }
 
 fn to_doc_feedback(doc_id: String, s: corpus_feedback::DocStats) -> DocFeedback {
     DocFeedback {
         excluded: s.excluded(),
+        pinned: s.pinned,
         doc_id,
         injected_count: s.injected_count,
         helpful: s.helpful,
@@ -81,6 +83,16 @@ pub fn memory_feedback_set(
     helpful: bool,
 ) -> AppResult<DocFeedback> {
     let s = corpus_feedback::set_verdict(&project_root, &doc_id, helpful)?;
+    Ok(to_doc_feedback(doc_id, s))
+}
+
+#[tauri::command]
+pub fn memory_feedback_pin(
+    project_root: String,
+    doc_id: String,
+    pinned: bool,
+) -> AppResult<DocFeedback> {
+    let s = corpus_feedback::set_pinned(&project_root, &doc_id, pinned)?;
     Ok(to_doc_feedback(doc_id, s))
 }
 

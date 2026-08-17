@@ -480,6 +480,7 @@ function MemoryInjectionSection() {
   const feedback = useInjectStore((s) => s.feedback);
   const vote = useInjectStore((s) => s.vote);
   const resetVerdicts = useInjectStore((s) => s.resetVerdicts);
+  const setPinned = useInjectStore((s) => s.setPinned);
   const [open, setOpen] = useState(false);
 
   if (!project) return null;
@@ -527,6 +528,7 @@ function MemoryInjectionSection() {
                   {r.hits.map((h) => (
                     <span key={h.id} className="inject-hits">
                       {h.kind === "profile" ? "⬢ " : ""}
+                      {feedback[h.id]?.pinned ? "📌 " : ""}
                       {h.title} ({Math.round(h.score * 100)}%)
                       {h.kind !== "profile" && (
                         <>
@@ -571,6 +573,25 @@ function MemoryInjectionSection() {
                     </span>
                     <span className="inject-hits">
                       {d.injectedCount}× injected · 👍{d.helpful} · 👎{d.unhelpful}
+                      {d.pinned && (
+                        <span
+                          className="inject-pinned"
+                          title="Pinned: policy, not preference — exempt from exclusion and negative ranking. Only you can unpin it."
+                        >
+                          📌 pinned
+                        </span>
+                      )}
+                      <button
+                        className="inject-vote-btn"
+                        title={
+                          d.pinned
+                            ? "Unpin — verdicts affect it normally again"
+                            : "Pin as policy — 👎 votes can no longer exclude or down-rank it"
+                        }
+                        onClick={() => void setPinned(project.root, d.docId, !d.pinned)}
+                      >
+                        {d.pinned ? "unpin" : "pin"}
+                      </button>
                       {d.excluded && (
                         <>
                           <span className="inject-excluded">excluded</span>
