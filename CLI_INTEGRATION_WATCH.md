@@ -7,8 +7,8 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 
 ## Estado del watch
 
-- **Última revisión completa**: 2026-08-06 (sin versiones nuevas: npm sigue en Claude `2.1.223` / Codex `0.146.1`)
-- **Baseline analizado**: Claude Code hasta `2.1.223` · Codex hasta `0.146.1`
+- **Última revisión completa**: 2026-08-18 (sin versiones nuevas respecto de la corrida anterior: Claude `2.1.234` / Codex `0.147.0`)
+- **Baseline analizado**: Claude Code hasta `2.1.234` · Codex hasta `0.147.0`
 - **Instalado local**: claude `2.1.218` · codex `0.144.3`
 
 ## Superficies que Agent Console depende hoy
@@ -19,6 +19,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 | Headless: `claude -p --output-format stream-json` / `codex exec --json` (+ `codex exec resume <id>`), parsing de usage | `src-tauri/src/services/engine_runner.rs` |
 | Headless permission flags: `--permission-mode plan\|acceptEdits`, `--dangerously-skip-permissions` | engine_runner, scheduler_service, advisor_service, learning_service |
 | Hooks: 4 bridges (UserPromptSubmit/PreToolUse/PostToolUse/Stop) como `node "<path>"` en `~/.claude/settings.json` + espejo idéntico en `~/.codex/hooks.json` | `src-tauri/src/services/hooks_service.rs`, `src-tauri/resources/*.cjs` |
+| Salida del hook UserPromptSubmit: `hookSpecificOutput.additionalContext` (inyección de memoria) + `sessionTitle` (2.1.94, nombre de la sesión) | `src-tauri/resources/userprompt-hook.cjs`, `src-tauri/src/services/inject_service.rs` |
 | Detección de errores de auth: `claude auth status --json` (2.1.41+, tolerante a ausencia) + heurística de texto como respaldo | `src-tauri/src/services/claude_cli.rs::auth_status`/`exit_error`, `engine_runner::finish` |
 | Transcripts Claude `~/.claude/projects/<slug>/*.jsonl` (lectura tolerante) | context/semantic services |
 
@@ -30,7 +31,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 
 - [ ] **W1 — Hook exec-form `args` (Claude 2.1.139)**: reemplaza nuestro workaround `node "<path>"` (PR #109) por `{command, args: [path]}` sin shell. CUIDADO compat: versiones <2.1.122 invalidan settings.json entero ante entradas que no entienden → gatear por versión detectada (`claude --version`) o esperar adopción. Codex: quoting Windows arreglado en 0.145 con el formato actual.
 - [x] **W2 — Auth detección estructurada** (PR #139, 2026-08-06): `claude auth status --json` → `claude_cli::auth_status()` (probe acotado a 8s, `None` = "no sé", nunca "deslogueado"); `exit_error` y `engine_runner::finish` nombran la expiración aunque el CLI culpe a otra cosa; "Fix Claude login" usa `claude auth login` cuando el probe prueba que el subcomando existe, con fallback a `claude` pelado. Queda como opcional: mostrar cuenta/método en la GUI (el comando IPC `claude_auth_status` ya los devuelve).
-- [ ] **W3 — `sessionTitle` writeback (Claude 2.1.94)**: nuestro auto-naming puede devolver `hookSpecificOutput.sessionTitle` desde el UserPromptSubmit hook → el nombre queda también en `/resume` y `claude agents` del propio CLI. Campo ignorado por versiones viejas (seguro).
+- [x] **W3 — `sessionTitle` writeback** (PR #149, 2026-08-18): el endpoint de inyección devuelve además `sessionTitle` = el nombre que la sidebar muestra para esa terminal, y el bridge lo eco-devuelve como `hookSpecificOutput.sessionTitle` → el mismo nombre aparece en `/resume` y `claude agents`. Regla: viaja lo que la sidebar muestra (rename manual, semilla de ticket Jira, o el auto-nombre silencioso `deriveSessionLabel`); los `shell N` por defecto NO salen, así que mientras la consola no tenga nada mejor el CLI conserva su propio título autogenerado. Dedupe por terminal (se manda una vez y de nuevo solo si cambia) para no pisar un `/rename` tipeado dentro del CLI. Campo ignorado por versiones viejas y por Codex (seguro). Limitación conocida: viaja solo en prompts que ya consultan el endpoint (≥12 chars, sin `/` inicial) — no agregamos latencia a prompts cortos por un título.
 - [ ] **W4 — `last_assistant_message` en Stop (Claude 2.1.47)**: el Stop hook ya recibe el texto final del turno → habilita resumen hablado fin-de-turno (hito 3 de voz) y digest sin parsear jsonl. Codex: verificar si su Stop lo incluye (su set de eventos creció: sessionEnd, permissionRequest, subagentStart/Stop, postCompact).
 - [ ] **W5 — Trust de workspace**: hooks NO corren en directorios no confiados (Claude 2.1.3/2.1.51/2.1.218) → detectar y avisar en la GUI en vez de asumir que el hook disparó (hoy el fallo es silencioso; misma clase de bug que el de Windows/Melissa).
 
@@ -63,6 +64,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 | Fecha | Item | PR |
 |---|---|---|
 | 2026-08-06 | W2 — auth estructurada (`claude auth status --json`) + `claude auth login` gateado por probe | #139 |
+| 2026-08-18 | W3 — el nombre de sesión de la sidebar viaja al CLI como `hookSpecificOutput.sessionTitle` | #149 |
 
 ## Protocolo de la tarea diaria
 

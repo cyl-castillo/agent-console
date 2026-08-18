@@ -7,6 +7,10 @@
 //! already knowing what this workspace has learned — for BOTH engines, since
 //! Codex consumes the same hook schema.
 //!
+//! The same answer also carries the session title (Claude 2.1.94): the bridge
+//! echoes it back as `hookSpecificOutput.sessionTitle`, so the name the user
+//! chose in our sidebar is the name the CLI's own `/resume` list shows.
+//!
 //! Hard rules, in order of importance:
 //! - Never slow a prompt down: every miss (toggle off, model not downloaded,
 //!   no index, malformed request) answers "nothing" immediately. The bridge
@@ -18,7 +22,7 @@
 //!   fed.
 //! - Loopback only (POLITICA: nothing listens outside 127.0.0.1).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -27,7 +31,7 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
 use crate::services::corpus_feedback;
@@ -54,6 +58,9 @@ const MAX_BODY_BYTES: usize = 64 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
 /// Recent injections kept for the GUI ("what was the agent fed lately?").
 const RECENT_CAP: usize = 20;
+/// Cap on an exported session title. The CLI shows it in one line of a list;
+/// a Jira-seeded name can be much longer than that line.
+const MAX_TITLE_CHARS: usize = 80;
 
 // ---------------------------------------------------------------------------
 // Settings: per-project on/off toggle. Default ON — the flywheel only spins
@@ -209,6 +216,77 @@ fn reset_profile_served() {
     if let Ok(mut g) = PROFILE_SERVED.lock() {
         *g = None;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Session title export (Claude 2.1.94: `hookSpecificOutput.sessionTitle` on
+// UserPromptSubmit). The name the user reads in our sidebar is the name they
+// should find in `/resume` and `claude agents` — otherwise the same session
+// has two identities depending on where you look at it from.
+// ---------------------------------------------------------------------------
+
+/// Titles already handed to a CLI, per terminal session. Keyed by term id →
+/// the last title sent, so a rename in Agent Console travels once and a
+/// `/rename` typed inside the CLI is not clobbered on every later prompt.
+/// In-memory on purpose: an app restart re-sends once, which is the harmless
+/// direction (the title is the one we'd set anyway).
+static TITLE_SENT: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+/// The name of a terminal, when it is worth exporting. A default "shell N"
+/// says nothing the CLI doesn't already know, and sending it would replace the
+/// CLI's own generated title with noise — those stay home.
+fn exportable_name(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.to_lowercase().strip_prefix("shell ") {
+        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+    }
+    // A title is one line: collapse any whitespace a pasted name carried in.
+    let flat = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(flat.chars().take(MAX_TITLE_CHARS).collect())
+}
+
+/// Gate a title behind "changed since the last one we sent for this terminal".
+fn title_if_new(term_id: &str, title: String) -> Option<String> {
+    let mut guard = TITLE_SENT.lock().ok()?;
+    let sent = guard.get_or_insert_with(HashMap::new);
+    if sent.get(term_id).is_some_and(|prev| prev == &title) {
+        return None;
+    }
+    sent.insert(term_id.to_string(), title.clone());
+    Some(title)
+}
+
+#[cfg(test)]
+fn reset_titles_sent() {
+    if let Ok(mut g) = TITLE_SENT.lock() {
+        *g = None;
+    }
+}
+
+/// Look up what Agent Console calls this terminal and hand it back once.
+/// Every miss (no term id, unknown session, default name, already sent)
+/// answers None — the CLI then keeps whatever title it had.
+fn session_title(app: &tauri::AppHandle, cwd: &str, term_id: Option<&str>) -> Option<String> {
+    let term_id = term_id?;
+    let roots: Vec<String> = projects_service::load()
+        .into_iter()
+        .map(|p| p.path)
+        .collect();
+    let root = resolve_project_root(cwd, &roots);
+    let name = app
+        .state::<crate::state::AppState>()
+        .sessions
+        .list(&root)
+        .ok()?
+        .into_iter()
+        .find(|s| s.id == term_id)?
+        .name;
+    title_if_new(term_id, exportable_name(&name)?)
 }
 
 pub fn recent() -> Vec<InjectionRecord> {
@@ -372,15 +450,25 @@ fn serve_connection(stream: &mut TcpStream, app: &tauri::AppHandle) {
         respond_json(stream, NOTHING);
         return;
     };
+    // Independent of injection: the title travels even when there is nothing
+    // to inject (toggle off, no model, empty index).
+    let title = session_title(app, &req.cwd, req.term_id.as_deref());
     match handle_and_render(&req.prompt, &req.cwd, req.term_id) {
         Some((record, context)) => {
-            let payload =
-                serde_json::json!({ "context": context, "hits": record.hits }).to_string();
+            let payload = serde_json::json!({
+                "context": context,
+                "hits": record.hits,
+                "sessionTitle": title,
+            })
+            .to_string();
             remember(record.clone());
             let _ = app.emit("inject://done", &record);
             respond_json(stream, &payload);
         }
-        None => respond_json(stream, NOTHING),
+        None => {
+            let payload = serde_json::json!({ "context": null, "sessionTitle": title }).to_string();
+            respond_json(stream, &payload);
+        }
     }
 }
 
@@ -747,6 +835,64 @@ mod tests {
             Some("t9".into())
         )
         .is_none());
+    }
+
+    #[test]
+    fn only_real_names_are_exportable_as_titles() {
+        // Default names carry no information — the CLI's own title is better.
+        assert_eq!(exportable_name("shell 1"), None);
+        assert_eq!(exportable_name("  shell 12  "), None);
+        assert_eq!(exportable_name("Shell 3"), None, "case is cosmetic");
+        assert_eq!(exportable_name("   "), None);
+        // A real name travels, flattened to the single line a title is.
+        assert_eq!(
+            exportable_name("Fix login on windows"),
+            Some("Fix login on windows".into())
+        );
+        assert_eq!(
+            exportable_name(" PROJ-42\n  worklog sync "),
+            Some("PROJ-42 worklog sync".into())
+        );
+        // Names that only look default keep their meaning.
+        assert_eq!(
+            exportable_name("shell rewrite"),
+            Some("shell rewrite".into())
+        );
+        assert_eq!(
+            exportable_name("shell 3 cleanup"),
+            Some("shell 3 cleanup".into())
+        );
+        // Oversized names are cut, never dropped.
+        let long = "x".repeat(MAX_TITLE_CHARS + 40);
+        assert_eq!(
+            exportable_name(&long).map(|t| t.chars().count()),
+            Some(MAX_TITLE_CHARS)
+        );
+    }
+
+    #[test]
+    fn a_title_is_sent_once_per_change_and_per_terminal() {
+        reset_titles_sent();
+        assert_eq!(
+            title_if_new("t1", "Fix login".into()),
+            Some("Fix login".into()),
+            "first prompt of the session carries the name"
+        );
+        assert_eq!(
+            title_if_new("t1", "Fix login".into()),
+            None,
+            "unchanged: a /rename typed in the CLI must survive later prompts"
+        );
+        assert_eq!(
+            title_if_new("t1", "Fix login on windows".into()),
+            Some("Fix login on windows".into()),
+            "renamed in Agent Console: the new name travels"
+        );
+        assert_eq!(
+            title_if_new("t2", "Fix login".into()),
+            Some("Fix login".into()),
+            "dedupe is per terminal"
+        );
     }
 
     #[test]
