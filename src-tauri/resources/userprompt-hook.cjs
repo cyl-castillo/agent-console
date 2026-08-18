@@ -10,6 +10,11 @@
 //    hand them back as hookSpecificOutput.additionalContext. A hard timeout
 //    bounds the wait — the app being closed, busy, or gone must never delay
 //    the prompt or surface an error to the CLI.
+//    The same answer may carry a sessionTitle (the name Agent Console shows
+//    for this session): echoed back as hookSpecificOutput.sessionTitle so the
+//    CLI's own session list matches the sidebar. The app only sends it when it
+//    has a real name to give, and only once per change — a title typed inside
+//    the CLI is never overwritten on every prompt. Older CLIs ignore the field.
 
 const fs = require("fs");
 const os = require("os");
@@ -41,14 +46,19 @@ function injectPort() {
   } catch { return null; }
 }
 
-// POST the prompt to the app; call done(contextOrNull) exactly once.
-function fetchContext(prompt, cwd, done) {
+// Nothing to add to this turn — what every miss collapses to.
+const EMPTY = { context: null, sessionTitle: null };
+
+function str(v) { return typeof v === "string" && v.length > 0 ? v : null; }
+
+// POST the prompt to the app; call done({context, sessionTitle}) exactly once.
+function fetchInjection(prompt, cwd, done) {
   const port = injectPort();
-  if (!port) { done(null); return; }
+  if (!port) { done(EMPTY); return; }
   let finished = false;
-  const finish = (ctx) => { if (!finished) { finished = true; done(ctx); } };
+  const finish = (res) => { if (!finished) { finished = true; done(res || EMPTY); } };
   // Outer guard: covers connect + response + parsing, whatever stalls.
-  const guard = setTimeout(() => finish(null), INJECT_TIMEOUT_MS);
+  const guard = setTimeout(() => finish(EMPTY), INJECT_TIMEOUT_MS);
   guard.unref?.();
   try {
     const body = JSON.stringify({ prompt, cwd, termId: process.env.AGENT_CONSOLE_TERM_ID || null });
@@ -61,17 +71,17 @@ function fetchContext(prompt, cwd, done) {
         res.on("data", (c) => out.push(c));
         res.on("end", () => {
           try {
-            const ctx = JSON.parse(Buffer.concat(out).toString()).context;
-            finish(typeof ctx === "string" && ctx.length > 0 ? ctx : null);
-          } catch { finish(null); }
+            const answer = JSON.parse(Buffer.concat(out).toString());
+            finish({ context: str(answer.context), sessionTitle: str(answer.sessionTitle) });
+          } catch { finish(EMPTY); }
         });
-        res.on("error", () => finish(null));
+        res.on("error", () => finish(EMPTY));
       }
     );
-    req.on("timeout", () => { req.destroy(); finish(null); });
-    req.on("error", () => finish(null));
+    req.on("timeout", () => { req.destroy(); finish(EMPTY); });
+    req.on("error", () => finish(EMPTY));
     req.end(body);
-  } catch { finish(null); }
+  } catch { finish(EMPTY); }
 }
 
 let chunks = [];
@@ -120,15 +130,15 @@ process.stdin.on("end", () => {
     event.prompt.length >= MIN_PROMPT_CHARS && !event.prompt.startsWith("/");
   if (!wantsInjection) { process.exit(0); }
 
-  fetchContext(event.prompt, event.cwd ?? "", (ctx) => {
-    if (ctx) {
-      // Same schema for both engines (Codex adopted Claude's hook output).
-      process.stdout.write(JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "UserPromptSubmit",
-          additionalContext: ctx,
-        },
-      }));
+  fetchInjection(event.prompt, event.cwd ?? "", (answer) => {
+    // Same schema for both engines (Codex adopted Claude's hook output).
+    const out = { hookEventName: "UserPromptSubmit" };
+    if (answer.context) out.additionalContext = answer.context;
+    if (answer.sessionTitle) out.sessionTitle = answer.sessionTitle;
+    // Nothing to say → say nothing at all: an empty hookSpecificOutput is
+    // still output the CLI has to parse.
+    if (out.additionalContext || out.sessionTitle) {
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: out }));
     }
     process.exit(0);
   });

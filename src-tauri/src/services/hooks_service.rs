@@ -1124,19 +1124,26 @@ mod tests {
         fs::create_dir_all(&session_dir).unwrap();
         fs::create_dir_all(&data_dir).unwrap();
 
-        // Fake inject endpoint: one connection, fixed answer.
+        // Fake inject endpoint: two connections, one answer each — first the
+        // full answer (context + title), then a title-only one (nothing to
+        // inject, but the session still has a name to export).
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
-            let (mut s, _) = listener.accept().unwrap();
-            let mut buf = [0u8; 4096];
-            let _ = s.read(&mut buf);
-            let body = r#"{"context":"CTX-FROM-APP"}"#;
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            let _ = s.write_all(resp.as_bytes());
+            let bodies = [
+                r#"{"context":"CTX-FROM-APP","sessionTitle":"Fix login on windows"}"#,
+                r#"{"context":null,"sessionTitle":"Fix login on windows"}"#,
+            ];
+            for body in bodies {
+                let (mut s, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let _ = s.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = s.write_all(resp.as_bytes());
+            }
         });
         fs::write(
             data_dir.join("inject-port.json"),
@@ -1178,13 +1185,33 @@ mod tests {
                 .and_then(Value::as_str),
             Some("UserPromptSubmit")
         );
+        // The session name the app exports rides the same answer, so the CLI's
+        // own `/resume` list shows what our sidebar shows (Claude 2.1.94).
+        assert_eq!(
+            v.pointer("/hookSpecificOutput/sessionTitle")
+                .and_then(Value::as_str),
+            Some("Fix login on windows")
+        );
+
+        // Title without context: still an output, and no empty context field.
+        let stdout = run(&base.join("data"));
+        let v: Value = serde_json::from_str(stdout.trim()).expect("bridge output is JSON");
+        assert_eq!(
+            v.pointer("/hookSpecificOutput/sessionTitle")
+                .and_then(Value::as_str),
+            Some("Fix login on windows")
+        );
+        assert!(
+            v.pointer("/hookSpecificOutput/additionalContext").is_none(),
+            "nothing to inject → the field must be absent, not null"
+        );
         server.join().unwrap();
 
         // Without a port file (app closed): silent, but the event still logs.
         let stdout = run(&base.join("nowhere"));
         assert!(stdout.trim().is_empty(), "no app → no output, no error");
         let events = fs::read_to_string(session_dir.join("events.jsonl")).unwrap();
-        assert_eq!(events.lines().count(), 2, "both runs must log the prompt");
+        assert_eq!(events.lines().count(), 3, "every run must log the prompt");
         assert!(events.contains("how do we cut a release"));
     }
 }
