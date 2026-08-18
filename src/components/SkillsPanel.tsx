@@ -17,6 +17,7 @@ export function SkillsPanel() {
   const installed = useSkillsStore((s) => s.installed);
   const recent = useSkillsStore((s) => s.recent);
   const hooks = useSkillsStore((s) => s.hooks);
+  const trust = useSkillsStore((s) => s.trust);
   const selected = useSkillsStore((s) => s.selected);
   const selectedMd = useSkillsStore((s) => s.selectedMarkdown);
   const refresh = useSkillsStore((s) => s.refresh);
@@ -27,6 +28,14 @@ export function SkillsPanel() {
 
   const pinned = usePinsStore((s) => s.pinned);
   const togglePin = usePinsStore((s) => s.toggle);
+
+  // "unknown" (CLI never run here / store unreadable) is not a problem to report.
+  const untrusted = useMemo(() => {
+    const names: string[] = [];
+    if (trust?.claude === "untrusted") names.push("claude");
+    if (trust?.codex === "untrusted" && hooks?.codexAvailable) names.push("codex");
+    return names;
+  }, [trust, hooks?.codexAvailable]);
 
   const [filter, setFilter] = useState<KindFilter>("all");
   const [query, setQuery] = useState("");
@@ -103,8 +112,22 @@ export function SkillsPanel() {
           >
             <span className="caret">{integrationOpen ? "▾" : "▸"}</span>
             <span>integration</span>
-            <span className={`wb-status ${integrationActive ? "ok" : "off"}`}>
-              {integrationActive ? "active" : "inactive"}
+            {/* The pill is the only thing visible while the section is
+                collapsed, so an inert-but-installed hook has to show here. */}
+            <span
+              className={`wb-status ${
+                integrationActive && untrusted.length > 0
+                  ? "warn"
+                  : integrationActive
+                    ? "ok"
+                    : "off"
+              }`}
+            >
+              {integrationActive && untrusted.length > 0
+                ? "untrusted"
+                : integrationActive
+                  ? "active"
+                  : "inactive"}
             </span>
           </button>
           {integrationOpen && (
@@ -146,6 +169,17 @@ export function SkillsPanel() {
                 <p className="wb-hint">
                   Approvals bridge active: permission requests surface in the console and every
                   decision is recorded.
+                </p>
+              )}
+              {/* An installed hook still never fires in a directory the CLI
+                  does not trust, and neither CLI says so outside its own
+                  prompt — without this the panel would claim "active" while
+                  nothing is being observed. */}
+              {untrusted.length > 0 && (
+                <p className="wb-hint wb-warn">
+                  {untrusted.join(" and ")} {untrusted.length > 1 ? "do" : "does"} not trust this
+                  folder yet, so the hooks never run here. Start a session in this project and
+                  accept the trust prompt to fix it.
                 </p>
               )}
               {hooks?.codexAvailable && hooks.codexInstalled && (

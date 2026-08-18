@@ -175,6 +175,20 @@ export interface HooksStatus {
   codexHooksPath: string;
 }
 
+/// Per-engine verdict on whether the CLI trusts a directory. "unknown" means
+/// the CLI's trust store is missing or unreadable — that CLI may simply never
+/// have run here, so it is never reported as a problem.
+export type TrustState = "trusted" | "untrusted" | "unknown";
+
+/// Hooks are inert in a directory the CLI does not trust, and the failure is
+/// silent. This is what the console reads to warn instead of claiming the
+/// integration is live.
+export interface WorkspaceTrust {
+  dir: string;
+  claude: TrustState;
+  codex: TrustState;
+}
+
 /// One link in the Testigo evidence chain (mirrors the Rust ProofEvent):
 /// hash-chained, append-only record of a prompt, approval, snapshot, or turn
 /// boundary, grouped by case (intent thread, e.g. "jira:FIXY-1").

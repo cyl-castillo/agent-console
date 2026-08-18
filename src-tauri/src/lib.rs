@@ -113,6 +113,7 @@ pub fn run() {
             commands::skills::skill_list,
             commands::skills::skill_read,
             commands::hooks::hooks_status,
+            commands::hooks::hooks_trust_status,
             commands::hooks::hooks_install,
             commands::hooks::hooks_uninstall,
             commands::hooks::hooks_start_watcher,

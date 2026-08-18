@@ -2,7 +2,13 @@ import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
-import type { HooksStatus, HookUserPromptEvent, Skill, Snapshot } from "../types/domain";
+import type {
+  HooksStatus,
+  HookUserPromptEvent,
+  Skill,
+  Snapshot,
+  WorkspaceTrust,
+} from "../types/domain";
 import { useChangesStore } from "./changesStore";
 import { useLearningStore } from "./learningStore";
 import { useOnboardingStore } from "./onboardingStore";
@@ -92,6 +98,8 @@ interface SkillsState {
   installed: Skill[];
   recent: PromptEvent[];
   hooks: HooksStatus | null;
+  /** Whether each CLI trusts the active project — installed hooks stay inert if not. */
+  trust: WorkspaceTrust | null;
   selected: Skill | null;
   selectedMarkdown: string;
   /** Backup taken before the last restore, so "undo last restore" can re-apply it. */
@@ -111,14 +119,21 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   installed: [],
   recent: [],
   hooks: null,
+  trust: null,
   selected: null,
   selectedMarkdown: "",
   undoRestoreSha: null,
 
   refresh: async () => {
     try {
-      const [skills, status] = await Promise.all([ipc.skillList(), ipc.hooksStatus()]);
-      set({ installed: skills, hooks: status });
+      // Trust is advisory: an older CLI or an unreadable store must not take
+      // the skills list down with it.
+      const [skills, status, trust] = await Promise.all([
+        ipc.skillList(),
+        ipc.hooksStatus(),
+        ipc.hooksTrustStatus().catch(() => null),
+      ]);
+      set({ installed: skills, hooks: status, trust });
       // Corpus changed → maybe the curator should tidy it (threshold auto-trigger).
       useLearningStore.getState().noteCorpusSize();
       // Notify scheduler jobs watching for new skills (only on real growth).
