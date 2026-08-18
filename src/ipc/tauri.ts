@@ -27,6 +27,7 @@ import type {
   GitCommitInfo,
   GitStatus,
   HooksStatus,
+  WorkspaceTrust,
   InstalledPlugin,
   AvailableSnapshot,
   JiraStatus,
@@ -190,6 +191,9 @@ export const ipc = {
   skillRead: (path: string) => invoke<string>("skill_read", { path }),
 
   hooksStatus: () => invoke<HooksStatus>("hooks_status"),
+  /** Omit `dir` to ask about the active project root. */
+  hooksTrustStatus: (dir?: string) =>
+    invoke<WorkspaceTrust>("hooks_trust_status", { dir: dir ?? null }),
   hooksInstall: () => invoke<HooksStatus>("hooks_install"),
   hooksUninstall: () => invoke<HooksStatus>("hooks_uninstall"),
 

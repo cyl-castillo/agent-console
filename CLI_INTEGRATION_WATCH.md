@@ -7,8 +7,8 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 
 ## Estado del watch
 
-- **Última revisión completa**: 2026-08-06 (sin versiones nuevas: npm sigue en Claude `2.1.223` / Codex `0.146.1`)
-- **Baseline analizado**: Claude Code hasta `2.1.223` · Codex hasta `0.146.1`
+- **Última revisión completa**: 2026-08-17 (Claude `2.1.234` y Codex `0.147.0` analizados)
+- **Baseline analizado**: Claude Code hasta `2.1.234` · Codex hasta `0.147.0`
 - **Instalado local**: claude `2.1.218` · codex `0.144.3`
 
 ## Superficies que Agent Console depende hoy
@@ -32,7 +32,8 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 - [x] **W2 — Auth detección estructurada** (PR #139, 2026-08-06): `claude auth status --json` → `claude_cli::auth_status()` (probe acotado a 8s, `None` = "no sé", nunca "deslogueado"); `exit_error` y `engine_runner::finish` nombran la expiración aunque el CLI culpe a otra cosa; "Fix Claude login" usa `claude auth login` cuando el probe prueba que el subcomando existe, con fallback a `claude` pelado. Queda como opcional: mostrar cuenta/método en la GUI (el comando IPC `claude_auth_status` ya los devuelve).
 - [ ] **W3 — `sessionTitle` writeback (Claude 2.1.94)**: nuestro auto-naming puede devolver `hookSpecificOutput.sessionTitle` desde el UserPromptSubmit hook → el nombre queda también en `/resume` y `claude agents` del propio CLI. Campo ignorado por versiones viejas (seguro).
 - [ ] **W4 — `last_assistant_message` en Stop (Claude 2.1.47)**: el Stop hook ya recibe el texto final del turno → habilita resumen hablado fin-de-turno (hito 3 de voz) y digest sin parsear jsonl. Codex: verificar si su Stop lo incluye (su set de eventos creció: sessionEnd, permissionRequest, subagentStart/Stop, postCompact).
-- [ ] **W5 — Trust de workspace**: hooks NO corren en directorios no confiados (Claude 2.1.3/2.1.51/2.1.218) → detectar y avisar en la GUI en vez de asumir que el hook disparó (hoy el fallo es silencioso; misma clase de bug que el de Windows/Melissa).
+- [x] **W5 — Trust de workspace** (PR pendiente, 2026-08-17): `workspace_trust.rs` lee los stores propios de cada CLI (`~/.claude.json` → `projects[dir].hasTrustDialogAccepted`; `~/.codex/config.toml` → `[projects."dir"] trust_level`), sube por ancestros hasta la raíz del repo y **para ahí** (2.1.232: un repo anidado ya no hereda el trust del padre). Store ausente/ilegible = `unknown`, nunca "desconfiado" (falsa alarma si el CLI jamás corrió acá). GUI: la pill de `integration` pasa a `untrusted` (visible con la sección colapsada) + hint explicando que los hooks no van a disparar. Comando `hooks_trust_status`.
+- [ ] **W6 — Slug de transcripts para paths largos (Claude 2.1.224)**: upstream arregló que paths de proyecto >200 chars cayeran en el directorio de *otro* proyecto bajo un prefijo saneado compartido. Nosotros seguimos calculando el slug a mano (`abs.replace(['/','\\'], "-")` en `usage_service::transcripts_dir` y `context_service::memory_dir_for`) → para paths largos ahora apuntamos a un dir que el CLI ya no usa (usage vacío, memoria en el lugar equivocado). BLOQUEADO: no conocemos la codificación nueva (truncado/hash) y el claude local (2.1.218) es anterior al fix, así que no se puede verificar empíricamente sin actualizar el CLI. Mitigación candidata sin adivinar: resolver el dir por *descubrimiento* (escanear `~/.claude/projects` y quedarse con el que contenga sesiones cuyo `cwd` sea el proyecto) y usar el slug calculado solo como fallback/creación.
 
 ### Medianas
 
@@ -51,6 +52,11 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 
 ### Vigilar (sin acción aún)
 
+- `CLAUDE_CODE_PROJECT_DIR_NAME` (2.1.234): un host puede elegir el nombre del dir de transcripts por proyecto. Nosotros no lo seteamos (y por eso leemos el slug por defecto), pero si algún día lo usamos, tenemos control explícito del path en vez de replicar la codificación de upstream — ver W6.
+- Codex 0.147: `codex exec --full-auto` eliminado (no lo usamos: pasamos `--sandbox`/flags propios), `--approve-for-me` nuevo (approvals auto-revisadas; se pisa con M4), plugins portables + secciones de conversación persistentes, MCP 2026-07-28 opt-in, y **trust explícito para proyectos locales desconocidos** (#36960) — esto último es justo lo que W5 ahora detecta del lado Codex.
+- Claude 2.1.232: cada repo git necesita su propia confirmación de trust (los anidados ya no heredan) → más directorios arrancan sin trust; W5 lo contempla parando el walk en la raíz del repo.
+- Claude 2.1.233: `Notification` hooks no disparaban bajo Claude Desktop/VS Code (arreglado) — relevante para S4 si adoptamos `Notification`.
+
 - Codex SQLite thread store (experimental 0.145/0.146): dirección anunciada para reemplazar rollouts JSONL — si se vuelve default, cambia cómo se capturan/resumen sesiones.
 - Claude npm deprecado como método de install (2.1.15): binario nativo será la norma; revisar docs/onboarding que mencionen `npm install`.
 - `codex login --api-key` hard-deprecado (usamos `codex login` interactivo — OK).
@@ -63,6 +69,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 | Fecha | Item | PR |
 |---|---|---|
 | 2026-08-06 | W2 — auth estructurada (`claude auth status --json`) + `claude auth login` gateado por probe | #139 |
+| 2026-08-17 | W5 — detección de trust de workspace (Claude + Codex) y aviso en la GUI cuando los hooks están instalados pero inertes | #148 |
 
 ## Protocolo de la tarea diaria
 
