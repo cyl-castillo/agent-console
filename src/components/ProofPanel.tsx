@@ -41,7 +41,9 @@ function entryExcerpt(e: TestigoPreviewEntry): string {
         ? p.prompt
         : typeof p.excerpt === "string"
           ? p.excerpt
-          : JSON.stringify(p);
+          : typeof p.summary === "string"
+            ? p.summary
+            : JSON.stringify(p);
     return s.length > 180 ? `${s.slice(0, 180)}…` : s;
   } catch {
     return "";
@@ -326,6 +328,12 @@ export function ProofPanel() {
                         {a.reason ? ` — ${a.reason}` : ""}
                       </span>
                     ))}
+                  </p>
+                )}
+                {t.summary && (
+                  <p className="wb-hint proof-turn-summary" title={t.summary}>
+                    ↳ {t.summary.length > 220 ? `${t.summary.slice(0, 220)}…` : t.summary}
+                    {t.summaryTruncated && " …"}
                   </p>
                 )}
                 {(t.toolResults > 0 || t.files.length > 0) && (

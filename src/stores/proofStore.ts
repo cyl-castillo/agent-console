@@ -30,6 +30,10 @@ export interface TimelineTurn {
   files: { status: string; path: string }[];
   filesTruncated: boolean;
   endTs: number | null;
+  /// What the agent said when it closed the turn, when the CLI reports it
+  /// (Claude's `last_assistant_message`). Empty when it didn't.
+  summary: string;
+  summaryTruncated: boolean;
 }
 
 interface ProofState {
@@ -100,6 +104,8 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         files: [],
         filesTruncated: false,
         endTs: null,
+        summary: "",
+        summaryTruncated: false,
       };
       byId.set(e.turnId, t);
       turns.push(t);
@@ -130,6 +136,8 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         );
       }
       t.filesTruncated = p.filesTruncated === true;
+      if (typeof p.summary === "string") t.summary = p.summary;
+      t.summaryTruncated = p.summaryTruncated === true;
     }
   }
   return turns;
