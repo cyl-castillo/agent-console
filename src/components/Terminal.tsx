@@ -63,6 +63,7 @@ export function Terminal({ session, visible }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appendOutput = useTerminalsStore((s) => s.appendOutput);
   const markLive = useTerminalsStore((s) => s.markLive);
+  const markStopped = useTerminalsStore((s) => s.markStopped);
   const fitRef = useRef<FitAddon | null>(null);
   const termRef = useRef<XTerm | null>(null);
   const theme = useThemeStore((s) => s.theme);
@@ -198,7 +199,16 @@ export function Terminal({ session, visible }: Props) {
       unlistenOutput = uOut;
       const uExit = await listen<TermExit>("term://exit", (e) => {
         if (e.payload.id === termId) {
-          term.write(`\r\n\x1b[90m[process exited: ${e.payload.code ?? "?"}]\x1b[0m\r\n`);
+          const msg = `\r\n\x1b[90m[process exited: ${e.payload.code ?? "?"}]\x1b[0m\r\n`;
+          term.write(msg);
+          // Into the scrollback record too (term.write bypasses appendOutput),
+          // so the resume replay shows how the previous run ended.
+          appendOutput(session.id, msg);
+          // Flip the store to "stopped": sidebar dot/counter go grey, the pane
+          // offers resume, and composer/notes stop typing into a dead PTY.
+          // This unmounts us (App only mounts live sessions) — cleanup's
+          // termKill on the already-dead PTY is a caught no-op.
+          markStopped(session.id);
         }
       });
       if (disposed) {
