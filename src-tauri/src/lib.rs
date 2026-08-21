@@ -62,6 +62,12 @@ pub fn run() {
             if let Err(e) = state.hooks.normalize_hook_commands() {
                 eprintln!("hooks: command normalization failed: {e}");
             }
+            // Codex installed AFTER hooks were wired claude-side (approvals
+            // bridge included): mirror the missing events so the bridge state
+            // shown in the UI is actually true for codex too.
+            if let Err(e) = state.hooks.sync_codex_hooks() {
+                eprintln!("hooks: codex sync failed: {e}");
+            }
             // Memory-injection endpoint (loopback only): serves the prompt
             // hooks the memories relevant to what's being typed. Best-effort —
             // the app works fine without it.
