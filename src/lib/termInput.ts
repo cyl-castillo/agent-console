@@ -14,15 +14,18 @@ export async function typeIntoActiveSession(
 ): Promise<boolean> {
   const trimmed = text.replace(/\s+$/, "");
   if (!trimmed) return false;
-  const { activeId } = useTerminalsStore.getState();
+  const { activeId, sessions } = useTerminalsStore.getState();
   useUIStore.getState().setTab("terminal");
-  if (!activeId) {
+  // A stopped session (its PTY exited) can't receive input — same fallback as
+  // having no session at all, instead of writing into a dead terminal.
+  const active = sessions.find((s) => s.id === activeId);
+  if (!activeId || active?.status !== "live") {
     try {
       await navigator.clipboard.writeText(trimmed);
     } catch {
       /* ignore */
     }
-    useToastStore.getState().show("No active session — text copied instead", "info");
+    useToastStore.getState().show("No live session — text copied instead", "info");
     return false;
   }
   try {
