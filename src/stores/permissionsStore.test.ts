@@ -49,6 +49,7 @@ describe("permissions rules", () => {
       scope: "project",
       effect: "allow",
       raw: "Bash(npm test)",
+      engine: "claude",
     });
     expect(s.snapshot?.rules).toHaveLength(1);
   });

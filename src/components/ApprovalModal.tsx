@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { useApprovalStore } from "../stores/approvalStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
+import { useTerminalsStore } from "../stores/terminalsStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import {
   suggestRules,
@@ -10,6 +11,8 @@ import {
   isHardDenyAllow,
   assessCommand,
   toRelative,
+  codexEquivalent,
+  resolveApprovalEngine,
 } from "../permissions/rules";
 import type { RuleSuggestion, Scope } from "../permissions/types";
 import type { ApprovalRequest } from "../types/domain";
@@ -185,7 +188,16 @@ export function ApprovalModal() {
   const req = queue[0] ?? null;
   const decide = useApprovalStore((s) => s.decide);
   const addRule = usePermissionsStore((s) => s.add);
+  const sessions = useTerminalsStore((s) => s.sessions);
   const voiceStage = useVoiceStore((s) => s.approvalStage);
+
+  // Which engine is blocked on this approval. Codex approvals must persist
+  // their "always" rules in Codex's store (execpolicy .rules), not Claude's
+  // settings.json — a rule in the wrong store is silently never enforced.
+  const engine = useMemo(
+    () => (req ? resolveApprovalEngine(req, sessions) : "claude"),
+    [req, sessions],
+  );
 
   const [showAlways, setShowAlways] = useState(false);
   const [scope, setScope] = useState<Scope>("project");
@@ -259,6 +271,11 @@ export function ApprovalModal() {
       <div className="modal approval-modal" onClick={(e) => e.stopPropagation()}>
         <div className="approval-head">
           <span className={`approval-tool tool-${req.tool.toLowerCase()}`}>{req.tool}</span>
+          {engine === "codex" && (
+            <span className="approval-engine" title="This approval comes from a Codex session">
+              codex
+            </span>
+          )}
           <span className="approval-cwd" title={req.cwd}>
             {shortenPath(req.cwd)}
           </span>
@@ -338,13 +355,24 @@ export function ApprovalModal() {
         {showAlways && (
           <AlwaysPanel
             req={req}
+            engine={engine}
             suggestions={suggestions}
             scope={scope}
             setScope={setScope}
             onCancel={() => setShowAlways(false)}
             onCommit={async (suggestion, effect) => {
               setBusy(true);
-              const r = await addRule(suggestion.rule.scope, effect, suggestion.rule.raw);
+              // Codex approval + translatable rule → Codex's store. When the
+              // rule has no Codex equivalent it still lands in Claude's
+              // settings.json (the panel already warned it won't bind here).
+              const ruleEngine =
+                engine === "codex" && codexEquivalent(suggestion.rule.raw) ? "codex" : "claude";
+              const r = await addRule(
+                suggestion.rule.scope,
+                effect,
+                suggestion.rule.raw,
+                ruleEngine,
+              );
               if (r) {
                 await decide(
                   req.id,
@@ -364,6 +392,7 @@ export function ApprovalModal() {
 
 interface AlwaysProps {
   req: ApprovalRequest;
+  engine: "claude" | "codex";
   suggestions: RuleSuggestion[];
   scope: Scope;
   setScope: (s: Scope) => void;
@@ -371,7 +400,15 @@ interface AlwaysProps {
   onCommit: (s: RuleSuggestion, effect: "allow" | "deny") => void;
 }
 
-function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: AlwaysProps) {
+function AlwaysPanel({
+  req,
+  engine,
+  suggestions,
+  scope,
+  setScope,
+  onCancel,
+  onCommit,
+}: AlwaysProps) {
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [confirmText, setConfirmText] = useState("");
   const [denyMode, setDenyMode] = useState(false);
@@ -408,6 +445,18 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
     raw: buildRaw(selected.rule.tool, selected.rule.pattern),
   };
   const { risk, reason } = classify(live);
+  // Codex sessions enforce rules from their execpolicy store, and only plain
+  // Bash-command rules translate into it. When there's no equivalent the rule
+  // can only go to Claude's settings.json — where THIS session never looks.
+  const codexBound = engine === "codex" && codexEquivalent(live.raw) !== null;
+  const codexUnbound = engine === "codex" && !codexBound;
+  const writesTo = codexBound
+    ? scope === "project"
+      ? ".codex/rules/agent-console.rules"
+      : "~/.codex/rules/agent-console.rules"
+    : scope === "project"
+      ? ".claude/settings.json"
+      : "~/.claude/settings.json";
   const hd = effect === "allow" ? isHardDenyAllow(live.raw) : ({ hard: false } as const);
   const blocked = hd.hard;
   const strict = risk === "broad" || risk === "dangerous";
@@ -479,11 +528,17 @@ function AlwaysPanel({ req, suggestions, scope, setScope, onCancel, onCommit }: 
         {reason && <div className="preview-reason">{reason}</div>}
         <div className="preview-line">
           <span className="label">Writes to</span>
-          <code className="path">
-            {scope === "project" ? ".claude/settings.json" : "~/.claude/settings.json"}
-          </code>
+          <code className="path">{writesTo}</code>
         </div>
       </div>
+
+      {codexUnbound && (
+        <div className="approval-engine-warn">
+          <strong>Won't apply to Codex</strong> — this rule has no Codex equivalent (Codex only
+          persists plain shell-command rules). It will be saved for Claude sessions, but this Codex
+          session will keep asking.
+        </div>
+      )}
 
       {blocked && (
         <div className="approval-blocked">
