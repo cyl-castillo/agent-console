@@ -126,7 +126,7 @@ fn now_ms() -> u64 {
 /// nonexistent conversation).
 fn scrub_session(mut s: PersistedSession) -> PersistedSession {
     s.cwd = String::new();
-    s.claude_session_id = None;
+    s.agent_session_id = None;
     s.name_suggested = None;
     s
 }
@@ -626,7 +626,7 @@ mod tests {
             created_at_ms: 1,
             scrollback: "the work".into(),
             agent: Some("claude".into()),
-            claude_session_id: Some("resume-handle-xyz".into()),
+            agent_session_id: Some("resume-handle-xyz".into()),
             name_suggested: Some(true),
             model: Some("opus".into()),
             worktree: None,
@@ -642,7 +642,7 @@ mod tests {
         let s = scrub_session(session("s1"));
         assert_eq!(s.cwd, "", "cwd (a source-machine path) must not travel");
         assert!(
-            s.claude_session_id.is_none(),
+            s.agent_session_id.is_none(),
             "local Claude resume id must not travel"
         );
         assert!(s.name_suggested.is_none());

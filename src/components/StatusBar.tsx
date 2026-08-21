@@ -85,10 +85,11 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
       <AgentStatePill onShowTerminal={() => setTab("terminal")} />
       {activeSession && <MemoryPill termId={activeSession.id} />}
       {activeSession && <ModelPill session={activeSession} projectRoot={project.root} />}
-      {activeSession?.claudeSessionId && (
+      {activeSession?.agentSessionId && (
         <UsagePill
-          sessionId={activeSession.claudeSessionId}
+          sessionId={activeSession.agentSessionId}
           projectRoot={project.root}
+          agent={activeSession.agent}
           live={activeSession.status === "live"}
         />
       )}
@@ -418,18 +419,21 @@ function VoicePill() {
   );
 }
 
-/// Context-usage indicator for the active Claude session. Reads the session
-/// transcript via `session_usage` and shows how full the model context is
+/// Context-usage indicator for the active agent session. Reads the on-disk
+/// transcript via `session_usage` (Claude's `~/.claude/projects` jsonl or
+/// Codex's `~/.codex/sessions` rollout) and shows how full the model context is
 /// (`contextTokens / contextWindow`). Polls while the session is live so it
 /// tracks the agent's progress; the totals live in the tooltip. Turns amber
-/// past 80% as a hint to `/compact`.
+/// past 80% as a hint to compact.
 function UsagePill({
   sessionId,
   projectRoot,
+  agent,
   live,
 }: {
   sessionId: string;
   projectRoot: string;
+  agent?: string;
   live: boolean;
 }) {
   const [usage, setUsage] = useState<SessionUsage | null>(null);
@@ -438,7 +442,7 @@ function UsagePill({
     let cancelled = false;
     const load = () => {
       ipc
-        .sessionUsage(sessionId, projectRoot)
+        .sessionUsage(sessionId, projectRoot, agent)
         .then((u) => {
           if (!cancelled) setUsage(u);
         })
@@ -453,7 +457,7 @@ function UsagePill({
       cancelled = true;
       if (t) window.clearInterval(t);
     };
-  }, [sessionId, projectRoot, live]);
+  }, [sessionId, projectRoot, agent, live]);
 
   if (!usage || usage.contextTokens <= 0) return null;
 

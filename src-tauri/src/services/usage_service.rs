@@ -1,10 +1,15 @@
-//! Reads token usage for a Claude Code session from its transcript.
+//! Reads token usage for an agent session from its on-disk transcript.
 //!
 //! Claude Code appends one JSON object per line to
 //! `~/.claude/projects/<slug>/<session-id>.jsonl`, where assistant turns carry
 //! a `message.usage` block (`input_tokens`, `output_tokens`,
 //! `cache_read_input_tokens`, `cache_creation_input_tokens`). We aggregate
 //! those so the status bar can show how much of the model context is in use.
+//!
+//! Codex writes the equivalent rollout to
+//! `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<session-id>.jsonl`,
+//! whose `token_count` events carry cumulative + last-request token usage and
+//! the model context window — no `codex app-server` daemon needed to read it.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -114,6 +119,108 @@ pub fn read_usage(project_root: &Path, session_id: &str) -> AppResult<Option<Usa
     Ok(saw_usage.then_some(stats))
 }
 
+/// Fallback context window for Codex when a rollout's `token_count` events omit
+/// `model_context_window` (observed value for GPT-5.x; virtually every event
+/// carries the real figure, so this rarely decides anything).
+const CODEX_CONTEXT_WINDOW_FALLBACK: u64 = 258_400;
+
+/// Locate the Codex rollout for `session_id`. Rollouts live under
+/// `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<session-id>.jsonl`;
+/// the date prefix isn't derivable from the id, so walk the (shallow, 3-level)
+/// date tree newest-first and stop at the first filename match.
+fn find_codex_rollout(session_id: &str) -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let root = home.join(".codex").join("sessions");
+    let suffix = format!("-{session_id}.jsonl");
+
+    // read_dir order is arbitrary — sort descending so recent sessions (the
+    // ones the status bar actually polls) are found in the first few dirs.
+    let sorted_desc = |dir: &Path| -> Vec<PathBuf> {
+        let mut entries: Vec<PathBuf> = fs::read_dir(dir)
+            .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
+            .unwrap_or_default();
+        entries.sort();
+        entries.reverse();
+        entries
+    };
+
+    for year in sorted_desc(&root) {
+        for month in sorted_desc(&year) {
+            for day in sorted_desc(&month) {
+                for file in sorted_desc(&day) {
+                    let Some(name) = file.file_name().and_then(|n| n.to_str()) else {
+                        continue;
+                    };
+                    if name.starts_with("rollout-") && name.ends_with(&suffix) {
+                        return Some(file);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Token usage for a Codex session, read from its rollout file. `token_count`
+/// events already carry cumulative totals (`total_token_usage`) plus the last
+/// request's footprint (`last_token_usage`), so the last event wins outright —
+/// nothing to sum. Returns `None` when no rollout exists for the id or it has
+/// no usage events yet.
+pub fn read_codex_usage(session_id: &str) -> AppResult<Option<UsageStats>> {
+    let Some(path) = find_codex_rollout(session_id) else {
+        return Ok(None);
+    };
+
+    let reader = BufReader::new(fs::File::open(&path)?);
+    let mut stats: Option<UsageStats> = None;
+
+    for line in reader.lines() {
+        let Ok(line) = line else { continue };
+        // Cheap pre-filter: rollouts are mostly turn payloads without usage.
+        if !line.contains("\"token_count\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let payload = v.get("payload").unwrap_or(&v);
+        if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
+            continue;
+        }
+        // `info` is null on housekeeping events (e.g. rate-limit-only updates);
+        // those must not clobber the last real reading.
+        let Some(info) = payload.get("info").filter(|i| !i.is_null()) else {
+            continue;
+        };
+
+        let usage_field = |block: &str, k: &str| {
+            info.get(block)
+                .and_then(|b| b.get(k))
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0)
+        };
+        let last_input = usage_field("last_token_usage", "input_tokens");
+        let last_output = usage_field("last_token_usage", "output_tokens");
+
+        stats = Some(UsageStats {
+            // Codex's `input_tokens` already includes the cached share, so the
+            // last request's input+output is the current context footprint.
+            context_tokens: last_input + last_output,
+            input_total: usage_field("total_token_usage", "input_tokens"),
+            output_total: usage_field("total_token_usage", "output_tokens"),
+            cache_read_total: usage_field("total_token_usage", "cached_input_tokens"),
+            // Codex doesn't report cache writes separately.
+            cache_creation_total: 0,
+            context_window: info
+                .get("model_context_window")
+                .and_then(|w| w.as_u64())
+                .unwrap_or(CODEX_CONTEXT_WINDOW_FALLBACK),
+        });
+    }
+
+    Ok(stats.filter(|s| s.context_tokens > 0 || s.output_total > 0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +291,70 @@ mod tests {
         }
         fs::remove_dir_all(&fake_home).ok();
         fs::remove_dir_all(&project).ok();
+        if let Err(p) = result {
+            std::panic::resume_unwind(p);
+        }
+    }
+
+    /// Codex rollout reading: locates the file by id under the date tree, takes
+    /// the LAST token_count event with real info (cumulative totals — no
+    /// summing), and ignores null-info housekeeping events.
+    #[test]
+    fn read_codex_usage_takes_last_token_count_event() {
+        let _env = crate::test_support::lock_env();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fake_home =
+            std::env::temp_dir().join(format!("ac-codex-home-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&fake_home).unwrap();
+        let prev_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", &fake_home);
+
+        let run = || {
+            // No rollout anywhere → None, indicator hidden.
+            assert!(read_codex_usage("019e-abc").unwrap().is_none());
+
+            let day = fake_home
+                .join(".codex")
+                .join("sessions")
+                .join("2026")
+                .join("08")
+                .join("21");
+            fs::create_dir_all(&day).unwrap();
+            let path = day.join("rollout-2026-08-21T10-00-00-019e-abc.jsonl");
+
+            // A rollout with: session meta, a first token_count, a null-info
+            // token_count (must not clobber), and the latest real reading.
+            let lines = [
+                r#"{"type":"session_meta","payload":{"id":"019e-abc"}}"#,
+                r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":300,"output_tokens":50},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":300,"output_tokens":50},"model_context_window":258400}}}"#,
+                r#"{"type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{}}}"#,
+                r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":9000,"cached_input_tokens":4000,"output_tokens":700},"last_token_usage":{"input_tokens":8000,"cached_input_tokens":3700,"output_tokens":650},"model_context_window":258400}}}"#,
+            ];
+            fs::write(&path, lines.join("\n")).unwrap();
+
+            let stats = read_codex_usage("019e-abc").unwrap().expect("some usage");
+            // Totals come from the LAST event's cumulative block, not a sum.
+            assert_eq!(stats.input_total, 9000);
+            assert_eq!(stats.output_total, 700);
+            assert_eq!(stats.cache_read_total, 4000);
+            assert_eq!(stats.cache_creation_total, 0);
+            // Context = last request's input (cached included) + output.
+            assert_eq!(stats.context_tokens, 8650);
+            assert_eq!(stats.context_window, 258_400);
+
+            // A different id doesn't match this rollout.
+            assert!(read_codex_usage("other-id").unwrap().is_none());
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run));
+
+        match prev_home {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
+        fs::remove_dir_all(&fake_home).ok();
         if let Err(p) = result {
             std::panic::resume_unwind(p);
         }

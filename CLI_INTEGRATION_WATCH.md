@@ -44,7 +44,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 
 ### Estratégicas
 
-- [ ] **S1 — `codex app-server` como backbone**: protocolo completo (threads list/resume/fork, `thread/items/list`, hooks list + notificaciones, `review/start`, usage exacto, auth inyectable), daemon gestionado, bindings TS generables. Mata la fragilidad del parsing de TUI. Gran refactor — planificar aparte.
+- [ ] **S1 — `codex app-server` como backbone**: protocolo completo (threads list/resume/fork, `thread/items/list`, hooks list + notificaciones, `review/start`, usage exacto, auth inyectable), daemon gestionado, bindings TS generables. Mata la fragilidad del parsing de TUI. Gran refactor — planificar aparte. *Nota: el "usage exacto" ya no depende de S1 para la UsagePill — los rollouts `~/.codex/sessions/**/rollout-*-<id>.jsonl` traen eventos `token_count` (totales acumulados + last request + `model_context_window`) y `usage_service` los lee directo.*
 - [ ] **S2 — HTTP hooks (Claude 2.1.63)**: hooks que POSTean a localhost → el backend Tauri recibe eventos sin spawn de node por prompt ni scripts en disco. Evaluar junto con W1 (se pisan).
 - [ ] **S3 — `codex review` scriptable**: `codex review --uncommitted|--base|--commit` corre por `codex exec` → integrable al flujo de review/roundtable. Ojo: churn de Guardian (0.144.2 revert, 0.146.1 defaults nuevos).
 - [ ] **S4 — Background daemon Claude (`--bg`, 2.1.14x+)**: sesiones que sobreviven al terminal + hook `Notification` con `agent_needs_input`/`agent_completed` (2.1.198).

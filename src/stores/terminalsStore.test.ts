@@ -69,13 +69,13 @@ beforeEach(async () => {
 
 describe("hydrate (the issue #72 contract)", () => {
   it("maps persisted sessions to stopped ones and opens the ready gate", async () => {
-    world.listResult = [persisted("a"), persisted("b", { claudeSessionId: "c-9" })];
+    world.listResult = [persisted("a"), persisted("b", { agentSessionId: "c-9" })];
     await useTerminalsStore.getState().hydrate("/repo");
     const s = useTerminalsStore.getState();
     expect(s.ready).toBe(true);
     expect(s.sessions.map((x) => x.status)).toEqual(["stopped", "stopped"]);
     expect(s.sessions[0].initialScrollback).toBe("old output");
-    expect(s.sessions[1].claudeSessionId).toBe("c-9");
+    expect(s.sessions[1].agentSessionId).toBe("c-9");
   });
 
   it("read failure keeps the gate closed AND tells the user saving is off", async () => {
@@ -328,15 +328,15 @@ describe("archive / history", () => {
 });
 
 describe("claude session binding", () => {
-  it("setClaudeSessionId persists immediately and skips no-op rebinds", async () => {
+  it("setAgentSessionId persists immediately and skips no-op rebinds", async () => {
     const id = useTerminalsStore.getState().add("/repo");
-    useTerminalsStore.getState().setClaudeSessionId(id, "claude-1");
+    useTerminalsStore.getState().setAgentSessionId(id, "claude-1");
     // persist() is fire-and-forget inside the setter — let it settle.
     await new Promise((r) => setTimeout(r, 0));
     expect(world.saved.length).toBe(1);
-    expect(world.saved[0].payload[0].claudeSessionId).toBe("claude-1");
+    expect(world.saved[0].payload[0].agentSessionId).toBe("claude-1");
 
-    useTerminalsStore.getState().setClaudeSessionId(id, "claude-1");
+    useTerminalsStore.getState().setAgentSessionId(id, "claude-1");
     await new Promise((r) => setTimeout(r, 0));
     expect(world.saved.length).toBe(1);
   });
