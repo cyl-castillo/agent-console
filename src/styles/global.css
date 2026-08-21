@@ -3789,6 +3789,23 @@ select:focus-visible,
   padding: 8px 10px;
   border-radius: 4px;
 }
+.approval-engine {
+  font-size: 9px;
+  color: var(--text-faint);
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.approval-engine-warn {
+  border: 1px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 4px;
+}
 .approval-typegate {
   display: flex;
   flex-direction: column;
@@ -4113,6 +4130,13 @@ select:focus-visible,
   color: var(--text-faint);
   padding: 1px 4px;
   border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.rule-eng {
+  font-size: 9px;
+  color: var(--accent);
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 3px;
 }
 .rule-rm {

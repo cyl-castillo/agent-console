@@ -198,10 +198,18 @@ export const ipc = {
   approvalsPending: () => invoke<ApprovalRequest[]>("approvals_pending"),
 
   permissionsSnapshot: () => invoke<PermissionsSnapshot>("permissions_snapshot"),
-  permissionsAdd: (scope: "project" | "global", effect: "allow" | "deny" | "ask", raw: string) =>
-    invoke<StoredRule>("permissions_add", { scope, effect, raw }),
-  permissionsRemove: (scope: "project" | "global", effect: "allow" | "deny" | "ask", raw: string) =>
-    invoke<void>("permissions_remove", { scope, effect, raw }),
+  permissionsAdd: (
+    scope: "project" | "global",
+    effect: "allow" | "deny" | "ask",
+    raw: string,
+    engine: "claude" | "codex" = "claude",
+  ) => invoke<StoredRule>("permissions_add", { scope, effect, raw, engine }),
+  permissionsRemove: (
+    scope: "project" | "global",
+    effect: "allow" | "deny" | "ask",
+    raw: string,
+    engine: "claude" | "codex" = "claude",
+  ) => invoke<void>("permissions_remove", { scope, effect, raw, engine }),
 
   sessionsList: (projectRoot: string) =>
     invoke<PersistedSession[]>("sessions_list", { projectRoot }),
