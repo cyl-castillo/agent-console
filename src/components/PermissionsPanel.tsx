@@ -143,8 +143,8 @@ export function PermissionsPanel() {
       </div>
 
       <p className="wb-hint wb-trust" style={{ margin: "0 10px 4px" }}>
-        Rules edit only your local <code>settings.json</code> — every change is reversible and
-        nothing here runs the agent.
+        Rules edit only your local <code>settings.json</code> (Claude) or <code>.codex/rules</code>{" "}
+        (Codex) — every change is reversible and nothing here runs the agent.
       </p>
 
       {error && (
@@ -210,7 +210,7 @@ export function PermissionsPanel() {
               !filter.effects.ask ||
               !filter.showExternal
             }
-            onRemove={(r) => remove(r.scope, r.effect, r.raw)}
+            onRemove={(r) => remove(r.scope, r.effect, r.raw, r.engine)}
             onEdit={(r) => setEditTarget(r)}
             onMove={(r) => move(r, "global")}
             onAdd={() => onAdd("project")}
@@ -230,7 +230,7 @@ export function PermissionsPanel() {
               !filter.effects.ask ||
               !filter.showExternal
             }
-            onRemove={(r) => remove(r.scope, r.effect, r.raw)}
+            onRemove={(r) => remove(r.scope, r.effect, r.raw, r.engine)}
             onEdit={(r) => setEditTarget(r)}
             onMove={snapshot.projectSettingsPath ? (r) => move(r, "project") : undefined}
             onAdd={() => onAdd("global")}
@@ -352,8 +352,9 @@ function RuleForm({ edit, defaultScope, hasProject, onClose }: RuleFormProps) {
   const onSave = async () => {
     setBusy(true);
     if (edit) {
-      // remove old + add new (atomic at the UI level only).
-      await remove(edit.scope, edit.effect, edit.raw, false);
+      // remove old + add new (atomic at the UI level only). The form only
+      // edits Claude rules — Codex rules hide the edit affordance.
+      await remove(edit.scope, edit.effect, edit.raw, "claude", false);
     }
     const r = await add(scope, effect, raw);
     setBusy(false);
@@ -548,23 +549,35 @@ function RuleGroup({
                 {(risk === "broad" || risk === "dangerous") && r.effect === "allow" && (
                   <span className={`risk risk-${risk}`}>{risk}</span>
                 )}
+                {r.engine === "codex" && (
+                  <span className="rule-eng" title={`Codex execpolicy rule — ${r.settingsPath}`}>
+                    codex
+                  </span>
+                )}
                 {r.source === "external" && (
                   <span className="rule-src" title="External: added outside Agent Console">
                     ext
                   </span>
                 )}
                 <div className="rule-actions">
-                  <button className="rule-act" title="Edit" onClick={() => onEdit(r)}>
-                    ✎
-                  </button>
-                  {onMove && (
+                  {r.engine !== "codex" && (
+                    <button className="rule-act" title="Edit" onClick={() => onEdit(r)}>
+                      ✎
+                    </button>
+                  )}
+                  {onMove && r.engine !== "codex" && (
                     <button className="rule-act" title="Move scope" onClick={() => onMove(r)}>
                       {moveLabel}
                     </button>
                   )}
-                  <button className="rule-rm" title="Remove rule" onClick={() => onRemove(r)}>
-                    ×
-                  </button>
+                  {/* Codex rules we didn't write (default.rules etc.) are shown
+                      for visibility but never touched — removal only targets
+                      our own agent-console.rules. */}
+                  {(r.engine !== "codex" || r.source === "agent-console") && (
+                    <button className="rule-rm" title="Remove rule" onClick={() => onRemove(r)}>
+                      ×
+                    </button>
+                  )}
                 </div>
               </li>
             );

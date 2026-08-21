@@ -4,8 +4,10 @@ import {
   assessCommand,
   buildRaw,
   classify,
+  codexEquivalent,
   isHardDenyAllow,
   parseRaw,
+  resolveApprovalEngine,
   suggestRules,
   toRelative,
 } from "./rules";
@@ -189,5 +191,55 @@ describe("toRelative", () => {
     expect(toRelative("/etc/passwd", "/home/me/proj")).toBe("/etc/passwd");
     expect(toRelative("src/a.ts", "/home/me/proj")).toBe("src/a.ts");
     expect(toRelative("", "/home/me/proj")).toBeNull();
+  });
+});
+
+describe("codexEquivalent", () => {
+  it("translates plain Bash command rules to argv prefixes", () => {
+    expect(codexEquivalent("Bash(git push:*)")).toEqual(["git", "push"]);
+    expect(codexEquivalent("Bash(npm run build)")).toEqual(["npm", "run", "build"]);
+    expect(codexEquivalent('Bash(git commit -m "two words")')).toEqual([
+      "git",
+      "commit",
+      "-m",
+      "two words",
+    ]);
+  });
+
+  it("refuses rules with no Codex equivalent", () => {
+    expect(codexEquivalent("Bash")).toBeNull(); // tool-wide
+    expect(codexEquivalent("Edit(src/**)")).toBeNull(); // path tool
+    expect(codexEquivalent("WebFetch")).toBeNull();
+    expect(codexEquivalent("Bash(cat a | grep b)")).toBeNull(); // pipe
+    expect(codexEquivalent("Bash(echo $HOME)")).toBeNull(); // expansion
+    expect(codexEquivalent("Bash(ls *.rs)")).toBeNull(); // glob
+    expect(codexEquivalent("Bash(a && b)")).toBeNull(); // chaining
+    expect(codexEquivalent("Bash()")).toBeNull(); // empty
+    expect(codexEquivalent('Bash("unbalanced)')).toBeNull(); // bad quoting
+  });
+});
+
+describe("resolveApprovalEngine", () => {
+  const sessions = [
+    { id: "t1", cwd: "/a", status: "live", agent: "codex" as const },
+    { id: "t2", cwd: "/b", status: "live" },
+    { id: "t3", cwd: "/c", status: "stopped", agent: "codex" as const },
+    { id: "t4", cwd: "/d", status: "live", agent: "codex" as const },
+    { id: "t5", cwd: "/d", status: "live", agent: "claude" as const },
+  ];
+
+  it("binds by termId first (deterministic)", () => {
+    expect(resolveApprovalEngine({ termId: "t1", cwd: "/x" }, sessions)).toBe("codex");
+    expect(resolveApprovalEngine({ termId: "t2", cwd: "/x" }, sessions)).toBe("claude");
+  });
+
+  it("falls back to a unique live cwd match", () => {
+    expect(resolveApprovalEngine({ cwd: "/a" }, sessions)).toBe("codex");
+    // Stopped sessions never attribute.
+    expect(resolveApprovalEngine({ cwd: "/c" }, sessions)).toBe("claude");
+    // Ambiguous cwd (two live sessions) defaults to claude.
+    expect(resolveApprovalEngine({ cwd: "/d" }, sessions)).toBe("claude");
+    // No match at all defaults to claude.
+    expect(resolveApprovalEngine({ cwd: "/nowhere" }, sessions)).toBe("claude");
   });
 });
