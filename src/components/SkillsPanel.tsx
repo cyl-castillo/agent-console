@@ -5,8 +5,8 @@ import { useSkillsStore } from "../stores/skillsStore";
 import { usePinsStore, pinKey } from "../stores/pinsStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useUIStore } from "../stores/uiStore";
-import { ipc } from "../ipc/tauri";
 import type { Skill } from "../types/domain";
+import type { TermInputDetail } from "./Terminal";
 import { MarkdownText } from "./MarkdownText";
 
 type KindFilter = "all" | "skill" | "command" | "agent";
@@ -376,11 +376,11 @@ async function insertIntoTerminal(text: string): Promise<void> {
     }
     return;
   }
-  try {
-    await ipc.termWrite(activeId, text);
-  } catch {
-    /* ignore */
-  }
+  // Same path the model pill / voice PTT use: the Terminal owning the session
+  // writes into its own PTY. (`ipc.termWrite` needs the PTY spawn UUID, which
+  // this panel doesn't have — the session id would not resolve.)
+  const detail: TermInputDetail = { sessionId: activeId, data: text };
+  window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
 }
 
 function EventRow({ event, onRestore }: { event: PromptEvent; onRestore: (sha: string) => void }) {
