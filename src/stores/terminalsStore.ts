@@ -29,10 +29,11 @@ export interface TerminalSession {
   /// Which coding agent this terminal launches. Undefined = Claude (the default
   /// and the only option for sessions created before agent selection existed).
   agent?: AgentKind;
-  /// Claude Code session id captured from the UserPromptSubmit hook. When set,
-  /// resuming this terminal auto-runs `claude --resume <id>` after spawn.
-  /// Codex sessions never populate this (no hook to capture it).
-  claudeSessionId?: string;
+  /// Agent-side session id captured from the UserPromptSubmit hook — both
+  /// Claude and Codex emit it (Codex since the hooks bridge landed). When set,
+  /// resuming this terminal auto-runs `claude --resume <id>` /
+  /// `codex resume <id>` after spawn.
+  agentSessionId?: string;
   /// True after the very first auto-suggestion fires for this session. Keeps
   /// us from re-suggesting on every subsequent prompt.
   nameSuggested?: boolean;
@@ -87,8 +88,8 @@ interface TerminalsState {
   rename: (id: string, name: string) => void;
   /// Mark session live (e.g., after spawn succeeded).
   markLive: (id: string) => void;
-  /// Tag a terminal session with the Claude Code session id from the hook.
-  setClaudeSessionId: (id: string, claudeId: string) => void;
+  /// Tag a terminal session with the agent's session id from the hook.
+  setAgentSessionId: (id: string, agentSessionId: string) => void;
   /// Set (or clear, with undefined) the model for a session and persist it.
   setModel: (id: string, model: string | undefined) => void;
   /// Silently rename a session that still wears its default "shell N" name —
@@ -158,7 +159,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         liveScrollback: "",
         status: "stopped" as const,
         agent: asAgentKind(p.agent),
-        claudeSessionId: p.claudeSessionId,
+        agentSessionId: p.agentSessionId,
         model: p.model,
         worktree: p.worktree,
         lastActiveMs,
@@ -256,12 +257,12 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     });
   },
 
-  setClaudeSessionId: (id, claudeId) => {
+  setAgentSessionId: (id, agentSessionId) => {
     const { sessions } = get();
     const target = sessions.find((s) => s.id === id);
-    if (!target || target.claudeSessionId === claudeId) return;
+    if (!target || target.agentSessionId === agentSessionId) return;
     set({
-      sessions: sessions.map((s) => (s.id === id ? { ...s, claudeSessionId: claudeId } : s)),
+      sessions: sessions.map((s) => (s.id === id ? { ...s, agentSessionId } : s)),
     });
     // Persist immediately so a crash doesn't lose the association.
     get().persist();
@@ -315,7 +316,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         createdAtMs: s.createdAtMs,
         scrollback: trimmed,
         agent: s.agent,
-        claudeSessionId: s.claudeSessionId,
+        agentSessionId: s.agentSessionId,
         nameSuggested: s.nameSuggested,
         model: s.model,
         worktree: s.worktree,
