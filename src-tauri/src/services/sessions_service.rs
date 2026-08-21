@@ -20,10 +20,16 @@ pub struct PersistedSession {
     /// Claude (the default, and the only option before agent selection existed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
-    /// Claude Code session id captured from the UserPromptSubmit hook; used to
-    /// auto-resume a Claude conversation when the user reactivates this terminal.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_session_id: Option<String>,
+    /// Agent-side session id (Claude or Codex — both emit it via the
+    /// UserPromptSubmit hook); used to auto-resume the conversation when the
+    /// user reactivates this terminal. The alias reads files persisted before
+    /// the field was renamed from `claudeSessionId`; saving rewrites it.
+    #[serde(
+        default,
+        alias = "claudeSessionId",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub agent_session_id: Option<String>,
     /// True once the rename suggestion has been offered for this session, so
     /// we don't re-suggest on every subsequent prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -323,13 +329,31 @@ mod tests {
             created_at_ms: 1,
             scrollback: "output".into(),
             agent: None,
-            claude_session_id: None,
+            agent_session_id: None,
             name_suggested: None,
             model: None,
             worktree: None,
             archived: None,
             last_active_ms: None,
         }
+    }
+
+    /// Files persisted before the `claudeSessionId` → `agentSessionId` rename
+    /// still load (serde alias), and re-serializing writes the new key only.
+    #[test]
+    fn agent_session_id_reads_legacy_key_and_writes_new_one() {
+        let legacy = r#"{"id":"s1","name":"n","cwd":"/tmp","createdAtMs":1,
+            "scrollback":"","claudeSessionId":"legacy-uuid"}"#;
+        let s: PersistedSession = serde_json::from_str(legacy).unwrap();
+        assert_eq!(s.agent_session_id.as_deref(), Some("legacy-uuid"));
+
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"agentSessionId\":\"legacy-uuid\""));
+        assert!(!json.contains("claudeSessionId"));
+
+        // The new key round-trips too, of course.
+        let s2: PersistedSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(s2.agent_session_id.as_deref(), Some("legacy-uuid"));
     }
 
     /// Exercises the real load/save code in an isolated data dir (via

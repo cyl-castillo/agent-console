@@ -147,7 +147,9 @@ export interface PersistedSession {
   scrollback: string;
   /// Which agent this session launches ("claude" | "codex"). Undefined = Claude.
   agent?: string;
-  claudeSessionId?: string;
+  /// Agent-side session id (Claude or Codex) used to resume the conversation.
+  /// The backend still reads the legacy `claudeSessionId` key from old files.
+  agentSessionId?: string;
   nameSuggested?: boolean;
   /// Archived = lives in the sidebar's History section, not the main list.
   archived?: boolean;

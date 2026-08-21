@@ -207,8 +207,8 @@ export const ipc = {
     invoke<PersistedSession[]>("sessions_list", { projectRoot }),
   sessionsSave: (projectRoot: string, sessions: PersistedSession[]) =>
     invoke<void>("sessions_save", { projectRoot, sessions }),
-  sessionUsage: (sessionId: string, projectRoot: string) =>
-    invoke<SessionUsage | null>("session_usage", { sessionId, projectRoot }),
+  sessionUsage: (sessionId: string, projectRoot: string, agent?: string) =>
+    invoke<SessionUsage | null>("session_usage", { sessionId, projectRoot, agent }),
 
   contextStatus: () => invoke<ContextStatus>("context_status"),
   contextReadMd: (scope: "project" | "global") => invoke<string>("context_read_md", { scope }),
