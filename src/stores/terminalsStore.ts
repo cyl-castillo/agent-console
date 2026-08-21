@@ -87,6 +87,11 @@ interface TerminalsState {
   rename: (id: string, name: string) => void;
   /// Mark session live (e.g., after spawn succeeded).
   markLive: (id: string) => void;
+  /// Mark a live session stopped — its PTY exited (shell died, user typed
+  /// `exit`). Folds the live scrollback into initialScrollback so resume
+  /// replays it and persist keeps it. No-op for stopped/unknown ids, so the
+  /// exit event of a session being close()d can't resurrect it.
+  markStopped: (id: string) => void;
   /// Tag a terminal session with the Claude Code session id from the hook.
   setClaudeSessionId: (id: string, claudeId: string) => void;
   /// Set (or clear, with undefined) the model for a session and persist it.
@@ -254,6 +259,35 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         s.id === id ? { ...s, status: "live" as const, lastActiveMs: Date.now() } : s,
       ),
     });
+  },
+
+  markStopped: (id) => {
+    const { sessions } = get();
+    const target = sessions.find((s) => s.id === id);
+    if (!target || target.status !== "live") return;
+    // Everything the user saw this run (previous replay + live output) becomes
+    // the resume-replay source. Live persist only saves liveScrollback, so
+    // without this fold the record would go blank the moment we flip status.
+    const merged = target.initialScrollback + target.liveScrollback;
+    set({
+      sessions: sessions.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              status: "stopped" as const,
+              initialScrollback:
+                merged.length > MAX_SCROLLBACK
+                  ? merged.slice(merged.length - MAX_SCROLLBACK)
+                  : merged,
+              liveScrollback: "",
+              lastActiveMs: Date.now(),
+            }
+          : s,
+      ),
+      // activeId stays put on purpose: the terminal pane shows the
+      // "session ended" state with a resume button for it.
+    });
+    get().persist();
   },
 
   setClaudeSessionId: (id, claudeId) => {
