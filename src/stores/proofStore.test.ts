@@ -77,6 +77,30 @@ describe("buildTimeline", () => {
     expect(turns[1].endTs).toBeNull();
   });
 
+  it("carries the agent's closing words, and stays empty when the CLI sends none", () => {
+    const withSummary = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "do it" } }),
+      ev({
+        seq: 2,
+        ts: 13,
+        kind: "turn_end",
+        turnId: "T1",
+        payload: { summary: "Fixed the retry loop", summaryTruncated: true },
+      }),
+    ]);
+    expect(withSummary[0].summary).toBe("Fixed the retry loop");
+    expect(withSummary[0].summaryTruncated).toBe(true);
+
+    // Codex (and Claude before 2.1.47) close the turn without it — the turn
+    // renders exactly as it did before, no empty "↳" line.
+    const without = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T2", payload: { prompt: "do it" } }),
+      ev({ seq: 2, ts: 13, kind: "turn_end", turnId: "T2", payload: { postSha: "abc" } }),
+    ]);
+    expect(without[0].summary).toBe("");
+    expect(without[0].summaryTruncated).toBe(false);
+  });
+
   it("skips turnless events (case_link, job_run)", () => {
     const turns = buildTimeline([
       ev({ seq: 0, ts: 1, kind: "case_link", actor: "system" }),

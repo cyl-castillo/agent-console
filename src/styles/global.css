@@ -2307,6 +2307,15 @@ select:focus-visible,
   font-size: 11px;
   color: var(--text);
 }
+/* What the agent said when it closed the turn — its claim, set apart from the
+   evidence lines (tool calls, files changed) right below it. */
+.proof-turn-summary {
+  margin-top: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
 /* Pre-sign export review: an event marked for manual redaction. */
 .proof-redacted {
   color: var(--danger);

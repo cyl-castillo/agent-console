@@ -12,6 +12,11 @@ const path = require("path");
 const dir = process.env.AGENT_CONSOLE_SESSION_DIR;
 if (!dir || !fs.existsSync(dir)) { process.exit(0); }
 
+// The agent's closing words can be a whole essay. The ledger only needs enough
+// to read what the turn claims it did; same cap as the tool-result excerpt so
+// events.jsonl stays bounded no matter how chatty the turn was.
+const SUMMARY_MAX = 1000;
+
 let chunks = [];
 process.stdin.on("data", (c) => chunks.push(c));
 process.stdin.on("end", () => {
@@ -32,6 +37,18 @@ process.stdin.on("end", () => {
   // right checkout for worktree sessions. The prompt hook stores it too; this
   // is the fallback when the turn state was lost (e.g. app restart mid-turn).
   if (typeof input.cwd === "string" && input.cwd.length > 0) event.cwd = input.cwd;
+
+  // What the agent SAID it did, straight from the CLI (Claude 2.1.47+ ships
+  // `last_assistant_message` in the Stop payload). Without it the ledger closes
+  // a turn with a file diff and no words; with it the close carries the agent's
+  // own claim next to the evidence. Absent on CLIs that don't send it (older
+  // Claude, Codex today) — then the event is exactly what it was before.
+  const last = input.last_assistant_message ?? input.lastAssistantMessage;
+  if (typeof last === "string" && last.trim().length > 0) {
+    const text = last.trim();
+    event.summary = text.length > SUMMARY_MAX ? text.slice(0, SUMMARY_MAX) : text;
+    event.summaryTruncated = text.length > SUMMARY_MAX;
+  }
 
   try {
     fs.appendFileSync(path.join(dir, "events.jsonl"), JSON.stringify(event) + "\n");

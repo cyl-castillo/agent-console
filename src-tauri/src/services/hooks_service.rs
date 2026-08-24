@@ -873,6 +873,18 @@ fn handle_event(v: &Value, app: &AppHandle) {
             let pre_sha = turn.as_ref().and_then(|t| t.pre_sha.clone());
 
             let mut payload = json!({});
+            // The agent's closing words, when the CLI sends them (Claude
+            // 2.1.47+ `last_assistant_message`). The hook already capped it;
+            // this is the second guard, same as the tool-result excerpt.
+            if let Some(summary) = str_field(v, "summary") {
+                payload["summary"] = json!(truncate_chars(&summary, SUMMARY_MAX));
+                payload["summaryTruncated"] = json!(
+                    v.get("summaryTruncated")
+                        .and_then(|t| t.as_bool())
+                        .unwrap_or(false)
+                        || summary.chars().count() > SUMMARY_MAX
+                );
+            }
             let post = snapshot_service::create(&repo, &uuid::Uuid::new_v4().to_string())
                 .ok()
                 .flatten();
@@ -937,6 +949,20 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
         .and_then(|x| x.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// Cap on the turn summary stored in the ledger. Mirrors the hook script's own
+/// cap; a hook script from an older install (or a hand-written event) doesn't
+/// get to bloat the chain.
+const SUMMARY_MAX: usize = 1000;
+
+/// Truncate on a char boundary — the summary is prose from the agent, so it can
+/// carry any UTF-8 and byte slicing would panic.
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max).collect()
 }
 
 fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
@@ -1218,6 +1244,97 @@ mod tests {
         assert!(has_command_path(&legacy, script));
         assert!(has_command_path(&canonical, script));
         assert!(!has_command_path(&other, script));
+    }
+
+    #[test]
+    fn summary_truncation_respects_char_boundaries() {
+        assert_eq!(truncate_chars("short", SUMMARY_MAX), "short");
+        // Multi-byte prose: cutting by bytes here would panic or corrupt.
+        let long: String = "áé—".repeat(SUMMARY_MAX);
+        let cut = truncate_chars(&long, SUMMARY_MAX);
+        assert_eq!(cut.chars().count(), SUMMARY_MAX);
+        assert!(long.starts_with(&cut));
+    }
+
+    /// The Stop bridge is what closes a turn in the ledger. Run the real script
+    /// under node and assert the event it appends: the agent's closing words
+    /// when the CLI sends them (Claude 2.1.47+ `last_assistant_message`),
+    /// bounded, and nothing extra when it doesn't (Codex today).
+    #[cfg(unix)]
+    #[test]
+    fn stop_bridge_records_the_agents_closing_words_when_the_cli_sends_them() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        if Command::new("node")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("node not available — skipping stop bridge test");
+            return;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let session_dir =
+            std::env::temp_dir().join(format!("ac-stop-test-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/stop-hook.cjs");
+        let run = |payload: String| {
+            let mut child = Command::new("node")
+                .arg(&script)
+                .env("AGENT_CONSOLE_SESSION_DIR", &session_dir)
+                .env("AGENT_CONSOLE_TERM_ID", "term-7")
+                .stdin(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(payload.as_bytes())
+                .unwrap();
+            assert!(child.wait().unwrap().success(), "bridge must always exit 0");
+        };
+
+        run(r#"{"session_id":"s1","cwd":"/proj/x","last_assistant_message":"  Fixed the retry loop and added a test.  "}"#.into());
+        // Chatty turn: capped, and the event says it was cut.
+        let long = "x".repeat(2500);
+        run(format!(
+            r#"{{"session_id":"s1","last_assistant_message":"{long}"}}"#
+        ));
+        // No such field (Codex, older Claude): the event is what it always was.
+        run(r#"{"session_id":"s1","cwd":"/proj/x"}"#.into());
+
+        let events = fs::read_to_string(session_dir.join("events.jsonl")).unwrap();
+        let lines: Vec<Value> = events
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 3);
+
+        assert_eq!(lines[0]["type"], "turn_end");
+        assert_eq!(lines[0]["termId"], "term-7");
+        assert_eq!(
+            lines[0]["summary"], "Fixed the retry loop and added a test.",
+            "the closing words ride the turn close, trimmed"
+        );
+        assert_eq!(lines[0]["summaryTruncated"], false);
+
+        assert_eq!(lines[1]["summary"].as_str().unwrap().len(), 1000);
+        assert_eq!(lines[1]["summaryTruncated"], true);
+
+        assert!(
+            lines[2].get("summary").is_none(),
+            "a CLI that doesn't report it must not produce an empty summary"
+        );
+
+        let _ = fs::remove_dir_all(&session_dir);
     }
 
     /// End-to-end over the REAL userprompt bridge: run it under node against a
