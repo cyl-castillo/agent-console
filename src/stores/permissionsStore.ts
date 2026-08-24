@@ -5,12 +5,14 @@ import type { PermissionsSnapshot, StoredRule } from "../types/domain";
 
 type Scope = "project" | "global";
 type Effect = "allow" | "deny" | "ask";
+type Engine = "claude" | "codex";
 
 interface LastOp {
   kind: "add" | "remove";
   scope: Scope;
   effect: Effect;
   raw: string;
+  engine: Engine;
 }
 
 interface PermissionsState {
@@ -20,8 +22,20 @@ interface PermissionsState {
   error: string | null;
 
   refresh: () => Promise<void>;
-  add: (scope: Scope, effect: Effect, raw: string, track?: boolean) => Promise<StoredRule | null>;
-  remove: (scope: Scope, effect: Effect, raw: string, track?: boolean) => Promise<void>;
+  add: (
+    scope: Scope,
+    effect: Effect,
+    raw: string,
+    engine?: Engine,
+    track?: boolean,
+  ) => Promise<StoredRule | null>;
+  remove: (
+    scope: Scope,
+    effect: Effect,
+    raw: string,
+    engine?: Engine,
+    track?: boolean,
+  ) => Promise<void>;
   move: (from: StoredRule, toScope: Scope) => Promise<void>;
   undo: () => Promise<void>;
   clearError: () => void;
@@ -45,10 +59,10 @@ export const usePermissionsStore = create<PermissionsState>((set, get) => ({
     }
   },
 
-  add: async (scope, effect, raw, track = true) => {
+  add: async (scope, effect, raw, engine = "claude", track = true) => {
     try {
-      const r = await ipc.permissionsAdd(scope, effect, raw);
-      if (track) set({ lastOp: { kind: "add", scope, effect, raw } });
+      const r = await ipc.permissionsAdd(scope, effect, raw, engine);
+      if (track) set({ lastOp: { kind: "add", scope, effect, raw, engine } });
       await get().refresh();
       return r;
     } catch (e) {
@@ -57,24 +71,32 @@ export const usePermissionsStore = create<PermissionsState>((set, get) => ({
     }
   },
 
-  remove: async (scope, effect, raw, track = true) => {
+  remove: async (scope, effect, raw, engine = "claude", track = true) => {
     try {
-      await ipc.permissionsRemove(scope, effect, raw);
-      if (track) set({ lastOp: { kind: "remove", scope, effect, raw } });
+      await ipc.permissionsRemove(scope, effect, raw, engine);
+      if (track) set({ lastOp: { kind: "remove", scope, effect, raw, engine } });
       await get().refresh();
     } catch (e) {
       set({ error: String(e) });
     }
   },
 
-  // Move = remove from old scope + add to new scope. Tracks as a single
-  // 'add' op (the more interesting half) so undo removes the new placement.
+  // Move = remove from old scope + add to new scope (same engine). Tracks as a
+  // single 'add' op (the more interesting half) so undo removes the new placement.
   move: async (from, toScope) => {
     if (from.scope === toScope) return;
     try {
-      await ipc.permissionsAdd(toScope, from.effect, from.raw);
-      await ipc.permissionsRemove(from.scope, from.effect, from.raw);
-      set({ lastOp: { kind: "add", scope: toScope, effect: from.effect, raw: from.raw } });
+      await ipc.permissionsAdd(toScope, from.effect, from.raw, from.engine);
+      await ipc.permissionsRemove(from.scope, from.effect, from.raw, from.engine);
+      set({
+        lastOp: {
+          kind: "add",
+          scope: toScope,
+          effect: from.effect,
+          raw: from.raw,
+          engine: from.engine,
+        },
+      });
       await get().refresh();
     } catch (e) {
       set({ error: String(e) });
@@ -86,9 +108,9 @@ export const usePermissionsStore = create<PermissionsState>((set, get) => ({
     if (!op) return;
     set({ lastOp: null });
     if (op.kind === "add") {
-      await get().remove(op.scope, op.effect, op.raw, false);
+      await get().remove(op.scope, op.effect, op.raw, op.engine, false);
     } else {
-      await get().add(op.scope, op.effect, op.raw, false);
+      await get().add(op.scope, op.effect, op.raw, op.engine, false);
     }
   },
 

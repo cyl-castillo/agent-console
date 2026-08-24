@@ -301,6 +301,9 @@ export interface StoredRule {
   source: "agent-console" | "external";
   createdAtMs: number | null;
   settingsPath: string;
+  /// Which agent enforces this rule: "claude" = settings.json permissions,
+  /// "codex" = execpolicy prefix_rule in a .codex/rules/*.rules file.
+  engine: "claude" | "codex";
 }
 
 export interface PermissionsSnapshot {

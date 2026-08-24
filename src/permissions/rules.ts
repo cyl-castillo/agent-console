@@ -217,6 +217,80 @@ export function suggestRules(req: ToolUseRequest, scope: Scope): RuleSuggestion[
   return out;
 }
 
+// --- Codex engine support ----------------------------------------------------
+//
+// Mirrors the Rust translator in permissions_service.rs (the enforcer): a rule
+// only has a Codex equivalent when it is a plain Bash command — Codex persists
+// permissions as execpolicy prefix_rule(pattern=[argv...]) lines, so tool-wide
+// grants, path tools, and shell-metacharacter commands can't be expressed.
+// The UI uses this to preview the target store and warn when "always" would
+// silently not apply to a Codex session.
+
+const CODEX_SHELL_META = /[|&;<>()`$*?{}[\]~#!\\]/;
+
+export function codexEquivalent(raw: string): string[] | null {
+  const m = raw.match(/^Bash\((.*)\)$/s);
+  if (!m) return null;
+  const cmd = (m[1].endsWith(":*") ? m[1].slice(0, -2) : m[1]).trim();
+  if (!cmd) return null;
+  // eslint-disable-next-line no-control-regex
+  if (CODEX_SHELL_META.test(cmd) || /[\x00-\x1f]/.test(cmd)) return null;
+  const tokens = shellSplit(cmd);
+  return tokens && tokens.length > 0 ? tokens : null;
+}
+
+/// Whitespace split with single/double-quote grouping (metacharacters and
+/// escapes are already refused above). Unbalanced quotes → null.
+function shellSplit(s: string): string[] | null {
+  const tokens: string[] = [];
+  let cur = "";
+  let inWord = false;
+  let quote: string | null = null;
+  for (const c of s) {
+    if (quote !== null) {
+      if (c === quote) quote = null;
+      else cur += c;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      inWord = true;
+    } else if (/\s/.test(c)) {
+      if (inWord) {
+        tokens.push(cur);
+        cur = "";
+        inWord = false;
+      }
+    } else {
+      cur += c;
+      inWord = true;
+    }
+  }
+  if (quote !== null) return null;
+  if (inWord) tokens.push(cur);
+  return tokens;
+}
+
+/// Where an approval's engine comes from: the hook tags requests with the
+/// terminal-session id (deterministic), falling back to a unique-cwd match
+/// among live sessions — the same attribution ladder as blockedSessionIds.
+/// Unknown → "claude" (the pre-engine-awareness behavior).
+export interface EngineSessionRef {
+  id: string;
+  cwd: string;
+  status?: string;
+  agent?: "claude" | "codex";
+}
+
+export function resolveApprovalEngine(
+  req: { termId?: string; cwd: string },
+  sessions: EngineSessionRef[],
+): "claude" | "codex" {
+  const byId = req.termId ? sessions.find((s) => s.id === req.termId) : undefined;
+  if (byId) return byId.agent ?? "claude";
+  const live = sessions.filter((s) => s.status !== "stopped" && s.cwd === req.cwd);
+  if (live.length === 1) return live[0].agent ?? "claude";
+  return "claude";
+}
+
 export function toRelative(filePath: string, cwd: string): string | null {
   if (!filePath) return null;
   if (!filePath.startsWith("/")) return filePath;

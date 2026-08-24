@@ -1,7 +1,9 @@
 use tauri::State;
 
 use crate::error::AppResult;
-use crate::services::permissions_service::{self, Effect, PermissionsSnapshot, Scope, StoredRule};
+use crate::services::permissions_service::{
+    self, Effect, Engine, PermissionsSnapshot, Scope, StoredRule,
+};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -15,6 +17,7 @@ pub fn permissions_add(
     scope: Scope,
     effect: Effect,
     raw: String,
+    engine: Option<Engine>,
     state: State<'_, AppState>,
 ) -> AppResult<StoredRule> {
     let project = state.inner.lock().project.clone();
@@ -23,6 +26,7 @@ pub fn permissions_add(
         scope,
         effect,
         &raw,
+        engine.unwrap_or_default(),
     )
 }
 
@@ -31,6 +35,7 @@ pub fn permissions_remove(
     scope: Scope,
     effect: Effect,
     raw: String,
+    engine: Option<Engine>,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     let project = state.inner.lock().project.clone();
@@ -39,5 +44,6 @@ pub fn permissions_remove(
         scope,
         effect,
         &raw,
+        engine.unwrap_or_default(),
     )
 }
