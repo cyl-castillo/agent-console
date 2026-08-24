@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { useApprovalStore } from "../stores/approvalStore";
 import { usePermissionsStore } from "../stores/permissionsStore";
+import { useToastStore } from "../stores/toastStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import {
@@ -380,6 +381,10 @@ export function ApprovalModal() {
                   `rule saved: ${suggestion.rule.raw}`,
                 );
               } else {
+                // Surface WHY the rule didn't save — a silent stay-open modal
+                // reads as "nothing happened" and the approval quietly expires.
+                const err = usePermissionsStore.getState().error;
+                useToastStore.getState().show(`Rule not saved${err ? `: ${err}` : ""}`, "error");
                 setBusy(false);
               }
             }}
