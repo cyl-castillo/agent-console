@@ -279,7 +279,7 @@ export function Terminal({ session, visible }: Props) {
               return { cmd: loginCmd, label: loginCmd, note: "fixing login —" };
             })()
           : profile.buildLaunch({
-              agentSessionId: session.claudeSessionId,
+              agentSessionId: session.agentSessionId,
               model: session.model,
               hasScrollback: Boolean(session.initialScrollback),
             });

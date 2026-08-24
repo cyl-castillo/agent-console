@@ -190,7 +190,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     // Notify scheduler jobs watching for prompts.
     void fireSchedulerEvent("prompt");
 
-    // Associate the Claude session id with the terminal that emitted the prompt.
+    // Associate the agent's session id with the terminal that emitted the prompt.
     // The hook tags each prompt with the PTY's terminal-session id (termId, from
     // AGENT_CONSOLE_TERM_ID), so we can bind deterministically — even when several
     // claude sessions run at once. We only fall back to the active terminal when
@@ -199,7 +199,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const { activeId, sessions } = useTerminalsStore.getState();
       const targetId = e.termId && sessions.some((s) => s.id === e.termId) ? e.termId : activeId;
       if (targetId) {
-        useTerminalsStore.getState().setClaudeSessionId(targetId, e.sessionId);
+        useTerminalsStore.getState().setAgentSessionId(targetId, e.sessionId);
         // Silently name the session from its first prompt — autoName only ever
         // replaces a default "shell N" name, never a user- or ticket-chosen
         // one, and only once (nameSuggested marker).
