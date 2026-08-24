@@ -16,6 +16,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
@@ -104,9 +105,26 @@ pub struct CandleEmbedder {
     inner: Option<(Tokenizer, BertModel)>,
 }
 
+/// Process-wide embedder for latency-sensitive paths. The inject endpoint
+/// lives inside the hook's ~1.5s budget, and a fresh BERT load alone costs
+/// seconds — so the hot path loads the model once and keeps it resident.
+/// Batch paths (reindexing) keep their own short-lived instances.
+static SHARED: Mutex<Option<CandleEmbedder>> = Mutex::new(None);
+
+pub fn with_shared_embedder<T>(f: impl FnOnce(&mut CandleEmbedder) -> T) -> T {
+    let mut guard = SHARED.lock().unwrap_or_else(|p| p.into_inner());
+    f(guard.get_or_insert_with(CandleEmbedder::new))
+}
+
 impl CandleEmbedder {
     pub fn new() -> Self {
         Self { inner: None }
+    }
+
+    /// Force the lazy model load now — called off the critical path at startup
+    /// so the first real query doesn't pay the multi-second load.
+    pub fn warm(&mut self) -> AppResult<()> {
+        self.ensure_loaded().map(|_| ())
     }
 
     fn ensure_loaded(&mut self) -> AppResult<&(Tokenizer, BertModel)> {
