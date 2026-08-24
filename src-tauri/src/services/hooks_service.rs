@@ -224,22 +224,33 @@ impl HooksRuntime {
     /// Merge the given hook entries into ~/.codex/hooks.json (created if
     /// missing; other content preserved; idempotent).
     fn install_codex(&self, hooks: &[(&str, &PathBuf)]) -> AppResult<()> {
-        let path = codex_hooks_path();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+        merge_hooks_into(&codex_hooks_path(), hooks)
+    }
+
+    /// Mirror into ~/.codex/hooks.json every hook event that is already
+    /// installed on the Claude side but missing on the Codex side. Closes the
+    /// install-order gap: enable the approvals bridge first, install the codex
+    /// CLI later — install() only wired codex if it was present at that
+    /// instant, so the UI said "bridge active" while codex approvals stayed in
+    /// the terminal. Runs on every startup (cheap when codex is absent or
+    /// nothing is missing). Mirroring only what's claude-installed keeps
+    /// PreToolUse opt-in, and uninstall() clears both sides so a deliberate
+    /// uninstall never gets resurrected here.
+    pub fn sync_codex_hooks(&self) -> AppResult<()> {
+        if !codex_available() {
+            return Ok(());
         }
-        let mut root: Value = if path.exists() {
-            serde_json::from_str(&fs::read_to_string(&path)?).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
-        if !root.is_object() {
-            root = json!({});
+        let pairs: [(&str, &PathBuf); 4] = [
+            ("UserPromptSubmit", &self.script_path),
+            ("PreToolUse", &self.pretooluse_script_path),
+            ("Stop", &self.stop_script_path),
+            ("PostToolUse", &self.posttooluse_script_path),
+        ];
+        let n = sync_hooks_between(&settings_path(), &codex_hooks_path(), &pairs)?;
+        if n > 0 {
+            eprintln!("hooks: mirrored {n} claude hook(s) into codex");
         }
-        for (event, script) in hooks {
-            upsert_hook(&mut root, event, script);
-        }
-        write_settings_atomic(&path, &root)
+        Ok(())
     }
 
     /// Auto-install the lightweight UserPromptSubmit observer on first run, so
@@ -468,6 +479,50 @@ impl HooksRuntime {
         fs::rename(&tmp, &path)?;
         Ok(())
     }
+}
+
+/// Merge hook entries into a hooks-table JSON file (created if missing; other
+/// content preserved; idempotent).
+fn merge_hooks_into(path: &Path, hooks: &[(&str, &PathBuf)]) -> AppResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut root: Value = if path.exists() {
+        serde_json::from_str(&fs::read_to_string(path)?).unwrap_or(json!({}))
+    } else {
+        json!({})
+    };
+    if !root.is_object() {
+        root = json!({});
+    }
+    for (event, script) in hooks {
+        upsert_hook(&mut root, event, script);
+    }
+    write_settings_atomic(path, &root)
+}
+
+/// Copy every hook event from `pairs` that is installed in `claude_path` but
+/// missing in `codex_path`. Returns how many events were mirrored (0 ⇒ no
+/// write at all). Free function over explicit paths so it's unit-testable
+/// without touching the real home dir.
+fn sync_hooks_between(
+    claude_path: &Path,
+    codex_path: &Path,
+    pairs: &[(&str, &PathBuf)],
+) -> AppResult<usize> {
+    let missing: Vec<(&str, &PathBuf)> = pairs
+        .iter()
+        .filter(|(event, script)| {
+            is_hook_installed(claude_path, event, script).unwrap_or(false)
+                && !is_hook_installed(codex_path, event, script).unwrap_or(false)
+        })
+        .copied()
+        .collect();
+    if missing.is_empty() {
+        return Ok(0);
+    }
+    merge_hooks_into(codex_path, &missing)?;
+    Ok(missing.len())
 }
 
 /// Write settings.json via temp file + rename so a crash mid-write can never
@@ -1079,6 +1134,79 @@ mod tests {
         assert!(cmds.contains(&"some-other-tool"));
         assert!(cmds.contains(&"node \"/x/hook with space.cjs\""));
         assert!(!cmds.contains(&"/x/hook with space.cjs"));
+    }
+
+    /// The install-order gap: bridge enabled first, codex CLI installed later.
+    /// sync must mirror exactly the events installed claude-side (both command
+    /// generations), leave foreign codex hooks alone, and be idempotent.
+    #[test]
+    fn sync_mirrors_claude_hooks_missing_on_the_codex_side() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("ac-sync-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&base).unwrap();
+        let claude = base.join("claude-settings.json");
+        let codex = base.join("codex").join("hooks.json");
+
+        let prompt_script = PathBuf::from("/x/userprompt-hook.cjs");
+        let pretool_script = PathBuf::from("/x/pretooluse-hook.cjs");
+        let stop_script = PathBuf::from("/x/stop-hook.cjs");
+        let pairs: [(&str, &PathBuf); 3] = [
+            ("UserPromptSubmit", &prompt_script),
+            ("PreToolUse", &pretool_script),
+            ("Stop", &stop_script),
+        ];
+
+        // Claude side: observer in the LEGACY bare-path format plus the
+        // opted-in bridge; Stop deliberately NOT installed. Codex side: a
+        // foreign hook only (fresh codex install, trust prompt pending).
+        let mut claude_settings = json!({
+            "hooks": { "UserPromptSubmit": [
+                { "matcher": "*", "hooks": [{ "type": "command", "command": "/x/userprompt-hook.cjs" }] }
+            ]}
+        });
+        upsert_hook(&mut claude_settings, "PreToolUse", &pretool_script);
+        write_settings_atomic(&claude, &claude_settings).unwrap();
+        fs::create_dir_all(codex.parent().unwrap()).unwrap();
+        write_settings_atomic(
+            &codex,
+            &json!({ "hooks": { "PreToolUse": [
+                { "matcher": "*", "hooks": [{ "type": "command", "command": "some-other-tool" }] }
+            ]}}),
+        )
+        .unwrap();
+
+        assert_eq!(sync_hooks_between(&claude, &codex, &pairs).unwrap(), 2);
+        assert!(is_hook_installed(&codex, "UserPromptSubmit", &prompt_script).unwrap());
+        assert!(is_hook_installed(&codex, "PreToolUse", &pretool_script).unwrap());
+        assert!(
+            !is_hook_installed(&codex, "Stop", &stop_script).unwrap(),
+            "events not installed claude-side must not be mirrored"
+        );
+        let codex_root: Value = serde_json::from_str(&fs::read_to_string(&codex).unwrap()).unwrap();
+        let pretool = codex_root
+            .pointer("/hooks/PreToolUse")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert!(
+            pretool
+                .iter()
+                .any(|e| entry_has_command(e, "some-other-tool")),
+            "foreign codex hooks survive the sync"
+        );
+
+        // Idempotent: nothing missing ⇒ no write reported.
+        assert_eq!(sync_hooks_between(&claude, &codex, &pairs).unwrap(), 0);
+
+        // A codex file that doesn't exist yet is created from scratch.
+        let fresh = base.join("fresh").join("hooks.json");
+        assert_eq!(sync_hooks_between(&claude, &fresh, &pairs).unwrap(), 2);
+        assert!(is_hook_installed(&fresh, "PreToolUse", &pretool_script).unwrap());
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -148,6 +148,26 @@ export function SkillsPanel() {
                   decision is recorded.
                 </p>
               )}
+              {/* Codex installed AFTER the bridge was enabled: install() only
+                  wired the codex side if the CLI existed at that instant, so
+                  codex approvals silently stay in the terminal while the line
+                  above says "active". Surface the real state and offer to
+                  complete the install (install() is idempotent and wires codex
+                  now that it's available). Startup also self-heals this via
+                  sync_codex_hooks; this covers codex appearing mid-session. */}
+              {integrationActive &&
+                hooks?.pretooluseInstalled &&
+                hooks.codexAvailable &&
+                !hooks.codexPretooluseInstalled && (
+                  <p className="wb-hint">
+                    …but not for Codex yet: codex was installed after the bridge, so its permission
+                    prompts still stay inside the terminal and are not recorded. Complete the
+                    install to bridge Codex too (<code>~/.codex/hooks.json</code>).
+                    <button className="wb-cta" onClick={install}>
+                      complete Codex bridge
+                    </button>
+                  </p>
+                )}
               {hooks?.codexAvailable && hooks.codexInstalled && (
                 <p className="wb-hint">
                   Codex too: wired via <code>~/.codex/hooks.json</code>. Codex asks you to trust the
