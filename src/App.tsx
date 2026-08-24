@@ -104,6 +104,7 @@ export default function App() {
   const clearTerminals = useTerminalsStore((s) => s.clear);
   const persistTerminals = useTerminalsStore((s) => s.persist);
   const addTerminal = useTerminalsStore((s) => s.add);
+  const resumeTerminal = useTerminalsStore((s) => s.resume);
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showGettingStarted, setShowGettingStarted] = useState(false);
@@ -516,6 +517,11 @@ export default function App() {
   }, [project, persistTerminals]);
 
   const liveTerminals = terminalSessions.filter((s) => s.status === "live");
+  // The active session's shell exited mid-run (markStopped): no mounted
+  // terminal is visible, so the pane shows a "session ended" state with a
+  // resume button instead of going blank.
+  const activeTerminal = terminalSessions.find((s) => s.id === activeTerminalId);
+  const activeStopped = activeTerminal?.status === "stopped" && !activeTerminal.archived;
 
   if (!project) {
     return (
@@ -646,7 +652,7 @@ export default function App() {
             </button>
           </div>
           <div className="tab-pane" style={{ display: tab === "terminal" ? "flex" : "none" }}>
-            {liveTerminals.length === 0 ? (
+            {liveTerminals.length === 0 && !activeStopped ? (
               <div className="terminal-empty">
                 <div>
                   <div className="terminal-empty-title">No active sessions</div>
@@ -661,15 +667,39 @@ export default function App() {
             ) : (
               <>
                 <WorktreeBar />
-                <div className="terminals-stack">
-                  {liveTerminals.map((s) => (
-                    <Terminal
-                      key={s.id}
-                      session={s}
-                      visible={tab === "terminal" && s.id === activeTerminalId}
-                    />
-                  ))}
-                </div>
+                {activeStopped && activeTerminal && (
+                  <div className="terminal-empty">
+                    <div>
+                      <div className="terminal-empty-title">Session ended</div>
+                      <div className="terminal-empty-copy">
+                        “{activeTerminal.name}” exited. Resume relaunches its shell and agent with
+                        the saved scrollback.
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => resumeTerminal(activeTerminal.id)}
+                    >
+                      ▸ Resume session
+                    </button>
+                  </div>
+                )}
+                {liveTerminals.length > 0 && (
+                  // Stays mounted (hidden) while a stopped session is active so
+                  // the other live PTYs survive the detour through this state.
+                  <div
+                    className="terminals-stack"
+                    style={{ display: activeStopped ? "none" : undefined }}
+                  >
+                    {liveTerminals.map((s) => (
+                      <Terminal
+                        key={s.id}
+                        session={s}
+                        visible={tab === "terminal" && s.id === activeTerminalId}
+                      />
+                    ))}
+                  </div>
+                )}
                 {composerOpen && project && (
                   <Composer projectRoot={project.root} onClose={() => setComposerOpen(false)} />
                 )}

@@ -180,6 +180,79 @@ describe("session lifecycle", () => {
   });
 });
 
+describe("markStopped (PTY exited mid-run)", () => {
+  it("flips a live session to stopped, folds scrollback for replay, and persists", async () => {
+    const id = useTerminalsStore.getState().add("/repo");
+    useTerminalsStore.getState().appendOutput(id, "run output");
+    world.saved = [];
+
+    useTerminalsStore.getState().markStopped(id);
+    const s = useTerminalsStore.getState().sessions[0];
+    expect(s.status).toBe("stopped");
+    expect(s.initialScrollback).toBe("run output");
+    expect(s.liveScrollback).toBe("");
+    // The pane needs the id to offer resume — stopping must not deselect.
+    expect(useTerminalsStore.getState().activeId).toBe(id);
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(world.saved.length).toBe(1);
+    expect(world.saved[0].payload[0].scrollback).toBe("run output");
+  });
+
+  it("appends this run's output to a previous run's scrollback (hydrated → resumed → died)", async () => {
+    world.listResult = [persisted("a")]; // scrollback "old output"
+    await useTerminalsStore.getState().hydrate("/repo");
+    useTerminalsStore.getState().resume("a");
+    useTerminalsStore.getState().appendOutput("a", " + new run");
+
+    useTerminalsStore.getState().markStopped("a");
+    expect(useTerminalsStore.getState().sessions[0].initialScrollback).toBe("old output + new run");
+  });
+
+  it("caps the folded scrollback, keeping the tail", () => {
+    const id = useTerminalsStore.getState().add("/repo");
+    useTerminalsStore.getState().appendOutput(id, "x".repeat(60_000));
+    useTerminalsStore.getState().appendOutput(id, "END");
+    useTerminalsStore.getState().markStopped(id);
+    const sb = useTerminalsStore.getState().sessions[0].initialScrollback;
+    expect(sb.length).toBeLessThanOrEqual(50_000);
+    expect(sb.endsWith("END")).toBe(true);
+  });
+
+  it("is a no-op for stopped and unknown sessions (a closing session can't be resurrected)", async () => {
+    world.listResult = [persisted("a")];
+    await useTerminalsStore.getState().hydrate("/repo");
+    world.saved = [];
+
+    useTerminalsStore.getState().markStopped("a"); // already stopped
+    useTerminalsStore.getState().markStopped("ghost");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(world.saved).toEqual([]);
+    expect(useTerminalsStore.getState().sessions[0].initialScrollback).toBe("old output");
+  });
+
+  it("a session stopped mid-run resumes live again with its scrollback as replay source", () => {
+    const id = useTerminalsStore.getState().add("/repo");
+    useTerminalsStore.getState().appendOutput(id, "before the crash");
+    useTerminalsStore.getState().markStopped(id);
+
+    useTerminalsStore.getState().resume(id);
+    const s = useTerminalsStore.getState().sessions[0];
+    expect(s.status).toBe("live");
+    expect(s.initialScrollback).toBe("before the crash");
+    expect(useTerminalsStore.getState().activeId).toBe(id);
+  });
+
+  it("a session stopped mid-run can be archived (was live-only before, dead ones lingered)", () => {
+    const id = useTerminalsStore.getState().add("/repo");
+    useTerminalsStore.getState().markStopped(id);
+    useTerminalsStore.getState().archive(id);
+    const s = useTerminalsStore.getState();
+    expect(s.sessions[0].archived).toBe(true);
+    expect(s.activeId).toBeNull();
+  });
+});
+
 describe("silent auto-naming (only ever replaces a default 'shell N')", () => {
   it("renames a default-named session once, silently", () => {
     const id = useTerminalsStore.getState().add("/repo");
