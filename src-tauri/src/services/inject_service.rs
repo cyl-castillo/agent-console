@@ -7,6 +7,10 @@
 //! already knowing what this workspace has learned — for BOTH engines, since
 //! Codex consumes the same hook schema.
 //!
+//! The same answer also carries the session title (Claude 2.1.94): the bridge
+//! echoes it back as `hookSpecificOutput.sessionTitle`, so the name the user
+//! chose in our sidebar is the name the CLI's own `/resume` list shows.
+//!
 //! Hard rules, in order of importance:
 //! - Never slow a prompt down: every miss (toggle off, model not downloaded,
 //!   no index, malformed request) answers "nothing" immediately. The bridge
@@ -18,7 +22,7 @@
 //!   fed.
 //! - Loopback only (POLITICA: nothing listens outside 127.0.0.1).
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -27,11 +31,11 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
 use crate::services::corpus_feedback;
-use crate::services::embedding_service::{model_ready, CandleEmbedder, Embedder};
+use crate::services::embedding_service::{self, model_ready, Embedder};
 use crate::services::projects_service;
 use crate::services::semantic_index::{self, SearchHit};
 use crate::services::work_profile;
@@ -54,6 +58,9 @@ const MAX_BODY_BYTES: usize = 64 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
 /// Recent injections kept for the GUI ("what was the agent fed lately?").
 const RECENT_CAP: usize = 20;
+/// Cap on an exported session title. The CLI shows it in one line of a list;
+/// a Jira-seeded name can be much longer than that line.
+const MAX_TITLE_CHARS: usize = 80;
 
 // ---------------------------------------------------------------------------
 // Settings: per-project on/off toggle. Default ON — the flywheel only spins
@@ -211,6 +218,98 @@ fn reset_profile_served() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Session title export (Claude 2.1.94: `hookSpecificOutput.sessionTitle` on
+// UserPromptSubmit). The name the user reads in our sidebar is the name they
+// should find in `/resume` and `claude agents` — otherwise the same session
+// has two identities depending on where you look at it from.
+// ---------------------------------------------------------------------------
+
+/// Titles already handed to a CLI, per terminal session. Keyed by term id →
+/// the last title sent, so a rename in Agent Console travels once and a
+/// `/rename` typed inside the CLI is not clobbered on every later prompt.
+/// In-memory on purpose: an app restart re-sends once, which is the harmless
+/// direction (the title is the one we'd set anyway).
+static TITLE_SENT: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+/// The name of a terminal, when it is worth exporting. A default "shell N"
+/// says nothing the CLI doesn't already know, and sending it would replace the
+/// CLI's own generated title with noise — those stay home.
+fn exportable_name(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.to_lowercase().strip_prefix("shell ") {
+        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+    }
+    // A title is one line: collapse any whitespace a pasted name carried in.
+    let flat = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(flat.chars().take(MAX_TITLE_CHARS).collect())
+}
+
+/// Gate a title behind "changed since the last one we sent for this terminal"
+/// — peek only, no marking. Marking is deferred to `mark_title_sent` AFTER the
+/// response is actually written: the hook aborts slow answers, and marking on
+/// serve would burn the one delivery forever without the CLI ever seeing it.
+fn title_pending(term_id: &str, title: String) -> Option<String> {
+    let guard = TITLE_SENT.lock().ok()?;
+    if guard
+        .as_ref()
+        .and_then(|sent| sent.get(term_id))
+        .is_some_and(|prev| prev == &title)
+    {
+        return None;
+    }
+    Some(title)
+}
+
+fn mark_title_sent(term_id: &str, title: &str) {
+    if let Ok(mut guard) = TITLE_SENT.lock() {
+        guard
+            .get_or_insert_with(HashMap::new)
+            .insert(term_id.to_string(), title.to_string());
+    }
+}
+
+/// Peek + mark in one step — the atomic form the dedupe tests exercise.
+#[cfg(test)]
+fn title_if_new(term_id: &str, title: String) -> Option<String> {
+    let pending = title_pending(term_id, title)?;
+    mark_title_sent(term_id, &pending);
+    Some(pending)
+}
+
+#[cfg(test)]
+fn reset_titles_sent() {
+    if let Ok(mut g) = TITLE_SENT.lock() {
+        *g = None;
+    }
+}
+
+/// Look up what Agent Console calls this terminal and hand it back once.
+/// Every miss (no term id, unknown session, default name, already sent)
+/// answers None — the CLI then keeps whatever title it had.
+fn session_title(app: &tauri::AppHandle, cwd: &str, term_id: Option<&str>) -> Option<String> {
+    let term_id = term_id?;
+    let roots: Vec<String> = projects_service::load()
+        .into_iter()
+        .map(|p| p.path)
+        .collect();
+    let root = resolve_project_root(cwd, &roots);
+    let name = app
+        .state::<crate::state::AppState>()
+        .sessions
+        .list(&root)
+        .ok()?
+        .into_iter()
+        .find(|s| s.id == term_id)?
+        .name;
+    title_pending(term_id, exportable_name(&name)?)
+}
+
 pub fn recent() -> Vec<InjectionRecord> {
     RECENT
         .lock()
@@ -352,12 +451,14 @@ fn read_request(stream: &mut TcpStream) -> Option<String> {
     String::from_utf8(body).ok()
 }
 
-fn respond_json(stream: &mut TcpStream, body: &str) {
+/// Returns whether the body reached the socket — a hook that already gave up
+/// closes its end, and the failed write tells us the answer was NOT delivered.
+fn respond_json(stream: &mut TcpStream, body: &str) -> bool {
     let resp = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    let _ = stream.write_all(resp.as_bytes());
+    stream.write_all(resp.as_bytes()).is_ok()
 }
 
 /// The empty answer — what every gate and every error collapses to.
@@ -372,15 +473,33 @@ fn serve_connection(stream: &mut TcpStream, app: &tauri::AppHandle) {
         respond_json(stream, NOTHING);
         return;
     };
-    match handle_and_render(&req.prompt, &req.cwd, req.term_id) {
+    // Independent of injection: the title travels even when there is nothing
+    // to inject (toggle off, no model, empty index).
+    let title = session_title(app, &req.cwd, req.term_id.as_deref());
+    let term_id = req.term_id.clone();
+    let delivered = match handle_and_render(&req.prompt, &req.cwd, req.term_id) {
         Some((record, context)) => {
-            let payload =
-                serde_json::json!({ "context": context, "hits": record.hits }).to_string();
+            let payload = serde_json::json!({
+                "context": context,
+                "hits": record.hits,
+                "sessionTitle": title,
+            })
+            .to_string();
             remember(record.clone());
             let _ = app.emit("inject://done", &record);
-            respond_json(stream, &payload);
+            respond_json(stream, &payload)
         }
-        None => respond_json(stream, NOTHING),
+        None => {
+            let payload = serde_json::json!({ "context": null, "sessionTitle": title }).to_string();
+            respond_json(stream, &payload)
+        }
+    };
+    // Dedupe only counts a title as sent once it actually reached the hook —
+    // an aborted (timed-out) socket keeps it eligible for the next prompt.
+    if delivered {
+        if let (Some(title), Some(term_id)) = (title, term_id) {
+            mark_title_sent(&term_id, &title);
+        }
     }
 }
 
@@ -416,9 +535,14 @@ fn handle_and_render(
             score: 1.0,
         });
     }
-    // Semantic retrieval (E1/E2) only when the model is already local.
+    // Semantic retrieval (E1/E2) only when the model is already local. The
+    // shared embedder keeps the multi-second BERT load out of this path — a
+    // fresh instance per request blew straight through the hook's 1.5s budget
+    // (the hook timed out on EVERY prompt and injection silently never ran).
     if model_ready() {
-        if let Ok((kept, Some(context))) = answer(&root, prompt, &mut CandleEmbedder::new()) {
+        if let Ok((kept, Some(context))) =
+            embedding_service::with_shared_embedder(|e| answer(&root, prompt, e))
+        {
             hits.extend(kept.iter().map(|h| InjectedHit {
                 id: h.id.clone(),
                 title: h.title.clone(),
@@ -464,6 +588,14 @@ fn handle_and_render(
 /// file, and serve forever on a background thread. Failure to start is loud
 /// in the log but never fatal to the app — injection is an enhancement.
 pub fn start(app: tauri::AppHandle) {
+    // Pre-load the shared embedder off the critical path: the first prompt of
+    // the session should not be the one paying the model load. No-op (cheap
+    // probe) when the model isn't downloaded yet.
+    if model_ready() {
+        std::thread::spawn(|| {
+            let _ = embedding_service::with_shared_embedder(|e| e.warm());
+        });
+    }
     std::thread::spawn(move || {
         let listener = match TcpListener::bind(("127.0.0.1", 0)) {
             Ok(l) => l,
@@ -747,6 +879,83 @@ mod tests {
             Some("t9".into())
         )
         .is_none());
+    }
+
+    #[test]
+    fn only_real_names_are_exportable_as_titles() {
+        // Default names carry no information — the CLI's own title is better.
+        assert_eq!(exportable_name("shell 1"), None);
+        assert_eq!(exportable_name("  shell 12  "), None);
+        assert_eq!(exportable_name("Shell 3"), None, "case is cosmetic");
+        assert_eq!(exportable_name("   "), None);
+        // A real name travels, flattened to the single line a title is.
+        assert_eq!(
+            exportable_name("Fix login on windows"),
+            Some("Fix login on windows".into())
+        );
+        assert_eq!(
+            exportable_name(" PROJ-42\n  worklog sync "),
+            Some("PROJ-42 worklog sync".into())
+        );
+        // Names that only look default keep their meaning.
+        assert_eq!(
+            exportable_name("shell rewrite"),
+            Some("shell rewrite".into())
+        );
+        assert_eq!(
+            exportable_name("shell 3 cleanup"),
+            Some("shell 3 cleanup".into())
+        );
+        // Oversized names are cut, never dropped.
+        let long = "x".repeat(MAX_TITLE_CHARS + 40);
+        assert_eq!(
+            exportable_name(&long).map(|t| t.chars().count()),
+            Some(MAX_TITLE_CHARS)
+        );
+    }
+
+    #[test]
+    fn a_title_is_sent_once_per_change_and_per_terminal() {
+        reset_titles_sent();
+        assert_eq!(
+            title_if_new("t1", "Fix login".into()),
+            Some("Fix login".into()),
+            "first prompt of the session carries the name"
+        );
+        assert_eq!(
+            title_if_new("t1", "Fix login".into()),
+            None,
+            "unchanged: a /rename typed in the CLI must survive later prompts"
+        );
+        assert_eq!(
+            title_if_new("t1", "Fix login on windows".into()),
+            Some("Fix login on windows".into()),
+            "renamed in Agent Console: the new name travels"
+        );
+        assert_eq!(
+            title_if_new("t2", "Fix login".into()),
+            Some("Fix login".into()),
+            "dedupe is per terminal"
+        );
+    }
+
+    #[test]
+    fn an_undelivered_title_stays_eligible_for_the_next_prompt() {
+        reset_titles_sent();
+        // Peek does not mark: a hook that times out before the response lands
+        // must get the same title offered again on its next prompt.
+        assert_eq!(
+            title_pending("t1", "Fix login".into()),
+            Some("Fix login".into())
+        );
+        assert_eq!(
+            title_pending("t1", "Fix login".into()),
+            Some("Fix login".into()),
+            "not marked until delivery is confirmed"
+        );
+        // Only a confirmed write marks it sent.
+        mark_title_sent("t1", "Fix login");
+        assert_eq!(title_pending("t1", "Fix login".into()), None);
     }
 
     #[test]
