@@ -51,3 +51,6 @@ tokenizers = "0.23.1"
 # `test` unlocks tauri::test::{mock_builder, MockRuntime} for the terminal
 # lifecycle tests. Dev-only: release builds never enable it.
 tauri = { version = "2", features = ["test"] }
+
+[workspace]
+members = ["hook-bridge"]

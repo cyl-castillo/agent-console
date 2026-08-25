@@ -57,17 +57,26 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      # tauri-build validates externalBin paths at compile time, so the
+      # sidecar must exist before any cargo check/clippy/test of the app.
+      - name: Build hook-bridge sidecar
+        working-directory: src-tauri
+        run: |
+          cargo build -p hook-bridge --release
+          mkdir -p binaries
+          cp target/release/hook-bridge binaries/hook-bridge-x86_64-unknown-linux-gnu
+
       - name: Format check
         working-directory: src-tauri
         run: cargo fmt --check
 
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --lib --bins -- -D warnings
+        run: cargo clippy --workspace --lib --bins -- -D warnings
 
       - name: Tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --workspace
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@v2

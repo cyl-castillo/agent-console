@@ -44,6 +44,7 @@ pub struct HooksStatus {
 
 pub struct HooksRuntime {
     session_dir: PathBuf,
+    binary_path: Option<PathBuf>,
     script_path: PathBuf,
     pretooluse_script_path: PathBuf,
     stop_script_path: PathBuf,
@@ -110,8 +111,10 @@ impl HooksRuntime {
         let stop_script_path = ensure_hook_script(&cache, "stop-hook.cjs", STOP_HOOK)?;
         let posttooluse_script_path =
             ensure_hook_script(&cache, "posttooluse-hook.cjs", POSTTOOLUSE_HOOK)?;
+        let binary_path = ensure_hook_binary(&cache);
         Ok(Self {
             session_dir,
+            binary_path,
             script_path,
             pretooluse_script_path,
             stop_script_path,
@@ -123,6 +126,12 @@ impl HooksRuntime {
 
     pub fn session_dir(&self) -> &Path {
         &self.session_dir
+    }
+    /// Stable cache-dir copy of the native bridge binary, when the sidecar
+    /// shipped with this build. None ⇒ hook commands fall back to node.
+    #[allow(dead_code)]
+    pub fn bridge_binary(&self) -> Option<&Path> {
+        self.binary_path.as_deref()
     }
     #[allow(dead_code)]
     pub fn script_path(&self) -> &Path {
@@ -203,10 +212,30 @@ impl HooksRuntime {
             settings = json!({});
         }
 
-        upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
-        upsert_hook(&mut settings, "PreToolUse", &self.pretooluse_script_path);
-        upsert_hook(&mut settings, "Stop", &self.stop_script_path);
-        upsert_hook(&mut settings, "PostToolUse", &self.posttooluse_script_path);
+        upsert_hook(
+            &mut settings,
+            "UserPromptSubmit",
+            &self.script_path,
+            self.binary_path.as_deref(),
+        );
+        upsert_hook(
+            &mut settings,
+            "PreToolUse",
+            &self.pretooluse_script_path,
+            self.binary_path.as_deref(),
+        );
+        upsert_hook(
+            &mut settings,
+            "Stop",
+            &self.stop_script_path,
+            self.binary_path.as_deref(),
+        );
+        upsert_hook(
+            &mut settings,
+            "PostToolUse",
+            &self.posttooluse_script_path,
+            self.binary_path.as_deref(),
+        );
 
         write_settings_atomic(&settings_path, &settings)?;
 
@@ -224,7 +253,7 @@ impl HooksRuntime {
     /// Merge the given hook entries into ~/.codex/hooks.json (created if
     /// missing; other content preserved; idempotent).
     fn install_codex(&self, hooks: &[(&str, &PathBuf)]) -> AppResult<()> {
-        merge_hooks_into(&codex_hooks_path(), hooks)
+        merge_hooks_into(&codex_hooks_path(), hooks, self.binary_path.as_deref())
     }
 
     /// Mirror into ~/.codex/hooks.json every hook event that is already
@@ -246,7 +275,12 @@ impl HooksRuntime {
             ("Stop", &self.stop_script_path),
             ("PostToolUse", &self.posttooluse_script_path),
         ];
-        let n = sync_hooks_between(&settings_path(), &codex_hooks_path(), &pairs)?;
+        let n = sync_hooks_between(
+            &settings_path(),
+            &codex_hooks_path(),
+            &pairs,
+            self.binary_path.as_deref(),
+        )?;
         if n > 0 {
             eprintln!("hooks: mirrored {n} claude hook(s) into codex");
         }
@@ -282,7 +316,12 @@ impl HooksRuntime {
         if !settings.is_object() {
             settings = json!({});
         }
-        upsert_hook(&mut settings, "UserPromptSubmit", &self.script_path);
+        upsert_hook(
+            &mut settings,
+            "UserPromptSubmit",
+            &self.script_path,
+            self.binary_path.as_deref(),
+        );
         write_settings_atomic(&settings_path, &settings)?;
         // Best-effort marker: if it fails we'd re-run the idempotent upsert next
         // launch, which is harmless.
@@ -330,7 +369,12 @@ impl HooksRuntime {
         if !settings.is_object() {
             settings = json!({});
         }
-        upsert_hook(&mut settings, "Stop", &self.stop_script_path);
+        upsert_hook(
+            &mut settings,
+            "Stop",
+            &self.stop_script_path,
+            self.binary_path.as_deref(),
+        );
         write_settings_atomic(&settings_path, &settings)?;
         if codex_available() {
             self.install_codex(&[("Stop", &self.stop_script_path)])?;
@@ -363,7 +407,12 @@ impl HooksRuntime {
         if !settings.is_object() {
             settings = json!({});
         }
-        upsert_hook(&mut settings, "PostToolUse", &self.posttooluse_script_path);
+        upsert_hook(
+            &mut settings,
+            "PostToolUse",
+            &self.posttooluse_script_path,
+            self.binary_path.as_deref(),
+        );
         write_settings_atomic(&settings_path, &settings)?;
         if codex_available() {
             self.install_codex(&[("PostToolUse", &self.posttooluse_script_path)])?;
@@ -400,10 +449,14 @@ impl HooksRuntime {
                 let installed = settings
                     .pointer(&format!("/hooks/{event}"))
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().any(|e| has_command_path(e, script)))
+                    .map(|arr| {
+                        arr.iter().any(|e| {
+                            has_command_path(e, script) || has_bridge_command(e, bridge_mode(event))
+                        })
+                    })
                     .unwrap_or(false);
                 if installed {
-                    upsert_hook(&mut settings, event, script);
+                    upsert_hook(&mut settings, event, script, self.binary_path.as_deref());
                 }
             }
             let after = settings.to_string();
@@ -431,7 +484,9 @@ impl HooksRuntime {
                     ("PostToolUse", &self.posttooluse_script_path),
                 ] {
                     if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
-                        arr.retain(|e| !has_command_path(e, target));
+                        arr.retain(|e| {
+                            !has_command_path(e, target) && !has_bridge_command(e, bridge_mode(key))
+                        });
                     }
                 }
             }
@@ -483,7 +538,11 @@ impl HooksRuntime {
 
 /// Merge hook entries into a hooks-table JSON file (created if missing; other
 /// content preserved; idempotent).
-fn merge_hooks_into(path: &Path, hooks: &[(&str, &PathBuf)]) -> AppResult<()> {
+fn merge_hooks_into(
+    path: &Path,
+    hooks: &[(&str, &PathBuf)],
+    binary: Option<&Path>,
+) -> AppResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -496,7 +555,7 @@ fn merge_hooks_into(path: &Path, hooks: &[(&str, &PathBuf)]) -> AppResult<()> {
         root = json!({});
     }
     for (event, script) in hooks {
-        upsert_hook(&mut root, event, script);
+        upsert_hook(&mut root, event, script, binary);
     }
     write_settings_atomic(path, &root)
 }
@@ -509,6 +568,7 @@ fn sync_hooks_between(
     claude_path: &Path,
     codex_path: &Path,
     pairs: &[(&str, &PathBuf)],
+    binary: Option<&Path>,
 ) -> AppResult<usize> {
     let missing: Vec<(&str, &PathBuf)> = pairs
         .iter()
@@ -521,7 +581,7 @@ fn sync_hooks_between(
     if missing.is_empty() {
         return Ok(0);
     }
-    merge_hooks_into(codex_path, &missing)?;
+    merge_hooks_into(codex_path, &missing, binary)?;
     Ok(missing.len())
 }
 
@@ -534,18 +594,42 @@ fn write_settings_atomic(settings_path: &Path, settings: &Value) -> AppResult<()
     Ok(())
 }
 
-/// Canonical hook command: `node "<script>"`.
+/// Legacy hook command: `node "<script>"`.
 ///
-/// The old format was the bare script path, which relied on shebang execution.
-/// That works on Unix but is dead on Windows twice over: cmd.exe has no
-/// shebangs and `.cjs` has no default file association, and the unquoted path
-/// split at the first space in the user's home dir ("C:\Users\Melissa
-/// Mujica\…"). So on Windows NO hook ever fired — no session-id capture (every
-/// resume started a fresh chat), no approval bridge, no activity/Testigo
-/// events. Quoted path + explicit interpreter works on all three platforms;
-/// node is already a hard requirement of the app.
+/// The oldest format was the bare script path, which relied on shebang
+/// execution. That works on Unix but is dead on Windows twice over: cmd.exe
+/// has no shebangs and `.cjs` has no default file association, and the
+/// unquoted path split at the first space in the user's home dir
+/// ("C:\Users\Melissa Mujica\…"). So on Windows NO hook ever fired. Quoted
+/// path + explicit interpreter fixed that — but still required node.
 fn hook_command(script_path: &Path) -> String {
     format!("node \"{}\"", script_path.to_string_lossy())
+}
+
+/// Canonical hook command, third generation: `"<hook-bridge>" <mode>` — the
+/// native bridge binary, no node required. Falls back to the node form when
+/// the binary isn't available (dev runs without the sidecar, copy failure),
+/// so hooks keep working exactly as before instead of silently dying.
+fn bridge_command(binary: Option<&Path>, script_path: &Path, mode: &str) -> String {
+    match binary {
+        Some(b) => format!("\"{}\" {mode}", b.to_string_lossy()),
+        None => hook_command(script_path),
+    }
+}
+
+/// Does this entry carry OUR native-bridge command for `mode`? Matched by the
+/// binary's filename plus the trailing mode word, so entries survive cache
+/// relocations (same reasoning as the path-containment match for scripts).
+fn has_bridge_command(entry: &Value, mode: &str) -> bool {
+    let Some(hooks) = entry.get("hooks").and_then(|v| v.as_array()) else {
+        return false;
+    };
+    hooks.iter().any(|h| {
+        h.get("command")
+            .and_then(|c| c.as_str())
+            .map(|c| c.contains(BRIDGE_BIN_NAME) && c.trim_end().ends_with(&format!("\" {mode}")))
+            .unwrap_or(false)
+    })
 }
 
 fn entry_has_command(entry: &Value, cmd: &str) -> bool {
@@ -559,8 +643,9 @@ fn entry_has_command(entry: &Value, cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path) {
-    let canonical = hook_command(script_path);
+fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path, binary: Option<&Path>) {
+    let mode = bridge_mode(event);
+    let canonical = bridge_command(binary, script_path, mode);
     let hooks = settings.get("hooks").cloned().unwrap_or(json!({}));
     let mut hooks = if hooks.is_object() { hooks } else { json!({}) };
     let mut arr = hooks
@@ -569,9 +654,10 @@ fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path) {
         .cloned()
         .unwrap_or_default();
     if !arr.iter().any(|e| entry_has_command(e, &canonical)) {
-        // Drop any prior entry for this script (the legacy bare-path format)
-        // so a re-install migrates it instead of duplicating the hook.
-        arr.retain(|e| !has_command_path(e, script_path));
+        // Drop any prior entry of ours — legacy bare path, node form, or a
+        // bridge command pointing at an old location — so a re-install
+        // migrates it instead of duplicating the hook.
+        arr.retain(|e| !has_command_path(e, script_path) && !has_bridge_command(e, mode));
         arr.push(json!({
             "matcher": "*",
             "hooks": [{ "type": "command", "command": canonical }]
@@ -613,6 +699,55 @@ fn codex_available() -> bool {
         .unwrap_or(false)
 }
 
+/// The native bridge binary's filename (with .exe on Windows).
+#[cfg(windows)]
+const BRIDGE_BIN_NAME: &str = "hook-bridge.exe";
+#[cfg(not(windows))]
+const BRIDGE_BIN_NAME: &str = "hook-bridge";
+
+/// Hook event → bridge binary mode argument.
+fn bridge_mode(event: &str) -> &'static str {
+    match event {
+        "UserPromptSubmit" => "userprompt",
+        "PreToolUse" => "pretooluse",
+        "PostToolUse" => "posttooluse",
+        _ => "stop",
+    }
+}
+
+/// Copy the bundled hook-bridge sidecar to a STABLE path under the cache dir.
+/// The sidecar ships next to the app executable, but that location moves on
+/// every AppImage launch (fresh /tmp mount) and on every update — a hooks.json
+/// pointing there would go stale immediately. The cache copy is the address
+/// the hook entries reference; refreshed on every start like the scripts.
+/// None ⇒ no sidecar next to the exe (dev run without it) — callers fall back
+/// to the node scripts.
+fn ensure_hook_binary(runtime_dir: &Path) -> Option<PathBuf> {
+    let sidecar = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join(BRIDGE_BIN_NAME);
+    if !sidecar.is_file() {
+        return None;
+    }
+    let bin_dir = runtime_dir.join("bin");
+    fs::create_dir_all(&bin_dir).ok()?;
+    let dest = bin_dir.join(BRIDGE_BIN_NAME);
+    // Copy through a temp name + rename so a hook firing mid-update never
+    // execs a half-written binary.
+    let tmp = bin_dir.join(format!("{BRIDGE_BIN_NAME}.tmp"));
+    fs::copy(&sidecar, &tmp).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perm = fs::metadata(&tmp).ok()?.permissions();
+        perm.set_mode(0o755);
+        fs::set_permissions(&tmp, perm).ok()?;
+    }
+    fs::rename(&tmp, &dest).ok()?;
+    Some(dest)
+}
+
 fn ensure_hook_script(runtime_dir: &Path, filename: &str, body: &str) -> AppResult<PathBuf> {
     let path = runtime_dir.join(filename);
     fs::write(&path, body)?;
@@ -638,7 +773,9 @@ fn is_hook_installed(settings_path: &Path, event: &str, script_path: &Path) -> A
     else {
         return Ok(false);
     };
-    Ok(arr.iter().any(|e| has_command_path(e, script_path)))
+    Ok(arr
+        .iter()
+        .any(|e| has_command_path(e, script_path) || has_bridge_command(e, bridge_mode(event))))
 }
 
 /// Does this settings entry point at our script? Matches BOTH command formats:
@@ -1121,8 +1258,8 @@ mod tests {
 
         // Fresh install → canonical entry, once.
         let mut settings = json!({});
-        upsert_hook(&mut settings, "UserPromptSubmit", script);
-        upsert_hook(&mut settings, "UserPromptSubmit", script); // idempotent
+        upsert_hook(&mut settings, "UserPromptSubmit", script, None);
+        upsert_hook(&mut settings, "UserPromptSubmit", script, None); // idempotent
         let arr = settings
             .pointer("/hooks/UserPromptSubmit")
             .unwrap()
@@ -1146,7 +1283,7 @@ mod tests {
                 { "matcher": "*", "hooks": [{ "type": "command", "command": "some-other-tool" }] }
             ]}
         });
-        upsert_hook(&mut settings, "PreToolUse", script);
+        upsert_hook(&mut settings, "PreToolUse", script, None);
         let arr = settings
             .pointer("/hooks/PreToolUse")
             .unwrap()
@@ -1193,7 +1330,7 @@ mod tests {
                 { "matcher": "*", "hooks": [{ "type": "command", "command": "/x/userprompt-hook.cjs" }] }
             ]}
         });
-        upsert_hook(&mut claude_settings, "PreToolUse", &pretool_script);
+        upsert_hook(&mut claude_settings, "PreToolUse", &pretool_script, None);
         write_settings_atomic(&claude, &claude_settings).unwrap();
         fs::create_dir_all(codex.parent().unwrap()).unwrap();
         write_settings_atomic(
@@ -1204,7 +1341,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(sync_hooks_between(&claude, &codex, &pairs).unwrap(), 2);
+        assert_eq!(
+            sync_hooks_between(&claude, &codex, &pairs, None).unwrap(),
+            2
+        );
         assert!(is_hook_installed(&codex, "UserPromptSubmit", &prompt_script).unwrap());
         assert!(is_hook_installed(&codex, "PreToolUse", &pretool_script).unwrap());
         assert!(
@@ -1225,11 +1365,17 @@ mod tests {
         );
 
         // Idempotent: nothing missing ⇒ no write reported.
-        assert_eq!(sync_hooks_between(&claude, &codex, &pairs).unwrap(), 0);
+        assert_eq!(
+            sync_hooks_between(&claude, &codex, &pairs, None).unwrap(),
+            0
+        );
 
         // A codex file that doesn't exist yet is created from scratch.
         let fresh = base.join("fresh").join("hooks.json");
-        assert_eq!(sync_hooks_between(&claude, &fresh, &pairs).unwrap(), 2);
+        assert_eq!(
+            sync_hooks_between(&claude, &fresh, &pairs, None).unwrap(),
+            2
+        );
         assert!(is_hook_installed(&fresh, "PreToolUse", &pretool_script).unwrap());
 
         let _ = fs::remove_dir_all(&base);
@@ -1244,6 +1390,66 @@ mod tests {
         assert!(has_command_path(&legacy, script));
         assert!(has_command_path(&canonical, script));
         assert!(!has_command_path(&other, script));
+    }
+
+    #[test]
+    fn upsert_with_binary_writes_the_bridge_command_and_migrates_the_node_form() {
+        let script = Path::new("/x/userprompt-hook.cjs");
+        let binary = Path::new("/cache/bin/hook-bridge");
+        // Existing install in the node form.
+        let mut settings = json!({});
+        upsert_hook(&mut settings, "UserPromptSubmit", script, None);
+        let arr = settings
+            .pointer("/hooks/UserPromptSubmit")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 1);
+        assert!(has_command_path(&arr[0], script));
+        // Re-install with the binary available: migrated, not duplicated.
+        upsert_hook(&mut settings, "UserPromptSubmit", script, Some(binary));
+        let arr = settings
+            .pointer("/hooks/UserPromptSubmit")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 1, "node-form entry migrated, not duplicated");
+        assert!(has_bridge_command(&arr[0], "userprompt"));
+        // Idempotent on the bridge form too.
+        upsert_hook(&mut settings, "UserPromptSubmit", script, Some(binary));
+        assert_eq!(
+            settings
+                .pointer("/hooks/UserPromptSubmit")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        // And a binary that MOVED (old cache path) is migrated as well.
+        let moved = Path::new("/elsewhere/bin/hook-bridge");
+        upsert_hook(&mut settings, "UserPromptSubmit", script, Some(moved));
+        let arr = settings
+            .pointer("/hooks/UserPromptSubmit")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 1);
+        let cmd = arr[0]["hooks"][0]["command"].as_str().unwrap();
+        assert!(cmd.starts_with("\"/elsewhere/"));
+    }
+
+    #[test]
+    fn bridge_entries_read_as_installed_and_uninstall_cleanly() {
+        let entry = json!({ "hooks": [{ "type": "command",
+            "command": "\"/cache/bin/hook-bridge\" pretooluse" }] });
+        assert!(has_bridge_command(&entry, "pretooluse"));
+        assert!(!has_bridge_command(&entry, "stop"));
+        // Mode must be the trailing word — a path merely containing the name
+        // does not match another mode's entry.
+        let other = json!({ "hooks": [{ "type": "command",
+            "command": "node \"/x/hook-bridge-notes.cjs\"" }] });
+        assert!(!has_bridge_command(&other, "pretooluse"));
     }
 
     #[test]

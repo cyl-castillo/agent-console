@@ -2415,6 +2415,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hook-bridge"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "html5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

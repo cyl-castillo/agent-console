@@ -43,3 +43,4 @@ Thumbs.db
 
 # Testigo proof packets are local export artifacts; PRs carry them in the body
 proofpacks/
+src-tauri/binaries/
