@@ -9602,3 +9602,42 @@ select:focus-visible,
   color: var(--text-muted);
   margin-top: 6px;
 }
+
+/* --- First-run welcome wizard --- */
+.welcome-wizard {
+  max-width: 480px;
+}
+.wizard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.wizard-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wizard-choice {
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev-1);
+  cursor: pointer;
+}
+.wizard-choice:hover {
+  border-color: var(--accent);
+}
+.wizard-choice-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.wizard-choice-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.wizard-skip {
+  align-self: flex-start;
+}

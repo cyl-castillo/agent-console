@@ -29,17 +29,25 @@ export async function resolveLoginCmd(profile: AgentProfile): Promise<string> {
 /// One-click login repair: open a terminal session that runs the engine's
 /// interactive login flow (claude / codex login). The OAuth dance needs a
 /// browser and a human — the app's job is putting you one click away from it.
-export function startLoginSession(agent: AgentKind): void {
+/// Works before any project is open (the first-run wizard's login step): the
+/// session falls back to the user's home directory.
+export async function startLoginSession(agent: AgentKind): Promise<void> {
   const project = useSessionStore.getState().project;
   const toast = useToastStore.getState();
-  if (!project) {
-    toast.show("Open a project first", "error");
-    return;
+  let cwd = project?.root;
+  if (!cwd) {
+    try {
+      const { homeDir } = await import("@tauri-apps/api/path");
+      cwd = await homeDir();
+    } catch {
+      toast.show("Couldn't resolve a directory for the login terminal", "error");
+      return;
+    }
   }
   const profile = profileFor(agent);
   const terminals = useTerminalsStore.getState();
   terminals.add(
-    project.root,
+    cwd,
     `${profile.binName} login`,
     undefined,
     agent,
