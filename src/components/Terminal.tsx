@@ -258,12 +258,23 @@ export function Terminal({ session, visible }: Props) {
         return;
       }
 
-      // Auto-launch the session's agent. The profile owns how the command is
-      // built (resume strategy, model/tuning encoding) and validates that any
-      // interpolated model value is shell-safe before it reaches the PTY. We
-      // type the command as text into the login-shell PTY, which resolves the
-      // bare binary (`claude`/`codex`) from the user's PATH.
-      if (termId) {
+      // Plain-shell session (setup doctor installer): type the command WITHOUT
+      // Enter — the user reads it, can edit it, and presses Enter themselves.
+      // No agent is ever auto-launched in these sessions.
+      if (termId && session.shellCmd) {
+        const tid = termId;
+        const cmd = session.shellCmd.trim();
+        setTimeout(() => {
+          if (disposed) return;
+          term.write(`\x1b[90m── review, edit if you like, then press Enter ──\x1b[0m\r\n`);
+          ipc.termWrite(tid, cmd).catch(() => {});
+        }, 600);
+      } else if (termId) {
+        // Auto-launch the session's agent. The profile owns how the command is
+        // built (resume strategy, model/tuning encoding) and validates that any
+        // interpolated model value is shell-safe before it reaches the PTY. We
+        // type the command as text into the login-shell PTY, which resolves the
+        // bare binary (`claude`/`codex`) from the user's PATH.
         const profile = profileFor(session.agent);
         const {
           cmd: launchCmd,

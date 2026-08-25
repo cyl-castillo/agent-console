@@ -54,6 +54,10 @@ export interface TerminalSession {
   /// Run the profile's loginCmd instead of the normal agent launch — the
   /// "fix login" flow. Transient by nature; never persisted.
   loginOnly?: boolean;
+  /// Plain-shell session: type this command into the terminal WITHOUT Enter
+  /// and never auto-launch an agent — the review-first contract for the setup
+  /// doctor's installers. Transient; never persisted.
+  shellCmd?: string;
   /// Archived = hidden from the main list, shown in the History section.
   archived?: boolean;
   /// Last real activity; drives auto-archiving of stale stopped sessions.
@@ -81,6 +85,7 @@ interface TerminalsState {
     setupCmd?: string,
     seedPrompt?: string,
     loginOnly?: boolean,
+    shellCmd?: string,
   ) => string;
   /// Marks a stopped session as live again so Terminal mounts and spawns.
   resume: (id: string) => void;
@@ -180,7 +185,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     set({ projectRoot: null, sessions: [], activeId: null, ready: false });
   },
 
-  add: (cwd, name, model, agent, worktree, setupCmd, seedPrompt, loginOnly) => {
+  add: (cwd, name, model, agent, worktree, setupCmd, seedPrompt, loginOnly, shellCmd) => {
     const id = genId();
     const { sessions } = get();
     const session: TerminalSession = {
@@ -197,6 +202,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       setupCmd,
       seedPrompt,
       loginOnly,
+      shellCmd,
       lastActiveMs: Date.now(),
     };
     set({ sessions: [...sessions, session], activeId: id });

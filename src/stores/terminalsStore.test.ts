@@ -113,6 +113,29 @@ describe("persist payload", () => {
     expect(liveOne.scrollback).toBe("fresh bytes");
   });
 
+  it("shellCmd rides the session but never the persisted payload", async () => {
+    world.listResult = [];
+    await useTerminalsStore.getState().hydrate("/repo");
+    const id = useTerminalsStore
+      .getState()
+      .add(
+        "/repo",
+        "install node",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "curl -o- https://example.com/install.sh | bash",
+      );
+    const session = useTerminalsStore.getState().sessions.find((s) => s.id === id)!;
+    expect(session.shellCmd).toContain("install.sh");
+    await useTerminalsStore.getState().persist();
+    const row = world.saved[world.saved.length - 1].payload.find((p) => p.id === id)!;
+    expect("shellCmd" in row).toBe(false);
+  });
+
   it("scrollback is capped, keeping the tail", async () => {
     const id = useTerminalsStore.getState().add("/repo");
     useTerminalsStore.getState().appendOutput(id, "x".repeat(60_000));

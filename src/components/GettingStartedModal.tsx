@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 
 import { Icon } from "./Icon";
 import { Modal } from "./Modal";
@@ -8,6 +8,7 @@ import { useAdvisorStore } from "../stores/advisorStore";
 import { useSkillsStore } from "../stores/skillsStore";
 import { useSchedulerStore } from "../stores/schedulerStore";
 import { usePreflightStore, toolStatus } from "../stores/preflightStore";
+import { SetupDoctor } from "./SetupDoctor";
 import type { WorkbenchTab } from "../lib/workbenchTabs";
 
 interface Props {
@@ -24,6 +25,8 @@ interface Step {
   description: string;
   done: boolean;
   action?: { label: string; onClick: () => void };
+  /// Rich content rendered under the description (e.g. the setup doctor).
+  detail?: ReactNode;
 }
 
 export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
@@ -57,8 +60,9 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
         key: "requirements",
         title: "Install the requirements",
         description:
-          "You need the Claude CLI (`npm i -g @anthropic-ai/claude-code`, then run `claude` once to log in) and Node ≥ 20.",
+          "The doctor below checks everything the console needs and hands you the official installer for anything missing.",
         done: requirementsReady,
+        detail: <SetupDoctor />,
       },
       {
         key: "open-project",
@@ -141,6 +145,7 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
           <div className="gs-step-body">
             <div className="gs-step-title">{step.title}</div>
             <div className="gs-step-desc">{step.description}</div>
+            {step.detail}
           </div>
           {step.action && !step.done && (
             <button className="wb-cta wb-cta-sm" onClick={step.action.onClick}>
