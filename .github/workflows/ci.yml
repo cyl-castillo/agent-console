@@ -57,6 +57,15 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      # tauri-build validates externalBin paths at compile time, so the
+      # sidecar must exist before any cargo check/clippy/test of the app.
+      - name: Build hook-bridge sidecar
+        working-directory: src-tauri
+        run: |
+          cargo build -p hook-bridge --release
+          mkdir -p binaries
+          cp target/release/hook-bridge binaries/hook-bridge-x86_64-unknown-linux-gnu
+
       - name: Format check
         working-directory: src-tauri
         run: cargo fmt --check
