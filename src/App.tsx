@@ -51,6 +51,8 @@ import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
 import { AboutModal } from "./components/AboutModal";
 import { GettingStartedModal } from "./components/GettingStartedModal";
+import { WelcomeWizard } from "./components/WelcomeWizard";
+import { usePreflightStore, toolStatus } from "./stores/preflightStore";
 import { OnboardingBanner } from "./components/OnboardingBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { CommandPalette } from "./components/CommandPalette";
@@ -108,6 +110,10 @@ export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showGettingStarted, setShowGettingStarted] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const wizardDone = useOnboardingStore((s) => s.wizardDone);
+  const preflight = usePreflightStore((s) => s.result);
+  const checkPreflight = usePreflightStore((s) => s.check);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
@@ -375,10 +381,29 @@ export default function App() {
     void initFeedback();
   }, [initFeedback]);
 
-  // First-time auto-open of the Getting Started guide.
+  // First-time auto-open. If NO agent CLI is installed this machine belongs
+  // to a first-run novice: open the wizard (engine → install → login) instead
+  // of the checklist. The decision waits for the preflight probe — never flash
+  // the wizard on a machine that turns out to be fully set up.
   useEffect(() => {
-    if (!seenWelcome) setShowGettingStarted(true);
-  }, [seenWelcome]);
+    void checkPreflight();
+  }, [checkPreflight]);
+  useEffect(() => {
+    if (wizardDone) {
+      if (!seenWelcome) setShowGettingStarted(true);
+      return;
+    }
+    if (!preflight) return;
+    const noEngine =
+      !toolStatus(preflight, "claude")?.found && !toolStatus(preflight, "codex")?.found;
+    if (noEngine) setShowWizard(true);
+    else if (!seenWelcome) setShowGettingStarted(true);
+  }, [seenWelcome, wizardDone, preflight]);
+  useEffect(() => {
+    const onOpenWizard = () => setShowWizard(true);
+    window.addEventListener("ac:open-wizard", onOpenWizard);
+    return () => window.removeEventListener("ac:open-wizard", onOpenWizard);
+  }, []);
 
   // Mark permissions tab as visited as soon as the user opens it.
   useEffect(() => {
@@ -535,6 +560,7 @@ export default function App() {
           />
         )}
         {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+        {showWizard && <WelcomeWizard onClose={() => setShowWizard(false)} />}
         <UpdateBanner />
         <Toasts />
       </>
@@ -775,6 +801,7 @@ export default function App() {
         />
       )}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+      {showWizard && <WelcomeWizard onClose={() => setShowWizard(false)} />}
       <OnboardingBanner onOpen={() => setShowGettingStarted(true)} />
       <UpdateBanner />
       <ApprovalModal />

@@ -319,6 +319,13 @@ const ACTIONS: PaletteAction[] = [
     run: () => emit("ac:toggle-composer", null),
   },
   {
+    id: "setup.wizard",
+    label: "Run first-run setup wizard",
+    hint: "Guided install + login for a coding agent (claude / codex)",
+    keywords: ["welcome", "wizard", "setup", "install", "onboarding", "first"],
+    run: () => emit("ac:open-wizard", null),
+  },
+  {
     id: "snapshot.restore_latest",
     label: "Restore Latest Snapshot",
     hint: "Discard ALL changes since the latest captured turn (a backup is taken first)",

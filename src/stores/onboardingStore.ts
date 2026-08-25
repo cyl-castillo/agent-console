@@ -22,6 +22,10 @@ export interface OnboardingState {
   visitedProof: boolean;
   /// User dismissed the unobtrusive progress banner.
   bannerDismissed: boolean;
+  /// True once the first-run wizard finished (or was explicitly skipped).
+  /// While false AND no agent CLI is installed, the wizard auto-opens at
+  /// startup instead of the Getting Started guide.
+  wizardDone: boolean;
 }
 
 const DEFAULT: OnboardingState = {
@@ -32,6 +36,7 @@ const DEFAULT: OnboardingState = {
   promptedClaude: false,
   visitedProof: false,
   bannerDismissed: false,
+  wizardDone: false,
 };
 
 function load(): OnboardingState {
@@ -61,6 +66,7 @@ interface Store extends OnboardingState {
   markPromptedClaude: () => void;
   markVisitedProof: () => void;
   dismissBanner: () => void;
+  markWizardDone: () => void;
   reset: () => void;
 }
 
@@ -75,6 +81,7 @@ export const useOnboardingStore = create<Store>((set, get) => {
       promptedClaude: next.promptedClaude,
       visitedProof: next.visitedProof,
       bannerDismissed: next.bannerDismissed,
+      wizardDone: next.wizardDone,
     });
     set(p);
   }
@@ -87,6 +94,7 @@ export const useOnboardingStore = create<Store>((set, get) => {
     markPromptedClaude: () => patch({ promptedClaude: true }),
     markVisitedProof: () => patch({ visitedProof: true }),
     dismissBanner: () => patch({ bannerDismissed: true }),
+    markWizardDone: () => patch({ wizardDone: true }),
     reset: () => {
       persist(DEFAULT);
       set(DEFAULT);

@@ -182,6 +182,12 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       skill: e.skill,
     };
     set((s) => ({ recent: [entry, ...s.recent].slice(0, MAX_RECENT) }));
+    // First prompt EVER on this machine: the event arriving here is live proof
+    // the hook bridges work end-to-end — exactly what the first-run wizard
+    // promised the console would confirm. Say it once.
+    if (!useOnboardingStore.getState().promptedClaude) {
+      useToastStore.getState().show("First prompt captured — the console's bridges work ✓", "info");
+    }
     useOnboardingStore.getState().markPromptedClaude();
     // A submitted prompt means a turn just started — light the "working" pill.
     useAgentStatusStore.getState().markActive();
