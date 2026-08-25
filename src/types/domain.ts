@@ -33,10 +33,26 @@ export interface PreflightTool {
   name: string;
   found: boolean;
   version: string | null;
+  /// Official installer for this OS — present only when the tool is missing.
+  /// Typed into a visible terminal without Enter (review-first), never run
+  /// behind the user's back.
+  fixCommand: string | null;
+  /// Caveat shown next to the fix ("needs Node", "Debian/Ubuntu", …).
+  fixNote: string | null;
+}
+
+/// Login state of an installed engine. `loggedIn: null` = the question could
+/// not be answered (probe timeout, CLI too old) — render as unknown, never as
+/// logged out.
+export interface EngineAuth {
+  engine: string;
+  loggedIn: boolean | null;
+  detail: string | null;
 }
 
 export interface Preflight {
   tools: PreflightTool[];
+  auth: EngineAuth[];
 }
 
 /// Structured login state reported by `claude auth status --json`. The IPC call
