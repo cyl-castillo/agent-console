@@ -21,8 +21,11 @@ const os = require("os");
 const path = require("path");
 const http = require("http");
 
-// The prompt must never wait on us longer than this.
-const INJECT_TIMEOUT_MS = 1500;
+// The prompt must never wait on us longer than this. The request resolves as
+// soon as the server answers (typically ~1.1-1.5s of warm semantic search on
+// modest CPUs), so this cap only bites when the answer would be lost anyway —
+// a tight cap was costing the whole injection, not saving time.
+const INJECT_TIMEOUT_MS = 2500;
 // Below this length a prompt is a nudge ("ok", "dale") — not worth a search.
 const MIN_PROMPT_CHARS = 12;
 
