@@ -63,11 +63,11 @@ jobs:
 
       - name: Clippy
         working-directory: src-tauri
-        run: cargo clippy --lib --bins -- -D warnings
+        run: cargo clippy --workspace --lib --bins -- -D warnings
 
       - name: Tests
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --workspace
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@v2

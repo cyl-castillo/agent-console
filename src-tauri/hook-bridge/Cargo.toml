@@ -1,0 +1,9 @@
+[package]
+name = "hook-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Agent Console native hook bridge — replaces the node .cjs hook scripts"
+
+[dependencies]
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

@@ -4,9 +4,9 @@
   "version": "0.73.0",
   "identifier": "dev.agentconsole.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run sidecar && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run sidecar && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -39,6 +39,7 @@
       "icons/icon.ico"
     ],
     "resources": ["resources/userprompt-hook.cjs"],
+    "externalBin": ["binaries/hook-bridge"],
     "createUpdaterArtifacts": true,
     "macOS": {
       "minimumSystemVersion": "10.15"
