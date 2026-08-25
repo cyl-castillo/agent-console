@@ -253,7 +253,10 @@ mod tests {
         // catalog must never hand a novice the deprecated path.
         for os in ["linux", "macos", "windows"] {
             let (cmd, _) = fix_for("claude", os, true);
-            assert!(!cmd.unwrap().contains("npm"), "claude fix on {os} must not use npm");
+            assert!(
+                !cmd.unwrap().contains("npm"),
+                "claude fix on {os} must not use npm"
+            );
         }
     }
 
