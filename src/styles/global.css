@@ -2293,12 +2293,21 @@ select:focus-visible,
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
 }
+/* Installed but inert — e.g. the CLI does not trust this folder. */
+.wb-status.warn {
+  color: var(--warn);
+  background: var(--warn-12);
+  border: 1px solid var(--warn-25);
+}
 .wb-hint {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-dim);
   margin: 0;
+}
+.wb-hint.wb-warn {
+  color: var(--warn);
 }
 .wb-hint code {
   background: var(--bg-elev-2);

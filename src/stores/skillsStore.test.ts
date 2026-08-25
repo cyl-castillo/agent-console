@@ -12,6 +12,7 @@ vi.mock("../ipc/tauri", () => ({
     // referenced elsewhere in the store but not by the paths under test:
     skillList: vi.fn().mockResolvedValue([]),
     hooksStatus: vi.fn(),
+    hooksTrustStatus: vi.fn(),
     hooksInstall: vi.fn(),
     hooksUninstall: vi.fn(),
     skillRead: vi.fn(),
@@ -29,6 +30,13 @@ vi.mock("./changesStore", () => ({
 const showToast = vi.fn();
 vi.mock("./toastStore", () => ({
   useToastStore: { getState: () => ({ show: showToast }) },
+}));
+
+vi.mock("./learningStore", () => ({
+  useLearningStore: { getState: () => ({ noteCorpusSize: vi.fn() }) },
+}));
+vi.mock("./schedulerStore", () => ({
+  fireSchedulerEvent: vi.fn(),
 }));
 
 import { ipc } from "../ipc/tauri";
@@ -73,6 +81,34 @@ describe("restoreSnapshot (UX P0.1 — undoable restore)", () => {
     expect(store().undoRestoreSha).toBe("previous-undo");
     expect(refresh).not.toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining("Restore failed"), "error");
+  });
+});
+
+describe("refresh (workspace trust is advisory)", () => {
+  const hooksStatus = vi.mocked(ipc.hooksStatus);
+  const trustStatus = vi.mocked(ipc.hooksTrustStatus);
+
+  it("keeps the trust verdict alongside the hook status", async () => {
+    hooksStatus.mockResolvedValueOnce({ installed: true } as never);
+    trustStatus.mockResolvedValueOnce({
+      dir: "/repo",
+      claude: "untrusted",
+      codex: "unknown",
+    });
+
+    await store().refresh();
+
+    expect(store().trust).toEqual({ dir: "/repo", claude: "untrusted", codex: "unknown" });
+  });
+
+  it("still loads skills and hooks when the trust probe fails (older CLI, unreadable store)", async () => {
+    hooksStatus.mockResolvedValueOnce({ installed: true } as never);
+    trustStatus.mockRejectedValueOnce(new Error("no such command"));
+
+    await store().refresh();
+
+    expect(store().hooks).toEqual({ installed: true });
+    expect(store().trust).toBeNull();
   });
 });
 
