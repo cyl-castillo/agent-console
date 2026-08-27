@@ -115,7 +115,8 @@ branch name; you'll see a one-line notice.
 - **Linux**: AppImage / `.deb` / `.rpm` from
   [Releases](https://github.com/cyl-castillo/agent-console/releases/latest), or
   on Arch: `yay -S agent-console-bin`.
-- **Windows**: the `-setup.exe` from Releases. SmartScreen may warn about an
+- **Windows**: `winget install CylCastillo.AgentConsole`, or the `-setup.exe`
+  from Releases. With a browser download, SmartScreen may warn about an
   unknown publisher (the binaries aren't code-signed yet) — "More info → Run
   anyway".
 - **macOS**: download the `.dmg`, drag the app to Applications, then **one
@@ -276,9 +277,11 @@ Not on the list:
 **Early preview**, releasing continuously (see
 [releases](https://github.com/cyl-castillo/agent-console/releases)) with
 auto-update on all three platforms (on Linux, the AppImage self-updates;
-deb/rpm get a download prompt). Single user, local only, no telemetry. Not in
-distribution channels (Snap/Flatpak/Homebrew/MS Store) yet. APIs and event
-names may still change between minor releases.
+deb/rpm get a download prompt). Single user, local only, no telemetry.
+Available on [winget](https://github.com/microsoft/winget-pkgs/tree/master/manifests/c/CylCastillo/AgentConsole)
+and the [AUR](https://aur.archlinux.org/packages/agent-console-bin); not on
+Snap/Flatpak/Homebrew/MS Store yet. APIs and event names may still change
+between minor releases.
 
 ## Support
 
@@ -287,6 +290,31 @@ If Agent Console is useful to you and you'd like to help shape where it goes, yo
 - [Buy Me a Coffee](https://www.buymeacoffee.com/cylcastillo)
 
 Non-financial support also counts: a ⭐ on the repo, a thoughtful issue, a workflow shared in [Discussions](https://github.com/cyl-castillo/agent-console/discussions).
+
+## Code signing policy
+
+Free code signing on Windows provided by [SignPath.io](https://signpath.io/),
+certificate by [SignPath Foundation](https://signpath.org/).
+
+Binaries are built exclusively from the source code in this repository by the
+public [release workflow](.github/workflows/release.yml) on GitHub Actions,
+from a pushed version tag. Every signed release requires manual approval by
+the approver below; nothing is signed automatically.
+
+Team roles:
+
+- **Authors**: repository
+  [contributors](https://github.com/cyl-castillo/agent-console/graphs/contributors)
+- **Reviewers / approvers**: [@cyl-castillo](https://github.com/cyl-castillo)
+  (project maintainer)
+
+### Privacy policy
+
+Agent Console collects no telemetry and transmits no usage data. The app only
+reaches the network to (a) check GitHub Releases for updates, and (b) talk to
+services the user explicitly configures — their own Jira site, their AI agent
+CLIs, their git remotes. Nothing is transferred to other networked systems
+unless requested by the person operating the program.
 
 ## License
 
