@@ -50,6 +50,11 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_stop_autoinstalled() {
                 eprintln!("hooks: stop auto-install failed: {e}");
             }
+            // Turn-died-on-an-API-error observer (Claude only), same rollout
+            // pattern as Stop: without it a turn the API refused never closes.
+            if let Err(e) = state.hooks.ensure_stopfailure_autoinstalled() {
+                eprintln!("hooks: stopfailure auto-install failed: {e}");
+            }
             // Tool-result observer (Testigo turn evidence), same rollout
             // pattern as Stop.
             if let Err(e) = state.hooks.ensure_posttooluse_autoinstalled() {

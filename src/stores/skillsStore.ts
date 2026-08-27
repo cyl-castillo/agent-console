@@ -12,6 +12,7 @@ import { useAgentStatusStore } from "./agentStatusStore";
 import { useTerminalsStore } from "./terminalsStore";
 import { notify, windowIsFocused } from "../lib/notify";
 import { reconcileSwitchedModel } from "../agents/profiles";
+import { describeTurnFailure } from "../lib/turnFailure";
 
 /// What the user (or agent in the terminal) has been doing — captured from
 /// the UserPromptSubmit hook stream.
@@ -267,6 +268,23 @@ export async function attachSkillsListeners(): Promise<UnlistenFn> {
       if (!session) return;
       const next = reconcileSwitchedModel(session.agent, session.model, model);
       if (next !== null) useTerminalsStore.getState().setModel(termId, next);
+    }),
+  );
+  // A turn the API refused never fires Stop — Claude sends StopFailure instead
+  // (2.1.78+). Without this the pill sat "working" until the decay window gave
+  // up and the reason only existed as text scrolling past in the terminal.
+  offs.push(
+    await listen<{ termId?: string; error?: string }>("hook://turn_failed", (e) => {
+      useAgentStatusStore.getState().markIdle();
+      const termId = e.payload?.termId;
+      const name = termId
+        ? useTerminalsStore.getState().sessions.find((t) => t.id === termId)?.name
+        : undefined;
+      const { message } = describeTurnFailure(e.payload?.error, name);
+      // Error toasts persist until dismissed, so the reason is still there when
+      // the user comes back to a session that stopped while they were away.
+      useToastStore.getState().show(message, "error");
+      if (!windowIsFocused()) notify("Agent Console — turn stopped", message);
     }),
   );
   return () => {
