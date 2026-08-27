@@ -471,6 +471,8 @@ select:focus-visible,
   grid-area: center;
   background: var(--bg);
   border-right: 1px solid var(--border);
+  /* Anchor for the onboarding pill — keeps it out of the side panels. */
+  position: relative;
 }
 .panel.right {
   grid-area: right;
@@ -5322,7 +5324,10 @@ select:focus-visible,
 
 /* ===== Onboarding banner ===== */
 .onboarding-banner {
-  position: fixed;
+  /* Absolute within .panel.center: floating over the workbench panel it used
+     to cover interactive controls pinned to the panel's bottom (e.g. Proof's
+     "sign & export"). Over the terminal/diff there is nothing clickable to hide. */
+  position: absolute;
   bottom: 12px;
   right: 12px;
   display: inline-flex;
