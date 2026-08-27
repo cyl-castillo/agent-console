@@ -738,6 +738,7 @@ export default function App() {
           <div className="tab-pane" style={{ display: tab === "preview" ? "flex" : "none" }}>
             <Preview />
           </div>
+          <OnboardingBanner onOpen={() => setShowGettingStarted(true)} />
         </main>
 
         <aside className="panel right">
@@ -802,7 +803,6 @@ export default function App() {
       )}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
       {showWizard && <WelcomeWizard onClose={() => setShowWizard(false)} />}
-      <OnboardingBanner onOpen={() => setShowGettingStarted(true)} />
       <UpdateBanner />
       <ApprovalModal />
       <CommandPalette />
