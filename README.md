@@ -12,6 +12,8 @@ protocol — prompts, human approvals, tool results and per-turn diffs land in a
 hash-chained evidence ledger, exportable as signed proof packets anyone can
 verify in a browser.
 
+![A full agent turn in Agent Console: the terminal shows the agent fixing a failing test and finding a second bug in the test runner, while the Proof panel shows the verified hash chain with 12 approvals and 38 events](docs/shots/hero-session.png)
+
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │ my-repo · javascript · vite · /home/me/code/my-repo                  │
@@ -109,6 +111,15 @@ surviving `room/<id>` branch, so both **Share** and **Sync** work again — the 
 cowork loop survives across sessions. If the worktree can't be remounted (e.g. the
 branch was deleted), the room comes back read-only but **Share** still works by
 branch name; you'll see a one-line notice.
+
+## Screenshots
+
+| | |
+|:--:|:--:|
+| ![Per-tool approval modal showing an Edit with its inline diff, Deny / Always / Approve once buttons, keyboard shortcuts and a live countdown](docs/shots/approval-modal.png) | ![Changes tab: split git diff of the agent's edit with file list, commit box and file inspector](docs/shots/changes-diff.png) |
+| **Approve before it lands** — every command and edit stops at a modal with the diff inline, keyboard-first. | **Review every diff** — split view per file, revert anytime, commit when *you* decide. |
+| ![Testigo verifier page in a browser reporting a valid Ed25519/DSSE signature and an intact hash chain for an exported proof packet](docs/shots/proof-verify.png) | ![A room where Claude (Opus) and Codex hold one shared conversation about a geometry bug, with turn counter and live cost](docs/shots/room-multi-agent.png) |
+| **Proof packets verify in any browser** — signature, hash chain, and honest notes about what redaction does and doesn't prove. | **Rooms** — you + N agents (mixed engines) on one problem; here Opus and Codex converge on a fix. |
 
 ## Installing
 

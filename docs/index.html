@@ -489,27 +489,43 @@
       <div class="shots">
         <figure class="lead">
           <div class="frame">
-            <span class="ph">Multi-agent room</span>
-            <!-- shots/room-multi-agent.png -->
-            <img src="shots/room-multi-agent.png" alt="A room where two Claude agents (Opus and Sonnet) hold one shared conversation, converging on a fix with a change summary and cost" width="1534" height="773" loading="lazy" onerror="this.closest('figure').remove()" />
+            <span class="ph">A full agent turn</span>
+            <!-- shots/hero-session.png -->
+            <img src="shots/hero-session.png" alt="A full agent turn: the terminal shows the agent fixing a failing test and finding a second bug in the test runner, while the Proof panel shows the verified hash chain with 12 approvals and 38 events" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
-          <figcaption>Multi-agent room — you and several agents on one problem, one shared thread</figcaption>
+          <figcaption>A full turn, witnessed — the agent fixes a failing test; the Proof panel keeps the verified chain</figcaption>
+        </figure>
+        <figure>
+          <div class="frame">
+            <span class="ph">Approve before it lands</span>
+            <!-- shots/approval-modal.png -->
+            <img src="shots/approval-modal.png" alt="Per-tool approval modal showing an Edit with its inline diff, Deny / Always / Approve once buttons, keyboard shortcuts and a live countdown" width="1213" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
+          </div>
+          <figcaption>Approve before it lands — every command and edit stops at a modal with the diff inline</figcaption>
         </figure>
         <figure>
           <div class="frame">
             <span class="ph">Review the diff</span>
-            <!-- shots/worktree-review.png -->
-            <img src="shots/worktree-review.png" alt="Split git diff of the agents' work with a file tree and inspector — review before merge" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
+            <!-- shots/changes-diff.png -->
+            <img src="shots/changes-diff.png" alt="Split git diff of the agent's edit with a file list, commit box and file inspector — review before merge" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
           <figcaption>Review every diff before it merges — split view, per file, revert anytime</figcaption>
         </figure>
         <figure>
           <div class="frame">
-            <span class="ph">Set up the room</span>
-            <!-- shots/room-setup.png -->
-            <img src="shots/room-setup.png" alt="Room setup: pick the agents, their engine (Claude or Codex) and model, optional roles, turn and token budgets, and whether they may edit" width="1534" height="652" loading="lazy" onerror="this.closest('figure').remove()" />
+            <span class="ph">Verify the proof</span>
+            <!-- shots/proof-verify.png -->
+            <img src="shots/proof-verify.png" alt="Testigo verifier page in a browser reporting a valid Ed25519/DSSE signature and an intact hash chain for an exported proof packet" width="1300" height="858" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
-          <figcaption>Set up the room — pick agents, engine (Claude or Codex), and who can edit</figcaption>
+          <figcaption>Proof packets verify in any browser — signature, hash chain, honest redaction notes</figcaption>
+        </figure>
+        <figure>
+          <div class="frame">
+            <span class="ph">Multi-agent room</span>
+            <!-- shots/room-multi-agent.png -->
+            <img src="shots/room-multi-agent.png" alt="A room where Claude (Opus) and Codex hold one shared conversation about a geometry bug, with turn counter and live cost" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
+          </div>
+          <figcaption>Multi-agent room — you and several agents (mixed engines) on one problem, one shared thread</figcaption>
         </figure>
       </div>
     </div>
