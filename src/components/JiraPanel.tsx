@@ -9,6 +9,7 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useRoleStore } from "../stores/roleStore";
 import { startSessionForIssue } from "../lib/startSessionForIssue";
 import {
+  applySprintScope,
   dueState,
   formatSecondsForWorklog,
   groupIssuesByStatus,
@@ -17,6 +18,8 @@ import {
   jqlForRole,
   priorityLevel,
   ROLE_LABELS,
+  sprintScopeHas,
+  toggleSprintScope,
   typeDotClass,
   type ProjectRole,
 } from "../lib/jira";
@@ -164,16 +167,20 @@ function IssueList() {
   const hasCustomJql = useRoleStore((s) => s.hasCustomJql);
   const setJqlFor = useRoleStore((s) => s.setJqlFor);
   const setJql = useJiraStore((s) => s.setJql);
+  // Selector (not a bare method grab) so a scope toggle re-renders this list.
+  const sprintScope = useRoleStore((s) => (projectRoot ? s.sprintScopeFor(projectRoot) : "all"));
+  const setSprintScopeFor = useRoleStore((s) => s.setSprintScopeFor);
   const role = projectRoot ? roleFor(projectRoot) : "developer";
   const effectiveJql = projectRoot ? jqlFor(projectRoot, role) : jqlForRole(role);
+  const scopedJql = applySprintScope(effectiveJql, sprintScope);
   const [jqlOpen, setJqlOpen] = useState(false);
   const [jqlDraft, setJqlDraft] = useState<string | null>(null);
 
-  // The store fetches with whatever JQL the current (project, role) demands;
-  // this also covers the very first load and role/JQL switches.
+  // The store fetches with whatever JQL the current (project, role, sprint
+  // scope) demands; this also covers the very first load and switches.
   useEffect(() => {
-    void setJql(effectiveJql);
-  }, [effectiveJql, setJql]);
+    void setJql(scopedJql);
+  }, [scopedJql, setJql]);
 
   const pickRole = (r: ProjectRole) => {
     if (!projectRoot) return;
@@ -234,6 +241,39 @@ function IssueList() {
           jql
         </button>
       </div>
+
+      <div className="jira-sprint-row">
+        <span className="jira-role-label">sprint</span>
+        <label
+          className="jira-sprint-check"
+          title="Only issues in the currently active sprint(s) — applied on top of the JQL"
+        >
+          <input
+            type="checkbox"
+            checked={sprintScopeHas(sprintScope, "active")}
+            onChange={() =>
+              projectRoot &&
+              setSprintScopeFor(projectRoot, toggleSprintScope(sprintScope, "active"))
+            }
+          />
+          active sprint
+        </label>
+        <label
+          className="jira-sprint-check"
+          title="Only backlog issues (not in an active or future sprint) — applied on top of the JQL"
+        >
+          <input
+            type="checkbox"
+            checked={sprintScopeHas(sprintScope, "backlog")}
+            onChange={() =>
+              projectRoot &&
+              setSprintScopeFor(projectRoot, toggleSprintScope(sprintScope, "backlog"))
+            }
+          />
+          backlog
+        </label>
+      </div>
+
       {jqlOpen && (
         <div className="jira-jql-editor">
           <textarea

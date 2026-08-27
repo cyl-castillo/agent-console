@@ -19,7 +19,7 @@ import { useRoleStore } from "./roleStore";
 
 beforeEach(() => {
   storage.map.clear();
-  useRoleStore.setState({ roles: {}, jqls: {} });
+  useRoleStore.setState({ roles: {}, jqls: {}, sprintScopes: {} });
 });
 
 describe("per-project role", () => {
@@ -61,5 +61,25 @@ describe("per-(project, role) JQL override", () => {
     s.setJqlFor("/repo", "qa", "custom2");
     s.setJqlFor("/repo", "qa", null);
     expect(useRoleStore.getState().jqlFor("/repo", "qa")).toBe(jqlForRole("qa"));
+  });
+});
+
+describe("per-project sprint scope", () => {
+  it("defaults to 'all', persists per project, and 'all' cleans storage up", () => {
+    const s = useRoleStore.getState();
+    expect(s.sprintScopeFor("/repo")).toBe("all");
+
+    s.setSprintScopeFor("/repo", "active");
+    expect(useRoleStore.getState().sprintScopeFor("/repo")).toBe("active");
+    expect(useRoleStore.getState().sprintScopeFor("/other")).toBe("all");
+    // Survives a fresh store via localStorage.
+    useRoleStore.setState({ sprintScopes: {} });
+    expect(useRoleStore.getState().sprintScopeFor("/repo")).toBe("active");
+
+    useRoleStore.getState().setSprintScopeFor("/repo", "all");
+    expect(storage.map.has("agent-console:jira-sprint:/repo")).toBe(false);
+    // Junk in storage degrades to 'all'.
+    storage.map.set("agent-console:jira-sprint:/tampered", "everything");
+    expect(useRoleStore.getState().sprintScopeFor("/tampered")).toBe("all");
   });
 });

@@ -24,6 +24,44 @@ export function jqlForRole(role: ProjectRole): string {
   return role === "po" || role === "pm" ? JQL_ALL : JQL_OWN;
 }
 
+/// Opt-in sprint scoping for the Queue, composed on top of the effective JQL
+/// (preset or hand-tuned): the active sprint, the backlog, or both. "all"
+/// leaves the JQL untouched.
+export type SprintScope = "all" | "active" | "backlog" | "active+backlog";
+
+export function sprintScopeHas(scope: SprintScope, part: "active" | "backlog"): boolean {
+  return scope === part || scope === "active+backlog";
+}
+
+export function toggleSprintScope(scope: SprintScope, part: "active" | "backlog"): SprintScope {
+  const active = sprintScopeHas(scope, "active") !== (part === "active");
+  const backlog = sprintScopeHas(scope, "backlog") !== (part === "backlog");
+  return active && backlog ? "active+backlog" : active ? "active" : backlog ? "backlog" : "all";
+}
+
+// Backlog matches the board's notion: no sprint at all, or only closed sprints
+// (a completed sprint stays in the field when its leftovers return to the
+// backlog, so `sprint is EMPTY` alone would miss them). Both together reduce
+// to "everything not parked in a future-only sprint".
+const SPRINT_CLAUSES: Record<SprintScope, string | null> = {
+  all: null,
+  active: "sprint in openSprints()",
+  backlog: "(sprint is EMPTY OR sprint not in (openSprints(), futureSprints()))",
+  "active+backlog": "(sprint is EMPTY OR sprint not in futureSprints())",
+};
+
+/// AND the sprint clause into a JQL, preserving its ORDER BY. The base WHERE
+/// is parenthesized so a hand-tuned "a OR b" keeps its meaning.
+export function applySprintScope(jql: string, scope: SprintScope): string {
+  const clause = SPRINT_CLAUSES[scope];
+  if (!clause) return jql;
+  const m = /\border\s+by\b/i.exec(jql);
+  const where = (m ? jql.slice(0, m.index) : jql).trim();
+  const order = m ? jql.slice(m.index).trim() : null;
+  const scoped = where ? `(${where}) AND ${clause}` : clause;
+  return order ? `${scoped} ${order}` : scoped;
+}
+
 /// What the user is most likely doing with a ticket, inferred from its stage.
 /// Drives the prompt an agent session is seeded with — reviewing a ticket in
 /// "Code Review" is a different job than implementing one in "To Do".
