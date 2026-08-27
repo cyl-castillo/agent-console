@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applySprintScope,
   intentForIssue,
   seedForIssue,
   groupIssuesByStatus,
@@ -9,6 +10,7 @@ import {
   dueState,
   typeDotClass,
   jqlForRole,
+  toggleSprintScope,
 } from "./jira";
 import type { JiraIssue } from "../types/domain";
 
@@ -190,5 +192,35 @@ describe("roles", () => {
     for (const r of ["analyst", "po", "pm"] as const) {
       expect(seedForIssue(issue, r).toLowerCase()).toContain("don't change any");
     }
+  });
+});
+
+describe("sprint scope", () => {
+  it("toggles between the four scopes like two checkboxes", () => {
+    expect(toggleSprintScope("all", "active")).toBe("active");
+    expect(toggleSprintScope("active", "backlog")).toBe("active+backlog");
+    expect(toggleSprintScope("active+backlog", "active")).toBe("backlog");
+    expect(toggleSprintScope("backlog", "backlog")).toBe("all");
+  });
+
+  it("'all' leaves the JQL untouched", () => {
+    expect(applySprintScope(jqlForRole("developer"), "all")).toBe(jqlForRole("developer"));
+  });
+
+  it("ANDs the clause before ORDER BY, parenthesizing the base WHERE", () => {
+    const scoped = applySprintScope("a = 1 OR b = 2 ORDER BY rank", "active");
+    expect(scoped).toBe("(a = 1 OR b = 2) AND sprint in openSprints() ORDER BY rank");
+  });
+
+  it("handles JQL without an ORDER BY", () => {
+    expect(applySprintScope("project = X", "backlog")).toBe(
+      "(project = X) AND (sprint is EMPTY OR sprint not in (openSprints(), futureSprints()))",
+    );
+  });
+
+  it("both checkboxes = active sprint or backlog, i.e. not future-only", () => {
+    const scoped = applySprintScope(jqlForRole("po"), "active+backlog");
+    expect(scoped).toContain("AND (sprint is EMPTY OR sprint not in futureSprints())");
+    expect(scoped.endsWith("ORDER BY priority DESC, duedate ASC, updated DESC")).toBe(true);
   });
 });

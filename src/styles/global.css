@@ -9067,6 +9067,29 @@ select:focus-visible,
 .jira-role-adv.custom {
   color: var(--accent);
 }
+.jira-sprint-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0;
+}
+.jira-sprint-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+.jira-sprint-check:hover {
+  color: var(--text);
+}
+.jira-sprint-check input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .jira-jql-editor {
   margin: 4px 0;
 }
