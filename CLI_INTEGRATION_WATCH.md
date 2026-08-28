@@ -89,7 +89,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 | 2026-08-19 | W4 — el cierre de turno lleva las palabras del agente (`last_assistant_message` → `summary` en el ledger) | #150 |
 | 2026-08-27 | M2 — `StopFailure` → evento `turn_failed`: el turno que la API rechaza CIERRA (con su diff) y la UI dice por qué | #169 |
 | 2026-08-28 | M5 — hyperlinks OSC 8: `linkHandler` propio (solo http(s), abre en el navegador real, hint al hover) en vez del `confirm` + `window.open` muerto de xterm | #170 |
-| 2026-08-31 | M8 — `PostModelSwitch` → evento `model_switch`: el pill de modelo deja de mostrar intención y muestra lo que el agente realmente corre (y deja de arrastrar el resume al modelo viejo) | (este PR) |
+| 2026-08-31 | M8 — `PostModelSwitch` → evento `model_switch`: el pill de modelo deja de mostrar intención y muestra lo que el agente realmente corre (y deja de arrastrar el resume al modelo viejo) | #172 |
 
 ## Protocolo de la tarea diaria
 

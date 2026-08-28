@@ -12,10 +12,12 @@ import { useToastStore } from "../stores/toastStore";
 import { profileFor } from "../agents/profiles";
 import { resolveLoginCmd } from "../lib/loginSession";
 import { clipboardActionFor } from "./terminalClipboard";
+import { createTerminalLinkHandler, type TerminalLinkHint } from "../lib/terminalLinks";
 import {
   readText as clipboardReadText,
   writeText as clipboardWriteText,
 } from "@tauri-apps/plugin-clipboard-manager";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 /// Detail for the `ac:term-input` window event: write `data` into the PTY of
 /// the session whose id matches. Used by the StatusBar model pill to send
@@ -76,6 +78,9 @@ export function Terminal({ session, visible }: Props) {
   // — not at click time. xterm clears its selection on the next pointer event,
   // so any click-time read races against that; this never loses.
   const selSnapshotRef = useRef<{ text: string; ts: number }>({ text: "", ts: 0 });
+  // Target of the OSC 8 hyperlink under the cursor (the agent CLIs emit these
+  // for docs/PR links), shown as a hint so a click is never a blind jump.
+  const [linkHint, setLinkHint] = useState<TerminalLinkHint | null>(null);
 
   // Spawn once per session id.
   useEffect(() => {
@@ -89,6 +94,19 @@ export function Terminal({ session, visible }: Props) {
       cursorBlink: true,
       convertEol: true,
       scrollback: 5000,
+      // OSC 8 hyperlinks. Without a handler xterm confirms with a scary native
+      // dialog and then calls window.open(), which this webview blocks — the
+      // link is dead. Ours validates the scheme and hands it to the OS browser.
+      linkHandler: createTerminalLinkHandler({
+        open: openUrl,
+        onHover: setLinkHint,
+        onBlocked: (text) =>
+          useToastStore
+            .getState()
+            .show(`Blocked a terminal link that isn't http(s): ${text.slice(0, 80)}`, "error"),
+        onError: (url) =>
+          useToastStore.getState().show(`Couldn't open ${url} in your browser`, "error"),
+      }),
     });
     termRef.current = term;
 
@@ -491,6 +509,12 @@ export function Terminal({ session, visible }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [visible]);
 
+  // A hidden pane gets no `leave` from xterm, so the hint of the link the
+  // cursor left behind would hang over whatever the user switched to.
+  useEffect(() => {
+    if (!visible) setLinkHint(null);
+  }, [visible]);
+
   // Live-swap xterm theme on toggle so it matches the rest of the UI.
   useEffect(() => {
     const t = termRef.current;
@@ -567,6 +591,20 @@ export function Terminal({ session, visible }: Props) {
           });
         }}
       />
+      {linkHint && visible && (
+        <div
+          className="term-link-hint"
+          style={{
+            // Clamped like the context menu so it can't open off-screen, and
+            // lifted above the cursor so it doesn't sit on the link itself.
+            left: Math.min(linkHint.x, window.innerWidth - 380),
+            top: Math.max(4, linkHint.y - 30),
+          }}
+        >
+          <span className="term-link-url">{linkHint.url}</span>
+          <span className="term-link-note">click to open in your browser</span>
+        </div>
+      )}
       {menu && (
         <div className="term-menu" style={{ left: menu.x, top: menu.y }} role="menu">
           <button role="menuitem" disabled={!menu.hasSelection} onClick={menuCopy}>
