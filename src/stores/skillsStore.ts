@@ -11,6 +11,7 @@ import { useToastStore } from "./toastStore";
 import { useAgentStatusStore } from "./agentStatusStore";
 import { useTerminalsStore } from "./terminalsStore";
 import { notify, windowIsFocused } from "../lib/notify";
+import { reconcileSwitchedModel } from "../agents/profiles";
 
 /// What the user (or agent in the terminal) has been doing — captured from
 /// the UserPromptSubmit hook stream.
@@ -246,6 +247,26 @@ export async function attachSkillsListeners(): Promise<UnlistenFn> {
           name ? `${name} is ready for you` : "The agent finished its turn",
         );
       }
+    }),
+  );
+  // PostModelSwitch (Claude 2.1.251+) is the first signal that tells us what the
+  // agent is REALLY running. Until now the model pill could only show intent —
+  // the last value we asked for — and the two drift apart on a `/model` typed in
+  // the terminal, on our own `/model` push landing while the agent was busy, and
+  // on Claude restoring or falling back to another model by itself. The drift
+  // isn't just cosmetic: the stale value is what `--model` pins on resume, so a
+  // wrong pill actively drags the session back to the wrong model.
+  offs.push(
+    await listen<{ termId?: string; model?: string }>("hook://model_switch", (e) => {
+      const { termId, model } = e.payload ?? {};
+      if (!termId || !model) return;
+      const session = useTerminalsStore.getState().sessions.find((s) => s.id === termId);
+      // No termId match ⇒ drop it. Unlike the prompt hook we do NOT fall back to
+      // the active terminal: writing another session's model onto whatever is
+      // focused would be worse than knowing nothing.
+      if (!session) return;
+      const next = reconcileSwitchedModel(session.agent, session.model, model);
+      if (next !== null) useTerminalsStore.getState().setModel(termId, next);
     }),
   );
   return () => {

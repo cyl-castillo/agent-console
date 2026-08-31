@@ -67,6 +67,11 @@ export interface AgentProfile {
   supportsLiveModelSwitch: boolean;
   /// The input to send to a live agent to switch model (only if supported).
   liveModelSwitchInput?: (model: string) => string;
+  /// Map a canonical model name the CLI reports (Claude's PostModelSwitch hook
+  /// sends ids like `claude-opus-5`) back to one of our preset values, or
+  /// undefined when it matches no preset. Absent on agents that never report
+  /// what they loaded — then we only ever know our own intent.
+  matchModelPreset?: (canonical: string) => string | undefined;
   /// Build the command typed into the PTY when this terminal spawns/resumes.
   buildLaunch: (ctx: LaunchContext) => AgentLaunch;
 }
@@ -101,6 +106,13 @@ const CLAUDE: AgentProfile = {
   models: CLAUDE_MODELS,
   supportsLiveModelSwitch: true,
   liveModelSwitchInput: (m) => `/model ${m}\r`,
+  // Claude reports canonical ids (`claude-opus-5`, `claude-haiku-4-5`); the
+  // preset value is the family word inside them. Family names are distinct
+  // enough that a substring match can't confuse two of them.
+  matchModelPreset: (canonical) => {
+    const c = canonical.toLowerCase();
+    return CLAUDE_MODELS.find((p) => c.includes(p.value))?.value;
+  },
   buildLaunch: (ctx) => {
     // Only do precise --resume when we captured a session id (from the hook).
     // Never `claude --continue`: it picks the LAST claude session globally, so
@@ -198,6 +210,37 @@ export function isValidModel(model: string | undefined | null): model is string 
 /// models is exactly right.
 export function isSafeSessionId(id: string | undefined | null): id is string {
   return typeof id === "string" && id.length > 0 && id.length <= 128 && MODEL_RE.test(id);
+}
+
+/// What to store on a session after its CLI reports it switched to `canonical`
+/// — or null when what we already hold is right and must be left alone.
+///
+/// We store *intent* (the preset the user picked, e.g. `opus`, which always
+/// tracks the newest Opus). A switch report is the first time we learn what is
+/// actually loaded, and the two only need reconciling when they disagree:
+///
+/// - Same family (`opus` vs `claude-opus-5`) ⇒ null. Our alias already says the
+///   truth, and replacing it with a pinned id would quietly freeze the session
+///   on one release of that model at the next resume.
+/// - Different family ⇒ the preset value for it, so the pill reads "Haiku" and
+///   `--model haiku` resumes into the same place.
+/// - No matching preset (a model this build has never heard of) ⇒ the canonical
+///   id verbatim: shown as-is in the pill and replayed exactly on resume. Better
+///   an unfamiliar name than a familiar lie.
+///
+/// A name we couldn't safely put in the launch command is ignored entirely —
+/// the event comes from a world-writable events file, same rule as session ids.
+export function reconcileSwitchedModel(
+  agent: AgentKind | undefined,
+  current: string | undefined,
+  canonical: string,
+): string | null {
+  if (!isValidModel(canonical)) return null;
+  const profile = profileFor(agent);
+  const preset = profile.matchModelPreset?.(canonical);
+  if (preset && current && profile.matchModelPreset?.(current) === preset) return null;
+  const next = preset ?? canonical;
+  return current === next ? null : next;
 }
 
 /// Human-facing label for a model value within a given agent. Known presets get
