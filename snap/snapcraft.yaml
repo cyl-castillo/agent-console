@@ -14,7 +14,7 @@ description: |
   Requires the Claude Code CLI (npm i -g @anthropic-ai/claude-code) and
   Node.js 20+ on the host.
 website: https://github.com/cyl-castillo/agent-console
-license: MIT
+license: AGPL-3.0-only
 grade: stable
 
 # Classic confinement is REQUIRED, not a convenience: the app's entire purpose

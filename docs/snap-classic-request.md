@@ -37,7 +37,7 @@ as the approved classic dev-tool snaps (`code`, `goland`, `clion`, …).
 **Title:** Classic confinement request: agent-console
 
 Hello! I'm requesting classic confinement for `agent-console`
-(<https://github.com/cyl-castillo/agent-console>, MIT licensed).
+(<https://github.com/cyl-castillo/agent-console>, AGPL-3.0 licensed).
 
 Agent Console is a desktop developer tool (Tauri/WebKitGTK): a minimalist
 console for supervising AI coding agents (Claude Code, Codex CLIs) working

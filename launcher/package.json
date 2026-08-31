@@ -29,6 +29,6 @@
   "bugs": {
     "url": "https://github.com/cyl-castillo/agent-console/issues"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "author": "Carlos Castillo"
 }

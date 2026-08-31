@@ -329,4 +329,11 @@ unless requested by the person operating the program.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+GNU Affero General Public License v3.0 — see [LICENSE](./LICENSE).
+
+Versions up to and including v0.75.0 were released under the MIT license and
+remain available under those terms.
+
+"Agent Console" and its logo identify this project. Please don't use the name
+or logo for modified versions in a way that suggests they are the official
+distribution.
