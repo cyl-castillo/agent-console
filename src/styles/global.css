@@ -2309,6 +2309,11 @@ select:focus-visible,
   font-size: 11px;
   color: var(--text);
 }
+.wb-error {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--danger);
+}
 /* What the agent said when it closed the turn — its claim, set apart from the
    evidence lines (tool calls, files changed) right below it. */
 .proof-turn-summary {

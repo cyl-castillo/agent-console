@@ -101,6 +101,38 @@ describe("buildTimeline", () => {
     expect(without[0].summaryTruncated).toBe(false);
   });
 
+  it("marks a StopFailure close as failed, with the CLI's reason", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "do it" } }),
+      ev({
+        seq: 2,
+        ts: 13,
+        kind: "turn_end",
+        turnId: "T1",
+        payload: {
+          failed: true,
+          error: "rate_limit",
+          errorDetails: "Retry after 60s",
+          filesChanged: [{ status: "M", path: "a.ts" }],
+        },
+      }),
+    ]);
+    expect(turns[0].failed).toBe(true);
+    expect(turns[0].error).toBe("rate_limit");
+    expect(turns[0].errorDetails).toBe("Retry after 60s");
+    // The failure still closes the turn and keeps its diff.
+    expect(turns[0].endTs).toBe(13);
+    expect(turns[0].files).toEqual([{ status: "M", path: "a.ts" }]);
+
+    // A normal close stays unmarked.
+    const ok = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T2", payload: { prompt: "do it" } }),
+      ev({ seq: 2, ts: 13, kind: "turn_end", turnId: "T2", payload: { postSha: "abc" } }),
+    ]);
+    expect(ok[0].failed).toBe(false);
+    expect(ok[0].error).toBeUndefined();
+  });
+
   it("skips turnless events (case_link, job_run)", () => {
     const turns = buildTimeline([
       ev({ seq: 0, ts: 1, kind: "case_link", actor: "system" }),

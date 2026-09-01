@@ -34,6 +34,12 @@ export interface TimelineTurn {
   /// (Claude's `last_assistant_message`). Empty when it didn't.
   summary: string;
   summaryTruncated: boolean;
+  /// True when the turn closed through StopFailure — the API refused it. The
+  /// diff still shows what the turn had changed by then; this marks that it
+  /// never finished on its own terms. `error` is Claude's reason enum.
+  failed: boolean;
+  error?: string;
+  errorDetails?: string;
 }
 
 interface ProofState {
@@ -106,6 +112,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         endTs: null,
         summary: "",
         summaryTruncated: false,
+        failed: false,
       };
       byId.set(e.turnId, t);
       turns.push(t);
@@ -138,6 +145,9 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       t.filesTruncated = p.filesTruncated === true;
       if (typeof p.summary === "string") t.summary = p.summary;
       t.summaryTruncated = p.summaryTruncated === true;
+      t.failed = p.failed === true;
+      if (typeof p.error === "string") t.error = p.error;
+      if (typeof p.errorDetails === "string") t.errorDetails = p.errorDetails;
     }
   }
   return turns;
