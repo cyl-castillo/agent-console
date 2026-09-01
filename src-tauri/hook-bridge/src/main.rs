@@ -1,10 +1,10 @@
 //! Agent Console native hook bridge.
 //!
-//! One tiny binary, five personalities — `hook-bridge <userprompt|pretooluse|
-//! posttooluse|stop|modelswitch>` — replacing the node `.cjs` scripts that made Node a
-//! hard requirement of the app (and whose absence made hooks fail silently:
-//! the Windows/Melissa class of bug). Behavior and on-disk protocol are
-//! byte-compatible with the scripts they replace:
+//! One tiny binary, six personalities — `hook-bridge <userprompt|pretooluse|
+//! posttooluse|stop|stopfailure|modelswitch>` — replacing the node `.cjs`
+//! scripts that made Node a hard requirement of the app (and whose absence made
+//! hooks fail silently: the Windows/Melissa class of bug). Behavior and on-disk
+//! protocol are byte-compatible with the scripts they replace:
 //!
 //! - Events append to `<AGENT_CONSOLE_SESSION_DIR>/events.jsonl`, one JSON
 //!   object per line, `ts` in epoch millis.
@@ -27,6 +27,7 @@ use serde_json::{json, Map, Value};
 
 const EXCERPT_MAX: usize = 1000;
 const SUMMARY_MAX: usize = 1000;
+const DETAILS_MAX: usize = 1000;
 /// Model names reach the resume command (`claude --model <m>`), so the reader
 /// validates them; this cap only keeps a hostile payload out of events.jsonl.
 const MODEL_MAX: usize = 128;
@@ -132,6 +133,52 @@ fn stop_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
     let mut e = Map::new();
     e.insert("type".into(), json!("turn_end"));
     e.insert("ts".into(), json!(ts));
+    if let Some(sid) = str_field(input, "session_id", "sessionId") {
+        e.insert("sessionId".into(), json!(sid));
+    }
+    if let Some(t) = term_id.filter(|t| !t.is_empty()) {
+        e.insert("termId".into(), json!(t));
+    }
+    if let Some(cwd) = input
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        e.insert("cwd".into(), json!(cwd));
+    }
+    if let Some(last) = str_field(input, "last_assistant_message", "lastAssistantMessage") {
+        let trimmed = last.trim();
+        if !trimmed.is_empty() {
+            let (summary, truncated) = cap(trimmed, SUMMARY_MAX);
+            e.insert("summary".into(), json!(summary));
+            e.insert("summaryTruncated".into(), json!(truncated));
+        }
+    }
+    Value::Object(e)
+}
+
+// --- stopfailure -----------------------------------------------------------
+
+/// StopFailure (Claude 2.1.78+) fires INSTEAD of Stop when the turn ends on an
+/// API error, so the turn would otherwise never close. `error` is the CLI's own
+/// enum (authentication_failed, rate_limit, billing_error, …) and is passed
+/// through verbatim — the app classifies it, and a value we don't know yet must
+/// still reach the UI.
+fn stopfailure_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
+    let mut e = Map::new();
+    e.insert("type".into(), json!("turn_failed"));
+    e.insert("ts".into(), json!(ts));
+    if let Some(err) = str_field(input, "error", "errorType") {
+        e.insert("error".into(), json!(err));
+    }
+    if let Some(details) = str_field(input, "error_details", "errorDetails") {
+        let trimmed = details.trim();
+        if !trimmed.is_empty() {
+            let (text, truncated) = cap(trimmed, DETAILS_MAX);
+            e.insert("errorDetails".into(), json!(text));
+            e.insert("errorDetailsTruncated".into(), json!(truncated));
+        }
+    }
     if let Some(sid) = str_field(input, "session_id", "sessionId") {
         e.insert("sessionId".into(), json!(sid));
     }
@@ -482,6 +529,14 @@ fn main() {
             let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
             append_event(&dir, &stop_event(&input, term_id.as_deref(), now_ms()));
         }
+        "stopfailure" => {
+            let input = read_stdin_json();
+            let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
+            append_event(
+                &dir,
+                &stopfailure_event(&input, term_id.as_deref(), now_ms()),
+            );
+        }
         "modelswitch" => {
             let input = read_stdin_json();
             let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
@@ -570,6 +625,41 @@ mod tests {
             .expect("still recorded, just bounded");
         assert_eq!(e["model"].as_str().unwrap().len(), MODEL_MAX);
         assert!(e.get("fromModel").is_none());
+    }
+
+    #[test]
+    fn turn_failed_carries_the_reason_and_caps_the_details() {
+        let e = stopfailure_event(
+            &json!({
+                "error": "authentication_failed",
+                "error_details": "x".repeat(DETAILS_MAX + 50),
+                "session_id": "s1",
+                "cwd": "/repo",
+            }),
+            Some("t-1"),
+            42,
+        );
+        assert_eq!(e["type"], "turn_failed");
+        assert_eq!(e["ts"], 42);
+        assert_eq!(e["error"], "authentication_failed");
+        assert_eq!(e["errorDetails"].as_str().unwrap().len(), DETAILS_MAX);
+        assert_eq!(e["errorDetailsTruncated"], true);
+        assert_eq!(e["sessionId"], "s1");
+        assert_eq!(e["termId"], "t-1");
+        assert_eq!(e["cwd"], "/repo");
+    }
+
+    #[test]
+    fn turn_failed_passes_unknown_error_kinds_through_and_omits_absent_fields() {
+        // A reason enum added by a future CLI must still reach the UI.
+        let e = stopfailure_event(&json!({"error": "some_future_kind"}), None, 1);
+        assert_eq!(e["error"], "some_future_kind");
+        assert!(e.get("errorDetails").is_none());
+        assert!(e.get("summary").is_none());
+        // A payload without a reason at all is still a valid close.
+        let bare = stopfailure_event(&json!({}), None, 1);
+        assert_eq!(bare["type"], "turn_failed");
+        assert!(bare.get("error").is_none());
     }
 
     #[test]

@@ -21,6 +21,7 @@ use crate::state::AppState;
 const USERPROMPT_HOOK: &str = include_str!("../../resources/userprompt-hook.cjs");
 const PRETOOLUSE_HOOK: &str = include_str!("../../resources/pretooluse-hook.cjs");
 const STOP_HOOK: &str = include_str!("../../resources/stop-hook.cjs");
+const STOPFAILURE_HOOK: &str = include_str!("../../resources/stopfailure-hook.cjs");
 const POSTTOOLUSE_HOOK: &str = include_str!("../../resources/posttooluse-hook.cjs");
 const MODELSWITCH_HOOK: &str = include_str!("../../resources/modelswitch-hook.cjs");
 
@@ -49,6 +50,7 @@ pub struct HooksRuntime {
     script_path: PathBuf,
     pretooluse_script_path: PathBuf,
     stop_script_path: PathBuf,
+    stopfailure_script_path: PathBuf,
     posttooluse_script_path: PathBuf,
     /// Claude-only (PostModelSwitch, 2.1.251+) — never mirrored into Codex.
     modelswitch_script_path: PathBuf,
@@ -112,6 +114,8 @@ impl HooksRuntime {
         let pretooluse_script_path =
             ensure_hook_script(&cache, "pretooluse-hook.cjs", PRETOOLUSE_HOOK)?;
         let stop_script_path = ensure_hook_script(&cache, "stop-hook.cjs", STOP_HOOK)?;
+        let stopfailure_script_path =
+            ensure_hook_script(&cache, "stopfailure-hook.cjs", STOPFAILURE_HOOK)?;
         let posttooluse_script_path =
             ensure_hook_script(&cache, "posttooluse-hook.cjs", POSTTOOLUSE_HOOK)?;
         let modelswitch_script_path =
@@ -123,6 +127,7 @@ impl HooksRuntime {
             script_path,
             pretooluse_script_path,
             stop_script_path,
+            stopfailure_script_path,
             posttooluse_script_path,
             modelswitch_script_path,
             watcher_started: Mutex::new(false),
@@ -240,6 +245,14 @@ impl HooksRuntime {
             &mut settings,
             "PostToolUse",
             &self.posttooluse_script_path,
+            self.binary_path.as_deref(),
+        );
+        // Claude-only (see `ensure_stopfailure_autoinstalled`): the event and
+        // its `error` enum are Claude's, and Codex has no equivalent today.
+        upsert_hook(
+            &mut settings,
+            "StopFailure",
+            &self.stopfailure_script_path,
             self.binary_path.as_deref(),
         );
         // Claude-only: Codex has no model-switch event, so this one is absent
@@ -397,6 +410,45 @@ impl HooksRuntime {
         Ok(())
     }
 
+    /// Auto-install the StopFailure (turn-died-on-an-API-error) observer, under
+    /// its OWN marker like Stop and PostToolUse. CLAUDE ONLY: the event is
+    /// Claude's (2.1.78+) and so is the `error` enum it carries; Codex has no
+    /// equivalent, and writing an event it doesn't know into ~/.codex/hooks.json
+    /// buys nothing while risking a file it has to parse on every launch.
+    ///
+    /// Observer-class (writes an event, changes no behavior) and the CLI ignores
+    /// its output and exit code entirely, so it's safe to enable by default.
+    /// Older Claude versions simply never fire an event they don't have.
+    pub fn ensure_stopfailure_autoinstalled(&self) -> AppResult<()> {
+        let marker = self
+            .script_path
+            .with_file_name(".stopfailure-autoinstalled");
+        if marker.exists() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = if settings_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
+        } else {
+            json!({})
+        };
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        upsert_hook(
+            &mut settings,
+            "StopFailure",
+            &self.stopfailure_script_path,
+            self.binary_path.as_deref(),
+        );
+        write_settings_atomic(&settings_path, &settings)?;
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
     /// Auto-install the PostToolUse (tool-result) observer for both engines,
     /// under its OWN marker (same reasoning as Stop: existing installs carry
     /// the older markers and would never get it otherwise). Observer-class —
@@ -484,10 +536,11 @@ impl HooksRuntime {
     /// upsert_hook. Only rewrites events where the script is ALREADY
     /// registered — a deliberate uninstall stays uninstalled.
     pub fn normalize_hook_commands(&self) -> AppResult<()> {
-        let pairs: [(&str, &PathBuf); 5] = [
+        let pairs: [(&str, &PathBuf); 6] = [
             ("UserPromptSubmit", &self.script_path),
             ("PreToolUse", &self.pretooluse_script_path),
             ("Stop", &self.stop_script_path),
+            ("StopFailure", &self.stopfailure_script_path),
             ("PostToolUse", &self.posttooluse_script_path),
             ("PostModelSwitch", &self.modelswitch_script_path),
         ];
@@ -537,6 +590,7 @@ impl HooksRuntime {
                     ("UserPromptSubmit", &self.script_path),
                     ("PreToolUse", &self.pretooluse_script_path),
                     ("Stop", &self.stop_script_path),
+                    ("StopFailure", &self.stopfailure_script_path),
                     ("PostToolUse", &self.posttooluse_script_path),
                     // Claude-only, but listed for both paths: removing an event
                     // Codex never had is a no-op, and skipping it here would
@@ -771,6 +825,10 @@ fn bridge_mode(event: &str) -> &'static str {
         "UserPromptSubmit" => "userprompt",
         "PreToolUse" => "pretooluse",
         "PostToolUse" => "posttooluse",
+        // Distinct from "stop" on purpose: the two events write different
+        // records, and the mode word is also how install/uninstall recognize
+        // OUR entry — sharing it would make removing one strip the other.
+        "StopFailure" => "stopfailure",
         "PostModelSwitch" => "modelswitch",
         _ => "stop",
     }
@@ -1047,10 +1105,17 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 let _ = app.emit("snapshot://created", &snap);
             }
         }
-    } else if kind == "turn_end" {
+    } else if kind == "turn_end" || kind == "turn_failed" {
         // Testigo: the Stop hook closes the open turn — and the close carries
         // the turn's result: a post-turn snapshot diffed against the pre-turn
         // one, so the event answers "what did this turn change".
+        //
+        // `turn_failed` (StopFailure) is the SAME close through a different
+        // door: Claude fires it instead of Stop when the API refuses the turn,
+        // so without it the turn would hang open in the ledger forever and the
+        // work done before the error would never be diffed. It closes here with
+        // the reason attached, so the timeline reads "this turn died, and this
+        // is what it had changed by then".
         let state = app.state::<AppState>();
         let project = state.inner.lock().project.clone();
         if let Some(p) = project {
@@ -1071,6 +1136,23 @@ fn handle_event(v: &Value, app: &AppHandle) {
             let pre_sha = turn.as_ref().and_then(|t| t.pre_sha.clone());
 
             let mut payload = json!({});
+            if kind == "turn_failed" {
+                payload["failed"] = json!(true);
+                // Claude's own reason enum, passed through — an enum value this
+                // build doesn't know still belongs in the ledger.
+                if let Some(err) = str_field(v, "error") {
+                    payload["error"] = json!(truncate_chars(&err, ERROR_KIND_MAX));
+                }
+                if let Some(details) = str_field(v, "errorDetails") {
+                    payload["errorDetails"] = json!(truncate_chars(&details, DETAILS_MAX));
+                    payload["errorDetailsTruncated"] = json!(
+                        v.get("errorDetailsTruncated")
+                            .and_then(|t| t.as_bool())
+                            .unwrap_or(false)
+                            || details.chars().count() > DETAILS_MAX
+                    );
+                }
+            }
             // The agent's closing words, when the CLI sends them (Claude
             // 2.1.47+ `last_assistant_message`). The hook already capped it;
             // this is the second guard, same as the tool-result excerpt.
@@ -1153,6 +1235,14 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
 /// cap; a hook script from an older install (or a hand-written event) doesn't
 /// get to bloat the chain.
 const SUMMARY_MAX: usize = 1000;
+
+/// Same second guard for the StopFailure detail text.
+const DETAILS_MAX: usize = 1000;
+
+/// The reason is a short enum word (`rate_limit`, `authentication_failed`, …).
+/// Capped anyway so a malformed event can't smuggle prose into the field the
+/// UI switches on.
+const ERROR_KIND_MAX: usize = 64;
 
 /// Truncate on a char boundary — the summary is prose from the agent, so it can
 /// carry any UTF-8 and byte slicing would panic.
@@ -1700,6 +1790,126 @@ mod tests {
         assert!(
             lines[2].get("summary").is_none(),
             "a CLI that doesn't report it must not produce an empty summary"
+        );
+
+        let _ = fs::remove_dir_all(&session_dir);
+    }
+
+    /// Stop and StopFailure are two events sharing one binary, so the thing
+    /// that must not break is that they stay TELLABLE APART: distinct bridge
+    /// modes, so installing one doesn't read as the other and uninstalling one
+    /// doesn't strip the other.
+    #[test]
+    fn stopfailure_is_a_separate_bridge_mode_from_stop() {
+        assert_eq!(bridge_mode("Stop"), "stop");
+        assert_eq!(bridge_mode("StopFailure"), "stopfailure");
+
+        let binary = Path::new("/cache/bin/hook-bridge");
+        let stop_script = Path::new("/x/stop-hook.cjs");
+        let fail_script = Path::new("/x/stopfailure-hook.cjs");
+        let mut settings = json!({});
+        upsert_hook(&mut settings, "Stop", stop_script, Some(binary));
+        upsert_hook(&mut settings, "StopFailure", fail_script, Some(binary));
+
+        let stop_entry = &settings.pointer("/hooks/Stop").unwrap().as_array().unwrap()[0];
+        let fail_entry = &settings
+            .pointer("/hooks/StopFailure")
+            .unwrap()
+            .as_array()
+            .unwrap()[0];
+        assert!(has_bridge_command(stop_entry, "stop"));
+        assert!(!has_bridge_command(stop_entry, "stopfailure"));
+        assert!(has_bridge_command(fail_entry, "stopfailure"));
+        assert!(
+            !has_bridge_command(fail_entry, "stop"),
+            "\"stopfailure\" must not read as the \"stop\" mode — uninstalling \
+             one event would take the other with it"
+        );
+    }
+
+    /// The StopFailure bridge is the ONLY signal that a turn died on an API
+    /// error (Claude fires it instead of Stop). Run the real script under node:
+    /// the reason rides the event, free text is bounded, an unknown reason still
+    /// gets through, and a payload without one is still a valid close.
+    #[cfg(unix)]
+    #[test]
+    fn stopfailure_bridge_records_the_reason_the_turn_died() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        if Command::new("node")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("node not available — skipping stopfailure bridge test");
+            return;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let session_dir =
+            std::env::temp_dir().join(format!("ac-stopfail-test-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/stopfailure-hook.cjs");
+        let run = |payload: String| {
+            let mut child = Command::new("node")
+                .arg(&script)
+                .env("AGENT_CONSOLE_SESSION_DIR", &session_dir)
+                .env("AGENT_CONSOLE_TERM_ID", "term-7")
+                .stdin(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(payload.as_bytes())
+                .unwrap();
+            assert!(child.wait().unwrap().success(), "bridge must always exit 0");
+        };
+
+        run(r#"{"session_id":"s1","cwd":"/proj/x","error":"authentication_failed","error_details":"  OAuth token expired  ","last_assistant_message":"Reading the file…"}"#.into());
+        // An API error body can be enormous; the ledger stays bounded.
+        let long = "x".repeat(2500);
+        run(format!(
+            r#"{{"session_id":"s1","error":"server_error","error_details":"{long}"}}"#
+        ));
+        // A reason enum this build has never heard of must still reach the UI.
+        run(r#"{"session_id":"s1","error":"some_future_kind"}"#.into());
+        // No reason at all: still a close, just an unexplained one.
+        run(r#"{"session_id":"s1"}"#.into());
+
+        let events = fs::read_to_string(session_dir.join("events.jsonl")).unwrap();
+        let lines: Vec<Value> = events
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 4);
+
+        assert_eq!(lines[0]["type"], "turn_failed");
+        assert_eq!(lines[0]["termId"], "term-7");
+        assert_eq!(lines[0]["sessionId"], "s1");
+        assert_eq!(lines[0]["cwd"], "/proj/x");
+        assert_eq!(lines[0]["error"], "authentication_failed");
+        assert_eq!(lines[0]["errorDetails"], "OAuth token expired");
+        assert_eq!(lines[0]["errorDetailsTruncated"], false);
+        assert_eq!(lines[0]["summary"], "Reading the file…");
+
+        assert_eq!(lines[1]["errorDetails"].as_str().unwrap().len(), 1000);
+        assert_eq!(lines[1]["errorDetailsTruncated"], true);
+
+        assert_eq!(lines[2]["error"], "some_future_kind");
+        assert!(lines[2].get("errorDetails").is_none());
+
+        assert_eq!(lines[3]["type"], "turn_failed");
+        assert!(
+            lines[3].get("error").is_none(),
+            "a missing reason must not become an empty one"
         );
 
         let _ = fs::remove_dir_all(&session_dir);

@@ -314,6 +314,12 @@ export function ProofPanel() {
                 <p>
                   <span className="wb-hint">{fmtTime(t.ts)}</span>
                   {t.endTs === null && <span className="wb-hint"> · turn still open</span>}
+                  {t.failed && (
+                    <span className="wb-error" title={t.errorDetails}>
+                      {" "}
+                      · turn failed{t.error ? ` — ${t.error}` : ""}
+                    </span>
+                  )}
                   <br />
                   <span title={t.prompt}>
                     {t.prompt.length > 160 ? `${t.prompt.slice(0, 160)}…` : t.prompt}
