@@ -333,6 +333,81 @@ pub fn logged_out_hint() -> Option<String> {
     Some(" — `claude auth status` reports you are not logged in; run `claude auth login` in a terminal (or use \"Fix Claude login\") and retry".to_string())
 }
 
+/// One live Claude session as `claude agents --json` reports it (scriptable
+/// since Claude Code 2.1.145). Only the fields we can act on are kept: the OS
+/// process (how we prove which terminal it belongs to) and the session id (the
+/// resume handle). Everything else in the payload is ignored, so new fields
+/// upstream can't break the parse.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveAgent {
+    pub pid: u32,
+    pub session_id: String,
+    /// `"interactive"` for a TUI session; absent on CLIs that don't report it.
+    pub kind: Option<String>,
+}
+
+/// Same bound, same reason as [`AUTH_PROBE_TIMEOUT`]: the command answers in
+/// well under a second, and the timeout only exists so a wedged CLI can't stall
+/// the caller.
+const AGENTS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Parse `claude agents --json`. Tolerant by design: anything that isn't an
+/// array of objects carrying a numeric `pid` and a plausible `sessionId` yields
+/// no agents — a CLI predating the subcommand prints a usage error, and an
+/// unknown shape must read as "nothing to bind", never as a guess.
+fn parse_live_agents(stdout: &str) -> Vec<LiveAgent> {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str(stdout.trim()) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|it| {
+            let pid = u32::try_from(it.get("pid")?.as_u64()?).ok()?;
+            let session_id = it.get("sessionId")?.as_str()?.trim();
+            // The id ends up inside a `claude --resume <id>` typed into a PTY,
+            // and this payload comes from another process — same rule as every
+            // other session id we accept: uuid alphabet only.
+            if !is_safe_session_id(session_id) {
+                return None;
+            }
+            Some(LiveAgent {
+                pid,
+                session_id: session_id.to_string(),
+                kind: it
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect()
+}
+
+/// Session ids are uuids; anything else never reaches a shell command line.
+fn is_safe_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Live Claude sessions on this machine, or an empty list when we can't tell
+/// (binary missing, CLI older than 2.1.145, probe timed out, output unparsable).
+/// "Can't tell" and "none running" collapse on purpose: both mean there is
+/// nothing to bind, and the caller treats the result as additive evidence only.
+pub fn live_agents() -> Vec<LiveAgent> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Off-thread like `auth_status`: an abandoned child exits on its own, and a
+    // stuck CLI can never hold up the reconcile pass.
+    std::thread::spawn(move || {
+        let _ = tx.send(command(&["agents", "--json"]).output());
+    });
+    let Ok(Ok(output)) = rx.recv_timeout(AGENTS_PROBE_TIMEOUT) else {
+        return Vec::new();
+    };
+    parse_live_agents(&String::from_utf8_lossy(&output.stdout))
+}
+
 /// Build the error message for a non-zero `claude -p` exit. Claude Code often
 /// prints the actual reason (auth expiry, usage limits) to STDOUT, not stderr
 /// — the old stderr-only message reduced a real "OAuth session expired and
@@ -437,6 +512,55 @@ mod tests {
         assert!(!st.logged_in);
         assert_eq!(st.method, None);
         assert_eq!(st.account.as_deref(), Some("Acme"));
+    }
+
+    #[test]
+    fn parses_live_agents_and_keeps_only_what_we_act_on() {
+        let raw = r#"[
+          {"pid":3449881,"cwd":"/w/agent-console","kind":"interactive",
+           "startedAt":1787874025488,"sessionId":"450aeb31-8079-498b-afab-1f0fab67b3e7",
+           "name":"agent-console-37"},
+          {"pid":42,"sessionId":"abc-123"}
+        ]"#;
+        let agents = parse_live_agents(raw);
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].pid, 3449881);
+        assert_eq!(agents[0].session_id, "450aeb31-8079-498b-afab-1f0fab67b3e7");
+        assert_eq!(agents[0].kind.as_deref(), Some("interactive"));
+        // A CLI that stops reporting `kind` still yields a usable agent.
+        assert_eq!(agents[1].kind, None);
+    }
+
+    #[test]
+    fn live_agent_entries_we_cannot_trust_are_dropped() {
+        // Missing pid, missing/blank id, and — the one that matters — an id
+        // that would not be safe to type into `claude --resume <id>`.
+        let raw = r#"[
+          {"cwd":"/w","sessionId":"no-pid"},
+          {"pid":1,"sessionId":"   "},
+          {"pid":2,"sessionId":"ok-id"},
+          {"pid":3,"sessionId":"; rm -rf ~"},
+          {"pid":4,"sessionId":"$(whoami)"},
+          {"pid":-7,"sessionId":"negative-pid"},
+          "not-an-object"
+        ]"#;
+        let agents = parse_live_agents(raw);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].session_id, "ok-id");
+    }
+
+    #[test]
+    fn unparsable_agent_output_means_no_agents_not_a_guess() {
+        // Old CLI (no `agents` subcommand), a future shape, silence.
+        for raw in [
+            "",
+            "   ",
+            "error: unknown command 'agents'",
+            r#"{"agents":[]}"#,
+            "[ truncated",
+        ] {
+            assert!(parse_live_agents(raw).is_empty(), "{raw:?}");
+        }
     }
 
     #[test]

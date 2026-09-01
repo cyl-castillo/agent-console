@@ -24,7 +24,10 @@ pub fn term_spawn(
     // one claude runs at a time and breaks `--resume`.
     if let Some(key) = term_key {
         if !key.is_empty() {
-            extra.push(("AGENT_CONSOLE_TERM_ID".to_string(), key));
+            extra.push((
+                crate::services::terminal_runner::TERM_ID_ENV.to_string(),
+                key,
+            ));
         }
     }
     // Inject Vault entries (project overrides global) so the agent can use
@@ -38,6 +41,17 @@ pub fn term_spawn(
     state
         .terminals
         .spawn_with_env(app, &PathBuf::from(cwd), &extra)
+}
+
+/// Which live Claude session each terminal is actually running, proven by
+/// process ancestry (see `agent_sessions`). The frontend polls this so a
+/// terminal learns its resume handle even when no hook ever fired for it.
+/// Terminals with no match are simply absent from the result.
+#[tauri::command]
+pub fn term_agent_sessions(
+    state: State<'_, AppState>,
+) -> Vec<crate::services::agent_sessions::TermBinding> {
+    crate::services::agent_sessions::reconcile(&state.terminals.live_shells())
 }
 
 #[tauri::command]

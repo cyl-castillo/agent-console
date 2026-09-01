@@ -19,6 +19,7 @@ import { listen } from "@tauri-apps/api/event";
 import { attachVoiceListeners, attachVoiceApprovalWatcher } from "./stores/voiceStore";
 import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
+import { adoptLiveResumeHandles, RESUME_HANDLE_POLL_MS } from "./lib/resumeHandles";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { useRoundtableStore } from "./stores/roundtableStore";
@@ -380,6 +381,17 @@ export default function App() {
   useEffect(() => {
     void initFeedback();
   }, [initFeedback]);
+
+  // Terminals whose agent never went through a hook still learn their resume
+  // handle: `claude agents --json` says which session runs in which process,
+  // and the backend matches those against each PTY's shell. Costs nothing once
+  // every live terminal has an id (the pass stops before the IPC).
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void adoptLiveResumeHandles();
+    }, RESUME_HANDLE_POLL_MS);
+    return () => window.clearInterval(id);
+  }, []);
 
   // First-time auto-open. If NO agent CLI is installed this machine belongs
   // to a first-run novice: open the wizard (engine → install → login) instead

@@ -11,6 +11,11 @@ use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 
+/// Env var carrying the frontend terminal-session id into the PTY. The hooks
+/// read it to attribute a prompt to a terminal; the registry keeps its value so
+/// a pid match can be reported in the same id.
+pub const TERM_ID_ENV: &str = "AGENT_CONSOLE_TERM_ID";
+
 /// Payload emitted to the frontend for each chunk of PTY output.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +37,13 @@ struct TerminalHandle {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    /// OS pid of the shell running in this PTY, when the platform reports one.
+    /// It is what lets us prove that a live agent process belongs to THIS
+    /// terminal (see `live_shells`) instead of guessing by cwd or recency.
+    shell_pid: Option<u32>,
+    /// Frontend terminal-session id (`AGENT_CONSOLE_TERM_ID`), so a match found
+    /// by pid can be reported back in the id the UI actually uses.
+    term_key: Option<String>,
 }
 
 #[derive(Default)]
@@ -95,6 +107,7 @@ impl TerminalRegistry {
             .map_err(|e| AppError::Other(format!("spawn: {e}")))?;
 
         let killer = child.clone_killer();
+        let shell_pid = child.process_id();
 
         let writer = pair
             .master
@@ -150,9 +163,24 @@ impl TerminalRegistry {
                 master: pair.master,
                 writer,
                 killer,
+                shell_pid,
+                term_key: extra_env
+                    .iter()
+                    .find(|(k, _)| k == TERM_ID_ENV)
+                    .map(|(_, v)| v.clone()),
             },
         );
         Ok(id)
+    }
+
+    /// Every live terminal that carries both a frontend id and a shell pid, as
+    /// `(term_key, shell_pid)`. This is the whole surface the session-adoption
+    /// pass needs: it never touches the PTY, only asks who is who.
+    pub fn live_shells(&self) -> Vec<(String, u32)> {
+        self.lock_terms()
+            .values()
+            .filter_map(|h| Some((h.term_key.clone()?, h.shell_pid?)))
+            .collect()
     }
 
     pub fn write(&self, id: &str, data: &[u8]) -> AppResult<()> {
