@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { profileFor, isSafeSessionId } from "./profiles";
+import { profileFor, isSafeSessionId, reconcileSwitchedModel } from "./profiles";
 
 const UUID = "0198c2f2-8a25-7e11-b3a4-8d6a3d5c2f10";
 
@@ -64,5 +64,36 @@ describe("isSafeSessionId", () => {
     expect(isSafeSessionId("x;y")).toBe(false);
     expect(isSafeSessionId("")).toBe(false);
     expect(isSafeSessionId(undefined)).toBe(false);
+  });
+});
+
+describe("reconcileSwitchedModel", () => {
+  it("keeps the preset alias when the CLI reports the same family", () => {
+    // `opus` already means "newest Opus"; pinning claude-opus-5 would freeze
+    // the session on one release at the next resume.
+    expect(reconcileSwitchedModel("claude", "opus", "claude-opus-5")).toBeNull();
+    expect(reconcileSwitchedModel("claude", "claude-opus-5", "claude-opus-5-20260101")).toBeNull();
+    expect(reconcileSwitchedModel("claude", "haiku", "claude-haiku-4-5")).toBeNull();
+  });
+
+  it("adopts the preset when the family actually changed", () => {
+    expect(reconcileSwitchedModel("claude", "opus", "claude-haiku-4-5")).toBe("haiku");
+    expect(reconcileSwitchedModel("claude", undefined, "claude-sonnet-5")).toBe("sonnet");
+  });
+
+  it("keeps an unknown model verbatim rather than guessing a preset", () => {
+    expect(reconcileSwitchedModel("claude", "opus", "claude-fable-5")).toBe("claude-fable-5");
+    expect(reconcileSwitchedModel("claude", "claude-fable-5", "claude-fable-5")).toBeNull();
+  });
+
+  it("ignores a name that could not go into the launch command", () => {
+    expect(reconcileSwitchedModel("claude", "opus", "$(rm -rf /)")).toBeNull();
+    expect(reconcileSwitchedModel("claude", "opus", "")).toBeNull();
+  });
+
+  it("leaves agents that never report their loaded model alone", () => {
+    // Codex has no model-switch event; if one ever arrived, its effort presets
+    // ("low"/"high") must not be matched against a model name.
+    expect(reconcileSwitchedModel("codex", "high", "gpt-5-low-latency")).toBe("gpt-5-low-latency");
   });
 });

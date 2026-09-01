@@ -1,7 +1,7 @@
 //! Agent Console native hook bridge.
 //!
-//! One tiny binary, four personalities — `hook-bridge <userprompt|pretooluse|
-//! posttooluse|stop>` — replacing the node `.cjs` scripts that made Node a
+//! One tiny binary, five personalities — `hook-bridge <userprompt|pretooluse|
+//! posttooluse|stop|modelswitch>` — replacing the node `.cjs` scripts that made Node a
 //! hard requirement of the app (and whose absence made hooks fail silently:
 //! the Windows/Melissa class of bug). Behavior and on-disk protocol are
 //! byte-compatible with the scripts they replace:
@@ -27,6 +27,9 @@ use serde_json::{json, Map, Value};
 
 const EXCERPT_MAX: usize = 1000;
 const SUMMARY_MAX: usize = 1000;
+/// Model names reach the resume command (`claude --model <m>`), so the reader
+/// validates them; this cap only keeps a hostile payload out of events.jsonl.
+const MODEL_MAX: usize = 128;
 const MIN_PROMPT_CHARS: usize = 12;
 const INJECT_TIMEOUT_MS: u64 = 2500;
 const APPROVAL_POLL_MS: u64 = 80;
@@ -151,6 +154,41 @@ fn stop_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
         }
     }
     Value::Object(e)
+}
+
+// --- modelswitch -----------------------------------------------------------
+
+/// PostModelSwitch → `model_switch`. None ⇒ nothing worth recording: a subagent's
+/// own switch (it says nothing about the session the pill describes) or a payload
+/// without a destination model.
+fn modelswitch_event(input: &Value, term_id: Option<&str>, ts: u64) -> Option<Value> {
+    // `agent_id` is only present inside a subagent, so its presence IS the
+    // filter — without it a Task run would rewrite the session's model.
+    if str_field(input, "agent_id", "agentId").is_some() {
+        return None;
+    }
+    let to = str_field(input, "to_model", "toModel")?;
+    let to = to.trim();
+    if to.is_empty() {
+        return None;
+    }
+    let mut e = Map::new();
+    e.insert("type".into(), json!("model_switch"));
+    e.insert("ts".into(), json!(ts));
+    e.insert("model".into(), json!(cap(to, MODEL_MAX).0));
+    if let Some(from) = str_field(input, "from_model", "fromModel") {
+        let from = from.trim();
+        if !from.is_empty() {
+            e.insert("fromModel".into(), json!(cap(from, MODEL_MAX).0));
+        }
+    }
+    if let Some(sid) = str_field(input, "session_id", "sessionId") {
+        e.insert("sessionId".into(), json!(sid));
+    }
+    if let Some(t) = term_id.filter(|t| !t.is_empty()) {
+        e.insert("termId".into(), json!(t));
+    }
+    Some(Value::Object(e))
 }
 
 // --- userprompt ------------------------------------------------------------
@@ -444,6 +482,13 @@ fn main() {
             let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
             append_event(&dir, &stop_event(&input, term_id.as_deref(), now_ms()));
         }
+        "modelswitch" => {
+            let input = read_stdin_json();
+            let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
+            if let Some(e) = modelswitch_event(&input, term_id.as_deref(), now_ms()) {
+                append_event(&dir, &e);
+            }
+        }
         _ => {}
     }
 }
@@ -483,6 +528,48 @@ mod tests {
         let without = stop_event(&json!({"session_id": "s"}), None, 1);
         assert!(without.get("summary").is_none());
         assert!(without.get("summaryTruncated").is_none());
+    }
+
+    #[test]
+    fn model_switch_records_the_destination_and_binds_it_to_the_terminal() {
+        let e = modelswitch_event(
+            &json!({
+                "from_model": "claude-sonnet-5",
+                "to_model": "  claude-opus-5  ",
+                "session_id": "s1",
+            }),
+            Some("t-1"),
+            9,
+        )
+        .expect("a real session switch is recorded");
+        assert_eq!(e["type"], "model_switch");
+        assert_eq!(e["ts"], 9);
+        assert_eq!(e["model"], "claude-opus-5");
+        assert_eq!(e["fromModel"], "claude-sonnet-5");
+        assert_eq!(e["sessionId"], "s1");
+        assert_eq!(e["termId"], "t-1");
+    }
+
+    /// A subagent switching its own model must not rewrite the session's pill,
+    /// and a payload with no destination has nothing to report.
+    #[test]
+    fn model_switch_ignores_subagents_and_empty_destinations() {
+        assert!(modelswitch_event(
+            &json!({"to_model": "claude-haiku-4-5", "agent_id": "sub-1"}),
+            Some("t-1"),
+            1
+        )
+        .is_none());
+        assert!(modelswitch_event(&json!({"to_model": "   "}), None, 1).is_none());
+        assert!(modelswitch_event(&json!({"from_model": "claude-opus-5"}), None, 1).is_none());
+    }
+
+    #[test]
+    fn model_switch_caps_an_absurd_model_name() {
+        let e = modelswitch_event(&json!({"to_model": "x".repeat(MODEL_MAX + 50)}), None, 1)
+            .expect("still recorded, just bounded");
+        assert_eq!(e["model"].as_str().unwrap().len(), MODEL_MAX);
+        assert!(e.get("fromModel").is_none());
     }
 
     #[test]

@@ -22,6 +22,7 @@ const USERPROMPT_HOOK: &str = include_str!("../../resources/userprompt-hook.cjs"
 const PRETOOLUSE_HOOK: &str = include_str!("../../resources/pretooluse-hook.cjs");
 const STOP_HOOK: &str = include_str!("../../resources/stop-hook.cjs");
 const POSTTOOLUSE_HOOK: &str = include_str!("../../resources/posttooluse-hook.cjs");
+const MODELSWITCH_HOOK: &str = include_str!("../../resources/modelswitch-hook.cjs");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +50,8 @@ pub struct HooksRuntime {
     pretooluse_script_path: PathBuf,
     stop_script_path: PathBuf,
     posttooluse_script_path: PathBuf,
+    /// Claude-only (PostModelSwitch, 2.1.251+) — never mirrored into Codex.
+    modelswitch_script_path: PathBuf,
     watcher_started: Mutex<bool>,
     approvals_watcher_started: Mutex<bool>,
 }
@@ -111,6 +114,8 @@ impl HooksRuntime {
         let stop_script_path = ensure_hook_script(&cache, "stop-hook.cjs", STOP_HOOK)?;
         let posttooluse_script_path =
             ensure_hook_script(&cache, "posttooluse-hook.cjs", POSTTOOLUSE_HOOK)?;
+        let modelswitch_script_path =
+            ensure_hook_script(&cache, "modelswitch-hook.cjs", MODELSWITCH_HOOK)?;
         let binary_path = ensure_hook_binary(&cache);
         Ok(Self {
             session_dir,
@@ -119,6 +124,7 @@ impl HooksRuntime {
             pretooluse_script_path,
             stop_script_path,
             posttooluse_script_path,
+            modelswitch_script_path,
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
         })
@@ -234,6 +240,14 @@ impl HooksRuntime {
             &mut settings,
             "PostToolUse",
             &self.posttooluse_script_path,
+            self.binary_path.as_deref(),
+        );
+        // Claude-only: Codex has no model-switch event, so this one is absent
+        // from the mirror list below on purpose.
+        upsert_hook(
+            &mut settings,
+            "PostModelSwitch",
+            &self.modelswitch_script_path,
             self.binary_path.as_deref(),
         );
 
@@ -421,6 +435,47 @@ impl HooksRuntime {
         Ok(())
     }
 
+    /// Auto-install the PostModelSwitch observer, under its OWN marker (same
+    /// rollout pattern as Stop/PostToolUse). Claude-only: the event is Claude's
+    /// (2.1.251+) and Codex has no equivalent, so nothing is mirrored into
+    /// ~/.codex/hooks.json — installing an event Codex doesn't know would only
+    /// add a dead entry to the user's file.
+    ///
+    /// Observer-class and then some: PostModelSwitch is an ASYNC event, so the
+    /// CLI doesn't even read our decision fields — the switch has already
+    /// happened. Older Claude versions simply never fire an event they don't
+    /// have, which is exactly how they degrade: the pill keeps showing intent,
+    /// as it did before.
+    pub fn ensure_modelswitch_autoinstalled(&self) -> AppResult<()> {
+        let marker = self
+            .script_path
+            .with_file_name(".modelswitch-autoinstalled");
+        if marker.exists() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = if settings_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
+        } else {
+            json!({})
+        };
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        upsert_hook(
+            &mut settings,
+            "PostModelSwitch",
+            &self.modelswitch_script_path,
+            self.binary_path.as_deref(),
+        );
+        write_settings_atomic(&settings_path, &settings)?;
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
     /// Migrate any of OUR already-installed hook entries from the legacy
     /// bare-path command format to the canonical `node "<path>"` form, in both
     /// Claude's settings.json and Codex's hooks.json. Runs on every startup
@@ -429,11 +484,12 @@ impl HooksRuntime {
     /// upsert_hook. Only rewrites events where the script is ALREADY
     /// registered — a deliberate uninstall stays uninstalled.
     pub fn normalize_hook_commands(&self) -> AppResult<()> {
-        let pairs: [(&str, &PathBuf); 4] = [
+        let pairs: [(&str, &PathBuf); 5] = [
             ("UserPromptSubmit", &self.script_path),
             ("PreToolUse", &self.pretooluse_script_path),
             ("Stop", &self.stop_script_path),
             ("PostToolUse", &self.posttooluse_script_path),
+            ("PostModelSwitch", &self.modelswitch_script_path),
         ];
         for path in [settings_path(), codex_hooks_path()] {
             if !path.exists() {
@@ -482,6 +538,10 @@ impl HooksRuntime {
                     ("PreToolUse", &self.pretooluse_script_path),
                     ("Stop", &self.stop_script_path),
                     ("PostToolUse", &self.posttooluse_script_path),
+                    // Claude-only, but listed for both paths: removing an event
+                    // Codex never had is a no-op, and skipping it here would
+                    // strand the entry if a future Codex ever grows one.
+                    ("PostModelSwitch", &self.modelswitch_script_path),
                 ] {
                     if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
                         arr.retain(|e| {
@@ -711,6 +771,7 @@ fn bridge_mode(event: &str) -> &'static str {
         "UserPromptSubmit" => "userprompt",
         "PreToolUse" => "pretooluse",
         "PostToolUse" => "posttooluse",
+        "PostModelSwitch" => "modelswitch",
         _ => "stop",
     }
 }
@@ -1450,6 +1511,107 @@ mod tests {
         let other = json!({ "hooks": [{ "type": "command",
             "command": "node \"/x/hook-bridge-notes.cjs\"" }] });
         assert!(!has_bridge_command(&other, "pretooluse"));
+    }
+
+    /// PostModelSwitch is Claude-only, so it must get its OWN bridge mode —
+    /// sharing `stop` would make install/uninstall unable to tell the two
+    /// entries apart (the mode word is how we recognize our own entries).
+    #[test]
+    fn model_switch_has_its_own_bridge_mode_and_installs_only_for_claude() {
+        assert_eq!(bridge_mode("PostModelSwitch"), "modelswitch");
+        assert_ne!(bridge_mode("PostModelSwitch"), bridge_mode("Stop"));
+
+        let script = Path::new("/cache/modelswitch-hook.cjs");
+        let bin = Path::new("/cache/bin/hook-bridge");
+        let mut settings = json!({});
+        upsert_hook(&mut settings, "PostModelSwitch", script, Some(bin));
+        upsert_hook(
+            &mut settings,
+            "Stop",
+            Path::new("/cache/stop-hook.cjs"),
+            Some(bin),
+        );
+        let arr = settings
+            .pointer("/hooks/PostModelSwitch")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 1);
+        assert!(has_bridge_command(&arr[0], "modelswitch"));
+        assert!(!has_bridge_command(&arr[0], "stop"));
+        // …and the Stop entry is untouched by it.
+        let stop = settings.pointer("/hooks/Stop").unwrap().as_array().unwrap();
+        assert_eq!(stop.len(), 1);
+        assert!(has_bridge_command(&stop[0], "stop"));
+    }
+
+    /// Run the REAL modelswitch script under node: it must record the model the
+    /// session moved to, ignore a subagent's own switch, and stay silent when
+    /// the payload has no destination.
+    #[cfg(unix)]
+    #[test]
+    fn modelswitch_bridge_records_session_switches_and_ignores_subagents() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        if Command::new("node")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("node not available — skipping modelswitch bridge test");
+            return;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let session_dir =
+            std::env::temp_dir().join(format!("ac-modelswitch-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/modelswitch-hook.cjs");
+        let run = |payload: String| {
+            let mut child = Command::new("node")
+                .arg(&script)
+                .env("AGENT_CONSOLE_SESSION_DIR", &session_dir)
+                .env("AGENT_CONSOLE_TERM_ID", "term-7")
+                .stdin(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(payload.as_bytes())
+                .unwrap();
+            assert!(child.wait().unwrap().success(), "bridge must always exit 0");
+        };
+
+        run(
+            r#"{"session_id":"s1","from_model":"claude-sonnet-5","to_model":"claude-opus-5"}"#
+                .into(),
+        );
+        // A subagent's switch says nothing about the session's own model.
+        run(r#"{"session_id":"s1","to_model":"claude-haiku-4-5","agent_id":"sub-1"}"#.into());
+        // Nothing to report.
+        run(r#"{"session_id":"s1","from_model":"claude-opus-5"}"#.into());
+
+        let events = fs::read_to_string(session_dir.join("events.jsonl")).unwrap();
+        let lines: Vec<Value> = events
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 1, "only the session's own switch is recorded");
+        assert_eq!(lines[0]["type"], "model_switch");
+        assert_eq!(lines[0]["model"], "claude-opus-5");
+        assert_eq!(lines[0]["fromModel"], "claude-sonnet-5");
+        assert_eq!(lines[0]["sessionId"], "s1");
+        assert_eq!(lines[0]["termId"], "term-7");
+
+        let _ = fs::remove_dir_all(&session_dir);
     }
 
     #[test]

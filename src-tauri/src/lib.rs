@@ -55,6 +55,11 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_posttooluse_autoinstalled() {
                 eprintln!("hooks: posttooluse auto-install failed: {e}");
             }
+            // Model-switch observer (Claude 2.1.251+): keeps the model pill on
+            // what the agent actually runs, not on what we last asked for.
+            if let Err(e) = state.hooks.ensure_modelswitch_autoinstalled() {
+                eprintln!("hooks: modelswitch auto-install failed: {e}");
+            }
             // Migrate legacy bare-path hook commands to `node "<path>"` on
             // installs that predate the format (on Windows the old format
             // never executed at all — no shebangs in cmd.exe, and the path
