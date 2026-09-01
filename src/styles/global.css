@@ -2842,6 +2842,37 @@ select:focus-visible,
   color: var(--text-faint);
 }
 
+/* Hover hint for OSC 8 hyperlinks written by the agent CLI. Fixed (viewport
+   coords from the mouse event) so the terminal's overflow:hidden can't clip
+   it, and pointer-events:none so it can never steal the click it describes. */
+.term-link-hint {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 380px;
+  padding: 4px 8px;
+  background: var(--bg-elev-1, #1a1c20);
+  border: 1px solid var(--border, color-mix(in srgb, var(--text) 10%, transparent));
+  border-radius: 6px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.term-link-url {
+  overflow: hidden;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-link-note {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
 .terminal-host .xterm {
   height: 100%;
 }
