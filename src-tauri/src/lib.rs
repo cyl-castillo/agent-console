@@ -110,6 +110,7 @@ pub fn run() {
             commands::git::git_checkout_branch,
             commands::snapshot::snapshot_restore,
             commands::snapshot::snapshot_delete,
+            commands::rewind::turn_rewind,
             commands::worktree::worktree_create,
             commands::worktree::worktree_suggest_branch,
             commands::worktree::worktree_status,
