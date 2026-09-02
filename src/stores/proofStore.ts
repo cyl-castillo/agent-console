@@ -1,6 +1,10 @@
 import { create } from "zustand";
 
+import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
+import { useChangesStore } from "./changesStore";
+import { useTerminalsStore } from "./terminalsStore";
+import { useToastStore } from "./toastStore";
 import type {
   ProofEvent,
   TestigoVerifyReport,
@@ -79,6 +83,12 @@ interface ProofState {
   cancelExport: () => void;
   selectCase: (caseId: string | null) => void;
   setSettings: (patch: Partial<TestigoSettings>) => Promise<void>;
+  /// "Rewind to this turn": restore the turn's checkout to its post-turn
+  /// snapshot, fork the agent's transcript truncated after the turn, and open
+  /// a NEW session resuming the fork — the original session and transcript
+  /// stay untouched as history. When the fork fails the files are restored
+  /// anyway and the toast SAYS the memory was not rewound.
+  rewindToTurn: (t: TimelineTurn) => Promise<void>;
 }
 
 export function summarizeCases(events: ProofEvent[]): CaseSummary[] {
@@ -258,6 +268,66 @@ export const useProofStore = create<ProofState>((set, get) => ({
   },
 
   cancelExport: () => set({ review: null }),
+
+  rewindToTurn: async (t) => {
+    // Re-checked even though the button already gates: this action rewrites a
+    // working tree, and the ledger can lag the session list.
+    if (!t.termId || !t.sessionId || !t.postSha || t.endTs == null) return;
+    const terminals = useTerminalsStore.getState();
+    const src = terminals.sessions.find((s) => s.id === t.termId);
+    // The engine gate lives on the profile (Claude-only today): a turn whose
+    // session is gone can't name its engine, so it isn't rewindable either.
+    if (!src || !profileFor(src.agent).supportsTranscriptFork) return;
+    // A live agent would keep writing over the restored tree from its
+    // un-rewound conversation — the UI disables the button, this is the belt.
+    if (src.status === "live") return;
+    const cwd = t.cwd ?? src.cwd;
+    try {
+      const res = await ipc.turnRewind({
+        repo: cwd,
+        commitSha: t.postSha,
+        sessionId: t.sessionId,
+        cutoffMs: t.endTs,
+        termId: t.termId,
+        turnId: t.turnId ?? undefined,
+      });
+      await useChangesStore.getState().refresh();
+      if (res.forkSessionId) {
+        // New session in the turn's checkout, resuming the forked (rewound)
+        // conversation. Bind the fork id in the same tick as add(): the
+        // terminal's spawn effect reads it when building `--resume`.
+        const newId = terminals.add(
+          cwd,
+          `${src.name} ↶`,
+          src.model,
+          src.agent,
+          src.worktree && src.worktree.path === cwd ? src.worktree : undefined,
+        );
+        terminals.setAgentSessionId(newId, res.forkSessionId);
+        useToastStore
+          .getState()
+          .show(
+            "Rewound: files restored, new session resumes the conversation as of that turn",
+            "success",
+          );
+      } else {
+        // Honest degradation, loud on purpose (error tone persists): files
+        // moved but the agent still remembers the turns that produced them —
+        // exactly the desync the user asked to undo.
+        useToastStore
+          .getState()
+          .show(
+            `Files restored, but the agent's memory was NOT rewound — the conversation still remembers later turns. ${res.forkError ?? ""}`,
+            "error",
+          );
+      }
+      // Reload so the timeline shows the rewind event on the turn.
+      const root = get().projectRoot;
+      if (root) void get().load(root);
+    } catch (e) {
+      useToastStore.getState().show(`Rewind failed: ${e}`, "error");
+    }
+  },
 
   setSettings: async (patch) => {
     const { projectRoot: root, settings } = get();

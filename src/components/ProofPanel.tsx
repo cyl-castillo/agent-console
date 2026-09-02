@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 
+import { profileFor } from "../agents/profiles";
 import { useProofStore, summarizeCases, buildTimeline } from "../stores/proofStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { useTerminalsStore } from "../stores/terminalsStore";
 import type { TestigoPreviewEntry } from "../types/domain";
 
 /// Public TSA used when the trusted-timestamp toggle is switched on. One
@@ -70,6 +72,8 @@ export function ProofPanel() {
   const confirmExport = useProofStore((s) => s.confirmExport);
   const cancelExport = useProofStore((s) => s.cancelExport);
   const selectCase = useProofStore((s) => s.selectCase);
+  const rewindToTurn = useProofStore((s) => s.rewindToTurn);
+  const sessions = useTerminalsStore((s) => s.sessions);
 
   useEffect(() => {
     if (project) void load(project.root);
@@ -309,54 +313,105 @@ export function ProofPanel() {
             {timeline.length === 0 && (
               <p className="wb-hint">No turns recorded in this case yet.</p>
             )}
-            {timeline.map((t) => (
-              <div className="wb-section proof-turn" key={t.turnId ?? t.ts}>
-                <p>
-                  <span className="wb-hint">{fmtTime(t.ts)}</span>
-                  {t.endTs === null && <span className="wb-hint"> · turn still open</span>}
-                  {t.failed && (
-                    <span className="wb-error" title={t.errorDetails}>
-                      {" "}
-                      · turn failed{t.error ? ` — ${t.error}` : ""}
-                    </span>
-                  )}
-                  <br />
-                  <span title={t.prompt}>
-                    {t.prompt.length > 160 ? `${t.prompt.slice(0, 160)}…` : t.prompt}
-                  </span>
-                </p>
-                {t.approvals.length > 0 && (
-                  <p className="wb-hint">
-                    {t.approvals.map((a, i) => (
-                      <span key={i}>
-                        {i > 0 && " · "}
-                        <code>{a.tool ?? "?"}</code> {a.decision}
-                        {a.reason ? ` — ${a.reason}` : ""}
+            {timeline.map((t) => {
+              // "Rewind to this turn" needs the turn closed with a post-turn
+              // snapshot, the engine session to fork, and a session whose
+              // profile supports the transcript fork (Claude-only — on Codex
+              // terminals the action is not offered, same criterion as
+              // StopFailure). A live source session would keep writing over
+              // the restored tree, so the button waits for it to stop.
+              const src = t.termId ? sessions.find((s) => s.id === t.termId) : undefined;
+              const rewindable =
+                !!src &&
+                profileFor(src.agent).supportsTranscriptFork &&
+                !!t.postSha &&
+                !!t.sessionId &&
+                t.endTs !== null;
+              const srcLive = src?.status === "live";
+              return (
+                <div className="wb-section proof-turn" key={t.turnId ?? t.ts}>
+                  <p>
+                    <span className="wb-hint">{fmtTime(t.ts)}</span>
+                    {t.endTs === null && <span className="wb-hint"> · turn still open</span>}
+                    {t.failed && (
+                      <span className="wb-error" title={t.errorDetails}>
+                        {" "}
+                        · turn failed{t.error ? ` — ${t.error}` : ""}
                       </span>
-                    ))}
+                    )}
+                    {t.rewound && (
+                      <span
+                        className="wb-hint"
+                        title="A rewind restored files and conversation to the end of this turn"
+                      >
+                        {" "}
+                        · ↶ history rewound to here
+                      </span>
+                    )}
+                    <br />
+                    <span title={t.prompt}>
+                      {t.prompt.length > 160 ? `${t.prompt.slice(0, 160)}…` : t.prompt}
+                    </span>
                   </p>
-                )}
-                {t.summary && (
-                  <p className="wb-hint proof-turn-summary" title={t.summary}>
-                    ↳ {t.summary.length > 220 ? `${t.summary.slice(0, 220)}…` : t.summary}
-                    {t.summaryTruncated && " …"}
-                  </p>
-                )}
-                {(t.toolResults > 0 || t.files.length > 0) && (
-                  <p className="wb-hint">
-                    {t.toolResults > 0 && `${t.toolResults} tool calls`}
-                    {t.toolResults > 0 && t.files.length > 0 && " · "}
-                    {t.files.length > 0 &&
-                      t.files
-                        .slice(0, 8)
-                        .map((f) => `${f.status} ${f.path}`)
-                        .join(", ")}
-                    {t.files.length > 8 && ` … +${t.files.length - 8} more`}
-                    {t.filesTruncated && " (list capped at 500)"}
-                  </p>
-                )}
-              </div>
-            ))}
+                  {t.approvals.length > 0 && (
+                    <p className="wb-hint">
+                      {t.approvals.map((a, i) => (
+                        <span key={i}>
+                          {i > 0 && " · "}
+                          <code>{a.tool ?? "?"}</code> {a.decision}
+                          {a.reason ? ` — ${a.reason}` : ""}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  {t.summary && (
+                    <p className="wb-hint proof-turn-summary" title={t.summary}>
+                      ↳ {t.summary.length > 220 ? `${t.summary.slice(0, 220)}…` : t.summary}
+                      {t.summaryTruncated && " …"}
+                    </p>
+                  )}
+                  {(t.toolResults > 0 || t.files.length > 0) && (
+                    <p className="wb-hint">
+                      {t.toolResults > 0 && `${t.toolResults} tool calls`}
+                      {t.toolResults > 0 && t.files.length > 0 && " · "}
+                      {t.files.length > 0 &&
+                        t.files
+                          .slice(0, 8)
+                          .map((f) => `${f.status} ${f.path}`)
+                          .join(", ")}
+                      {t.files.length > 8 && ` … +${t.files.length - 8} more`}
+                      {t.filesTruncated && " (list capped at 500)"}
+                    </p>
+                  )}
+                  {rewindable && (
+                    <p className="wb-hint">
+                      <button
+                        className="wb-link"
+                        disabled={srcLive}
+                        title={
+                          srcLive
+                            ? "Stop the session first — a live agent would keep writing over the restored files"
+                            : "Restore the files AND the conversation to the end of this turn (originals kept; a backup is taken first)"
+                        }
+                        onClick={() => {
+                          if (
+                            confirm(
+                              "Rewind to this turn?\n\n" +
+                                "Files are restored to how they were when this turn ended — changes from later turns are discarded (a backup snapshot is taken first, undo via ⌘P).\n\n" +
+                                "A NEW session opens, resuming the conversation as of this turn. The current session and its transcript are kept untouched as history.",
+                            )
+                          ) {
+                            void rewindToTurn(t);
+                          }
+                        }}
+                      >
+                        ↶ rewind to this turn
+                      </button>
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </section>
         )}
 

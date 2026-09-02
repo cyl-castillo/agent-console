@@ -1,7 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { summarizeCases, buildTimeline } from "./proofStore";
+// rewindToTurn rewrites a working tree and spawns a session resuming a forked
+// conversation — isolate the backend and the stores it touches.
+vi.mock("../ipc/tauri", () => ({
+  ipc: {
+    turnRewind: vi.fn(),
+    testigoList: vi.fn().mockResolvedValue([]),
+    testigoVerify: vi.fn().mockResolvedValue(null),
+    testigoGetSettings: vi.fn().mockResolvedValue(null),
+  },
+}));
+const refresh = vi.fn().mockResolvedValue(undefined);
+vi.mock("./changesStore", () => ({
+  useChangesStore: { getState: () => ({ refresh }) },
+}));
+const showToast = vi.fn();
+vi.mock("./toastStore", () => ({
+  useToastStore: { getState: () => ({ show: showToast }) },
+}));
+
+import { ipc } from "../ipc/tauri";
+import { summarizeCases, buildTimeline, useProofStore, type TimelineTurn } from "./proofStore";
+import { useTerminalsStore, type TerminalSession } from "./terminalsStore";
 import type { ProofEvent } from "../types/domain";
+
+const mockRewind = vi.mocked(ipc.turnRewind);
 
 function ev(partial: Partial<ProofEvent>): ProofEvent {
   return {
@@ -182,5 +205,125 @@ describe("buildTimeline", () => {
       ev({ seq: 1, ts: 2, kind: "job_run", actor: "system" }),
     ]);
     expect(turns).toEqual([]);
+  });
+});
+
+function session(partial: Partial<TerminalSession>): TerminalSession {
+  return {
+    id: "term-1",
+    name: "shell 1",
+    cwd: "/repo",
+    createdAtMs: 0,
+    initialScrollback: "",
+    liveScrollback: "",
+    status: "stopped",
+    agent: "claude",
+    ...partial,
+  };
+}
+
+function turn(partial: Partial<TimelineTurn>): TimelineTurn {
+  return {
+    turnId: "T1",
+    ts: 10,
+    prompt: "do it",
+    approvals: [],
+    toolResults: 0,
+    files: [],
+    filesTruncated: false,
+    endTs: 13,
+    summary: "",
+    summaryTruncated: false,
+    failed: false,
+    rewound: false,
+    termId: "term-1",
+    sessionId: "sid-original",
+    cwd: "/repo/worktree",
+    postSha: "post-sha",
+    ...partial,
+  };
+}
+
+describe("rewindToTurn", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useProofStore.setState({ projectRoot: null });
+    useTerminalsStore.setState({
+      projectRoot: "/repo",
+      sessions: [session({})],
+      activeId: null,
+      ready: true,
+    });
+  });
+
+  it("restores in the turn's checkout and opens a new session bound to the fork", async () => {
+    mockRewind.mockResolvedValueOnce({
+      backupSha: "backup-sha",
+      forkSessionId: "fork-uuid",
+      forkError: null,
+    });
+
+    await useProofStore.getState().rewindToTurn(turn({}));
+
+    // The turn's cwd (its worktree), never the session's current cwd.
+    expect(mockRewind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo: "/repo/worktree",
+        commitSha: "post-sha",
+        sessionId: "sid-original",
+        cutoffMs: 13,
+        termId: "term-1",
+        turnId: "T1",
+      }),
+    );
+    expect(refresh).toHaveBeenCalled();
+    // A NEW session exists, bound to the fork BEFORE its terminal spawns —
+    // that binding is what makes it launch `--resume <fork>`.
+    const sessions = useTerminalsStore.getState().sessions;
+    expect(sessions).toHaveLength(2);
+    const forked = sessions[1];
+    expect(forked.agentSessionId).toBe("fork-uuid");
+    expect(forked.cwd).toBe("/repo/worktree");
+    expect(forked.agent).toBe("claude");
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/rewound/i), "success");
+  });
+
+  it("degrades honestly: fork failed ⇒ files restored, NO new session, loud toast", async () => {
+    mockRewind.mockResolvedValueOnce({
+      backupSha: "backup-sha",
+      forkSessionId: null,
+      forkError: "claude 2.1.100 predates 2.1.224",
+    });
+
+    await useProofStore.getState().rewindToTurn(turn({}));
+
+    expect(useTerminalsStore.getState().sessions).toHaveLength(1);
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/NOT rewound/), "error");
+  });
+
+  it("refuses on a live source session and on engines without transcript fork", async () => {
+    useTerminalsStore.setState({
+      sessions: [session({ status: "live" })],
+    });
+    await useProofStore.getState().rewindToTurn(turn({}));
+    expect(mockRewind).not.toHaveBeenCalled();
+
+    useTerminalsStore.setState({
+      sessions: [session({ agent: "codex" })],
+    });
+    await useProofStore.getState().rewindToTurn(turn({}));
+    expect(mockRewind).not.toHaveBeenCalled();
+
+    // Session gone entirely — the engine is unknowable, so no rewind.
+    useTerminalsStore.setState({ sessions: [] });
+    await useProofStore.getState().rewindToTurn(turn({}));
+    expect(mockRewind).not.toHaveBeenCalled();
+  });
+
+  it("refuses a turn that is still open or has no post-turn snapshot", async () => {
+    await useProofStore.getState().rewindToTurn(turn({ endTs: null }));
+    await useProofStore.getState().rewindToTurn(turn({ postSha: undefined }));
+    await useProofStore.getState().rewindToTurn(turn({ sessionId: undefined }));
+    expect(mockRewind).not.toHaveBeenCalled();
   });
 });
