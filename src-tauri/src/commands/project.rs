@@ -36,9 +36,38 @@ pub fn open_project(
     }
     // Record in recents — best effort, never fails the open.
     let _ = crate::services::projects_service::remember(&path_buf);
+    // Retire snapshot pins nobody can reach for anymore. Opening a project is
+    // the natural moment: once per project per app run, off every hot path, and
+    // it's the point where we already know which checkout we're talking about.
+    // The keep-set is computed here (it needs `state`, which isn't 'static) and
+    // moved into the thread; failures are silent by design — an unswept repo is
+    // a repo that keeps working.
+    // Same key the ledger is written under (`project.root`), not the raw arg.
+    let keep = state
+        .testigo
+        .live_snapshot_shas(&project.root.to_string_lossy());
+    let sweep_repo = project.root.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = crate::services::snapshot_service::sweep(
+            &sweep_repo,
+            &keep,
+            crate::services::snapshot_service::SNAPSHOT_RETENTION_DAYS,
+            now_unix(),
+        ) {
+            eprintln!("snapshot retention sweep: {e}");
+        }
+    });
     // Start the git filesystem watcher so the UI auto-refreshes Changes.
     state.git_watcher.watch(app, path_buf);
     Ok(project)
+}
+
+fn now_unix() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[tauri::command]
