@@ -40,6 +40,17 @@ export interface TimelineTurn {
   failed: boolean;
   error?: string;
   errorDetails?: string;
+  /// Where the turn ran and what it left behind — everything "Rewind to this
+  /// turn" needs: the terminal binding, the engine session to fork, the
+  /// checkout (worktree sessions differ from the project root) and the
+  /// post-turn snapshot to restore files to.
+  termId?: string;
+  sessionId?: string;
+  cwd?: string;
+  postSha?: string;
+  /// True when a later rewind event points at this turn — the timeline shows
+  /// where history was rewound to.
+  rewound: boolean;
 }
 
 interface ProofState {
@@ -113,6 +124,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         summary: "",
         summaryTruncated: false,
         failed: false,
+        rewound: false,
       };
       byId.set(e.turnId, t);
       turns.push(t);
@@ -120,6 +132,14 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
     return t;
   };
   for (const e of events) {
+    // A rewind event's turnId POINTS AT the turn it restored — it must mark
+    // that turn, never open a phantom one (e.g. after the pointed-at turn was
+    // exported away or the ledger only holds the tail).
+    if (e.kind === "rewind") {
+      const target = e.turnId ? byId.get(e.turnId) : undefined;
+      if (target) target.rewound = true;
+      continue;
+    }
     const t = turnFor(e);
     if (!t) continue;
     const p = e.payload as Record<string, unknown>;
@@ -127,6 +147,9 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       t.ts = e.ts;
       t.prompt = typeof p.prompt === "string" ? p.prompt : "";
       if (typeof p.skill === "string") t.skill = p.skill;
+      if (e.termId) t.termId = e.termId;
+      if (e.sessionId) t.sessionId = e.sessionId;
+      if (typeof p.cwd === "string" && p.cwd) t.cwd = p.cwd;
     } else if (e.kind === "approval_decision") {
       t.approvals.push({
         tool: typeof p.tool === "string" ? p.tool : undefined,
@@ -148,6 +171,11 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       t.failed = p.failed === true;
       if (typeof p.error === "string") t.error = p.error;
       if (typeof p.errorDetails === "string") t.errorDetails = p.errorDetails;
+      if (typeof p.postSha === "string" && p.postSha) t.postSha = p.postSha;
+      // The close carries the binding too — keeps the turn actionable even
+      // when the prompt event predates a hook that sent no ids.
+      if (!t.termId && e.termId) t.termId = e.termId;
+      if (!t.sessionId && e.sessionId) t.sessionId = e.sessionId;
     }
   }
   return turns;

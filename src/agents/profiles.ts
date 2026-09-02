@@ -72,6 +72,12 @@ export interface AgentProfile {
   /// undefined when it matches no preset. Absent on agents that never report
   /// what they loaded — then we only ever know our own intent.
   matchModelPreset?: (canonical: string) => string | undefined;
+  /// Whether "Rewind to this turn" can fork this agent's conversation by
+  /// truncating its transcript (M9). Claude-only: the fork copies
+  /// `~/.claude/projects/<slug>/<sid>.jsonl` cut at a turn boundary and
+  /// resumes the copy; Codex has no known equivalent, so on Codex sessions
+  /// the action is not offered at all (same criterion as StopFailure).
+  supportsTranscriptFork: boolean;
   /// Build the command typed into the PTY when this terminal spawns/resumes.
   buildLaunch: (ctx: LaunchContext) => AgentLaunch;
 }
@@ -113,6 +119,7 @@ const CLAUDE: AgentProfile = {
     const c = canonical.toLowerCase();
     return CLAUDE_MODELS.find((p) => c.includes(p.value))?.value;
   },
+  supportsTranscriptFork: true,
   buildLaunch: (ctx) => {
     // Only do precise --resume when we captured a session id (from the hook).
     // Never `claude --continue`: it picks the LAST claude session globally, so
@@ -147,6 +154,8 @@ const CODEX: AgentProfile = {
   // Codex has no `/model` slash command we can push reliably; the choice only
   // takes effect on (re)launch.
   supportsLiveModelSwitch: false,
+  // No known way to rewind/fork a Codex rollout at a turn boundary.
+  supportsTranscriptFork: false,
   buildLaunch: (ctx) => {
     // Precise resume by id, mirroring Claude: the session id is captured by the
     // UserPromptSubmit hook (Codex ships the same hooks system now). Never

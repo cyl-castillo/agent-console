@@ -210,6 +210,16 @@ export interface ProofEvent {
   hash: string;
 }
 
+/// Outcome of "Rewind to this turn" (mirrors the Rust TurnRewindResult). The
+/// file restore succeeded if this came back at all; the transcript fork is
+/// best-effort on top — forkError says why the agent's memory was NOT rewound
+/// when forkSessionId is null, and the UI must surface it.
+export interface TurnRewindResult {
+  backupSha: string | null;
+  forkSessionId: string | null;
+  forkError: string | null;
+}
+
 /// Result of walking a project's Testigo chain (mirrors the Rust VerifyReport).
 export interface TestigoVerifyReport {
   ok: boolean;

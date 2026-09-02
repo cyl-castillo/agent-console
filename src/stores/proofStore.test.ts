@@ -133,6 +133,49 @@ describe("buildTimeline", () => {
     expect(ok[0].error).toBeUndefined();
   });
 
+  it("carries the rewind bindings: term, session, cwd and post-turn snapshot", () => {
+    const turns = buildTimeline([
+      ev({
+        seq: 1,
+        ts: 10,
+        kind: "prompt",
+        turnId: "T1",
+        termId: "term-1",
+        sessionId: "sid-1",
+        payload: { prompt: "do it", cwd: "/repo/worktree" },
+      }),
+      ev({
+        seq: 2,
+        ts: 13,
+        kind: "turn_end",
+        turnId: "T1",
+        payload: { postSha: "abc123" },
+      }),
+    ]);
+    expect(turns[0].termId).toBe("term-1");
+    expect(turns[0].sessionId).toBe("sid-1");
+    expect(turns[0].cwd).toBe("/repo/worktree");
+    expect(turns[0].postSha).toBe("abc123");
+  });
+
+  it("a rewind event marks the turn it points at, and never opens a phantom turn", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "do it" } }),
+      ev({ seq: 2, ts: 13, kind: "turn_end", turnId: "T1", payload: { postSha: "abc" } }),
+      ev({
+        seq: 3,
+        ts: 20,
+        kind: "rewind",
+        turnId: "T1",
+        payload: { restoredSha: "abc", forkSessionId: "fork-1" },
+      }),
+      // Rewind pointing at a turn this slice of the ledger no longer holds.
+      ev({ seq: 4, ts: 21, kind: "rewind", turnId: "GONE", payload: {} }),
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].rewound).toBe(true);
+  });
+
   it("skips turnless events (case_link, job_run)", () => {
     const turns = buildTimeline([
       ev({ seq: 0, ts: 1, kind: "case_link", actor: "system" }),

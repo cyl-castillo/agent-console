@@ -40,6 +40,7 @@ import type {
   TestigoExportSummary,
   TestigoExportPreview,
   TestigoSettings,
+  TurnRewindResult,
   MemoryEntry,
   PermissionsSnapshot,
   Preflight,
@@ -139,6 +140,27 @@ export const ipc = {
   // before the destructive restore), or null if the repo couldn't be snapshotted.
   snapshotRestore: (commitSha: string) => invoke<string | null>("snapshot_restore", { commitSha }),
   snapshotDelete: (id: string) => invoke<void>("snapshot_delete", { id }),
+
+  // "Rewind to this turn": restore the tree of the turn's checkout to its
+  // post-turn snapshot AND fork the Claude transcript truncated after that
+  // turn (M9). The restore is the core action; a failed fork degrades into
+  // forkError on the result instead of failing the call.
+  turnRewind: (args: {
+    repo?: string;
+    commitSha: string;
+    sessionId: string;
+    cutoffMs: number;
+    termId?: string;
+    turnId?: string;
+  }) =>
+    invoke<TurnRewindResult>("turn_rewind", {
+      repo: args.repo ?? null,
+      commitSha: args.commitSha,
+      sessionId: args.sessionId,
+      cutoffMs: args.cutoffMs,
+      termId: args.termId ?? null,
+      turnId: args.turnId ?? null,
+    }),
 
   preflightCheck: () => invoke<Preflight>("preflight_check"),
 
