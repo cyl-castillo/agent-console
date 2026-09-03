@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 
 use parking_lot::Mutex;
@@ -724,6 +724,48 @@ impl TestigoService {
         Ok(events)
     }
 
+    /// Snapshot commits that must stay restorable no matter how old the pin is:
+    /// the pre/post pair of each terminal's most recent closed turn, plus the
+    /// pre-snapshot of any turn still open. That is the undo a user can still
+    /// reach for — "undo the last thing this session did" — and retention
+    /// (`snapshot_service::sweep`) must not be the thing that takes it away.
+    ///
+    /// Everything else the ledger names is evidence, not a live handle: the shas
+    /// and the file list are already recorded, and export reads ledger lines
+    /// rather than git objects, so an expired pin costs no proof.
+    ///
+    /// Best-effort by design — an unreadable ledger yields an empty set, which
+    /// only ever makes the sweep *more* conservative at its other guards.
+    pub fn live_snapshot_shas(&self, project_root: &str) -> HashSet<String> {
+        // Scoped: `list` takes the same (non-reentrant) lock.
+        let mut keep: HashSet<String> = {
+            let inner = self.inner.lock();
+            inner
+                .turns
+                .values()
+                .filter_map(|t| t.pre_sha.clone())
+                .collect()
+        };
+
+        let Ok(events) = self.list(project_root, None, None) else {
+            return keep;
+        };
+        // Last turn_end wins per terminal: the list is chronological, so a later
+        // close simply overwrites the pair recorded for that term.
+        let mut last_by_term: HashMap<String, Vec<String>> = HashMap::new();
+        for ev in events.iter().filter(|e| e.kind == "turn_end") {
+            let term = ev.term_id.clone().unwrap_or_else(|| "unbound".into());
+            let shas = ["preSha", "postSha"]
+                .iter()
+                .filter_map(|k| ev.payload.get(*k).and_then(|v| v.as_str()))
+                .map(String::from)
+                .collect();
+            last_by_term.insert(term, shas);
+        }
+        keep.extend(last_by_term.into_values().flatten());
+        keep
+    }
+
     /// Walk the whole chain recomputing hashes and links. A torn final line
     /// (crash mid-append) is tolerated and reported; anything else
     /// inconsistent marks the chain broken at that seq.
@@ -985,6 +1027,44 @@ mod tests {
         let (hseq, hhash) = svc2.head(root).unwrap().expect("non-empty ledger");
         assert_eq!(hseq, 9);
         assert_eq!(hhash, p2.hash);
+
+        // Retention keep-set: what snapshot pins must outlive their expiry.
+        // Right now t1's newest CLOSED turn is the one from seq 7, and the turn
+        // p2 just opened has no snapshot yet.
+        let keep = svc2.live_snapshot_shas(root);
+        assert!(
+            keep.contains("abc123") && keep.contains("def456"),
+            "the last closed turn's pre/post pair is the live undo"
+        );
+
+        // A snapshot taken inside the OPEN turn is kept too — it's the "before"
+        // of an undo the user can still reach for, and it's in no closed turn.
+        svc2.on_snapshot(root, 11, Some("t1"), None, "open789")
+            .unwrap();
+        assert!(svc2.live_snapshot_shas(root).contains("open789"));
+
+        // Closing that turn moves the keep-set forward: the previous pair is now
+        // ordinary history — evidence in the ledger, but no longer a live handle,
+        // so retention is free to expire it.
+        svc2.on_turn_end(
+            root,
+            12,
+            Some("t1"),
+            None,
+            serde_json::json!({ "preSha": "open789", "postSha": "post789" }),
+        )
+        .unwrap();
+        let keep = svc2.live_snapshot_shas(root);
+        assert!(keep.contains("open789") && keep.contains("post789"));
+        assert!(
+            !keep.contains("abc123") && !keep.contains("def456"),
+            "only the MOST RECENT turn per terminal is pinned past expiry"
+        );
+
+        // A project with no ledger keeps nothing — and says so instead of failing.
+        assert!(TestigoService::new()
+            .live_snapshot_shas("/proj/empty")
+            .is_empty());
 
         // Tampering with a middle line breaks verification at that seq.
         let path = TestigoService::ledger_path(root).unwrap();

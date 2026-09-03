@@ -1,4 +1,5 @@
 use crate::services::proc;
+use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -104,9 +105,13 @@ pub fn restore(repo: &Path, commit_sha: &str) -> AppResult<()> {
         .current_dir(repo)
         .output()?;
     if !tree.status.success() {
+        // A missing object here is usually retention, not corruption: the pin
+        // expired (see `sweep`) and the user's own `git gc` reclaimed the tree.
+        // Say so, because "snapshot not found" alone reads like a bug.
         return Err(AppError::Other(format!(
-            "snapshot not found: {}",
-            String::from_utf8_lossy(&tree.stderr)
+            "snapshot not found — snapshots stay restorable for {SNAPSHOT_RETENTION_DAYS} days; \
+             past that the ledger keeps the record but the tree is gone: {}",
+            String::from_utf8_lossy(&tree.stderr).trim()
         )));
     }
     let tree_sha = String::from_utf8_lossy(&tree.stdout).trim().to_string();
@@ -151,6 +156,123 @@ pub fn diff_names(repo: &Path, from_sha: &str, to_sha: &str) -> AppResult<Vec<(S
         })
         .take(DIFF_NAMES_MAX)
         .collect())
+}
+
+/// How long an auto-snapshot ref stays pinned. Two snapshots per turn (pre at
+/// the prompt, post at Stop/StopFailure) pin whole trees forever otherwise, and
+/// in a repo with real churn that only ever grows. Thirty days matches what
+/// Claude Code itself keeps for its file checkpoints (`cleanupPeriodDays`), so
+/// the undo we offer outlives the CLI's own.
+pub const SNAPSHOT_RETENTION_DAYS: u64 = 30;
+
+const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
+
+/// What a retention pass did. Reported, never guessed at: the caller logs it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SweepReport {
+    pub deleted: usize,
+    pub kept: usize,
+}
+
+/// Drop the pins on auto-snapshots older than `max_age_days`, so the objects
+/// become unreachable and the user's own `git gc` can reclaim them. We never
+/// run `gc` ourselves — repacking someone's repo behind their back is not our
+/// call; we only stop holding trees alive.
+///
+/// What survives, by construction:
+/// - **Refs we didn't auto-create**: only a uuid-named ref is swept, because
+///   that is exactly the shape `create` is called with per turn. That leaves
+///   `refs/agent-console/testigo-head` (the ledger anchor) and the
+///   `pre-restore-<nanos>` backups (the undo of a destructive restore, one per
+///   explicit user action) untouched, without either needing a special case.
+/// - **Anything in `keep_shas`**: the caller passes the pre/post pair of the
+///   most recent turn per terminal — the undo that is still live.
+/// - **Anything younger than the cutoff.**
+///
+/// What is NOT at risk: the proof ledger. Its evidence is the recorded shas and
+/// the file list, materialized at turn_end and hash-chained; export reads ledger
+/// lines, never git objects. Losing the pin costs the ability to restore or
+/// re-diff an old tree, not the record that it existed.
+///
+/// `now_unix` is a parameter so the age boundary is testable without waiting a
+/// month. In a linked worktree this still covers everything: `refs/agent-console/*`
+/// is not a per-worktree ref, so worktree sessions write into the common ref
+/// store that the project root sweeps.
+pub fn sweep(
+    repo: &Path,
+    keep_shas: &HashSet<String>,
+    max_age_days: u64,
+    now_unix: i64,
+) -> AppResult<SweepReport> {
+    if !is_git_repo(repo)? {
+        return Ok(SweepReport::default());
+    }
+    let cutoff = now_unix - (max_age_days as i64) * SECONDS_PER_DAY;
+
+    let out = proc::command("git")
+        .args([
+            "for-each-ref",
+            "--format=%(refname)\t%(objectname)\t%(creatordate:unix)",
+            "refs/agent-console/",
+        ])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        return Err(AppError::Other(format!(
+            "for-each-ref: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )));
+    }
+
+    let mut report = SweepReport::default();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let mut parts = line.split('\t');
+        let (Some(refname), Some(oid), Some(created)) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        let Some(id) = refname.strip_prefix("refs/agent-console/") else {
+            continue;
+        };
+        // A ref whose creation date we can't read is a ref we don't delete.
+        let created: i64 = match created.trim().parse() {
+            Ok(c) => c,
+            Err(_) => {
+                report.kept += 1;
+                continue;
+            }
+        };
+        if !is_auto_snapshot_id(id) || created > cutoff || keep_shas.contains(oid) {
+            report.kept += 1;
+            continue;
+        }
+        // Pass the old value: if something re-pointed this ref since the listing,
+        // the delete fails instead of dropping a pin we never looked at.
+        let del = proc::command("git")
+            .args(["update-ref", "-d", refname, oid])
+            .current_dir(repo)
+            .output()?;
+        if del.status.success() {
+            report.deleted += 1;
+        } else {
+            report.kept += 1;
+        }
+    }
+    Ok(report)
+}
+
+/// True for the uuid shape `create` is fed once per snapshot (8-4-4-4-12 hex).
+/// Deliberately narrow: a ref this doesn't recognize is a ref we leave alone.
+fn is_auto_snapshot_id(id: &str) -> bool {
+    let groups = [8, 4, 4, 4, 12];
+    let mut parts = id.split('-');
+    for len in groups {
+        match parts.next() {
+            Some(p) if p.len() == len && p.chars().all(|c| c.is_ascii_hexdigit()) => {}
+            _ => return false,
+        }
+    }
+    parts.next().is_none()
 }
 
 pub fn delete(repo: &Path, id: &str) -> AppResult<()> {
@@ -283,6 +405,141 @@ mod tests {
         delete(&repo, "turn-1").unwrap();
 
         let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn only_uuid_shaped_ids_are_recognized_as_auto_snapshots() {
+        assert!(is_auto_snapshot_id("450aeb31-8079-498b-afab-1f0fab67b3e7"));
+        // Everything we or a user might park in the namespace by hand.
+        for id in [
+            "testigo-head",
+            "pre-restore-1756800000000000000",
+            "450aeb31-8079-498b-afab-1f0fab67b3e", // short group
+            "450aeb31-8079-498b-afab-1f0fab67b3e77", // long group
+            "450aeb31-8079-498b-afab",             // missing group
+            "450aeb31-8079-498b-afab-1f0fab67b3e7-x", // extra group
+            "450aeb31_8079_498b_afab_1f0fab67b3e7", // wrong separator
+            "450aeb31-8079-498b-afab-1f0fab67b3zz", // non-hex
+            "",
+        ] {
+            assert!(!is_auto_snapshot_id(id), "{id:?} must not be swept");
+        }
+    }
+
+    #[test]
+    fn sweep_expires_old_pins_but_never_the_ones_still_load_bearing() {
+        let repo = init_repo("sweep");
+        fs::write(repo.join("f.txt"), "seed").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+
+        let old = create(&repo, "11111111-1111-4111-8111-111111111111")
+            .unwrap()
+            .unwrap();
+        fs::write(repo.join("f.txt"), "later").unwrap();
+        let live_undo = create(&repo, "22222222-2222-4222-8222-222222222222")
+            .unwrap()
+            .unwrap();
+        // Refs we never auto-created: the ledger anchor and a restore backup.
+        git(
+            &["update-ref", "refs/agent-console/testigo-head", "HEAD"],
+            &repo,
+        );
+        git(
+            &["update-ref", "refs/agent-console/pre-restore-42", "HEAD"],
+            &repo,
+        );
+
+        let now = now_unix();
+        let keep: HashSet<String> = [live_undo.commit_sha.clone()].into_iter().collect();
+
+        // Nothing is old enough yet: a sweep at creation time is a no-op.
+        let fresh = sweep(&repo, &keep, 30, now).unwrap();
+        assert_eq!(fresh.deleted, 0, "young pins are never touched");
+        let pinned = git(
+            &[
+                "rev-parse",
+                "refs/agent-console/11111111-1111-4111-8111-111111111111",
+            ],
+            &repo,
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&pinned.stdout).trim(),
+            old.commit_sha,
+            "still pinned at its snapshot commit"
+        );
+
+        // Same refs, 40 days later: only the expired auto-snapshot goes.
+        let later = now + 40 * SECONDS_PER_DAY;
+        let report = sweep(&repo, &keep, 30, later).unwrap();
+        assert_eq!(report.deleted, 1, "exactly the expired, unreferenced pin");
+        assert_eq!(report.kept, 3, "live undo + anchor + restore backup");
+
+        assert!(
+            !git(
+                &[
+                    "rev-parse",
+                    "refs/agent-console/11111111-1111-4111-8111-111111111111"
+                ],
+                &repo
+            )
+            .status
+            .success(),
+            "expired pin dropped"
+        );
+        for still in [
+            "refs/agent-console/22222222-2222-4222-8222-222222222222",
+            "refs/agent-console/testigo-head",
+            "refs/agent-console/pre-restore-42",
+        ] {
+            assert!(
+                git(&["rev-parse", still], &repo).status.success(),
+                "{still} must survive retention"
+            );
+        }
+
+        // The kept snapshot is still a working undo, not just a live ref.
+        fs::write(repo.join("f.txt"), "wrecked").unwrap();
+        restore(&repo, &live_undo.commit_sha).unwrap();
+        assert_eq!(fs::read_to_string(repo.join("f.txt")).unwrap(), "later");
+
+        // And the swept one now fails with a reason that names retention
+        // instead of reading like corruption. (The object may still be in the
+        // odb until the user's own gc runs, so assert on the message we'd give
+        // for an unresolvable sha.)
+        let err = restore(&repo, "0000000000000000000000000000000000000000")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("30 days"),
+            "restore error explains retention: {err}"
+        );
+
+        // Idempotent: a second pass has nothing left to expire.
+        let again = sweep(&repo, &keep, 30, later).unwrap();
+        assert_eq!(again.deleted, 0);
+
+        let _ = fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn sweep_of_a_plain_directory_is_a_no_op() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let plain = std::env::temp_dir().join(format!("ac-snap-sweep-norepo-{nanos}"));
+        fs::create_dir_all(&plain).unwrap();
+        let r = sweep(&plain, &HashSet::new(), 30, now_unix()).unwrap();
+        assert_eq!(r, SweepReport::default());
+        let _ = fs::remove_dir_all(&plain);
+    }
+
+    fn now_unix() -> i64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
     }
 
     // Mirrors what the snapshot_restore command does: back up the current tree
