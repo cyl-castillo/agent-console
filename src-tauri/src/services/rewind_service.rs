@@ -6,11 +6,16 @@
 //! explicitly does not rewind the conversation, and the interactive `/rewind`
 //! mutates the session in place. What DOES work (verified live on claude
 //! 2.1.248, 2026-09-02): copy `~/.claude/projects/<slug>/<sid>.jsonl`
-//! truncated right before the `{"type":"queue-operation","operation":
-//! "enqueue",...}` line of the first prompt AFTER the turn we rewind to, save
-//! it as `<new-uuid>.jsonl` in the SAME directory, and `claude --resume
-//! <new-uuid>` starts with the memory rewound. Non-destructive: the original
-//! transcript is never opened for writing.
+//! truncated right before the first line of the turn AFTER the one we rewind
+//! to, save it as `<new-uuid>.jsonl` in the SAME directory, and `claude
+//! --resume <new-uuid>` starts with the memory rewound. Non-destructive: the
+//! original transcript is never opened for writing.
+//!
+//! What "first line of the next turn" is depends on how the session runs —
+//! headless transcripts mark turns with `queue-operation enqueue` lines,
+//! interactive ones (the only kind the GUI produces) with `user` lines
+//! carrying a fresh `promptId`. `find_boundary` documents and enforces both
+//! grammars.
 //!
 //! This is a conscious workaround over an internal format that churns between
 //! releases, so every step is defensive and fails LOUDLY into an honest
@@ -119,9 +124,30 @@ pub fn fork_transcript(session_id: &str, cutoff_ms: i64) -> AppResult<ForkOutcom
 
 /// Byte offset to truncate `data` at. Errors are format-drift tripwires: this
 /// parser must BREAK, not guess, when a claude release changes the transcript.
+///
+/// Two turn-start grammars coexist (a session can even mix them — started
+/// headless, resumed interactive):
+///
+/// - **Headless** (`claude -p`): every prompt is preceded by a
+///   `{"type":"queue-operation","operation":"enqueue",...}` line. That line is
+///   the boundary (the shape the original live experiment verified).
+/// - **Interactive** (the only kind the GUI produces): there are NO
+///   queue-operation lines. A turn starts at a non-sidechain `user` line
+///   carrying a `promptId` never seen before in the file — tool results also
+///   arrive as `user` lines, but they REUSE their turn's promptId, so novelty
+///   is what distinguishes a prompt from a result. Verified against a real
+///   2.1.248 interactive transcript. The per-turn header block
+///   (`mode`/`permission-mode`/`atis-latch`/`bridge-session`) is deliberately
+///   NOT a boundary: it re-appears mid-turn (e.g. around a permission
+///   approval), so cutting there would split a turn in half.
+///
+/// The scan is strictly in file order and the first marker past the cutoff
+/// wins — in headless files the enqueue precedes its `user` line, so the cut
+/// stays at the enqueue exactly as before.
 fn find_boundary(data: &str, session_id: &str, cutoff_ms: i64) -> AppResult<usize> {
     let mut offset = 0usize;
-    let mut saw_enqueue = false;
+    let mut saw_turn_marker = false;
+    let mut seen_prompt_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut line_no = 0usize;
     while offset < data.len() {
         line_no += 1;
@@ -146,10 +172,11 @@ fn find_boundary(data: &str, session_id: &str, cutoff_ms: i64) -> AppResult<usiz
                 "transcript line {line_no} is not valid JSON — format may have changed"
             )));
         };
-        if v.get("type").and_then(Value::as_str) == Some("queue-operation")
+        let line_type = v.get("type").and_then(Value::as_str);
+        if line_type == Some("queue-operation")
             && v.get("operation").and_then(Value::as_str) == Some("enqueue")
         {
-            saw_enqueue = true;
+            saw_turn_marker = true;
             let sid = v.get("sessionId").and_then(Value::as_str).ok_or_else(|| {
                 AppError::Other(format!(
                     "enqueue line {line_no} has no sessionId — format may have changed"
@@ -160,30 +187,56 @@ fn find_boundary(data: &str, session_id: &str, cutoff_ms: i64) -> AppResult<usiz
                     "enqueue line {line_no} belongs to session {sid}, expected {session_id}"
                 )));
             }
-            let ts = v.get("timestamp").and_then(Value::as_str).ok_or_else(|| {
-                AppError::Other(format!(
-                    "enqueue line {line_no} has no timestamp — format may have changed"
-                ))
-            })?;
-            let ms = iso_to_epoch_ms(ts).ok_or_else(|| {
-                AppError::Other(format!(
-                    "enqueue line {line_no} timestamp {ts:?} is not ISO 8601 UTC"
-                ))
-            })?;
+            let ms = line_timestamp_ms(&v, line_no, "enqueue")?;
             if ms > cutoff_ms {
                 return Ok(offset);
+            }
+        } else if line_type == Some("user")
+            && !v
+                .get("isSidechain")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            // Interactive grammar. Sidechain (subagent) lines never open a
+            // top-level turn, hence the guard above.
+            if let Some(pid) = v.get("promptId").and_then(Value::as_str) {
+                saw_turn_marker = true;
+                if seen_prompt_ids.insert(pid.to_string()) {
+                    // First time this promptId appears = a turn starts HERE.
+                    let ms = line_timestamp_ms(&v, line_no, "user prompt")?;
+                    if ms > cutoff_ms {
+                        return Ok(offset);
+                    }
+                }
             }
         }
         offset += advance;
     }
-    if !saw_enqueue {
+    if !saw_turn_marker {
         return Err(AppError::Other(
-            "no queue-operation enqueue lines in transcript — format may have changed".into(),
+            "no turn markers in transcript (neither queue-operation enqueue nor promptId user \
+             lines) — format may have changed"
+                .into(),
         ));
     }
     // Every prompt happened at or before the cutoff: the rewound-to turn is
     // the last one, so the fork keeps every fully-written line.
     Ok(offset)
+}
+
+/// The line's `timestamp` field as epoch ms — required on any line the scan
+/// evaluates as a turn boundary. Missing/unparseable = drift, break loudly.
+fn line_timestamp_ms(v: &Value, line_no: usize, what: &str) -> AppResult<i64> {
+    let ts = v.get("timestamp").and_then(Value::as_str).ok_or_else(|| {
+        AppError::Other(format!(
+            "{what} line {line_no} has no timestamp — format may have changed"
+        ))
+    })?;
+    iso_to_epoch_ms(ts).ok_or_else(|| {
+        AppError::Other(format!(
+            "{what} line {line_no} timestamp {ts:?} is not ISO 8601 UTC"
+        ))
+    })
 }
 
 /// `"2026-09-02T12:09:30.203Z"` → epoch ms. Only the exact shape claude
@@ -322,21 +375,133 @@ mod tests {
         )
     }
 
-    /// Minimal synthetic transcript with three turns. This test doubles as the
-    /// format smoke test: it encodes the exact line shapes the fork relies on,
-    /// and it must be updated deliberately if a claude release changes them.
+    fn user_prompt(ts: &str, prompt_id: &str, content: &str) -> String {
+        format!(
+            r#"{{"parentUuid":null,"isSidechain":false,"promptId":"{prompt_id}","type":"user","message":{{"role":"user","content":"{content}"}},"uuid":"u-{prompt_id}","timestamp":"{ts}"}}"#
+        )
+    }
+
+    /// A tool result ALSO arrives as a `user` line, reusing its turn's
+    /// promptId — the trap that makes "user line = new turn" a wrong parser.
+    fn tool_result_user(ts: &str, prompt_id: &str, tool_use_id: &str) -> String {
+        format!(
+            r#"{{"parentUuid":"u-{prompt_id}","isSidechain":false,"promptId":"{prompt_id}","type":"user","message":{{"role":"user","content":[{{"tool_use_id":"{tool_use_id}","type":"tool_result","content":"ok"}}]}},"uuid":"u-{tool_use_id}","timestamp":"{ts}"}}"#
+        )
+    }
+
+    fn assistant(ts: &str, text: &str) -> String {
+        format!(
+            r#"{{"parentUuid":"x","isSidechain":false,"message":{{"model":"claude-opus-5","id":"msg_x","type":"message","role":"assistant","content":[{{"type":"text","text":"{text}"}}]}},"type":"assistant","uuid":"a-{ts}","timestamp":"{ts}"}}"#
+        )
+    }
+
+    /// The per-turn header block of an interactive session. It ALSO re-appears
+    /// mid-turn (e.g. around a permission approval), which is why it must
+    /// never be treated as a turn boundary.
+    fn header_block() -> [String; 4] {
+        [
+            format!(r#"{{"type":"mode","mode":"normal","sessionId":"{SID}"}}"#),
+            format!(r#"{{"type":"permission-mode","permissionMode":"auto","sessionId":"{SID}"}}"#),
+            format!(r#"{{"type":"atis-latch","atis":"","sessionId":"{SID}"}}"#),
+            format!(
+                r#"{{"type":"bridge-session","sessionId":"{SID}","bridgeSessionId":"cse_01X","lastSequenceNum":0}}"#
+            ),
+        ]
+    }
+
+    /// Minimal synthetic HEADLESS (`claude -p`) transcript with three turns.
+    /// This test doubles as the format smoke test: it encodes the exact line
+    /// shapes the fork relies on, and it must be updated deliberately if a
+    /// claude release changes them. The `user` lines carry promptId/timestamp
+    /// like the real ones — proving the enqueue line (which comes first) stays
+    /// the boundary in headless files.
     fn synthetic() -> String {
         [
             enqueue("2026-09-02T10:00:00.000Z", "turn one"),
             dequeue("2026-09-02T10:00:00.100Z"),
-            r#"{"type":"user","message":{"role":"user","content":"turn one"}}"#.into(),
-            r#"{"type":"assistant","message":{"role":"assistant","content":[]}}"#.into(),
+            user_prompt("2026-09-02T10:00:00.200Z", "hp-one", "turn one"),
+            assistant("2026-09-02T10:00:05.000Z", "done one"),
             enqueue("2026-09-02T11:00:00.000Z", "turn two"),
             dequeue("2026-09-02T11:00:00.100Z"),
-            r#"{"type":"user","message":{"role":"user","content":"turn two"}}"#.into(),
+            user_prompt("2026-09-02T11:00:00.200Z", "hp-two", "turn two"),
             enqueue("2026-09-02T12:00:00.000Z", "turn three"),
             dequeue("2026-09-02T12:00:00.100Z"),
-            r#"{"type":"user","message":{"role":"user","content":"turn three"}}"#.into(),
+            user_prompt("2026-09-02T12:00:00.200Z", "hp-three", "turn three"),
+        ]
+        .join("\n")
+            + "\n"
+    }
+
+    /// Minimal synthetic INTERACTIVE transcript, line shapes cloned from a
+    /// real claude 2.1.248 session (~/.claude/projects/…/09bdeb80….jsonl, the
+    /// GUI-verification exemplar): per-turn header block, file-history
+    /// snapshot, prompt as a `user` line with a fresh promptId, tool results
+    /// as `user` lines REUSING that promptId, a mid-turn header re-latch
+    /// (around an approval), system stop/turn_duration closers, and
+    /// last-prompt/ai-title/cost-state trailers. Same contract as the
+    /// headless fixture: a claude release changing these shapes must turn CI
+    /// red, deliberately.
+    fn synthetic_interactive() -> String {
+        let h = header_block();
+        [
+            // ---- turn one ----
+            h[0].clone(),
+            h[1].clone(),
+            h[2].clone(),
+            h[3].clone(),
+            format!(
+                r#"{{"type":"file-history-snapshot","messageId":"m1","snapshot":{{"messageId":"m1","trackedFileBackups":{{}},"timestamp":"2026-09-03T01:00:04.760Z"}},"isSnapshotUpdate":false}}"#
+            ),
+            user_prompt("2026-09-03T01:00:04.694Z", "prompt-one", "turn one codeword ROJO"),
+            format!(
+                r#"{{"parentUuid":"u-prompt-one","isSidechain":false,"attachment":{{"type":"total_tokens_reminder","text":"x"}},"type":"attachment","uuid":"att1","timestamp":"2026-09-03T01:00:04.800Z"}}"#
+            ),
+            format!(r#"{{"type":"ai-title","aiTitle":"demo","sessionId":"{SID}"}}"#),
+            assistant("2026-09-03T01:00:10.000Z", "working on it"),
+            format!(
+                r#"{{"parentUuid":"a1","isSidechain":false,"attachment":{{"type":"hook_success","hookName":"PreToolUse:Write","toolUseID":"toolu_1","hookEvent":"PreToolUse","content":""}},"type":"attachment","uuid":"att2","timestamp":"2026-09-03T01:00:39.300Z"}}"#
+            ),
+            tool_result_user("2026-09-03T01:00:39.343Z", "prompt-one", "toolu_1"),
+            // Mid-turn header re-latch (the approval pause) — NOT a boundary.
+            h[0].clone(),
+            h[1].clone(),
+            h[2].clone(),
+            h[3].clone(),
+            assistant("2026-09-03T01:01:10.000Z", "Done, ROJO set"),
+            format!(
+                r#"{{"parentUuid":"a2","isSidechain":false,"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookInfos":[],"timestamp":"2026-09-03T01:01:12.700Z","uuid":"sys1","isMeta":false}}"#
+            ),
+            format!(
+                r#"{{"parentUuid":"sys1","isSidechain":false,"type":"system","subtype":"turn_duration","durationMs":67987,"messageCount":18,"timestamp":"2026-09-03T01:01:12.750Z","uuid":"sys2","isMeta":false}}"#
+            ),
+            format!(
+                r#"{{"type":"file-history-delta","messageId":"m2","snapshotMessageId":"m1","trackingPath":"version.txt"}}"#
+            ),
+            format!(
+                r#"{{"type":"last-prompt","lastPrompt":"turn one codeword ROJO","leafUuid":"sys2","sessionId":"{SID}"}}"#
+            ),
+            format!(r#"{{"type":"custom-title","customTitle":"demo","sessionId":"{SID}"}}"#),
+            format!(r#"{{"type":"agent-name","agentName":"demo","sessionId":"{SID}"}}"#),
+            // A sidechain (subagent) user line with a NOVEL promptId — never a
+            // top-level turn boundary.
+            format!(
+                r#"{{"parentUuid":"sys2","isSidechain":true,"promptId":"sidechain-prompt","type":"user","message":{{"role":"user","content":"subagent task"}},"uuid":"sc1","timestamp":"2026-09-03T01:01:20.000Z"}}"#
+            ),
+            // ---- turn two ----
+            user_prompt("2026-09-03T01:01:38.904Z", "prompt-two", "turn two codeword AZUL"),
+            format!(
+                r#"{{"type":"file-history-snapshot","messageId":"m3","snapshot":{{"messageId":"m3","trackedFileBackups":{{}},"timestamp":"2026-09-03T01:01:39.000Z"}},"isSnapshotUpdate":false}}"#
+            ),
+            assistant("2026-09-03T01:01:45.000Z", "Done, AZUL set"),
+            format!(
+                r#"{{"parentUuid":"a3","isSidechain":false,"type":"system","subtype":"turn_duration","durationMs":36470,"messageCount":27,"timestamp":"2026-09-03T01:02:15.417Z","uuid":"sys3","isMeta":false}}"#
+            ),
+            format!(
+                r#"{{"type":"cost-state","sessionId":"{SID}","totalCostUSD":1.1,"totalAPIDuration":22019}}"#
+            ),
+            format!(
+                r#"{{"type":"last-prompt","lastPrompt":"turn two codeword AZUL","leafUuid":"sys3","sessionId":"{SID}"}}"#
+            ),
         ]
         .join("\n")
             + "\n"
@@ -386,6 +551,63 @@ mod tests {
         data.push_str(r#"{"type":"queue-op"#); // writer caught mid-append
         let cut = find_boundary(&data, SID, i64::MAX).unwrap();
         assert_eq!(cut, synthetic().len());
+    }
+
+    #[test]
+    fn interactive_boundary_cuts_before_the_next_prompt() {
+        let data = synthetic_interactive();
+        // The ledger's turn_end for turn one lands just after its
+        // turn_duration line (01:01:12.750).
+        let cutoff = iso_to_epoch_ms("2026-09-03T01:01:13Z").unwrap();
+        let cut = find_boundary(&data, SID, cutoff).unwrap();
+        let kept = &data[..cut];
+        // Turn one survives WHOLE: closing message, system closers, trailers.
+        assert!(kept.contains("Done, ROJO set"));
+        assert!(kept.contains("turn_duration"));
+        assert!(kept.contains("last-prompt"));
+        assert!(kept.contains("custom-title"));
+        // The sidechain line sits between the turns with a novel promptId and
+        // a timestamp past the cutoff — if the parser treated it as a turn
+        // start, the cut would land on it instead of on turn two's prompt.
+        assert!(kept.contains("sidechain-prompt"));
+        // Turn two is gone entirely...
+        assert!(!kept.contains("AZUL"));
+        assert!(!kept.contains("prompt-two"));
+        // ...and the cut lands exactly on its prompt line.
+        assert!(data[cut..]
+            .starts_with(r#"{"parentUuid":null,"isSidechain":false,"promptId":"prompt-two""#));
+    }
+
+    #[test]
+    fn interactive_tool_results_and_mid_turn_headers_are_not_boundaries() {
+        // Cutoff mid-turn-one, BEFORE its tool result and the header
+        // re-latch: a parser that treats any `user` line — or the header
+        // block, which re-appears around approvals — as a turn start would
+        // cut turn one in half right here.
+        let data = synthetic_interactive();
+        let cutoff = iso_to_epoch_ms("2026-09-03T01:00:10Z").unwrap();
+        let cut = find_boundary(&data, SID, cutoff).unwrap();
+        let kept = &data[..cut];
+        assert!(kept.contains("toolu_1")); // the tool_result user line, kept
+        assert!(kept.contains("Done, ROJO set")); // the closing message, kept
+        assert!(!kept.contains("prompt-two"));
+        assert!(data[cut..].contains("prompt-two"));
+    }
+
+    #[test]
+    fn interactive_rewind_to_last_turn_keeps_everything() {
+        let data = synthetic_interactive();
+        assert_eq!(find_boundary(&data, SID, i64::MAX).unwrap(), data.len());
+    }
+
+    #[test]
+    fn interactive_format_drift_breaks_loudly() {
+        // A novel-promptId user line without a timestamp can't be placed
+        // against the cutoff — drift, never a guess.
+        let data = format!(
+            r#"{{"type":"user","isSidechain":false,"promptId":"p1","message":{{"role":"user","content":"hi"}}}}"#
+        ) + "\n";
+        assert!(find_boundary(&data, SID, 0).is_err());
     }
 
     #[test]
