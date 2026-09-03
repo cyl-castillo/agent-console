@@ -337,6 +337,35 @@ GNU Affero General Public License v3.0 — see [LICENSE](./LICENSE).
 Versions up to and including v0.75.0 were released under the MIT license and
 remain available under those terms.
 
+### Using Agent Console at work
+
+Short version: **using the app imposes no obligations on you or your
+company.** If a compliance scanner flagged "AGPL" and sent you here, this
+section is for you.
+
+- **Your code stays yours.** The AGPL covers Agent Console itself, not what
+  you make with it. Code your team writes while using the app — including
+  code the agents write under your direction — belongs to you, under
+  whatever license you choose. There is no copyleft on your repositories.
+- **Nothing to disclose.** Running the app inside a company, on client
+  projects, commercially, org-wide: none of that requires releasing any
+  source code or telling anyone anything. Your obligations from *using*
+  Agent Console under AGPL are identical to what they were under MIT: none.
+- **When the AGPL does apply:** only if you distribute a *modified build of
+  Agent Console itself*, or offer a modified version to others over a
+  network. Using unmodified releases — even at scale — triggers nothing.
+- **If policy needs time:** every release up to and including
+  [v0.75.0](https://github.com/cyl-castillo/agent-console/releases/tag/v0.75.0)
+  is MIT, irrevocably. Pin there while your legal team reads the above.
+- **If policy says no anyway:** open an issue or write to the maintainer.
+  The project's copyright is held so that individual license grants are
+  possible (contributions come in under MIT — see
+  [CONTRIBUTING.md](CONTRIBUTING.md)) — a blanket AGPL ban at your company
+  is a solvable conversation, not a dead end.
+
+For what the app sends over the network (nothing, basically), see the
+[privacy policy](#privacy-policy) above.
+
 "Agent Console" and its logo identify this project. Please don't use the name
 or logo for modified versions in a way that suggests they are the official
 distribution.
