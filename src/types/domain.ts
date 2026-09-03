@@ -885,3 +885,11 @@ export interface WorklogDigestEntry {
   logged: boolean;
   loggedSeconds?: number | null;
 }
+
+/// A terminal and the live Claude session it is actually running, matched by
+/// process ancestry (`claude agents --json` + the PTY's shell pid). Present
+/// only for terminals with exactly one live agent underneath them.
+export interface AgentSessionBinding {
+  termKey: string;
+  sessionId: string;
+}

@@ -10,6 +10,7 @@ import type {
   WorklogDigestEntry,
   ActivityEvent,
   AdvisorAnalysisResult,
+  AgentSessionBinding,
   ApprovalRequest,
   BranchInfo,
   ContextFileStat,
@@ -91,6 +92,9 @@ export const ipc = {
   termResize: (id: string, cols: number, rows: number) =>
     invoke<void>("term_resize", { id, cols, rows }),
   termKill: (id: string) => invoke<void>("term_kill", { id }),
+  // Which live Claude session each terminal is really running, proven by
+  // process ancestry. Terminals with no (or an ambiguous) match are absent.
+  termAgentSessions: () => invoke<AgentSessionBinding[]>("term_agent_sessions"),
 
   gitStatus: () => invoke<GitStatus>("git_status"),
   gitDiffFile: (file: string) => invoke<string>("git_diff_file", { file }),

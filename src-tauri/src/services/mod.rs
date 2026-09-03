@@ -1,5 +1,6 @@
 pub mod activity_service;
 pub mod advisor_service;
+pub mod agent_sessions;
 pub mod claude_cli;
 pub mod context_service;
 pub mod corpus_feedback;
