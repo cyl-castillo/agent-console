@@ -318,6 +318,9 @@ Team roles:
   [contributors](https://github.com/cyl-castillo/agent-console/graphs/contributors)
 - **Reviewers / approvers**: [@cyl-castillo](https://github.com/cyl-castillo)
   (project maintainer)
+- **Contributing**: see [CONTRIBUTING.md](CONTRIBUTING.md) — commits need a
+  DCO sign-off (`git commit -s`); contributions are accepted under MIT while
+  the project ships as AGPL-3.0-only (keeps relicensing honest and possible)
 
 ### Privacy policy
 
