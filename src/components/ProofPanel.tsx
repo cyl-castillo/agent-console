@@ -1,8 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
+import { profileFor } from "../agents/profiles";
 import { useProofStore, summarizeCases, buildTimeline } from "../stores/proofStore";
+import type { TimelineTurn } from "../stores/proofStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { useTerminalsStore } from "../stores/terminalsStore";
 import type { TestigoPreviewEntry } from "../types/domain";
+import { Modal } from "./Modal";
 
 /// Public TSA used when the trusted-timestamp toggle is switched on. One
 /// well-known default beats a URL field nobody fills correctly; the backend
@@ -70,6 +74,13 @@ export function ProofPanel() {
   const confirmExport = useProofStore((s) => s.confirmExport);
   const cancelExport = useProofStore((s) => s.cancelExport);
   const selectCase = useProofStore((s) => s.selectCase);
+  const rewindToTurn = useProofStore((s) => s.rewindToTurn);
+  const sessions = useTerminalsStore((s) => s.sessions);
+  // Turn awaiting rewind confirmation. Our own Modal, NOT window.confirm():
+  // WebKitGTK can skip the native dialog and return without ever asking —
+  // same failure class as the clipboard lesson — and a phantom "yes" on an
+  // action that rewrites the working tree is not acceptable.
+  const [rewindTarget, setRewindTarget] = useState<TimelineTurn | null>(null);
 
   useEffect(() => {
     if (project) void load(project.root);
@@ -309,54 +320,95 @@ export function ProofPanel() {
             {timeline.length === 0 && (
               <p className="wb-hint">No turns recorded in this case yet.</p>
             )}
-            {timeline.map((t) => (
-              <div className="wb-section proof-turn" key={t.turnId ?? t.ts}>
-                <p>
-                  <span className="wb-hint">{fmtTime(t.ts)}</span>
-                  {t.endTs === null && <span className="wb-hint"> · turn still open</span>}
-                  {t.failed && (
-                    <span className="wb-error" title={t.errorDetails}>
-                      {" "}
-                      · turn failed{t.error ? ` — ${t.error}` : ""}
-                    </span>
-                  )}
-                  <br />
-                  <span title={t.prompt}>
-                    {t.prompt.length > 160 ? `${t.prompt.slice(0, 160)}…` : t.prompt}
-                  </span>
-                </p>
-                {t.approvals.length > 0 && (
-                  <p className="wb-hint">
-                    {t.approvals.map((a, i) => (
-                      <span key={i}>
-                        {i > 0 && " · "}
-                        <code>{a.tool ?? "?"}</code> {a.decision}
-                        {a.reason ? ` — ${a.reason}` : ""}
+            {timeline.map((t) => {
+              // "Rewind to this turn" needs the turn closed with a post-turn
+              // snapshot, the engine session to fork, and a session whose
+              // profile supports the transcript fork (Claude-only — on Codex
+              // terminals the action is not offered, same criterion as
+              // StopFailure). A live source session would keep writing over
+              // the restored tree, so the button waits for it to stop.
+              const src = t.termId ? sessions.find((s) => s.id === t.termId) : undefined;
+              const rewindable =
+                !!src &&
+                profileFor(src.agent).supportsTranscriptFork &&
+                !!t.postSha &&
+                !!t.sessionId &&
+                t.endTs !== null;
+              const srcLive = src?.status === "live";
+              return (
+                <div className="wb-section proof-turn" key={t.turnId ?? t.ts}>
+                  <p>
+                    <span className="wb-hint">{fmtTime(t.ts)}</span>
+                    {t.endTs === null && <span className="wb-hint"> · turn still open</span>}
+                    {t.failed && (
+                      <span className="wb-error" title={t.errorDetails}>
+                        {" "}
+                        · turn failed{t.error ? ` — ${t.error}` : ""}
                       </span>
-                    ))}
+                    )}
+                    {t.rewound && (
+                      <span
+                        className="wb-hint"
+                        title="A rewind restored files and conversation to the end of this turn"
+                      >
+                        {" "}
+                        · ↶ history rewound to here
+                      </span>
+                    )}
+                    <br />
+                    <span title={t.prompt}>
+                      {t.prompt.length > 160 ? `${t.prompt.slice(0, 160)}…` : t.prompt}
+                    </span>
                   </p>
-                )}
-                {t.summary && (
-                  <p className="wb-hint proof-turn-summary" title={t.summary}>
-                    ↳ {t.summary.length > 220 ? `${t.summary.slice(0, 220)}…` : t.summary}
-                    {t.summaryTruncated && " …"}
-                  </p>
-                )}
-                {(t.toolResults > 0 || t.files.length > 0) && (
-                  <p className="wb-hint">
-                    {t.toolResults > 0 && `${t.toolResults} tool calls`}
-                    {t.toolResults > 0 && t.files.length > 0 && " · "}
-                    {t.files.length > 0 &&
-                      t.files
-                        .slice(0, 8)
-                        .map((f) => `${f.status} ${f.path}`)
-                        .join(", ")}
-                    {t.files.length > 8 && ` … +${t.files.length - 8} more`}
-                    {t.filesTruncated && " (list capped at 500)"}
-                  </p>
-                )}
-              </div>
-            ))}
+                  {t.approvals.length > 0 && (
+                    <p className="wb-hint">
+                      {t.approvals.map((a, i) => (
+                        <span key={i}>
+                          {i > 0 && " · "}
+                          <code>{a.tool ?? "?"}</code> {a.decision}
+                          {a.reason ? ` — ${a.reason}` : ""}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  {t.summary && (
+                    <p className="wb-hint proof-turn-summary" title={t.summary}>
+                      ↳ {t.summary.length > 220 ? `${t.summary.slice(0, 220)}…` : t.summary}
+                      {t.summaryTruncated && " …"}
+                    </p>
+                  )}
+                  {(t.toolResults > 0 || t.files.length > 0) && (
+                    <p className="wb-hint">
+                      {t.toolResults > 0 && `${t.toolResults} tool calls`}
+                      {t.toolResults > 0 && t.files.length > 0 && " · "}
+                      {t.files.length > 0 &&
+                        t.files
+                          .slice(0, 8)
+                          .map((f) => `${f.status} ${f.path}`)
+                          .join(", ")}
+                      {t.files.length > 8 && ` … +${t.files.length - 8} more`}
+                      {t.filesTruncated && " (list capped at 500)"}
+                    </p>
+                  )}
+                  {rewindable && (
+                    <p className="wb-hint">
+                      <button
+                        className="wb-link"
+                        disabled={srcLive}
+                        title={
+                          srcLive
+                            ? "Stop the session first — a live agent would keep writing over the restored files"
+                            : "Restore the files AND the conversation to the end of this turn (originals kept; a backup is taken first)"
+                        }
+                        onClick={() => setRewindTarget(t)}
+                      >
+                        ↶ rewind to this turn
+                      </button>
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </section>
         )}
 
@@ -378,6 +430,40 @@ export function ProofPanel() {
               receiver verifies in a browser, no install.
             </p>
           </section>
+        )}
+
+        {rewindTarget && (
+          <Modal
+            onClose={() => setRewindTarget(null)}
+            className="wt-modal"
+            ariaLabel="Rewind to this turn"
+          >
+            <h3>Rewind to this turn?</h3>
+            <p className="wt-modal-line">
+              Files are restored to how they were when this turn ended — changes from later turns
+              are discarded. A backup snapshot is taken first (undo via ⌘P → Undo last restore).
+            </p>
+            <p className="wt-modal-line">
+              A <strong>new session</strong> opens, resuming the conversation as of this turn. The
+              current session and its transcript are kept untouched as history.
+            </p>
+            <div className="wt-modal-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  const target = rewindTarget;
+                  setRewindTarget(null);
+                  void rewindToTurn(target);
+                }}
+              >
+                Rewind
+              </button>
+              <span className="spacer" />
+              <button className="btn btn-ghost" onClick={() => setRewindTarget(null)}>
+                Cancel
+              </button>
+            </div>
+          </Modal>
         )}
       </div>
     </div>

@@ -1,6 +1,10 @@
 import { create } from "zustand";
 
+import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
+import { useChangesStore } from "./changesStore";
+import { useTerminalsStore } from "./terminalsStore";
+import { useToastStore } from "./toastStore";
 import type {
   ProofEvent,
   TestigoVerifyReport,
@@ -40,6 +44,17 @@ export interface TimelineTurn {
   failed: boolean;
   error?: string;
   errorDetails?: string;
+  /// Where the turn ran and what it left behind — everything "Rewind to this
+  /// turn" needs: the terminal binding, the engine session to fork, the
+  /// checkout (worktree sessions differ from the project root) and the
+  /// post-turn snapshot to restore files to.
+  termId?: string;
+  sessionId?: string;
+  cwd?: string;
+  postSha?: string;
+  /// True when a later rewind event points at this turn — the timeline shows
+  /// where history was rewound to.
+  rewound: boolean;
 }
 
 interface ProofState {
@@ -68,6 +83,12 @@ interface ProofState {
   cancelExport: () => void;
   selectCase: (caseId: string | null) => void;
   setSettings: (patch: Partial<TestigoSettings>) => Promise<void>;
+  /// "Rewind to this turn": restore the turn's checkout to its post-turn
+  /// snapshot, fork the agent's transcript truncated after the turn, and open
+  /// a NEW session resuming the fork — the original session and transcript
+  /// stay untouched as history. When the fork fails the files are restored
+  /// anyway and the toast SAYS the memory was not rewound.
+  rewindToTurn: (t: TimelineTurn) => Promise<void>;
 }
 
 export function summarizeCases(events: ProofEvent[]): CaseSummary[] {
@@ -113,6 +134,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         summary: "",
         summaryTruncated: false,
         failed: false,
+        rewound: false,
       };
       byId.set(e.turnId, t);
       turns.push(t);
@@ -120,6 +142,14 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
     return t;
   };
   for (const e of events) {
+    // A rewind event's turnId POINTS AT the turn it restored — it must mark
+    // that turn, never open a phantom one (e.g. after the pointed-at turn was
+    // exported away or the ledger only holds the tail).
+    if (e.kind === "rewind") {
+      const target = e.turnId ? byId.get(e.turnId) : undefined;
+      if (target) target.rewound = true;
+      continue;
+    }
     const t = turnFor(e);
     if (!t) continue;
     const p = e.payload as Record<string, unknown>;
@@ -127,6 +157,9 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       t.ts = e.ts;
       t.prompt = typeof p.prompt === "string" ? p.prompt : "";
       if (typeof p.skill === "string") t.skill = p.skill;
+      if (e.termId) t.termId = e.termId;
+      if (e.sessionId) t.sessionId = e.sessionId;
+      if (typeof p.cwd === "string" && p.cwd) t.cwd = p.cwd;
     } else if (e.kind === "approval_decision") {
       t.approvals.push({
         tool: typeof p.tool === "string" ? p.tool : undefined,
@@ -148,6 +181,11 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       t.failed = p.failed === true;
       if (typeof p.error === "string") t.error = p.error;
       if (typeof p.errorDetails === "string") t.errorDetails = p.errorDetails;
+      if (typeof p.postSha === "string" && p.postSha) t.postSha = p.postSha;
+      // The close carries the binding too — keeps the turn actionable even
+      // when the prompt event predates a hook that sent no ids.
+      if (!t.termId && e.termId) t.termId = e.termId;
+      if (!t.sessionId && e.sessionId) t.sessionId = e.sessionId;
     }
   }
   return turns;
@@ -230,6 +268,66 @@ export const useProofStore = create<ProofState>((set, get) => ({
   },
 
   cancelExport: () => set({ review: null }),
+
+  rewindToTurn: async (t) => {
+    // Re-checked even though the button already gates: this action rewrites a
+    // working tree, and the ledger can lag the session list.
+    if (!t.termId || !t.sessionId || !t.postSha || t.endTs == null) return;
+    const terminals = useTerminalsStore.getState();
+    const src = terminals.sessions.find((s) => s.id === t.termId);
+    // The engine gate lives on the profile (Claude-only today): a turn whose
+    // session is gone can't name its engine, so it isn't rewindable either.
+    if (!src || !profileFor(src.agent).supportsTranscriptFork) return;
+    // A live agent would keep writing over the restored tree from its
+    // un-rewound conversation — the UI disables the button, this is the belt.
+    if (src.status === "live") return;
+    const cwd = t.cwd ?? src.cwd;
+    try {
+      const res = await ipc.turnRewind({
+        repo: cwd,
+        commitSha: t.postSha,
+        sessionId: t.sessionId,
+        cutoffMs: t.endTs,
+        termId: t.termId,
+        turnId: t.turnId ?? undefined,
+      });
+      await useChangesStore.getState().refresh();
+      if (res.forkSessionId) {
+        // New session in the turn's checkout, resuming the forked (rewound)
+        // conversation. Bind the fork id in the same tick as add(): the
+        // terminal's spawn effect reads it when building `--resume`.
+        const newId = terminals.add(
+          cwd,
+          `${src.name} ↶`,
+          src.model,
+          src.agent,
+          src.worktree && src.worktree.path === cwd ? src.worktree : undefined,
+        );
+        terminals.setAgentSessionId(newId, res.forkSessionId);
+        useToastStore
+          .getState()
+          .show(
+            "Rewound: files restored, new session resumes the conversation as of that turn",
+            "success",
+          );
+      } else {
+        // Honest degradation, loud on purpose (error tone persists): files
+        // moved but the agent still remembers the turns that produced them —
+        // exactly the desync the user asked to undo.
+        useToastStore
+          .getState()
+          .show(
+            `Files restored, but the agent's memory was NOT rewound — the conversation still remembers later turns. ${res.forkError ?? ""}`,
+            "error",
+          );
+      }
+      // Reload so the timeline shows the rewind event on the turn.
+      const root = get().projectRoot;
+      if (root) void get().load(root);
+    } catch (e) {
+      useToastStore.getState().show(`Rewind failed: ${e}`, "error");
+    }
+  },
 
   setSettings: async (patch) => {
     const { projectRoot: root, settings } = get();

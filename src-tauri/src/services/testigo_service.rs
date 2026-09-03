@@ -491,6 +491,38 @@ impl TestigoService {
         )
     }
 
+    /// Record a turn rewind: the working tree was restored to a snapshot and
+    /// (when the fork succeeded) the conversation transcript was forked to a
+    /// new session id. A rewind rewrites what the checkout contains, so it is
+    /// an auditable fact in its own right — the payload names the restored
+    /// snapshot, the original session and the fork, and `turn_id` points at
+    /// the ledger turn the user rewound to.
+    pub fn on_rewind(
+        &self,
+        project_root: &str,
+        ts: i64,
+        term_id: Option<&str>,
+        session_id: Option<&str>,
+        turn_id: Option<String>,
+        payload: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        let case = Self::case_for(&inner, term_id);
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case,
+            turn_id,
+            "rewind",
+            term_id.map(String::from),
+            session_id.map(String::from),
+            "human",
+            payload,
+        )
+    }
+
     pub fn on_snapshot(
         &self,
         project_root: &str,
