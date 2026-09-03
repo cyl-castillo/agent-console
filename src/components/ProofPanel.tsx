@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { profileFor } from "../agents/profiles";
 import { useProofStore, summarizeCases, buildTimeline } from "../stores/proofStore";
+import type { TimelineTurn } from "../stores/proofStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import type { TestigoPreviewEntry } from "../types/domain";
+import { Modal } from "./Modal";
 
 /// Public TSA used when the trusted-timestamp toggle is switched on. One
 /// well-known default beats a URL field nobody fills correctly; the backend
@@ -74,6 +76,11 @@ export function ProofPanel() {
   const selectCase = useProofStore((s) => s.selectCase);
   const rewindToTurn = useProofStore((s) => s.rewindToTurn);
   const sessions = useTerminalsStore((s) => s.sessions);
+  // Turn awaiting rewind confirmation. Our own Modal, NOT window.confirm():
+  // WebKitGTK can skip the native dialog and return without ever asking —
+  // same failure class as the clipboard lesson — and a phantom "yes" on an
+  // action that rewrites the working tree is not acceptable.
+  const [rewindTarget, setRewindTarget] = useState<TimelineTurn | null>(null);
 
   useEffect(() => {
     if (project) void load(project.root);
@@ -393,17 +400,7 @@ export function ProofPanel() {
                             ? "Stop the session first — a live agent would keep writing over the restored files"
                             : "Restore the files AND the conversation to the end of this turn (originals kept; a backup is taken first)"
                         }
-                        onClick={() => {
-                          if (
-                            confirm(
-                              "Rewind to this turn?\n\n" +
-                                "Files are restored to how they were when this turn ended — changes from later turns are discarded (a backup snapshot is taken first, undo via ⌘P).\n\n" +
-                                "A NEW session opens, resuming the conversation as of this turn. The current session and its transcript are kept untouched as history.",
-                            )
-                          ) {
-                            void rewindToTurn(t);
-                          }
-                        }}
+                        onClick={() => setRewindTarget(t)}
                       >
                         ↶ rewind to this turn
                       </button>
@@ -433,6 +430,40 @@ export function ProofPanel() {
               receiver verifies in a browser, no install.
             </p>
           </section>
+        )}
+
+        {rewindTarget && (
+          <Modal
+            onClose={() => setRewindTarget(null)}
+            className="wt-modal"
+            ariaLabel="Rewind to this turn"
+          >
+            <h3>Rewind to this turn?</h3>
+            <p className="wt-modal-line">
+              Files are restored to how they were when this turn ended — changes from later turns
+              are discarded. A backup snapshot is taken first (undo via ⌘P → Undo last restore).
+            </p>
+            <p className="wt-modal-line">
+              A <strong>new session</strong> opens, resuming the conversation as of this turn. The
+              current session and its transcript are kept untouched as history.
+            </p>
+            <div className="wt-modal-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  const target = rewindTarget;
+                  setRewindTarget(null);
+                  void rewindToTurn(target);
+                }}
+              >
+                Rewind
+              </button>
+              <span className="spacer" />
+              <button className="btn btn-ghost" onClick={() => setRewindTarget(null)}>
+                Cancel
+              </button>
+            </div>
+          </Modal>
         )}
       </div>
     </div>
