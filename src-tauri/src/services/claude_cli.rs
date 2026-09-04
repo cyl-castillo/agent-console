@@ -71,6 +71,31 @@ pub fn command(args: &[&str]) -> Command {
     spawn_command(bin(), args, Stdio::null())
 }
 
+/// A `claude <args>` command with stdin piped, for callers that feed the
+/// prompt over stdin (`claude -p` with no positional prompt reads it there).
+/// Prompts must NOT travel as argv: on Windows `CreateProcess` caps the whole
+/// command line at 32,767 chars — and the npm `claude.cmd` shim, spawned via
+/// `cmd.exe`, at ~8k — so a grown prompt fails to spawn with os error 206
+/// ("file name or extension is too long"). stdin has no such cap.
+pub fn command_with_stdin(args: &[&str]) -> Command {
+    spawn_command(bin(), args, Stdio::piped())
+}
+
+/// Spawn `cmd`, write `prompt` to its stdin, close it, and collect the output.
+/// `claude -p` reads stdin until EOF before answering, so dropping the handle
+/// right after the write is load-bearing, not just tidy. A failed write is
+/// deliberately ignored: it means the child died before reading (bad flag,
+/// missing binary), and `wait_with_output` surfaces its stderr — a far better
+/// error than "broken pipe".
+pub fn output_with_stdin(mut cmd: Command, prompt: &str) -> std::io::Result<std::process::Output> {
+    use std::io::Write;
+    let mut child = cmd.spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(prompt.as_bytes());
+    }
+    child.wait_with_output()
+}
+
 /// A `codex <args>` command with stdin piped for callers that intentionally
 /// feed the prompt over stdin instead of passing it as an argv value. Codex's
 /// `exec` mode blocks until stdin is closed, so the caller must write and then
@@ -458,6 +483,37 @@ mod tests {
             ))
             .output()
             .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_with_stdin_feeds_the_whole_prompt_and_collects_stdout() {
+        // Larger than the 32,767-char Windows argv cap that motivated the
+        // helper: the prompt must reach the child intact via stdin.
+        let prompt = "x".repeat(40_000);
+        let mut cmd = Command::new("cat");
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let out = output_with_stdin(cmd, &prompt).expect("spawns");
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout), prompt);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_with_stdin_surfaces_the_childs_error_not_a_broken_pipe() {
+        // A child that exits without reading stdin: the write is best-effort
+        // and the caller still gets the real exit status + stderr.
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg("echo boom >&2; exit 3")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let out = output_with_stdin(cmd, &"y".repeat(1_000_000)).expect("spawns");
+        assert_eq!(out.status.code(), Some(3));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("boom"));
     }
 
     #[cfg(unix)]
