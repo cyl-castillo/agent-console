@@ -33,6 +33,6 @@ pub fn advisor_create_skill(
         .as_ref()
         .map(|p| p.root.clone())
         .ok_or_else(|| AppError::Other("no project open".into()))?;
-    let path = advisor_service::create_skill(&root, &scope, &name, &skill_md_content)?;
+    let path = advisor_service::create_skill(&root, &scope, &name, &skill_md_content, "advisor")?;
     Ok(path.display().to_string())
 }

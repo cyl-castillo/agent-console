@@ -74,7 +74,7 @@ pub fn learning_create_skill(
     skill_md_content: String,
 ) -> AppResult<String> {
     let root = project_root(&state)?;
-    let path = advisor_service::create_skill(&root, "project", &name, &skill_md_content)?;
+    let path = advisor_service::create_skill(&root, "project", &name, &skill_md_content, "coach")?;
     Ok(path.display().to_string())
 }
 
@@ -86,7 +86,8 @@ pub fn learning_create_plugin(
     description: String,
     skill_md: String,
 ) -> AppResult<String> {
-    let path = crate::services::plugins_service::scaffold_plugin(&name, &description, &skill_md)?;
+    let stamped = crate::services::provenance::stamp(&skill_md, "coach");
+    let path = crate::services::plugins_service::scaffold_plugin(&name, &description, &stamped)?;
     Ok(path.display().to_string())
 }
 
@@ -98,7 +99,8 @@ pub fn learning_save_memory(
     content: String,
 ) -> AppResult<String> {
     let root = project_root(&state)?;
-    let path = memory_service::write(&root, &name, &content)?;
+    let stamped = crate::services::provenance::stamp(&content, "coach");
+    let path = memory_service::write(&root, &name, &stamped)?;
     Ok(path.display().to_string())
 }
 
@@ -129,9 +131,10 @@ pub fn learning_apply_refactor(
     new_content: String,
 ) -> AppResult<String> {
     let root = project_root(&state)?;
+    let stamped = crate::services::provenance::stamp(&new_content, "curator");
     let path = match target_kind.as_str() {
-        "skill" => skills_service::write(&root, &name, &new_content)?,
-        "memory" => memory_service::write(&root, &name, &new_content)?,
+        "skill" => skills_service::write(&root, &name, &stamped)?,
+        "memory" => memory_service::write(&root, &name, &stamped)?,
         other => return Err(unknown_kind(other)),
     };
     Ok(path.display().to_string())
@@ -148,6 +151,7 @@ pub fn learning_apply_merge(
     new_content: String,
 ) -> AppResult<String> {
     let root = project_root(&state)?;
+    let new_content = crate::services::provenance::stamp(&new_content, "curator");
     let path = match target_kind.as_str() {
         "skill" => {
             let p = skills_service::write(&root, &new_name, &new_content)?;

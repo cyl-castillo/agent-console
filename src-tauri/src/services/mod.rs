@@ -24,6 +24,7 @@ pub mod plugins_service;
 pub mod proc;
 pub mod project_manager;
 pub mod projects_service;
+pub mod provenance;
 pub mod rewind_service;
 pub mod roundtable_service;
 pub mod scheduler_service;

@@ -116,11 +116,15 @@ fn annotate_similarity(project_root: &Path, recs: &mut [SkillRecommendation]) {
 /// Write a single recommendation to disk as a Claude skill.
 /// scope: "project" -> <root>/.claude/skills/<name>/SKILL.md
 /// scope: "user"    -> ~/.claude/skills/<name>/SKILL.md
+/// `generated_by` names the pipeline that produced the content ("advisor",
+/// "coach") — stamped into the frontmatter with today's date so the corpus
+/// records where and when each generated entry came from.
 pub fn create_skill(
     project_root: &Path,
     scope: &str,
     name: &str,
     skill_md_content: &str,
+    generated_by: &str,
 ) -> AppResult<PathBuf> {
     let safe = sanitize_name(name);
     if safe.is_empty() {
@@ -149,7 +153,10 @@ pub fn create_skill(
     }
     fs::create_dir_all(&dir)?;
     let path = dir.join("SKILL.md");
-    fs::write(&path, skill_md_content)?;
+    fs::write(
+        &path,
+        super::provenance::stamp(skill_md_content, generated_by),
+    )?;
     Ok(path)
 }
 
@@ -428,22 +435,26 @@ Hope that helps!"#;
     #[test]
     fn create_skill_writes_project_scope_and_refuses_duplicates_and_junk() {
         let root = temp_root("create");
-        let path = create_skill(&root, "project", "My Skill", "content").unwrap();
+        let path = create_skill(&root, "project", "My Skill", "content", "advisor").unwrap();
         assert!(path.ends_with(".claude/skills/my-skill/SKILL.md"));
-        assert_eq!(fs::read_to_string(&path).unwrap(), "content");
+        // Provenance is stamped on the way in (bodyless content gains a block).
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(written.contains("generated-by: advisor"));
+        assert!(written.contains("generated-at: "));
+        assert!(written.ends_with("content"));
 
         // Same name again → refuse rather than clobber.
-        let err = create_skill(&root, "project", "My Skill", "other").unwrap_err();
+        let err = create_skill(&root, "project", "My Skill", "other", "advisor").unwrap_err();
         assert!(matches!(err, AppError::Other(_)));
-        assert_eq!(fs::read_to_string(&path).unwrap(), "content");
+        assert!(fs::read_to_string(&path).unwrap().ends_with("content"));
 
         // A name that sanitizes to nothing, and an unknown scope.
         assert!(matches!(
-            create_skill(&root, "project", "///", "c").unwrap_err(),
+            create_skill(&root, "project", "///", "c", "advisor").unwrap_err(),
             AppError::InvalidArgument(_)
         ));
         assert!(matches!(
-            create_skill(&root, "workspace", "ok-name", "c").unwrap_err(),
+            create_skill(&root, "workspace", "ok-name", "c", "advisor").unwrap_err(),
             AppError::InvalidArgument(_)
         ));
 

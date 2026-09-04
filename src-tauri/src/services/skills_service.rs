@@ -16,6 +16,11 @@ pub struct Skill {
     pub path: PathBuf,
     pub description: Option<String>,
     pub allowed_tools: Vec<String>,
+    /// Provenance stamp ("2026-09-04" / "advisor"|"coach"|"curator") written by
+    /// the generating pipeline. Absent on hand-written or pre-stamp entries —
+    /// which is itself a signal: provenance unknown.
+    pub generated_at: Option<String>,
+    pub generated_by: Option<String>,
 }
 
 /// Walks both project-level (.claude/skills|commands|agents) and user-level
@@ -76,56 +81,72 @@ fn scan(dir: &Path, kind: &str, source: &str) -> Vec<Skill> {
             continue;
         };
 
-        let (description, allowed_tools) = parse_frontmatter(&md_path);
+        let fm = parse_frontmatter(&md_path);
         out.push(Skill {
             name: display_name,
             kind: kind.to_string(),
             source: source.to_string(),
             path: root_path,
-            description,
-            allowed_tools,
+            description: fm.description,
+            allowed_tools: fm.allowed_tools,
+            generated_at: fm.generated_at,
+            generated_by: fm.generated_by,
         });
     }
     out
 }
 
-/// Tolerant frontmatter parser — looks for `description:` and `allowed-tools:`.
-/// Does not require a full YAML implementation.
-fn parse_frontmatter(path: &Path) -> (Option<String>, Vec<String>) {
+#[derive(Default)]
+struct Frontmatter {
+    description: Option<String>,
+    allowed_tools: Vec<String>,
+    generated_at: Option<String>,
+    generated_by: Option<String>,
+}
+
+/// Tolerant frontmatter parser — looks for `description:`, `allowed-tools:`
+/// and the provenance stamp. Does not require a full YAML implementation.
+fn parse_frontmatter(path: &Path) -> Frontmatter {
     let Ok(content) = fs::read_to_string(path) else {
-        return (None, Vec::new());
+        return Frontmatter::default();
     };
     if !content.starts_with("---") {
-        return (None, Vec::new());
+        return Frontmatter::default();
     }
     let after = &content[3..];
     let Some(end) = after.find("\n---") else {
-        return (None, Vec::new());
+        return Frontmatter::default();
     };
     let fm = &after[..end];
 
-    let mut description: Option<String> = None;
-    let mut allowed_tools: Vec<String> = Vec::new();
+    let mut out = Frontmatter::default();
+    let clean = |rest: &str| {
+        let v = rest
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .to_string();
+        (!v.is_empty()).then_some(v)
+    };
     for line in fm.lines() {
         let l = line.trim();
         if let Some(rest) = l.strip_prefix("description:") {
-            let v = rest
-                .trim()
-                .trim_matches(|c| c == '"' || c == '\'')
-                .to_string();
-            if !v.is_empty() {
-                description = Some(v);
+            if let Some(v) = clean(rest) {
+                out.description = Some(v);
             }
         } else if let Some(rest) = l.strip_prefix("allowed-tools:") {
             let v = rest.trim().trim_matches(|c| c == '[' || c == ']');
-            allowed_tools = v
+            out.allowed_tools = v
                 .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
+        } else if let Some(rest) = l.strip_prefix("generated-at:") {
+            out.generated_at = clean(rest);
+        } else if let Some(rest) = l.strip_prefix("generated-by:") {
+            out.generated_by = clean(rest);
         }
     }
-    (description, allowed_tools)
+    out
 }
 
 /// Read the raw SKILL.md (or .md) so the UI can preview it.
