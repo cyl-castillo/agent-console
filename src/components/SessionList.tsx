@@ -352,9 +352,7 @@ function AgentModelChooser({
             className="wb-search-input"
             autoFocus
             placeholder={
-              agent === "codex"
-                ? "reasoning effort (e.g. xhigh)"
-                : "model id (e.g. claude-opus-4-8)"
+              agent === "codex" ? "reasoning effort (e.g. xhigh)" : "model id (e.g. claude-fable-5)"
             }
             value={custom}
             onChange={(e) => setCustom(e.target.value)}

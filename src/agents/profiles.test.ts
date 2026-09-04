@@ -79,11 +79,12 @@ describe("reconcileSwitchedModel", () => {
   it("adopts the preset when the family actually changed", () => {
     expect(reconcileSwitchedModel("claude", "opus", "claude-haiku-4-5")).toBe("haiku");
     expect(reconcileSwitchedModel("claude", undefined, "claude-sonnet-5")).toBe("sonnet");
+    expect(reconcileSwitchedModel("claude", "opus", "claude-fable-5")).toBe("fable");
   });
 
   it("keeps an unknown model verbatim rather than guessing a preset", () => {
-    expect(reconcileSwitchedModel("claude", "opus", "claude-fable-5")).toBe("claude-fable-5");
-    expect(reconcileSwitchedModel("claude", "claude-fable-5", "claude-fable-5")).toBeNull();
+    expect(reconcileSwitchedModel("claude", "opus", "claude-quasar-6")).toBe("claude-quasar-6");
+    expect(reconcileSwitchedModel("claude", "claude-quasar-6", "claude-quasar-6")).toBeNull();
   });
 
   it("ignores a name that could not go into the launch command", () => {

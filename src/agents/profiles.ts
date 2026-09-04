@@ -83,6 +83,7 @@ export interface AgentProfile {
 }
 
 const CLAUDE_MODELS: AgentModelPreset[] = [
+  { value: "fable", label: "Fable", intent: "Hardest problems / deep work", icon: "🌌" },
   { value: "opus", label: "Opus", intent: "Plan / architecture", icon: "🧠" },
   { value: "sonnet", label: "Sonnet", intent: "Implement", icon: "🔨" },
   { value: "haiku", label: "Haiku", intent: "Quick edits / format", icon: "⚡" },
