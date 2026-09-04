@@ -20,15 +20,20 @@ const AUTO_PREF_KEY = "agent-console:learning-auto";
 
 /// Curation auto-trigger fires when the corpus has both grown past a floor and
 /// added a chunk of new entries since the last pass — a corpus worth re-tidying,
-/// not every single new skill. Threshold-based, as the user chose, rather than
-/// scheduled or activity-counted.
+/// not every single new skill.
 const CURATE_MIN_CORPUS = 8;
 const CURATE_GROWTH = 5;
 /// Curation is heavier and rarer than reflection — a longer floor between passes.
 const CURATE_COOLDOWN_MS = 30 * 60 * 1000;
+/// Calendar fallback: growth alone as the trigger means a corpus that stopped
+/// growing is never curated again, while the world moves under it (code drifts,
+/// model generations change). Past the floor, a pass also becomes due when this
+/// long has gone by since the last one — growth or not.
+const CURATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 const CURATE_AUTO_PREF_KEY = "agent-console:learning-curate-auto";
 const CURATE_BASELINE_KEY = "agent-console:learning-curate-baseline";
+const CURATE_LAST_KEY = "agent-console:learning-curate-last-ms";
 
 function loadAutoPref(): boolean {
   try {
@@ -83,6 +88,31 @@ function saveCurateBaseline(n: number) {
   }
 }
 
+/// Wall-clock time of the last curation, persisted so "due by age" survives
+/// restarts (the in-memory cooldown stamp deliberately resets each launch).
+/// First sight — no stored value — seeds the clock to now instead of counting
+/// as "never": an upgraded install starts the 30-day countdown, it doesn't
+/// burst-curate every qualifying corpus on day one.
+function loadOrSeedCurateLastMs(): number {
+  const now = Date.now();
+  try {
+    const v = Number(localStorage.getItem(CURATE_LAST_KEY));
+    if (Number.isFinite(v) && v > 0) return v;
+    localStorage.setItem(CURATE_LAST_KEY, String(now));
+  } catch {
+    /* ignore */
+  }
+  return now;
+}
+
+function saveCurateLastMs(ms: number) {
+  try {
+    localStorage.setItem(CURATE_LAST_KEY, String(ms));
+  } catch {
+    /* ignore */
+  }
+}
+
 /// One suggestion as shown in the UI, with local-only state for whether the
 /// user has already acted on it. "friction" suggestions are report-only — they
 /// carry no apply action, only skip.
@@ -131,12 +161,15 @@ interface LearningState {
   skillsAnalyzed: number;
   memoriesAnalyzed: number;
 
-  /// Auto-curation: fires a pass once the corpus grows past the threshold.
+  /// Auto-curation: fires a pass once the corpus grows past the threshold, or
+  /// once the last pass is old enough (calendar fallback).
   curateAutoEnabled: boolean;
   /// Corpus size (project skills + memories) at the last curation pass.
   lastCuratedSize: number;
   /// Epoch ms of the last curation, for the cooldown.
   lastCurateMs: number;
+  /// Persisted wall-clock of the last completed curation, for "due by age".
+  lastCurateWallMs: number;
 
   curate: () => Promise<void>;
   applyCuration: (id: string) => Promise<void>;
@@ -220,6 +253,7 @@ export const useLearningStore = create<LearningState>((set, get) => ({
   curateAutoEnabled: loadCurateAutoPref(),
   lastCuratedSize: loadCurateBaseline(),
   lastCurateMs: 0,
+  lastCurateWallMs: loadOrSeedCurateLastMs(),
 
   reflect: () => runReflection(set, false),
 
@@ -346,12 +380,18 @@ export const useLearningStore = create<LearningState>((set, get) => ({
       // auto-pass waits for genuinely new entries.
       const analyzed = result.skillsAnalyzed + result.memoriesAnalyzed;
       saveCurateBaseline(analyzed);
+      // Stamp "due by age" only on success — a failing pass keeps retrying on
+      // the 30-minute cooldown (same as the growth path) instead of going
+      // silent for a month.
+      const wallMs = Date.now();
+      saveCurateLastMs(wallMs);
       set({
         curationStatus: "results",
         curationItems: items,
         skillsAnalyzed: result.skillsAnalyzed,
         memoriesAnalyzed: result.memoriesAnalyzed,
         lastCuratedSize: analyzed,
+        lastCurateWallMs: wallMs,
       });
     } catch (err) {
       set({
@@ -440,7 +480,11 @@ export const useLearningStore = create<LearningState>((set, get) => ({
     const size = skills + memories;
 
     if (size < CURATE_MIN_CORPUS) return;
-    if (size - s.lastCuratedSize < CURATE_GROWTH) return;
+    // Due either by growth (a chunk of new entries to tidy) or by age (a
+    // corpus that stopped growing still drifts out of date underneath).
+    const grew = size - s.lastCuratedSize >= CURATE_GROWTH;
+    const aged = Date.now() - s.lastCurateWallMs >= CURATE_MAX_AGE_MS;
+    if (!grew && !aged) return;
     if (Date.now() - s.lastCurateMs < CURATE_COOLDOWN_MS) return;
     // Don't replace a batch the user is still reviewing.
     const pending = s.curationItems.filter(

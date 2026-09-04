@@ -62,6 +62,7 @@ const AUTO_COOLDOWN_MS = 10 * 60 * 1000;
 const CURATE_MIN_CORPUS = 8;
 const CURATE_GROWTH = 5;
 const CURATE_COOLDOWN_MS = 30 * 60 * 1000;
+const CURATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 const NOW = 1_750_000_000_000;
 
@@ -102,6 +103,8 @@ function resetStore(partial: Partial<ReturnType<typeof useLearningStore.getState
     curateAutoEnabled: true,
     lastCuratedSize: 0,
     lastCurateMs: 0,
+    // A fresh clock by default, so growth-path tests never trip the age path.
+    lastCurateWallMs: NOW,
     ...partial,
   });
 }
@@ -367,6 +370,38 @@ describe("curation auto-trigger via noteCorpusSize", () => {
     vi.setSystemTime(NOW + 2_000); // cooldown window elapsed
     useLearningStore.getState().noteCorpusSize();
     expect(mockCurate).toHaveBeenCalledTimes(1);
+  });
+
+  it("curates by age when the corpus stopped growing", async () => {
+    mockCurate.mockResolvedValue(CURATION);
+    // Same size as the last pass (zero growth), but the last pass is over the
+    // age limit — the calendar fallback fires anyway.
+    resetStore({ lastCuratedSize: 13, lastCurateWallMs: NOW - CURATE_MAX_AGE_MS - 1 });
+    setCorpus(8, 5); // size 13, growth 0
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).toHaveBeenCalledTimes(1);
+
+    // Success re-stamps the wall clock, so the next pass waits a full period.
+    await vi.waitFor(() => {
+      expect(useLearningStore.getState().curationStatus).toBe("results");
+    });
+    expect(useLearningStore.getState().lastCurateWallMs).toBeGreaterThanOrEqual(NOW);
+  });
+
+  it("age never overrides the corpus floor", () => {
+    mockCurate.mockResolvedValue(CURATION);
+    resetStore({ lastCurateWallMs: NOW - CURATE_MAX_AGE_MS - 1 });
+    setCorpus(CURATE_MIN_CORPUS - 1, 0); // tiny corpus, however stale
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).not.toHaveBeenCalled();
+  });
+
+  it("a fresh clock without growth stays quiet", () => {
+    mockCurate.mockResolvedValue(CURATION);
+    resetStore({ lastCuratedSize: 13, lastCurateWallMs: NOW - CURATE_MAX_AGE_MS + 1_000 });
+    setCorpus(8, 5); // size 13, growth 0, not yet due by age
+    useLearningStore.getState().noteCorpusSize();
+    expect(mockCurate).not.toHaveBeenCalled();
   });
 
   it("does nothing when auto-curate is off", () => {
