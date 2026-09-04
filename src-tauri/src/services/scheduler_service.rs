@@ -748,19 +748,20 @@ fn step_should_run(when: &Option<StepCondition>, prev: Option<(&str, &str)>) -> 
     }
 }
 
-/// Spawn `claude -p <prompt> --permission-mode plan --output-format text` in the
-/// project dir. Plan mode is the suggest-only guarantee: it cannot mutate.
+/// Spawn `claude -p --permission-mode plan --output-format text` in the
+/// project dir, feeding the prompt over stdin (argv would hit Windows'
+/// command-line cap, os error 206). Plan mode is the suggest-only guarantee:
+/// it cannot mutate.
 fn run_claude(project_root: &Path, prompt: &str) -> (String, String) {
-    let mut cmd = crate::services::claude_cli::command(&[
+    let mut cmd = crate::services::claude_cli::command_with_stdin(&[
         "-p",
-        prompt,
         "--permission-mode",
         "plan",
         "--output-format",
         "text",
     ]);
     cmd.current_dir(project_root);
-    match cmd.output() {
+    match crate::services::claude_cli::output_with_stdin(cmd, prompt) {
         Ok(o) if o.status.success() => {
             ("ok".into(), String::from_utf8_lossy(&o.stdout).to_string())
         }
