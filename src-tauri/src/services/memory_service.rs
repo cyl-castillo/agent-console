@@ -18,6 +18,10 @@ pub struct MemoryEntry {
     pub size_bytes: u64,
     pub modified_ms: i64,
     pub is_index: bool,
+    /// Provenance stamp written by the generating pipeline ("coach"/"curator").
+    /// Absent on hand-written or pre-stamp entries: provenance unknown.
+    pub generated_at: Option<String>,
+    pub generated_by: Option<String>,
 }
 
 pub fn list(project_root: &Path) -> AppResult<Vec<MemoryEntry>> {
@@ -42,7 +46,7 @@ pub fn list(project_root: &Path) -> AppResult<Vec<MemoryEntry>> {
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
-        let (kind, description) = parse_frontmatter(&p);
+        let (kind, description, generated_at, generated_by) = parse_frontmatter(&p);
         out.push(MemoryEntry {
             is_index: name == MEMORY_INDEX,
             name,
@@ -50,6 +54,8 @@ pub fn list(project_root: &Path) -> AppResult<Vec<MemoryEntry>> {
             description,
             size_bytes,
             modified_ms,
+            generated_at,
+            generated_by,
         });
     }
     // Index first, then by mtime desc.
@@ -151,41 +157,55 @@ fn safe_path(project_root: &Path, name: &str) -> AppResult<PathBuf> {
     Ok(path)
 }
 
-fn parse_frontmatter(path: &Path) -> (Option<String>, Option<String>) {
+/// Returns (kind, description, generated_at, generated_by).
+fn parse_frontmatter(
+    path: &Path,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    let none = || (None, None, None, None);
     let Ok(content) = fs::read_to_string(path) else {
-        return (None, None);
+        return none();
     };
     if !content.starts_with("---") {
-        return (None, None);
+        return none();
     }
     let after = &content[3..];
     let Some(end) = after.find("\n---") else {
-        return (None, None);
+        return none();
     };
     let fm = &after[..end];
+    let clean = |rest: &str| {
+        let v = rest
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .to_string();
+        (!v.is_empty()).then_some(v)
+    };
     let mut description: Option<String> = None;
     let mut kind: Option<String> = None;
+    let mut generated_at: Option<String> = None;
+    let mut generated_by: Option<String> = None;
     let mut in_metadata = false;
     for line in fm.lines() {
         let raw = line;
         let l = line.trim();
         if let Some(rest) = l.strip_prefix("description:") {
-            let v = rest
-                .trim()
-                .trim_matches(|c| c == '"' || c == '\'')
-                .to_string();
-            if !v.is_empty() {
+            if let Some(v) = clean(rest) {
                 description = Some(v);
             }
+        } else if let Some(rest) = l.strip_prefix("generated-at:") {
+            generated_at = clean(rest);
+        } else if let Some(rest) = l.strip_prefix("generated-by:") {
+            generated_by = clean(rest);
         } else if l.starts_with("metadata:") {
             in_metadata = true;
         } else if in_metadata && raw.starts_with("  ") {
             if let Some(rest) = l.strip_prefix("type:") {
-                let v = rest
-                    .trim()
-                    .trim_matches(|c| c == '"' || c == '\'')
-                    .to_string();
-                if !v.is_empty() {
+                if let Some(v) = clean(rest) {
                     kind = Some(v);
                 }
             }
@@ -194,7 +214,7 @@ fn parse_frontmatter(path: &Path) -> (Option<String>, Option<String>) {
             in_metadata = false;
         }
     }
-    (kind, description)
+    (kind, description, generated_at, generated_by)
 }
 
 // Placed at the end of the file so it doesn't trip clippy's

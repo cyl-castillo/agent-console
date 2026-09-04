@@ -985,6 +985,7 @@ mod tests {
             "project",
             "e2e-deploy-skill",
             "---\nname: e2e-deploy-skill\ndescription: deploy\n---\n\nBody.",
+            "coach",
         )
         .expect("skill create");
         assert!(skill.exists(), "SKILL.md written");

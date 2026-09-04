@@ -118,6 +118,10 @@ export interface Skill {
   path: string;
   description: string | null;
   allowedTools: string[];
+  /// Provenance stamp ("2026-09-04" / "advisor"|"coach"|"curator") from the
+  /// generating pipeline; null on hand-written or pre-stamp entries.
+  generatedAt?: string | null;
+  generatedBy?: string | null;
 }
 
 /// Isolated worktree a session runs in: its checkout path, the `agent/<name>`
@@ -366,6 +370,9 @@ export interface MemoryEntry {
   sizeBytes: number;
   modifiedMs: number;
   isIndex: boolean;
+  /// Provenance stamp from the generating pipeline; null when hand-written.
+  generatedAt?: string | null;
+  generatedBy?: string | null;
 }
 
 /// A Vault entry as exposed to the UI — never contains the value, only
