@@ -10,6 +10,8 @@ import { useThemeStore } from "./themeStore";
 import { useToastStore } from "./toastStore";
 import { useUpdaterStore } from "./updaterStore";
 import { reportProblem } from "../lib/reportProblem";
+import { isWorkbenchTab } from "../lib/workbenchTabs";
+import { isTabEnabled } from "./modulesStore";
 import { typeIntoActiveSession } from "../lib/termInput";
 import { startLoginSession } from "../lib/loginSession";
 
@@ -142,6 +144,13 @@ const ACTIONS: PaletteAction[] = [
     run: () => emit("ac:open-workbench-tab", "jira"),
   },
   {
+    id: "nav.teams",
+    label: "Open Teams",
+    hint: "Workbench → Teams (read your Microsoft Teams messages)",
+    keywords: ["microsoft", "chat", "messages"],
+    run: () => emit("ac:open-workbench-tab", "teams"),
+  },
+  {
     id: "nav.agenda",
     label: "Open Agenda",
     hint: "Workbench → Agenda (due dates + scheduled jobs)",
@@ -189,6 +198,13 @@ const ACTIONS: PaletteAction[] = [
     hint: "Workbench → Transfer (export / import your work)",
     keywords: ["export", "import", "backup", "migrate"],
     run: () => emit("ac:open-workbench-tab", "transfer"),
+  },
+  {
+    id: "modules.configure",
+    label: "Configure Modules",
+    hint: "Switch workbench modules on or off",
+    keywords: ["modules", "enable", "disable", "hide", "toggle", "features"],
+    run: () => emit("ac:open-modules", null),
   },
   {
     id: "git.commit",
@@ -499,6 +515,12 @@ export const usePaletteStore = create<PaletteState>((set, get) => ({
     if (mode === "all" || mode === "action") {
       for (const a of ACTIONS) {
         if (a.available && !a.available()) continue;
+        // Workbench nav actions are named "nav.<tab id>" — hide the ones whose
+        // module is switched off, same visibility rule as the strip.
+        if (a.id.startsWith("nav.")) {
+          const tab = a.id.slice(4);
+          if (isWorkbenchTab(tab) && !isTabEnabled(tab)) continue;
+        }
         const haystack = [a.label, ...(a.keywords ?? [])].join(" ");
         const s = q ? fuzzyScore(q, haystack) : 50;
         if (s < 0) continue;

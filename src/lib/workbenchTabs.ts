@@ -18,6 +18,7 @@ export const WORKBENCH_TABS = [
   "feedback",
   "jira",
   "agenda",
+  "teams",
   "notes",
   "proof",
 ] as const;
@@ -36,6 +37,7 @@ export function isWorkbenchTab(v: unknown): v is WorkbenchTab {
 /// palette, not workspaces that earn a permanent button.
 export const WORKBENCH_GROUPS = [
   { key: "tasks", tabs: ["jira", "agenda"] },
+  { key: "teams", tabs: ["teams"] },
   { key: "notes", tabs: ["notes"] },
   { key: "proof", tabs: ["proof"] },
   { key: "context", tabs: ["context"] },

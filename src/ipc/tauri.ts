@@ -31,6 +31,11 @@ import type {
   InstalledPlugin,
   AvailableSnapshot,
   JiraStatus,
+  TeamsChat,
+  TeamsDeviceLogin,
+  TeamsLoginPoll,
+  TeamsMessage,
+  TeamsStatus,
   JiraIssue,
   Job,
   McpServer,
@@ -295,6 +300,15 @@ export const ipc = {
       date,
       entries,
     }),
+  teamsStatus: () => invoke<TeamsStatus>("teams_status"),
+  teamsBeginLogin: (clientId: string, tenant: string) =>
+    invoke<TeamsDeviceLogin>("teams_begin_login", { clientId, tenant }),
+  teamsPollLogin: () => invoke<TeamsLoginPoll>("teams_poll_login"),
+  teamsCancelLogin: () => invoke<void>("teams_cancel_login"),
+  teamsDisconnect: () => invoke<void>("teams_disconnect"),
+  teamsListChats: () => invoke<TeamsChat[]>("teams_list_chats"),
+  teamsListMessages: (chatId: string) => invoke<TeamsMessage[]>("teams_list_messages", { chatId }),
+
   jiraWorklogSuggestion: (
     projectRoot: string,
     issueKey: string,

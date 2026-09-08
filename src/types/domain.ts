@@ -306,6 +306,48 @@ export interface JiraIssue {
   url: string;
 }
 
+/// Whether Teams is connected, and the non-secret config (tokens never leave
+/// the backend/keychain). Mirrors the Rust TeamsStatus.
+export interface TeamsStatus {
+  configured: boolean;
+  clientId: string;
+  tenant: string;
+  account: string;
+}
+
+/// First half of the Teams device-code login. Mirrors Rust DeviceLoginStart.
+export interface TeamsDeviceLogin {
+  userCode: string;
+  verificationUri: string;
+  message: string;
+  intervalMs: number;
+  expiresInSecs: number;
+}
+
+/// One poll of the pending Teams login. Mirrors the Rust LoginPoll enum.
+export type TeamsLoginPoll =
+  | { state: "pending" }
+  | { state: "connected"; account: string }
+  | { state: "failed"; message: string };
+
+/// One Teams chat, flattened for the UI. Mirrors the Rust TeamsChat.
+export interface TeamsChat {
+  id: string;
+  title: string;
+  /// "oneOnOne" | "group" | "meeting".
+  chatType: string;
+  lastPreview: string;
+  lastActivity: string;
+}
+
+/// One Teams message (plain text, newest first). Mirrors the Rust TeamsMessage.
+export interface TeamsMessage {
+  id: string;
+  from: string;
+  created: string;
+  body: string;
+}
+
 /// A PreToolUse approval request emitted by the bridge hook.
 export interface ApprovalRequest {
   id: string;

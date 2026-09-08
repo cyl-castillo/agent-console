@@ -9705,3 +9705,226 @@ select:focus-visible,
 .wizard-skip {
   align-self: flex-start;
 }
+
+/* --- Modules modal (workbench modularity) --- */
+.modules-modal {
+  width: 440px;
+  max-height: 82vh;
+  overflow: auto;
+}
+.modules-list {
+  display: flex;
+  flex-direction: column;
+}
+.module-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+}
+.module-row:first-child {
+  border-top: 0;
+}
+.module-info {
+  min-width: 0;
+}
+.module-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.module-desc {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  margin-top: 1px;
+}
+.module-locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.module-switch {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-1);
+  padding: 1px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: background 120ms ease;
+}
+.module-switch-knob {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition:
+    transform 120ms ease,
+    background 120ms ease;
+}
+.module-switch.on {
+  background: var(--accent-12);
+  border-color: var(--accent);
+}
+.module-switch.on .module-switch-knob {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+/* Foot-of-strip Modules button: visually quieter than the real groups. */
+.wb-strip-modules {
+  margin-top: auto;
+  opacity: 0.75;
+}
+.wb-strip-modules:hover {
+  opacity: 1;
+}
+
+/* --- Teams panel (read-only Microsoft Teams companion) --- */
+.teams-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.teams-account {
+  color: var(--text-faint);
+  font-size: 11px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.teams-devicecode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 420px;
+}
+.teams-usercode {
+  font-family: var(--mono, monospace);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--text);
+  background: var(--bg-elev-1);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 10px 18px;
+  cursor: copy;
+  align-self: center;
+}
+.teams-usercode:hover {
+  border-color: var(--accent);
+}
+.teams-waiting {
+  animation: teams-pulse 1.6s ease-in-out infinite;
+}
+@keyframes teams-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+.teams-chatlist {
+  display: flex;
+  flex-direction: column;
+}
+.teams-chat {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 8px 6px;
+  cursor: pointer;
+  color: var(--text);
+}
+.teams-chat:first-child {
+  border-top: 0;
+}
+.teams-chat:hover {
+  background: var(--hover);
+}
+.teams-chat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.teams-chat-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.teams-chat-when,
+.teams-msg-when {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.teams-chat-preview {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.teams-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.teams-messages-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.teams-msg {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: var(--bg-elev-1);
+}
+.teams-msg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.teams-msg-from {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.teams-msg-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+  opacity: 0;
+}
+.teams-msg:hover .teams-msg-actions {
+  opacity: 1;
+}
+.teams-msg-body {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

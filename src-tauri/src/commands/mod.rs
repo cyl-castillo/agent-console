@@ -21,6 +21,7 @@ pub mod semantic;
 pub mod sessions;
 pub mod skills;
 pub mod snapshot;
+pub mod teams;
 pub mod terminal;
 pub mod testigo;
 pub mod usage;

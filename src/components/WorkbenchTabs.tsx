@@ -12,6 +12,7 @@ import { useNotesStore } from "../stores/notesStore";
 import { useMcpStore } from "../stores/mcpStore";
 import { useRoundtableStore } from "../stores/roundtableStore";
 import { useSchedulerStore } from "../stores/schedulerStore";
+import { useModulesStore } from "../stores/modulesStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
 
@@ -92,6 +93,11 @@ export function WorkbenchTabs({
       title: "Tasks — your Jira queue + agenda",
       count: jiraCount,
     },
+    teams: {
+      icon: "message-square",
+      label: "Teams",
+      title: "Teams — read the Microsoft Teams messages sent to you (never posts back)",
+    },
     notes: {
       icon: "sticky-note",
       label: "Notes",
@@ -145,11 +151,20 @@ export function WorkbenchTabs({
     },
   };
 
-  const sections: { label: string; groups: WorkbenchGroupKey[] }[] = [
-    { label: "Work", groups: ["tasks", "notes", "proof", "context"] },
+  // Disabled modules disappear from the strip; a section with nothing left
+  // hides its label too. The Modules button at the foot is the way back.
+  const disabledModules = useModulesStore((s) => s.disabled);
+  const allSections: { label: string; groups: WorkbenchGroupKey[] }[] = [
+    { label: "Work", groups: ["tasks", "teams", "notes", "proof", "context"] },
     { label: "Agents", groups: ["coach", "room", "schedule"] },
     { label: "Config", groups: ["trust", "addons"] },
   ];
+  const sections = allSections
+    .map((sec) => ({
+      ...sec,
+      groups: sec.groups.filter((g) => !disabledModules.includes(g)),
+    }))
+    .filter((sec) => sec.groups.length > 0);
 
   return (
     <div className="workbench-strip">
@@ -175,6 +190,16 @@ export function WorkbenchTabs({
           })}
         </div>
       ))}
+      <button
+        className="wb-strip-btn wb-strip-modules"
+        title="Modules — switch workbench modules on/off"
+        onClick={() => window.dispatchEvent(new CustomEvent("ac:open-modules"))}
+      >
+        <span className="wb-strip-icon">
+          <Icon name="sliders" size={16} />
+        </span>
+        <span className="wb-strip-label">Modules</span>
+      </button>
     </div>
   );
 }

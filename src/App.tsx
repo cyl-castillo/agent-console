@@ -38,6 +38,7 @@ import { ContextPanel } from "./components/ContextPanel";
 import { FeedbackPanel } from "./components/FeedbackPanel";
 import { PluginsPanel } from "./components/PluginsPanel";
 import { JiraPanel } from "./components/JiraPanel";
+import { TeamsPanel } from "./components/TeamsPanel";
 import { AgendaPanel } from "./components/AgendaPanel";
 import { NotesPanel } from "./components/NotesPanel";
 import { ProofPanel } from "./components/ProofPanel";
@@ -47,6 +48,7 @@ import { ExportImportPanel } from "./components/ExportImportPanel";
 import { useFeedbackStore } from "./stores/feedbackStore";
 import { WorkbenchTabs, WorkbenchSubTabs } from "./components/WorkbenchTabs";
 import { isWorkbenchTab, type WorkbenchTab } from "./lib/workbenchTabs";
+import { useModulesStore, isTabEnabled, firstEnabledTab } from "./stores/modulesStore";
 import { maybeWorklogNudge } from "./lib/worklogNudge";
 import { ApprovalModal } from "./components/ApprovalModal";
 import { FileInspector } from "./components/FileInspector";
@@ -59,6 +61,7 @@ import { UpdateBanner } from "./components/UpdateBanner";
 import { CommandPalette } from "./components/CommandPalette";
 import { StatusBar } from "./components/StatusBar";
 import { ShortcutsModal } from "./components/ShortcutsModal";
+import { ModulesModal } from "./components/ModulesModal";
 import { Toasts } from "./components/Toasts";
 import { useThemeStore } from "./stores/themeStore";
 import { Icon } from "./components/Icon";
@@ -116,6 +119,7 @@ export default function App() {
   const preflight = usePreflightStore((s) => s.result);
   const checkPreflight = usePreflightStore((s) => s.check);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showModules, setShowModules] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
@@ -260,6 +264,16 @@ export default function App() {
   useKeyboardShortcuts({ setTab });
   useVoicePtt();
 
+  // When the module of the CURRENTLY OPEN tab gets switched off, bounce to
+  // the first enabled group. Deliberately keyed on the disabled set only:
+  // deep links that land on a disabled tab (Getting Started jumps) must not
+  // be fought — the user's explicit click wins over the hidden state.
+  const disabledModules = useModulesStore((s) => s.disabled);
+  useEffect(() => {
+    if (!isTabEnabled(workbenchTab)) setWorkbenchTabState(firstEnabledTab());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disabledModules]);
+
   // Listen for palette-triggered navigation events.
   useEffect(() => {
     const onOpenTab = (e: Event) => {
@@ -268,10 +282,13 @@ export default function App() {
     };
     const onOpenWb = (e: Event) => {
       const d = (e as CustomEvent).detail;
-      if (isWorkbenchTab(d)) {
+      // Tabs of a switched-off module are unreachable from the palette; the
+      // Modules modal is the way to bring them back.
+      if (isWorkbenchTab(d) && isTabEnabled(d)) {
         setWorkbenchTab(d);
       }
     };
+    const onOpenModules = () => setShowModules(true);
     const onGettingStarted = () => setShowGettingStarted(true);
     const onShortcuts = () => setShowShortcuts(true);
     const onToggleSidebar = () => setLeftOpen((v) => !v);
@@ -285,6 +302,7 @@ export default function App() {
     window.addEventListener("ac:toggle-composer", onToggleComposer);
     window.addEventListener("ac:open-tab", onOpenTab);
     window.addEventListener("ac:open-workbench-tab", onOpenWb);
+    window.addEventListener("ac:open-modules", onOpenModules);
     window.addEventListener("ac:open-getting-started", onGettingStarted);
     window.addEventListener("ac:open-shortcuts", onShortcuts);
     window.addEventListener("ac:toggle-sidebar", onToggleSidebar);
@@ -294,6 +312,7 @@ export default function App() {
     return () => {
       window.removeEventListener("ac:open-tab", onOpenTab);
       window.removeEventListener("ac:open-workbench-tab", onOpenWb);
+      window.removeEventListener("ac:open-modules", onOpenModules);
       window.removeEventListener("ac:open-getting-started", onGettingStarted);
       window.removeEventListener("ac:open-shortcuts", onShortcuts);
       window.removeEventListener("ac:toggle-sidebar", onToggleSidebar);
@@ -442,7 +461,7 @@ export default function App() {
     // Restore last workbench tab for this project, if any.
     try {
       const saved = localStorage.getItem(`agent-console:workbench-tab:${project.root}`);
-      if (isWorkbenchTab(saved)) {
+      if (isWorkbenchTab(saved) && isTabEnabled(saved)) {
         setWorkbenchTabState(saved);
       }
     } catch {
@@ -770,6 +789,7 @@ export default function App() {
                 {workbenchTab === "vault" && <VaultPanel />}
                 {workbenchTab === "context" && <ContextPanel />}
                 {workbenchTab === "jira" && <JiraPanel />}
+                {workbenchTab === "teams" && <TeamsPanel />}
                 {workbenchTab === "agenda" && <AgendaPanel />}
                 {workbenchTab === "notes" && <NotesPanel />}
                 {workbenchTab === "proof" && <ProofPanel />}
@@ -814,6 +834,7 @@ export default function App() {
         />
       )}
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+      {showModules && <ModulesModal onClose={() => setShowModules(false)} />}
       {showWizard && <WelcomeWizard onClose={() => setShowWizard(false)} />}
       <UpdateBanner />
       <ApprovalModal />
