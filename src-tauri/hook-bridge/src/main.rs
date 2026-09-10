@@ -1,7 +1,7 @@
 //! Agent Console native hook bridge.
 //!
-//! One tiny binary, six personalities — `hook-bridge <userprompt|pretooluse|
-//! posttooluse|stop|stopfailure|modelswitch>` — replacing the node `.cjs`
+//! One tiny binary, seven personalities — `hook-bridge <userprompt|pretooluse|
+//! posttooluse|stop|stopfailure|interrupt|modelswitch>` — replacing the node `.cjs`
 //! scripts that made Node a hard requirement of the app (and whose absence made
 //! hooks fail silently: the Windows/Melissa class of bug). Behavior and on-disk
 //! protocol are byte-compatible with the scripts they replace:
@@ -199,6 +199,32 @@ fn stopfailure_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
             e.insert("summary".into(), json!(summary));
             e.insert("summaryTruncated".into(), json!(truncated));
         }
+    }
+    Value::Object(e)
+}
+
+// --- interrupt -------------------------------------------------------------
+
+/// Interrupt (Codex 0.150+) fires INSTEAD of Stop when the user cuts a
+/// top-level turn short, so the turn would otherwise never close — the Codex
+/// twin of StopFailure. No reason enum and no closing words ride this one: the
+/// payload only says which session, and where it ran.
+fn interrupt_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
+    let mut e = Map::new();
+    e.insert("type".into(), json!("turn_interrupted"));
+    e.insert("ts".into(), json!(ts));
+    if let Some(sid) = str_field(input, "session_id", "sessionId") {
+        e.insert("sessionId".into(), json!(sid));
+    }
+    if let Some(t) = term_id.filter(|t| !t.is_empty()) {
+        e.insert("termId".into(), json!(t));
+    }
+    if let Some(cwd) = input
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        e.insert("cwd".into(), json!(cwd));
     }
     Value::Object(e)
 }
@@ -537,6 +563,11 @@ fn main() {
                 &stopfailure_event(&input, term_id.as_deref(), now_ms()),
             );
         }
+        "interrupt" => {
+            let input = read_stdin_json();
+            let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
+            append_event(&dir, &interrupt_event(&input, term_id.as_deref(), now_ms()));
+        }
         "modelswitch" => {
             let input = read_stdin_json();
             let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
@@ -660,6 +691,39 @@ mod tests {
         let bare = stopfailure_event(&json!({}), None, 1);
         assert_eq!(bare["type"], "turn_failed");
         assert!(bare.get("error").is_none());
+    }
+
+    #[test]
+    fn turn_interrupted_keeps_attribution_and_carries_no_reason() {
+        // Codex's Interrupt payload (0.150+): session, turn, cwd, model, mode —
+        // and nothing about why. The event binds the close to the terminal and
+        // checkout, and invents no reason or summary it wasn't given.
+        let e = interrupt_event(
+            &json!({
+                "hook_event_name": "Interrupt",
+                "session_id": "s1",
+                "turn_id": "turn-3",
+                "cwd": "/repo",
+                "model": "gpt-5",
+                "permission_mode": "default",
+                "transcript_path": null,
+            }),
+            Some("t-1"),
+            42,
+        );
+        assert_eq!(e["type"], "turn_interrupted");
+        assert_eq!(e["ts"], 42);
+        assert_eq!(e["sessionId"], "s1");
+        assert_eq!(e["termId"], "t-1");
+        assert_eq!(e["cwd"], "/repo");
+        assert!(e.get("error").is_none());
+        assert!(e.get("summary").is_none());
+        // Outside a bound terminal the event still closes the turn — just
+        // without the binding, like every other bridge.
+        let bare = interrupt_event(&json!({}), None, 1);
+        assert_eq!(bare["type"], "turn_interrupted");
+        assert!(bare.get("termId").is_none());
+        assert!(bare.get("sessionId").is_none());
     }
 
     #[test]

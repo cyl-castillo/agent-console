@@ -65,6 +65,12 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_modelswitch_autoinstalled() {
                 eprintln!("hooks: modelswitch auto-install failed: {e}");
             }
+            // Turn-cut-short observer (Codex 0.150+ `Interrupt`, Codex only):
+            // the Codex twin of StopFailure — without it an interrupted turn
+            // never closes in the ledger.
+            if let Err(e) = state.hooks.ensure_interrupt_autoinstalled() {
+                eprintln!("hooks: interrupt auto-install failed: {e}");
+            }
             // Migrate legacy bare-path hook commands to `node "<path>"` on
             // installs that predate the format (on Windows the old format
             // never executed at all — no shebangs in cmd.exe, and the path
