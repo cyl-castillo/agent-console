@@ -45,6 +45,10 @@ export interface TimelineTurn {
   failed: boolean;
   error?: string;
   errorDetails?: string;
+  /// True when the turn closed through Codex's Interrupt — the user cut it
+  /// short. Not a failure (nothing refused it) and not a finish either; the
+  /// diff still shows what it had changed by then.
+  interrupted: boolean;
   /// Where the turn ran and what it left behind — everything "Rewind to this
   /// turn" needs: the terminal binding, the engine session to fork, the
   /// checkout (worktree sessions differ from the project root) and the
@@ -180,6 +184,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         summary: "",
         summaryTruncated: false,
         failed: false,
+        interrupted: false,
         rewound: false,
         checks: [],
         commits: [],
@@ -262,6 +267,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       if (typeof p.summary === "string") t.summary = p.summary;
       t.summaryTruncated = p.summaryTruncated === true;
       t.failed = p.failed === true;
+      t.interrupted = p.interrupted === true;
       if (typeof p.error === "string") t.error = p.error;
       if (typeof p.errorDetails === "string") t.errorDetails = p.errorDetails;
       if (typeof p.postSha === "string" && p.postSha) t.postSha = p.postSha;
