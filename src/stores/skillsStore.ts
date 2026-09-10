@@ -287,6 +287,15 @@ export async function attachSkillsListeners(): Promise<UnlistenFn> {
       if (!windowIsFocused()) notify("Agent Console — turn stopped", message);
     }),
   );
+  // A turn the user cut short never fires Stop either — Codex sends Interrupt
+  // instead (0.150+). The user did this on purpose, from inside the terminal,
+  // so there is nothing to tell them: just stop pretending the agent is still
+  // working. (The ledger close, with the diff, happens on the Rust side.)
+  offs.push(
+    await listen<{ termId?: string }>("hook://turn_interrupted", () => {
+      useAgentStatusStore.getState().markIdle();
+    }),
+  );
   return () => {
     for (const off of offs) off();
   };

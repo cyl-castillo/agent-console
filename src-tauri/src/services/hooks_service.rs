@@ -24,6 +24,7 @@ const STOP_HOOK: &str = include_str!("../../resources/stop-hook.cjs");
 const STOPFAILURE_HOOK: &str = include_str!("../../resources/stopfailure-hook.cjs");
 const POSTTOOLUSE_HOOK: &str = include_str!("../../resources/posttooluse-hook.cjs");
 const MODELSWITCH_HOOK: &str = include_str!("../../resources/modelswitch-hook.cjs");
+const INTERRUPT_HOOK: &str = include_str!("../../resources/interrupt-hook.cjs");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +55,8 @@ pub struct HooksRuntime {
     posttooluse_script_path: PathBuf,
     /// Claude-only (PostModelSwitch, 2.1.251+) — never mirrored into Codex.
     modelswitch_script_path: PathBuf,
+    /// Codex-only (Interrupt, 0.150+) — never written into Claude's settings.
+    interrupt_script_path: PathBuf,
     watcher_started: Mutex<bool>,
     approvals_watcher_started: Mutex<bool>,
 }
@@ -120,6 +123,8 @@ impl HooksRuntime {
             ensure_hook_script(&cache, "posttooluse-hook.cjs", POSTTOOLUSE_HOOK)?;
         let modelswitch_script_path =
             ensure_hook_script(&cache, "modelswitch-hook.cjs", MODELSWITCH_HOOK)?;
+        let interrupt_script_path =
+            ensure_hook_script(&cache, "interrupt-hook.cjs", INTERRUPT_HOOK)?;
         let binary_path = ensure_hook_binary(&cache);
         Ok(Self {
             session_dir,
@@ -130,6 +135,7 @@ impl HooksRuntime {
             stopfailure_script_path,
             posttooluse_script_path,
             modelswitch_script_path,
+            interrupt_script_path,
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
         })
@@ -272,6 +278,9 @@ impl HooksRuntime {
                 ("PreToolUse", &self.pretooluse_script_path),
                 ("Stop", &self.stop_script_path),
                 ("PostToolUse", &self.posttooluse_script_path),
+                // Codex-only (see `ensure_interrupt_autoinstalled`): the event
+                // is Codex's, and Claude has no turn-interrupted hook.
+                ("Interrupt", &self.interrupt_script_path),
             ])?;
         }
         Ok(self.status())
@@ -449,6 +458,40 @@ impl HooksRuntime {
         Ok(())
     }
 
+    /// Auto-install the Interrupt (turn-cut-short) observer, under its OWN
+    /// marker. CODEX ONLY: the event is Codex's (0.150+) — it fires INSTEAD of
+    /// Stop when the user interrupts a top-level turn — and Claude has no
+    /// equivalent, so writing it into settings.json would be an entry Claude
+    /// can't act on. The Codex twin of `ensure_stopfailure_autoinstalled`.
+    ///
+    /// Two guards beyond the marker. The codex CLI must be present (same rule
+    /// as the other codex hooks: an installed hook triggers codex's one-time
+    /// trust prompt, noise for people who never use it) — and until it is, no
+    /// marker is written, so the observer lands on the launch that first finds
+    /// codex. And the Stop observer must be installed claude-side: it's the
+    /// turn-close bridge this event completes, and `uninstall()` clears it, so
+    /// a deliberate uninstall before codex existed never resurrects a lone
+    /// Interrupt hook later.
+    ///
+    /// Observer-class (writes an event, changes no behavior). Codex ignores its
+    /// exit code and reads at most a `systemMessage` we never print. Older
+    /// Codex builds ignore the unknown event key entirely (their hooks table
+    /// deserializes with serde defaults, no `deny_unknown_fields`), so the
+    /// entry is inert there rather than a parse failure that would take the
+    /// other hooks down with it.
+    pub fn ensure_interrupt_autoinstalled(&self) -> AppResult<()> {
+        let marker = self.script_path.with_file_name(".interrupt-autoinstalled");
+        if marker.exists() || !codex_available() {
+            return Ok(());
+        }
+        if !is_hook_installed(&settings_path(), "Stop", &self.stop_script_path).unwrap_or(false) {
+            return Ok(());
+        }
+        self.install_codex(&[("Interrupt", &self.interrupt_script_path)])?;
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
     /// Auto-install the PostToolUse (tool-result) observer for both engines,
     /// under its OWN marker (same reasoning as Stop: existing installs carry
     /// the older markers and would never get it otherwise). Observer-class —
@@ -536,13 +579,14 @@ impl HooksRuntime {
     /// upsert_hook. Only rewrites events where the script is ALREADY
     /// registered — a deliberate uninstall stays uninstalled.
     pub fn normalize_hook_commands(&self) -> AppResult<()> {
-        let pairs: [(&str, &PathBuf); 6] = [
+        let pairs: [(&str, &PathBuf); 7] = [
             ("UserPromptSubmit", &self.script_path),
             ("PreToolUse", &self.pretooluse_script_path),
             ("Stop", &self.stop_script_path),
             ("StopFailure", &self.stopfailure_script_path),
             ("PostToolUse", &self.posttooluse_script_path),
             ("PostModelSwitch", &self.modelswitch_script_path),
+            ("Interrupt", &self.interrupt_script_path),
         ];
         for path in [settings_path(), codex_hooks_path()] {
             if !path.exists() {
@@ -596,6 +640,8 @@ impl HooksRuntime {
                     // Codex never had is a no-op, and skipping it here would
                     // strand the entry if a future Codex ever grows one.
                     ("PostModelSwitch", &self.modelswitch_script_path),
+                    // Codex-only, same reasoning in the other direction.
+                    ("Interrupt", &self.interrupt_script_path),
                 ] {
                     if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
                         arr.retain(|e| {
@@ -830,6 +876,7 @@ fn bridge_mode(event: &str) -> &'static str {
         // OUR entry — sharing it would make removing one strip the other.
         "StopFailure" => "stopfailure",
         "PostModelSwitch" => "modelswitch",
+        "Interrupt" => "interrupt",
         _ => "stop",
     }
 }
@@ -1105,7 +1152,7 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 let _ = app.emit("snapshot://created", &snap);
             }
         }
-    } else if kind == "turn_end" || kind == "turn_failed" {
+    } else if kind == "turn_end" || kind == "turn_failed" || kind == "turn_interrupted" {
         // Testigo: the Stop hook closes the open turn — and the close carries
         // the turn's result: a post-turn snapshot diffed against the pre-turn
         // one, so the event answers "what did this turn change".
@@ -1116,6 +1163,11 @@ fn handle_event(v: &Value, app: &AppHandle) {
         // work done before the error would never be diffed. It closes here with
         // the reason attached, so the timeline reads "this turn died, and this
         // is what it had changed by then".
+        //
+        // `turn_interrupted` (Codex's Interrupt, 0.150+) is the third door:
+        // Codex fires it instead of Stop when the user cuts the turn short.
+        // Same close, same diff, no reason — the turn wasn't refused, it was
+        // stopped — so the payload only marks it as cut short.
         let state = app.state::<AppState>();
         let project = state.inner.lock().project.clone();
         if let Some(p) = project {
@@ -1152,6 +1204,9 @@ fn handle_event(v: &Value, app: &AppHandle) {
                             || details.chars().count() > DETAILS_MAX
                     );
                 }
+            }
+            if kind == "turn_interrupted" {
+                payload["interrupted"] = json!(true);
             }
             // The agent's closing words, when the CLI sends them (Claude
             // 2.1.47+ `last_assistant_message`). The hook already capped it;
@@ -1633,6 +1688,121 @@ mod tests {
         let stop = settings.pointer("/hooks/Stop").unwrap().as_array().unwrap();
         assert_eq!(stop.len(), 1);
         assert!(has_bridge_command(&stop[0], "stop"));
+    }
+
+    /// Interrupt is Codex-only and gets its OWN bridge mode for the same reason
+    /// PostModelSwitch does: the mode word is how install/uninstall recognize
+    /// our entry, and sharing `stop` would make removing one strip the other.
+    #[test]
+    fn interrupt_has_its_own_bridge_mode_and_coexists_with_stop() {
+        assert_eq!(bridge_mode("Interrupt"), "interrupt");
+        assert_ne!(bridge_mode("Interrupt"), bridge_mode("Stop"));
+        assert_ne!(bridge_mode("Interrupt"), bridge_mode("StopFailure"));
+
+        let script = Path::new("/cache/interrupt-hook.cjs");
+        let bin = Path::new("/cache/bin/hook-bridge");
+        let mut hooks = json!({});
+        upsert_hook(&mut hooks, "Interrupt", script, Some(bin));
+        upsert_hook(
+            &mut hooks,
+            "Stop",
+            Path::new("/cache/stop-hook.cjs"),
+            Some(bin),
+        );
+        let arr = hooks
+            .pointer("/hooks/Interrupt")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 1);
+        assert!(has_bridge_command(&arr[0], "interrupt"));
+        assert!(!has_bridge_command(&arr[0], "stop"));
+        let stop = hooks.pointer("/hooks/Stop").unwrap().as_array().unwrap();
+        assert_eq!(stop.len(), 1);
+        assert!(has_bridge_command(&stop[0], "stop"));
+        assert!(!has_bridge_command(&stop[0], "interrupt"));
+    }
+
+    /// Run the REAL interrupt script under node: the close binds to the
+    /// terminal and checkout, carries no reason or summary it wasn't given,
+    /// and always exits 0 (Codex ignores the exit code, but a crash would show
+    /// up as a failed hook run in its UI).
+    #[cfg(unix)]
+    #[test]
+    fn interrupt_bridge_closes_the_turn_as_cut_short() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        if Command::new("node")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            eprintln!("node not available — skipping interrupt bridge test");
+            return;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let session_dir =
+            std::env::temp_dir().join(format!("ac-interrupt-test-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&session_dir).unwrap();
+
+        let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/interrupt-hook.cjs");
+        let run = |payload: &str| {
+            let mut child = Command::new("node")
+                .arg(&script)
+                .env("AGENT_CONSOLE_SESSION_DIR", &session_dir)
+                .env("AGENT_CONSOLE_TERM_ID", "term-7")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(payload.as_bytes())
+                .unwrap();
+            let out = child.wait_with_output().unwrap();
+            assert!(out.status.success(), "bridge must always exit 0");
+            // Codex parses whatever the hook prints; the bridge prints nothing.
+            assert!(
+                out.stdout.is_empty(),
+                "the interrupt bridge must stay silent"
+            );
+        };
+
+        // The documented Interrupt payload (0.150+): session, turn, cwd, model,
+        // permission mode, nullable transcript path — and nothing about why.
+        run(
+            r#"{"hook_event_name":"Interrupt","session_id":"s1","turn_id":"turn-3","cwd":"/proj/x","model":"gpt-5","permission_mode":"default","transcript_path":null}"#,
+        );
+        // Garbage on stdin is still a close (the terminal binding does the work).
+        run("not json");
+
+        let events = fs::read_to_string(session_dir.join("events.jsonl")).unwrap();
+        let lines: Vec<Value> = events
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 2);
+
+        assert_eq!(lines[0]["type"], "turn_interrupted");
+        assert_eq!(lines[0]["termId"], "term-7");
+        assert_eq!(lines[0]["sessionId"], "s1");
+        assert_eq!(lines[0]["cwd"], "/proj/x");
+        assert!(lines[0].get("error").is_none());
+        assert!(lines[0].get("summary").is_none());
+
+        assert_eq!(lines[1]["type"], "turn_interrupted");
+        assert_eq!(lines[1]["termId"], "term-7");
+        assert!(lines[1].get("sessionId").is_none());
+
+        let _ = fs::remove_dir_all(&session_dir);
     }
 
     /// Run the REAL modelswitch script under node: it must record the model the

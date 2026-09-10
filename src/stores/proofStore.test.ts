@@ -156,6 +156,30 @@ describe("buildTimeline", () => {
     expect(ok[0].error).toBeUndefined();
   });
 
+  it("marks an Interrupt close as cut short — closed, with its diff, but not failed", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "do it" } }),
+      ev({
+        seq: 2,
+        ts: 13,
+        kind: "turn_end",
+        turnId: "T1",
+        payload: { interrupted: true, filesChanged: [{ status: "M", path: "a.ts" }] },
+      }),
+    ]);
+    expect(turns[0].interrupted).toBe(true);
+    expect(turns[0].failed).toBe(false);
+    expect(turns[0].endTs).toBe(13);
+    expect(turns[0].files).toEqual([{ status: "M", path: "a.ts" }]);
+
+    // A normal close, and a StopFailure close, stay unmarked.
+    const ok = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T2", payload: { prompt: "do it" } }),
+      ev({ seq: 2, ts: 13, kind: "turn_end", turnId: "T2", payload: { failed: true } }),
+    ]);
+    expect(ok[0].interrupted).toBe(false);
+  });
+
   it("carries the rewind bindings: term, session, cwd and post-turn snapshot", () => {
     const turns = buildTimeline([
       ev({
@@ -235,6 +259,7 @@ function turn(partial: Partial<TimelineTurn>): TimelineTurn {
     summary: "",
     summaryTruncated: false,
     failed: false,
+    interrupted: false,
     rewound: false,
     termId: "term-1",
     sessionId: "sid-original",
