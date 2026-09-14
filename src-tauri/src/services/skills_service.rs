@@ -198,15 +198,17 @@ pub fn archive(project_root: &Path, name: &str) -> AppResult<PathBuf> {
 /// Resolve a project skill directory by name, defending against traversal and
 /// reserving the leading-underscore namespace (e.g. `_archived`) and dotfiles.
 fn skill_dir(project_root: &Path, name: &str) -> AppResult<PathBuf> {
-    if name.is_empty()
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains("..")
-        || name.starts_with('_')
-        || name.starts_with('.')
-    {
+    if name.contains("..") || name.starts_with('_') || name.starts_with('.') {
         return Err(AppError::InvalidArgument(format!(
             "invalid skill name: {name}"
+        )));
+    }
+    // Portability guard, enforced on every OS: a name Windows can't create
+    // (`:`, trailing dot, `con`…) fails there with a cryptic os error 123, and
+    // a corpus written on Linux must survive a Windows checkout.
+    if let Some(problem) = crate::services::fs_names::component_problem(name) {
+        return Err(AppError::InvalidArgument(format!(
+            "invalid skill name `{name}`: {problem}"
         )));
     }
     Ok(project_root.join(".claude").join("skills").join(name))

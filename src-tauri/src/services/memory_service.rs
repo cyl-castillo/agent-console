@@ -134,14 +134,16 @@ pub fn archive(project_root: &Path, name: &str) -> AppResult<PathBuf> {
 /// Rules: must end in `.md`, must not contain path separators or `..`,
 /// and the resolved path must live inside the project's memory dir.
 fn safe_path(project_root: &Path, name: &str) -> AppResult<PathBuf> {
-    if name.is_empty()
-        || !name.ends_with(".md")
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains("..")
-    {
+    if !name.ends_with(".md") || name.contains("..") {
         return Err(AppError::InvalidArgument(format!(
             "invalid memory name: {name}"
+        )));
+    }
+    // Portability guard, enforced on every OS: a name Windows can't create
+    // (`:`, trailing dot, `con.md`…) fails there with a cryptic os error 123.
+    if let Some(problem) = crate::services::fs_names::component_problem(name) {
+        return Err(AppError::InvalidArgument(format!(
+            "invalid memory name `{name}`: {problem}"
         )));
     }
     let dir = memory_dir_for(project_root)?;

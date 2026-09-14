@@ -8,6 +8,7 @@ pub mod embedding_service;
 pub mod engine_runner;
 pub mod feedback_service;
 pub mod flywheel;
+pub mod fs_names;
 pub mod git_service;
 pub mod git_watcher;
 pub mod hooks_service;
