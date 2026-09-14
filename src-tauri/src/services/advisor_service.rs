@@ -353,19 +353,9 @@ fn parse_recommendations(stdout: &str) -> AppResult<Vec<SkillRecommendation>> {
 }
 
 fn sanitize_name(name: &str) -> String {
-    name.trim()
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string()
+    // Shared slugifier: also caps length and dodges Windows device names
+    // (`con`, `com1`…), which are invalid as directories there.
+    crate::services::fs_names::sanitize_slug(name)
 }
 
 fn truncate(s: &str, max: usize) -> String {

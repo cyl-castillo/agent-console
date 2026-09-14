@@ -100,8 +100,22 @@ pub fn learning_save_memory(
 ) -> AppResult<String> {
     let root = project_root(&state)?;
     let stamped = crate::services::provenance::stamp(&content, "coach");
-    let path = memory_service::write(&root, &name, &stamped)?;
+    let path = memory_service::write(&root, &memory_file_name(&name)?, &stamped)?;
     Ok(path.display().to_string())
+}
+
+/// Model-proposed memory names become file names: slugify the stem so a title
+/// like "deploy: fixy" saves as `deploy--fixy.md` instead of failing on
+/// Windows (os error 123), and keep the `.md` the service requires.
+fn memory_file_name(name: &str) -> AppResult<String> {
+    let stem = name.strip_suffix(".md").unwrap_or(name);
+    let slug = crate::services::fs_names::sanitize_slug(stem);
+    if slug.is_empty() {
+        return Err(AppError::InvalidArgument(format!(
+            "memory name has no usable characters: {name}"
+        )));
+    }
+    Ok(format!("{slug}.md"))
 }
 
 /// Apply a reflect "profile" suggestion: append the proposed line to the
@@ -152,8 +166,12 @@ pub fn learning_apply_merge(
 ) -> AppResult<String> {
     let root = project_root(&state)?;
     let new_content = crate::services::provenance::stamp(&new_content, "curator");
+    // The merged name is model-proposed: slugify it BEFORE writing (Windows
+    // rejects `:` etc. with os error 123) and compare targets against the
+    // final name so the survivor is never archived.
     let path = match target_kind.as_str() {
         "skill" => {
+            let new_name = crate::services::fs_names::sanitize_slug(&new_name);
             let p = skills_service::write(&root, &new_name, &new_content)?;
             for t in targets.iter().filter(|t| *t != &new_name) {
                 skills_service::archive(&root, t)?;
@@ -161,6 +179,7 @@ pub fn learning_apply_merge(
             p
         }
         "memory" => {
+            let new_name = memory_file_name(&new_name)?;
             let p = memory_service::write(&root, &new_name, &new_content)?;
             for t in targets.iter().filter(|t| *t != &new_name) {
                 memory_service::archive(&root, t)?;
