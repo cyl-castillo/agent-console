@@ -51,6 +51,24 @@ pub struct ProofEvent {
     pub hash: String,
 }
 
+/// Instruction files an agent reads implicitly (spec §1.7, `prompt.payload.context`).
+pub const INSTRUCTION_FILES: &[&str] = &["CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md"];
+
+/// `[{uri, sha256}]` for the instruction files present under `cwd` at call
+/// time — the bytes the agent actually ran under, not whatever is on disk
+/// later. Absent or unreadable files are simply not instructions it had.
+pub fn instruction_context(cwd: &str) -> Vec<Value> {
+    INSTRUCTION_FILES
+        .iter()
+        .filter_map(|rel| {
+            let bytes = fs::read(Path::new(cwd).join(rel)).ok()?;
+            let mut h = Sha256::new();
+            h.update(&bytes);
+            Some(json!({ "uri": rel, "sha256": format!("{:x}", h.finalize()) }))
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyReport {
@@ -381,6 +399,16 @@ impl TestigoService {
             );
         }
         let case = Self::case_for(&inner, term_id);
+        // Spec §1.7 (v0.2): the instruction files present in the prompt's
+        // cwd, hashed NOW — inside the chain — so the packet's context
+        // artifacts are derived from evidence, not typed in at export.
+        let mut payload = json!({ "prompt": prompt, "skill": skill, "cwd": cwd });
+        if let Some(dir) = cwd {
+            let ctx = instruction_context(dir);
+            if !ctx.is_empty() {
+                payload["context"] = Value::Array(ctx);
+            }
+        }
         Self::record(
             &mut inner,
             project_root,
@@ -391,7 +419,7 @@ impl TestigoService {
             term_id.map(String::from),
             session_id.map(String::from),
             "human",
-            json!({ "prompt": prompt, "skill": skill, "cwd": cwd }),
+            payload,
         )
     }
 

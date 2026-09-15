@@ -202,6 +202,21 @@ ProofEvent {
   caída = export falla (nunca packet silenciosamente sin lo pedido). El verificador declara
   el token (imprint ✓, genTime escaneado) y entrega el .tsr + comandos `openssl ts -verify`
   — sin fingir verificación CMS en el browser. E2E real contra freetsa en test `#[ignore]`.
+- **V2-E — Process context (spec v0.2, additive)** ✅ HECHO 2026-09-15 (working tree, sin
+  commitear): `on_prompt` graba en el evento `prompt` los digests de los archivos de
+  instrucciones presentes en el cwd al momento del prompt (`payload.context`, spec §1.7);
+  el export deriva `provider` (harness agent-console + `languageModels` desde eventos
+  `session_start`/`model_switch` de las sesiones involucradas, aunque queden fuera del
+  rango), `contextArtifacts` (solo desde los prompts EMPAQUETADOS — un prompt redactado no
+  aporta nada), `startTimestamp`/`endTimestamp` (ts de la primera/última entrada no-stub,
+  formato `Date#toISOString` vía `rfc3339_ms`, verificable). Sin bump de URI ni de formato.
+  Formas tomadas de FINOS Agentic Process Evidence (finos/ai-governance-framework#384) —
+  mapeo en `testigo/docs/ape-mapping.md`. **Fix de paso:** `redactionCount` contaba hits de
+  patrones; el spec (§2.3, normativo desde 2026-07-21) cuenta entradas — el packet publicado
+  de Fixy (0.48.1) declara 12 sobre 8 y hoy FALLA en todos los verificadores: hay que
+  re-exportarlo con este build (mismas redacciones manuales: seqs 2,4,5,7,8,10) y actualizar
+  digests del README de testigo. Verificador embebido (`resources/testigo-verifier.html`)
+  re-sincronizado con el del repo testigo (estaba atrasado desde jul-2026).
 - **V2-C — sigstore keyless**: modo de firma alternativo vía Fulcio/Rekor (identidad OIDC +
   log de transparencia público). Pesado y con implicancias de privacidad (el log es público):
   diseño en doc antes de código.
