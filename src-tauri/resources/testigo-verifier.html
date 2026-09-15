@@ -9,7 +9,9 @@
   Zero dependencies, zero network: everything runs locally via WebCrypto.
   Verifies: (1) the DSSE Ed25519 signature over the in-toto statement,
   (2) the subject digest over the packed events, (3) the hash-chain linkage
-  across every entry, recomputing content hashes for non-redacted events.
+  across every entry, recomputing content hashes for non-redacted events,
+  (3b) the optional process context (spec §2.6): shape, and the declared
+  session window against the first/last event.
   If the packet carries an RFC 3161 timestamp it is DECLARED with informative
   checks only — the token's CMS signature is not validated in the browser;
   the page hands you the token and the openssl commands instead.
@@ -151,8 +153,43 @@ async function load(f) {
   else check("fail", "Hash chain linkage BROKEN.");
   if (contentFail === 0) check("ok", `Content hashes recomputed for ${recomputed} events.`);
   else check("fail", `${contentFail} event(s) failed content hash recomputation.`);
-  if (redacted > 0) check("warn", `${redacted} event(s) redacted before export — linkage verified, content hash not recomputable (by design).`);
+  if (redacted > 0) check("warn", `${redacted} event(s) redacted before export — linkage verified, content hash not recomputable (by design). Redaction is a producer assertion: it claims content was replaced, it is not evidence that it was.`);
   if (stubs > 0) check("warn", `${stubs} out-of-case event(s) included as linkage stubs (seq + hashes only).`);
+  if (linkageOk && (pred.redactionCount ?? 0) !== redacted) check("fail", `Declared redactionCount (${pred.redactionCount ?? 0}) does not match the ${redacted} redacted entries — the packet misrepresents what was withheld (stubs are not redactions).`);
+
+  // 3b. Process context (spec §2.6): provider / contextArtifacts / session
+  // window / owner. All optional; present ones must be well-formed. The
+  // window is the one claim a verifier can check against the hashed lines.
+  const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const nonEmpty = (v) => typeof v === "string" && v.length > 0;
+  let ctxProblem = null;
+  if (pred.provider !== undefined) {
+    const p = pred.provider;
+    if (!isObj(p) || !isObj(p.harness) || !nonEmpty(p.harness.name) || !nonEmpty(p.harness.version)) ctxProblem = "provider.harness needs a non-empty name and version";
+    else if (p.agent !== undefined && !isObj(p.agent)) ctxProblem = "provider.agent is not an object";
+    else if (p.languageModels !== undefined && !(Array.isArray(p.languageModels) && p.languageModels.every(isObj))) ctxProblem = "provider.languageModels is not an array of objects";
+  }
+  if (!ctxProblem && pred.contextArtifacts !== undefined) {
+    if (!Array.isArray(pred.contextArtifacts)) ctxProblem = "contextArtifacts is not an array";
+    else for (const a of pred.contextArtifacts) {
+      if (!isObj(a) || nonEmpty(a.uri) === nonEmpty(a.data)) { ctxProblem = "a context artifact needs exactly one of uri / data"; break; }
+      if (a.digest !== undefined && !(isObj(a.digest) && /^[0-9a-f]{64}$/.test(a.digest.sha256 ?? ""))) { ctxProblem = "a context artifact digest is not a lowercase hex sha256"; break; }
+      if (a.tags !== undefined && !(Array.isArray(a.tags) && a.tags.every(nonEmpty))) { ctxProblem = "context artifact tags must be non-empty strings"; break; }
+    }
+  }
+  if (!ctxProblem && pred.owner !== undefined && !nonEmpty(pred.owner)) ctxProblem = "owner is empty";
+  if (ctxProblem) check("fail", `Process context malformed: ${ctxProblem}.`);
+  const hasStart = pred.startTimestamp !== undefined, hasEnd = pred.endTimestamp !== undefined;
+  if (hasStart !== hasEnd) check("fail", "Session window declares only one of startTimestamp / endTimestamp.");
+  else if (hasStart) {
+    const rfc = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+    const ts = [];
+    for (const e of events) if (typeof e.line === "string") { try { ts.push(JSON.parse(e.line).ts); } catch {} }
+    const windowOk = rfc.test(pred.startTimestamp) && rfc.test(pred.endTimestamp) && ts.length > 0 &&
+      Date.parse(pred.startTimestamp) === ts[0] && Date.parse(pred.endTimestamp) === ts[ts.length - 1];
+    if (windowOk) check("ok", `Session window ${pred.startTimestamp} → ${pred.endTimestamp} matches the first and last event.`);
+    else check("fail", "Declared session window does NOT match the first/last event's timestamp.");
+  }
 
   // 4. Trusted timestamp (RFC 3161), if present. Informative only: the
   // token's CMS signature is NOT validated here — pretending to verify ASN.1
@@ -194,8 +231,27 @@ async function load(f) {
   }
 
   // 5. Render.
+  // exportedAtMs (testigo v0.1, epoch ms) or exportedAt (session-chain draft, RFC 3339).
+  const exported = pred.exportedAtMs != null ? new Date(pred.exportedAtMs).toISOString() : (pred.exportedAt ?? "?");
   $("meta").textContent =
-    `case: ${pred.caseId ?? "(full ledger)"} · project: ${pred.project} · exported: ${new Date(pred.exportedAtMs).toISOString()} · generator: ${pred.generator} · range: ${pred.range?.fromSeq}–${pred.range?.toSeq} · key id: ${keyId}`;
+    `case: ${pred.caseId ?? "(full ledger)"} · project: ${pred.project} · exported: ${exported} · generator: ${pred.generator} · range: ${pred.range?.fromSeq}–${pred.range?.toSeq} · key id: ${keyId}`;
+  // Process context (§2.6), producer-reported: shown as declared, never as verified.
+  const ctxLines = [];
+  if (pred.provider) {
+    const p = pred.provider;
+    const models = (p.languageModels || []).map((m) => m.resolved || m.inferenceProvider).filter(Boolean).join(", ");
+    ctxLines.push(`provider: harness ${p.harness?.name ?? "?"} ${p.harness?.version ?? ""}${p.agent ? ` · agent ${p.agent.name ?? p.agent.id ?? ""}` : ""}${models ? ` · models ${models}` : ""}`);
+  }
+  if (pred.owner) ctxLines.push(`owner (declared): ${pred.owner}`);
+  if (Array.isArray(pred.contextArtifacts) && pred.contextArtifacts.length)
+    ctxLines.push(`context artifacts: ${pred.contextArtifacts.map((a) => `${(a.tags || []).join("/") || "artifact"} ${a.uri ?? "(inline)"}${a.digest?.sha256 ? " sha256:" + a.digest.sha256.slice(0, 12) + "…" : ""}`).join(" · ")}`);
+  if (ctxLines.length) {
+    const c = document.createElement("div");
+    c.className = "mono muted";
+    c.style.whiteSpace = "pre-wrap";
+    c.textContent = ctxLines.join("\n");
+    $("meta").appendChild(c);
+  }
   const tbl = document.createElement("table");
   tbl.innerHTML = "<tr><th>seq</th><th>kind</th><th>actor</th><th>detail</th></tr>";
   for (const e of events) {
@@ -214,6 +270,9 @@ async function load(f) {
       else if (v.kind === "turn_end") detail = (p.filesChanged || []).map((f) => `${f.status} ${f.path}`).join(", ").slice(0, 200) || "(no diff captured)";
       else if (v.kind === "case_link") detail = v.caseId;
       else if (v.kind === "job_run") detail = `${p.jobName ?? ""}: ${p.status ?? ""}`;
+      else if (v.kind === "session_start") detail = `${p.engine ?? ""}${p.model ? " model=" + p.model : ""}`;
+      else if (v.kind === "model_switch") detail = `${p.from ?? "?"} → ${p.to ?? "?"}`;
+      else if (v.kind === "tool_call") detail = `tool=${p.tool ?? ""}`;
       const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
       tr.innerHTML = `<td>${v.seq}</td><td class="kind">${esc(v.kind)}${e.redacted ? " ⚠" : ""}</td><td>${esc(v.actor ?? "")}</td><td>${esc(detail)}</td>`;
     }

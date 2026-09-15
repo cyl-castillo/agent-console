@@ -337,12 +337,19 @@ pub fn export_with_seed(
         if seg.in_case(v) {
             let (mut line, n) = redact(&seg.raw_lines[i]);
             let mut redacted = n > 0;
-            redaction_count += n;
             let seq = v.get("seq").and_then(|s| s.as_u64());
             if seq.is_some_and(|s| manual_redact.contains(&s)) {
                 line = redact_manually(&line)?;
-                redaction_count += 1;
                 redacted = true;
+            }
+            // Spec §2.3 (normative since the corpus cross of 2026-07-21):
+            // redactionCount counts ENTRIES carrying redacted:true, not
+            // pattern hits — a line with three secrets is one redaction, and
+            // an auto-redacted line that is also marked manually is still one.
+            // Counting hits is what left the published Fixy packet (v0.48.1)
+            // declaring 12 over 8 redacted entries.
+            if redacted {
+                redaction_count += 1;
             }
             included += 1;
             events.push(json!({ "line": line, "redacted": redacted }));
@@ -382,6 +389,26 @@ pub fn export_with_seed(
         .map(|v| (v.get("seq").cloned(), v.get("hash").cloned()))
         .unwrap_or((None, None));
 
+    // Process context (spec §2.6), derived from what the packet carries.
+    let (provider, context_artifacts, window) = process_context(&parsed, &events);
+    let mut predicate = json!({
+        "caseId": case_id,
+        "project": project_name,
+        "exportedAtMs": exported_at,
+        "generator": format!("agent-console/{}", env!("CARGO_PKG_VERSION")),
+        "range": { "fromSeq": first, "toSeq": last, "prevHashBefore": prev_hash_before },
+        "ledgerHead": { "seq": head_seq, "hash": head_hash },
+        "redactionCount": redaction_count,
+    });
+    predicate["provider"] = provider;
+    if !context_artifacts.is_empty() {
+        predicate["contextArtifacts"] = Value::Array(context_artifacts);
+    }
+    if let Some((start, end)) = window {
+        predicate["startTimestamp"] = json!(rfc3339_ms(start));
+        predicate["endTimestamp"] = json!(rfc3339_ms(end));
+    }
+    predicate["events"] = Value::Array(events);
     let statement = json!({
         "_type": STATEMENT_TYPE,
         "subject": [{
@@ -389,16 +416,7 @@ pub fn export_with_seed(
             "digest": { "sha256": subject_digest }
         }],
         "predicateType": PREDICATE_TYPE,
-        "predicate": {
-            "caseId": case_id,
-            "project": project_name,
-            "exportedAtMs": exported_at,
-            "generator": format!("agent-console/{}", env!("CARGO_PKG_VERSION")),
-            "range": { "fromSeq": first, "toSeq": last, "prevHashBefore": prev_hash_before },
-            "ledgerHead": { "seq": head_seq, "hash": head_hash },
-            "redactionCount": redaction_count,
-            "events": events,
-        }
+        "predicate": predicate,
     });
 
     let payload = serde_json::to_string(&statement)
@@ -454,6 +472,116 @@ pub fn export_with_seed(
     })
 }
 
+/// Process context (spec §2.6): `(provider, contextArtifacts, (startTs, endTs))`,
+/// DERIVED from evidence, never typed in at export. Models are session
+/// properties, so `session_start` / `model_switch` events of the sessions
+/// involved count even when they sit outside the exported range; instruction
+/// digests come only from the packed `prompt` lines — a redacted prompt
+/// contributes nothing, because the packet no longer shows it. The window is
+/// the `ts` of the first and last non-stub packed entries, which is exactly
+/// what verifiers recompute.
+fn process_context(ledger: &[Value], packed: &[Value]) -> (Value, Vec<Value>, Option<(i64, i64)>) {
+    let lines: Vec<Value> = packed
+        .iter()
+        .filter_map(|e| e.get("line").and_then(Value::as_str))
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect();
+    let ts = |v: &Value| v.get("ts").and_then(Value::as_i64);
+    let window = match (lines.first().and_then(ts), lines.last().and_then(ts)) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    };
+
+    let sessions: std::collections::HashSet<&str> = lines
+        .iter()
+        .filter_map(|v| v.get("sessionId").and_then(Value::as_str))
+        .collect();
+    let mut models: Vec<String> = Vec::new();
+    for v in ledger {
+        let in_session = v
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .is_some_and(|s| sessions.contains(s));
+        if !in_session {
+            continue;
+        }
+        let model = match v.get("kind").and_then(Value::as_str) {
+            Some("session_start") => v.pointer("/payload/model"),
+            Some("model_switch") => v.pointer("/payload/to"),
+            _ => None,
+        };
+        if let Some(m) = model.and_then(Value::as_str) {
+            if !m.is_empty() && !models.iter().any(|x| x == m) {
+                models.push(m.to_string());
+            }
+        }
+    }
+    let mut provider = json!({
+        "harness": { "name": "agent-console", "version": env!("CARGO_PKG_VERSION") }
+    });
+    if !models.is_empty() {
+        provider["languageModels"] =
+            Value::Array(models.iter().map(|m| json!({ "resolved": m })).collect());
+    }
+
+    let is_hex64 =
+        |s: &str| s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    let mut context: Vec<Value> = Vec::new();
+    for v in &lines {
+        if v.get("kind").and_then(Value::as_str) != Some("prompt") {
+            continue;
+        }
+        let Some(arr) = v.pointer("/payload/context").and_then(Value::as_array) else {
+            continue;
+        };
+        for c in arr {
+            let (Some(uri), Some(sha)) = (
+                c.get("uri").and_then(Value::as_str),
+                c.get("sha256").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            if uri.is_empty() || !is_hex64(sha) {
+                continue;
+            }
+            if context
+                .iter()
+                .any(|x| x["uri"] == uri && x["digest"]["sha256"] == sha)
+            {
+                continue;
+            }
+            context
+                .push(json!({ "tags": ["instructions"], "uri": uri, "digest": { "sha256": sha } }));
+        }
+    }
+    (provider, context, window)
+}
+
+/// Epoch milliseconds → RFC 3339 with millisecond precision and a `Z`
+/// designator (what `Date#toISOString` produces), so both producers emit
+/// the same bytes for the same instant. Civil-from-days per Howard Hinnant.
+fn rfc3339_ms(ms: i64) -> String {
+    let secs = ms.div_euclid(1000);
+    let milli = ms.rem_euclid(1000);
+    let days = secs.div_euclid(86_400);
+    let sod = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{milli:03}Z",
+        sod / 3600,
+        (sod % 3600) / 60,
+        sod % 60
+    )
+}
+
 /// Public key info for sharing the keyid out-of-band (and showing it in UI).
 pub fn public_key_info() -> AppResult<Value> {
     let seed = load_or_create_seed()?;
@@ -486,6 +614,14 @@ mod tests {
     use ed25519_dalek::Verifier;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[test]
+    fn rfc3339_ms_matches_date_to_iso_string() {
+        assert_eq!(rfc3339_ms(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(rfc3339_ms(1784133679508), "2026-07-15T16:41:19.508Z");
+        assert_eq!(rfc3339_ms(951782400000), "2000-02-29T00:00:00.000Z");
+        assert_eq!(rfc3339_ms(-1), "1969-12-31T23:59:59.999Z");
+    }
+
     /// Full packet round trip with an injected seed (no keychain): export a
     /// ledger with a case + interleaved events + a secret, then verify the
     /// DSSE signature, the subject digest, the stub pruning, the redaction,
@@ -507,6 +643,11 @@ mod tests {
 
         let svc = TestigoService::new();
         let root = "/proj/export";
+        // A cwd with an instruction file: its digest must land in the prompt
+        // event (spec §1.7) and surface as a context artifact (spec §2.6).
+        let cwd = base.join("cwd");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(cwd.join("CLAUDE.md"), b"never push to main\n").unwrap();
         svc.link_case(root, 1, "t1", "jira:FIXY-9").unwrap();
         svc.on_prompt(
             root,
@@ -515,7 +656,7 @@ mod tests {
             None,
             Some("deploy with key ghp_0123456789abcdefghijklmnopqrstuvwxyz"),
             None,
-            None,
+            Some(cwd.to_str().unwrap()),
         )
         .unwrap();
         // An interleaved event from another terminal → becomes a stub.
@@ -566,6 +707,42 @@ mod tests {
         assert_eq!(statement["predicateType"], PREDICATE_TYPE);
         let events = statement["predicate"]["events"].as_array().unwrap();
         assert_eq!(events.len(), 4);
+
+        // §2.3: redactionCount is the number of redacted ENTRIES, not hits.
+        let pred = &statement["predicate"];
+        let redacted_entries = events.iter().filter(|e| e["redacted"] == true).count();
+        assert_eq!(
+            pred["redactionCount"],
+            json!(redacted_entries),
+            "redactionCount counts entries carrying redacted:true (spec §2.3)"
+        );
+
+        // §2.6 process context, derived from the packed lines.
+        assert_eq!(pred["provider"]["harness"]["name"], "agent-console");
+        assert_eq!(
+            pred["provider"]["harness"]["version"],
+            env!("CARGO_PKG_VERSION")
+        );
+        assert!(
+            pred["provider"].get("languageModels").is_none(),
+            "no session_start in this ledger ⇒ no model claimed"
+        );
+        assert_eq!(
+            pred["startTimestamp"], "1970-01-01T00:00:00.001Z",
+            "window start = first packed line (case_link, ts 1)"
+        );
+        assert_eq!(
+            pred["endTimestamp"], "1970-01-01T00:00:00.004Z",
+            "window end = last packed line (turn_end, ts 4; the t2 stub at ts 3 does not count)"
+        );
+        let mut h = Sha256::new();
+        h.update(b"never push to main\n");
+        let want = format!("{:x}", h.finalize());
+        assert_eq!(
+            pred["contextArtifacts"],
+            json!([{ "tags": ["instructions"], "uri": "CLAUDE.md", "digest": { "sha256": want } }]),
+            "instruction digest hashed at prompt time, derived at export"
+        );
 
         // Digest covers the packed segment byte-exactly.
         let body = serde_json::to_string(&statement["predicate"]["events"]).unwrap();
