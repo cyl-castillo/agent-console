@@ -105,6 +105,10 @@ fn pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
 /// quote would corrupt the line.
 fn redact(line: &str) -> (String, usize) {
     static PATTERNS: &[(&str, &str)] = &[
+        // Home directories: every prompt records its cwd, and a packet that
+        // leaves the machine should not name the operator's account.
+        (r"/home/[A-Za-z0-9._-]+", "[REDACTED:home]"),
+        (r"/Users/[A-Za-z0-9._-]+", "[REDACTED:home]"),
         (r"AKIA[0-9A-Z]{16}", "[REDACTED:aws-key]"),
         (r"ghp_[A-Za-z0-9]{36,}", "[REDACTED:github-token]"),
         (r"github_pat_[A-Za-z0-9_]{22,}", "[REDACTED:github-token]"),
@@ -615,6 +619,15 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
+    fn home_directories_are_redacted() {
+        let (line, n) = redact(r#"{"cwd":"/home/carlos/Documents/x","p":"/Users/ada/y","k":"v"}"#);
+        assert_eq!(n, 2);
+        assert!(line.contains("[REDACTED:home]/Documents/x") && line.contains("[REDACTED:home]/y"));
+        assert!(!line.contains("carlos") && !line.contains("ada"));
+        assert_eq!(redact("/tmp/proj"), ("/tmp/proj".to_string(), 0));
+    }
+
+    #[test]
     fn rfc3339_ms_matches_date_to_iso_string() {
         assert_eq!(rfc3339_ms(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(rfc3339_ms(1784133679508), "2026-07-15T16:41:19.508Z");
@@ -870,6 +883,63 @@ mod tests {
         assert!(preview(&svc2, root, None).is_err());
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Re-export a real case from this machine's ledger with the keychain
+    /// signing key — the operator's tool for regenerating a published packet
+    /// (e.g. the Fixy case study after a format fix). #[ignore] because it
+    /// reads the OS keychain and the user's real ledger; run on demand:
+    ///
+    ///   TESTIGO_REGEN_ROOT=/path/to/project TESTIGO_REGEN_CASE=term:… \
+    ///   TESTIGO_REGEN_REDACT=2,4,5 TESTIGO_REGEN_OUT=/tmp/out \
+    ///   cargo test --lib regenerate_case_packet -- --ignored --nocapture
+    ///
+    /// Writes two packets: `<out>/private/` (no manual redaction — keep it
+    /// private) and `<out>/` (manually redacted seqs — the one to publish),
+    /// and prints both subject digests and the key id for the README table.
+    #[test]
+    #[ignore]
+    fn regenerate_case_packet_from_env() {
+        let _env = crate::test_support::lock_env();
+        let root = std::env::var("TESTIGO_REGEN_ROOT").expect("TESTIGO_REGEN_ROOT");
+        let case = std::env::var("TESTIGO_REGEN_CASE").ok();
+        let out = std::path::PathBuf::from(
+            std::env::var("TESTIGO_REGEN_OUT").expect("TESTIGO_REGEN_OUT"),
+        );
+        let redact: Vec<u64> = std::env::var("TESTIGO_REGEN_REDACT")
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().parse().expect("seq number"))
+            .collect();
+        let svc = TestigoService::new();
+        let full = export(&svc, &root, case.as_deref(), &out.join("private"), &[]).unwrap();
+        let redacted = export(&svc, &root, case.as_deref(), &out, &redact).unwrap();
+        assert_eq!(full.key_id, redacted.key_id);
+        assert_eq!(
+            redacted.redaction_count,
+            full.redaction_count + redact.len()
+        );
+        println!("key id:                      {}", redacted.key_id);
+        println!(
+            "digest (private, full):      {}  -> {}",
+            full.subject_digest, full.path
+        );
+        println!(
+            "digest (published, redacted): {}  -> {}",
+            redacted.subject_digest, redacted.path
+        );
+        println!(
+            "events {} · stubs {} · redacted entries {}{}",
+            redacted.event_count,
+            redacted.stub_count,
+            redacted.redaction_count,
+            redacted
+                .timestamp_tsa
+                .as_deref()
+                .map(|t| format!(" · RFC 3161 via {t}"))
+                .unwrap_or_default()
+        );
     }
 
     /// End-to-end against the real freetsa.org TSA — network, so #[ignore]:
