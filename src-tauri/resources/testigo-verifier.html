@@ -273,6 +273,7 @@ async function load(f) {
       else if (v.kind === "session_start") detail = `${p.engine ?? ""}${p.model ? " model=" + p.model : ""}`;
       else if (v.kind === "model_switch") detail = `${p.from ?? "?"} → ${p.to ?? "?"}`;
       else if (v.kind === "tool_call") detail = `tool=${p.tool ?? ""}`;
+      else if (v.kind === "external_evidence") detail = `${p.source ?? "evidence"} · sha256 ${(p.sha256 || "").slice(0, 12)}… · ${p.uri ?? ""}${p.note ? " · " + p.note : ""}`;
       const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
       tr.innerHTML = `<td>${v.seq}</td><td class="kind">${esc(v.kind)}${e.redacted ? " ⚠" : ""}</td><td>${esc(v.actor ?? "")}</td><td>${esc(detail)}</td>`;
     }
