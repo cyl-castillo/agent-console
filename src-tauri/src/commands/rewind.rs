@@ -29,7 +29,7 @@ pub struct TurnRewindResult {
 /// first (with a pre-restore backup); the transcript fork is best-effort on
 /// top and degrades honestly into `fork_error`. The original transcript is
 /// never mutated — the fork is a new file under a new uuid.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn turn_rewind(
     repo: Option<String>,
     commit_sha: String,

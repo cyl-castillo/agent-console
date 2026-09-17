@@ -6,13 +6,13 @@ use crate::services::permissions_service::{
 };
 use crate::state::AppState;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn permissions_snapshot(state: State<'_, AppState>) -> AppResult<PermissionsSnapshot> {
     let project = state.inner.lock().project.clone();
     permissions_service::snapshot(project.as_ref().map(|p| p.root.as_path()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn permissions_add(
     scope: Scope,
     effect: Effect,
@@ -30,7 +30,7 @@ pub fn permissions_add(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn permissions_remove(
     scope: Scope,
     effect: Effect,

@@ -74,6 +74,13 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --workspace --lib --bins -- -D warnings
 
+      # A synchronous Tauri command runs on the webview's main thread and
+      # freezes the UI for its whole duration. Anything touching fs/git/
+      # process/network must be `#[tauri::command(async)]`; the allowlist
+      # names the few in-memory reads that may stay sync.
+      - name: IPC commands off the main thread
+        run: scripts/check-ipc-sync.sh
+
       - name: Tests
         working-directory: src-tauri
         run: cargo test --workspace

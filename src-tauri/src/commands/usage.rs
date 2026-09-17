@@ -7,7 +7,7 @@ use crate::services::usage_service::{self, UsageStats};
 /// Claude's `~/.claude/projects/<slug>/<id>.jsonl` or Codex's rollout under
 /// `~/.codex/sessions/`. `None` when no transcript exists yet (brand-new
 /// session) or it carries no usage, so the caller can simply hide the pill.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn session_usage(
     session_id: String,
     project_root: String,

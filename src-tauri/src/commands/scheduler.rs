@@ -18,34 +18,34 @@ fn project_root(state: &State<'_, AppState>) -> AppResult<String> {
 }
 
 /// All scheduled jobs for the open project.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduler_list(state: State<'_, AppState>) -> AppResult<Vec<Job>> {
     let root = project_root(&state)?;
     state.scheduler.list(&root)
 }
 
 /// Create (or replace by id) a job.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduler_create(state: State<'_, AppState>, job: Job) -> AppResult<Job> {
     let root = project_root(&state)?;
     state.scheduler.create(&root, job)
 }
 
 /// Update a job in place (recomputes its next firing).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduler_update(state: State<'_, AppState>, job: Job) -> AppResult<Job> {
     let root = project_root(&state)?;
     state.scheduler.update(&root, job)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduler_delete(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let root = project_root(&state)?;
     state.scheduler.delete(&root, &id)
 }
 
 /// Pause or resume a job (`enabled=false` pauses; `true` resumes + reschedules).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduler_set_enabled(
     state: State<'_, AppState>,
     id: String,
@@ -56,7 +56,7 @@ pub fn scheduler_set_enabled(
 }
 
 /// Recent run records for the open project, newest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduler_history(
     state: State<'_, AppState>,
     limit: Option<usize>,
@@ -75,7 +75,7 @@ pub fn scheduler_is_paused(state: State<'_, AppState>) -> AppResult<bool> {
 
 /// Engage/release the global kill-switch. When paused, the tick loop and event
 /// firing run nothing; an explicit "run now" still works.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn scheduler_set_paused(
     app: AppHandle,
     state: State<'_, AppState>,

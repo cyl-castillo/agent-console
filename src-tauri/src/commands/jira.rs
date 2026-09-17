@@ -1,7 +1,7 @@
 use crate::error::AppResult;
 use crate::services::jira_service::{self, JiraIssue, JiraStatus};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn jira_status() -> JiraStatus {
     jira_service::status()
 }
@@ -21,7 +21,7 @@ pub async fn jira_connect(site_url: String, email: String, token: String) -> App
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn jira_disconnect() -> AppResult<()> {
     jira_service::disconnect()
 }
@@ -55,7 +55,7 @@ pub struct WorklogSuggestion {
 /// Suggest a worklog duration for an issue from the witnessed activity of its
 /// `jira:<KEY>` case in the Testigo ledger, within [day_start_ms, day_end_ms)
 /// (local-day bounds computed by the frontend). None = no meaningful activity.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn jira_worklog_suggestion(
     project_root: String,
     issue_key: String,
@@ -91,7 +91,7 @@ pub fn jira_worklog_suggestion(
 /// The "⏱ Today" digest: tickets with witnessed activity in the given local
 /// day (bounds computed by the frontend), with estimated time and whether
 /// that (ticket, day) was already logged.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn jira_daily_digest(
     project_root: String,
     day_start_ms: i64,

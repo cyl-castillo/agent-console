@@ -18,31 +18,31 @@ fn current_repo(state: &AppState) -> AppResult<std::path::PathBuf> {
         .ok_or_else(|| AppError::InvalidArgument("no project open".into()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_status(state: State<'_, AppState>) -> AppResult<GitStatus> {
     let repo = current_repo(&state)?;
     git_service::status(&repo)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_diff_file(file: String, state: State<'_, AppState>) -> AppResult<String> {
     let repo = current_repo(&state)?;
     git_service::diff_file(&repo, &file)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_revert_file(file: String, state: State<'_, AppState>) -> AppResult<()> {
     let repo = current_repo(&state)?;
     git_service::revert_file(&repo, &file)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_stage_file(file: String, state: State<'_, AppState>) -> AppResult<()> {
     let repo = current_repo(&state)?;
     git_service::stage_file(&repo, &file)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_unstage_file(file: String, state: State<'_, AppState>) -> AppResult<()> {
     let repo = current_repo(&state)?;
     git_service::unstage_file(&repo, &file)
@@ -52,7 +52,7 @@ pub fn git_unstage_file(file: String, state: State<'_, AppState>) -> AppResult<(
 /// for "commit the work the agent just did", not archaeology.
 const TESTIGO_TRAILER_MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<String> {
     let repo = current_repo(&state)?;
     // Testigo trailer: stamp the commit with the case whose recorded turn
@@ -90,19 +90,19 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
     git_service::commit(&repo, &message)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_branches(state: State<'_, AppState>) -> AppResult<Vec<BranchInfo>> {
     let repo = current_repo(&state)?;
     git_service::branches(&repo)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_checkout_branch(name: String, state: State<'_, AppState>) -> AppResult<()> {
     let repo = current_repo(&state)?;
     git_service::checkout_branch(&repo, &name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_recent_messages(
     limit: Option<u32>,
     state: State<'_, AppState>,
@@ -111,19 +111,19 @@ pub fn git_recent_messages(
     git_service::recent_messages(&repo, limit.unwrap_or(10))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_head_message(state: State<'_, AppState>) -> AppResult<String> {
     let repo = current_repo(&state)?;
     git_service::head_message(&repo)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_amend_commit(message: String, state: State<'_, AppState>) -> AppResult<String> {
     let repo = current_repo(&state)?;
     git_service::amend_commit(&repo, &message)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_file_log(
     file: String,
     limit: Option<u32>,

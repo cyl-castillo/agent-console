@@ -19,7 +19,7 @@ pub struct FileContent {
     pub truncated: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_project(
     path: String,
     app: AppHandle,
@@ -97,7 +97,7 @@ pub fn app_build_info() -> serde_json::Value {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn workspace_context(state: State<'_, AppState>) -> AppResult<WorkspaceContext> {
     let root = state
         .inner
