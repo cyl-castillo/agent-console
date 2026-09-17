@@ -84,7 +84,7 @@ fn annotate_similarity(project_root: &Path, recs: &mut [SkillRecommendation]) {
     let root = project_root.to_string_lossy();
     let mut embedder = CandleEmbedder::new();
     if let Err(e) = semantic_index::ensure_fresh(&root, &mut embedder) {
-        eprintln!("advisor: semantic annotate skipped (index): {e}");
+        tracing::warn!("advisor: semantic annotate skipped (index): {e}");
         return;
     }
     for rec in recs.iter_mut() {
@@ -105,7 +105,7 @@ fn annotate_similarity(project_root: &Path, recs: &mut [SkillRecommendation]) {
             }
             Ok(None) => {}
             Err(e) => {
-                eprintln!("advisor: semantic annotate skipped (query): {e}");
+                tracing::warn!("advisor: semantic annotate skipped (query): {e}");
                 return;
             }
         }

@@ -358,6 +358,8 @@ export const ipc = {
 
   feedbackDevEnabled: () => invoke<boolean>("feedback_dev_enabled"),
   feedbackContext: () => invoke<FeedbackContext>("feedback_context"),
+  diagnosticsBundle: () => invoke<string>("diagnostics_bundle"),
+  diagnosticsLogFile: () => invoke<string>("diagnostics_log_file"),
   feedbackSubmit: (input: FeedbackInput) => invoke<string>("feedback_submit", { input }),
 
   advisorAnalyze: () => invoke<AdvisorAnalysisResult>("advisor_analyze"),

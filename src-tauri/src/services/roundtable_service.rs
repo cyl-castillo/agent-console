@@ -219,7 +219,7 @@ impl RunControl {
 fn autosave(control: &RunControl, id: &str) {
     let room = control.snapshot(id);
     if let Err(e) = control.rooms.save_room(&room, &control.repo) {
-        eprintln!("roundtable: failed to persist room {id}: {e}");
+        tracing::warn!("roundtable: failed to persist room {id}: {e}");
     }
 }
 

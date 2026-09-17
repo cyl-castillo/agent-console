@@ -29,5 +29,8 @@ pub fn feedback_submit(input: FeedbackInput, state: State<'_, AppState>) -> AppR
             project.map(|p| p.name.as_str()),
         )
     };
-    feedback_service::submit(input, &ctx)
+    // The bundle rides along collapsed: hooks state, store sizes and the log
+    // tail are what every "it doesn't work" report ends up needing.
+    let diagnostics = crate::services::diagnostics::render(&super::diagnostics::collect(&state));
+    feedback_service::submit(input, &ctx, Some(&diagnostics))
 }

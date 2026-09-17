@@ -582,7 +582,7 @@ mod tests {
         let out = CodexRunner
             .run(&ctx, &sink)
             .expect("codex turn should succeed");
-        eprintln!(
+        tracing::warn!(
             "text={:?} session_id={:?} tokens={} kinds={:?}",
             out.text,
             out.session_id,

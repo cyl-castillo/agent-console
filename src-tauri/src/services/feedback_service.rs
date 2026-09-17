@@ -59,7 +59,14 @@ fn git_branch(root: &Path) -> Option<String> {
     }
 }
 
-pub fn submit(input: FeedbackInput, ctx: &FeedbackContext) -> AppResult<String> {
+/// `diagnostics`: the rendered bundle (see `services::diagnostics::render`),
+/// attached collapsed at the end of the issue body. `None` keeps the body as
+/// before — the panel says what will be attached, so this is never silent.
+pub fn submit(
+    input: FeedbackInput,
+    ctx: &FeedbackContext,
+    diagnostics: Option<&str>,
+) -> AppResult<String> {
     if !dev_enabled() {
         return Err(AppError::InvalidArgument(
             "feedback panel is disabled (set AGENT_CONSOLE_DEV=1)".into(),
@@ -76,7 +83,12 @@ pub fn submit(input: FeedbackInput, ctx: &FeedbackContext) -> AppResult<String> 
     let cat = sanitize_token(&input.category, &["bug", "feature", "ux", "other"]);
     let sev = sanitize_token(&input.severity, &["low", "medium", "high"]);
     let full_title = format!("[{cat}][{sev}] {title}");
-    let body = format_body(desc, ctx, &cat, &sev);
+    let mut body = format_body(desc, ctx, &cat, &sev);
+    if let Some(d) = diagnostics.filter(|d| !d.trim().is_empty()) {
+        body.push_str("\n<details><summary>Diagnostics (attached by Agent Console)</summary>\n\n");
+        body.push_str(d);
+        body.push_str("\n</details>\n");
+    }
 
     let out = proc::command("gh")
         .args(["issue", "create", "--repo", REPO, "--label", FEEDBACK_LABEL])
@@ -180,7 +192,7 @@ mod tests {
 
     #[test]
     fn submit_is_hard_gated_behind_the_dev_flag() {
-        let err = with_dev_env(None, || submit(input("t", "d"), &ctx()).unwrap_err());
+        let err = with_dev_env(None, || submit(input("t", "d"), &ctx(), None).unwrap_err());
         assert!(matches!(err, AppError::InvalidArgument(_)));
     }
 
@@ -188,9 +200,13 @@ mod tests {
     fn submit_validates_before_reaching_the_gh_cli() {
         // With the flag on, empty title/description must fail fast — these
         // paths return before any external command is spawned.
-        let err = with_dev_env(Some("1"), || submit(input("  ", "d"), &ctx()).unwrap_err());
+        let err = with_dev_env(Some("1"), || {
+            submit(input("  ", "d"), &ctx(), None).unwrap_err()
+        });
         assert!(err.to_string().contains("title"));
-        let err = with_dev_env(Some("1"), || submit(input("t", "  "), &ctx()).unwrap_err());
+        let err = with_dev_env(Some("1"), || {
+            submit(input("t", "  "), &ctx(), None).unwrap_err()
+        });
         assert!(err.to_string().contains("description"));
     }
 

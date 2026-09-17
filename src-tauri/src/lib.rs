@@ -8,6 +8,14 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Logging first: everything below may fail, and the point of H3 is that
+    // a failure leaves a line somewhere the user can find.
+    let log_dir = services::diagnostics::init_logging();
+    services::diagnostics::install_panic_hook();
+    match &log_dir {
+        Some(d) => tracing::info!(dir = %d.display(), "log file live"),
+        None => tracing::warn!("no writable log dir — logging to stderr only"),
+    }
     tauri::Builder::default()
         .manage(AppState::default())
         // MUST be the first plugin. A second launch (very common on Windows —
@@ -39,44 +47,44 @@ pub fn run() {
             // session-name suggestions / resume binding / activity / snapshots
             // work without the user having to flip the integration toggle.
             if let Err(e) = state.hooks.ensure_autoinstalled() {
-                eprintln!("hooks: auto-install failed: {e}");
+                tracing::warn!("hooks: auto-install failed: {e}");
             }
             // Codex twin (own marker; no-op when the codex CLI isn't installed).
             if let Err(e) = state.hooks.ensure_codex_autoinstalled() {
-                eprintln!("hooks: codex auto-install failed: {e}");
+                tracing::warn!("hooks: codex auto-install failed: {e}");
             }
             // Turn-completed observer for both engines (own marker so it
             // reaches installs that predate it).
             if let Err(e) = state.hooks.ensure_stop_autoinstalled() {
-                eprintln!("hooks: stop auto-install failed: {e}");
+                tracing::warn!("hooks: stop auto-install failed: {e}");
             }
             // Turn-died-on-an-API-error observer (Claude only), same rollout
             // pattern as Stop: without it a turn the API refused never closes.
             if let Err(e) = state.hooks.ensure_stopfailure_autoinstalled() {
-                eprintln!("hooks: stopfailure auto-install failed: {e}");
+                tracing::warn!("hooks: stopfailure auto-install failed: {e}");
             }
             // Tool-result observer (Testigo turn evidence), same rollout
             // pattern as Stop.
             if let Err(e) = state.hooks.ensure_posttooluse_autoinstalled() {
-                eprintln!("hooks: posttooluse auto-install failed: {e}");
+                tracing::warn!("hooks: posttooluse auto-install failed: {e}");
             }
             // Model-switch observer (Claude 2.1.251+): keeps the model pill on
             // what the agent actually runs, not on what we last asked for.
             if let Err(e) = state.hooks.ensure_modelswitch_autoinstalled() {
-                eprintln!("hooks: modelswitch auto-install failed: {e}");
+                tracing::warn!("hooks: modelswitch auto-install failed: {e}");
             }
             // Migrate legacy bare-path hook commands to `node "<path>"` on
             // installs that predate the format (on Windows the old format
             // never executed at all — no shebangs in cmd.exe, and the path
             // broke at the first space in the user's home dir).
             if let Err(e) = state.hooks.normalize_hook_commands() {
-                eprintln!("hooks: command normalization failed: {e}");
+                tracing::warn!("hooks: command normalization failed: {e}");
             }
             // Codex installed AFTER hooks were wired claude-side (approvals
             // bridge included): mirror the missing events so the bridge state
             // shown in the UI is actually true for codex too.
             if let Err(e) = state.hooks.sync_codex_hooks() {
-                eprintln!("hooks: codex sync failed: {e}");
+                tracing::warn!("hooks: codex sync failed: {e}");
             }
             // Memory-injection endpoint (loopback only): serves the prompt
             // hooks the memories relevant to what's being typed. Best-effort —
@@ -181,6 +189,8 @@ pub fn run() {
             commands::feedback::feedback_dev_enabled,
             commands::feedback::feedback_context,
             commands::feedback::feedback_submit,
+            commands::diagnostics::diagnostics_bundle,
+            commands::diagnostics::diagnostics_log_file,
             commands::jira::jira_status,
             commands::jira::jira_connect,
             commands::jira::jira_disconnect,
