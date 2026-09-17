@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useMcpStore } from "../stores/mcpStore";
 import { PanelError } from "./PanelError";
 import type { McpServer } from "../types/domain";
+import { confirmDialog } from "../stores/confirmStore";
 
 type Transport = "stdio" | "http" | "sse";
 type Scope = "local" | "user" | "project";
@@ -70,8 +71,15 @@ export function McpPanel() {
                   key={`${s.scope ?? "?"}:${s.name}`}
                   server={s}
                   busy={!!removing[s.name]}
-                  onRemove={() => {
-                    if (confirm(`Remove MCP server "${s.name}" from ${s.scope ?? "its"} scope?`)) {
+                  onRemove={async () => {
+                    if (
+                      await confirmDialog({
+                        title: "Remove MCP server",
+                        message: `Remove MCP server "${s.name}" from ${s.scope ?? "its"} scope?`,
+                        confirmLabel: "Remove",
+                        danger: true,
+                      })
+                    ) {
                       void remove(s.name, s.scope ?? "local");
                     }
                   }}

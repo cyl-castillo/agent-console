@@ -9,6 +9,7 @@ import { typeIntoActiveSession } from "../lib/termInput";
 import { PanelError } from "./PanelError";
 import type { ContextFileStat, MemoryEntry } from "../types/domain";
 import { MarkdownText } from "./MarkdownText";
+import { confirmDialog } from "../stores/confirmStore";
 
 type Scope = "project" | "global";
 
@@ -156,9 +157,13 @@ function ClaudeMdEditor({ scope, stat }: { scope: Scope; stat: ContextFileStat }
       const msg = String(e);
       if (msg.includes("context:conflict")) {
         if (
-          confirm(
-            "This file was modified externally since you opened it. Save anyway and overwrite?",
-          )
+          await confirmDialog({
+            title: "File changed on disk",
+            message:
+              "This file was modified externally since you opened it. Save anyway and overwrite?",
+            confirmLabel: "Overwrite",
+            danger: true,
+          })
         ) {
           try {
             await writeMd(scope, content, null);
@@ -412,18 +417,25 @@ function MemoryRow({
     };
   }, [expanded, entry.name, readMemory]);
 
-  const onDelete = (e: React.MouseEvent) => {
+  const onDelete = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (entry.isIndex) {
-      alert("MEMORY.md is the index — delete the individual memory files instead.");
+      useToastStore
+        .getState()
+        .show("MEMORY.md is the index — delete the individual memory files instead.", "info");
       return;
     }
     if (
-      confirm(
-        `Delete memory "${entry.name}"?\n\nThe agent uses this to remember context — this cannot be undone.`,
-      )
+      await confirmDialog({
+        title: "Delete memory",
+        message: `Delete memory "${entry.name}"?\n\nThe agent uses this to remember context — this cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      })
     ) {
-      deleteMemory(entry.name).catch((e2) => alert(`Could not delete: ${e2}`));
+      deleteMemory(entry.name).catch((e2) =>
+        useToastStore.getState().show(`Could not delete: ${e2}`, "error"),
+      );
     }
   };
 

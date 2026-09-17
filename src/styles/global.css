@@ -1987,6 +1987,19 @@ select:focus-visible,
   border-left: 2px solid var(--danger);
   margin-bottom: 12px;
 }
+.confirm-modal {
+  max-width: 460px;
+}
+.confirm-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.confirm-message {
+  white-space: pre-wrap;
+  color: var(--text);
+  margin-bottom: 16px;
+  line-height: 1.45;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRoundtableStore } from "../stores/roundtableStore";
 import { useSessionStore } from "../stores/sessionStore";
 import type { RoomSummary } from "../types/domain";
+import { confirmDialog } from "../stores/confirmStore";
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -52,9 +53,16 @@ export function RoomsList({ onOpenRoom }: { onOpenRoom: (id: string) => void }) 
           room={r}
           active={readOnly && r.id === activeId}
           onOpen={() => onOpenRoom(r.id)}
-          onDelete={() => {
+          onDelete={async () => {
             const label = r.problem.trim().slice(0, 60) || "this room";
-            if (confirm(`Delete saved room "${label}"? This can't be undone.`)) {
+            if (
+              await confirmDialog({
+                title: "Delete saved room",
+                message: `Delete saved room "${label}"? This can't be undone.`,
+                confirmLabel: "Delete",
+                danger: true,
+              })
+            ) {
               void deleteSavedRoom(r.id);
             }
           }}
