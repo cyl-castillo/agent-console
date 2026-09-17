@@ -300,19 +300,29 @@ fn data_dir() -> Option<PathBuf> {
     }
 }
 
-fn inject_port() -> Option<u16> {
+/// Port + per-process token of the app's loopback endpoint, from the same
+/// owner-only file. The app refuses requests without the token, so a file
+/// we can't read (or one without a token) means "inject nothing" — never
+/// "try anyway".
+fn inject_target() -> Option<(u16, String)> {
     let raw =
         std::fs::read_to_string(data_dir()?.join("agent-console").join("inject-port.json")).ok()?;
     let v: Value = serde_json::from_str(&raw).ok()?;
     let port = v.get("port")?.as_u64()?;
-    u16::try_from(port).ok().filter(|p| *p > 0)
+    let port = u16::try_from(port).ok().filter(|p| *p > 0)?;
+    let token = v
+        .get("token")?
+        .as_str()
+        .filter(|t| !t.is_empty())?
+        .to_string();
+    Some((port, token))
 }
 
 /// Minimal HTTP/1.1 POST to the loopback inject endpoint — hand-rolled over
 /// TcpStream like the server side, so the bridge stays dependency-free. The
 /// whole exchange lives inside INJECT_TIMEOUT_MS; any failure returns None
 /// (inject nothing — the prompt must never wait on us).
-fn fetch_injection(port: u16, body: &str, budget: Duration) -> Option<Value> {
+fn fetch_injection(port: u16, token: &str, body: &str, budget: Duration) -> Option<Value> {
     let start = Instant::now();
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = std::net::TcpStream::connect_timeout(&addr, budget).ok()?;
@@ -321,7 +331,7 @@ fn fetch_injection(port: u16, body: &str, budget: Duration) -> Option<Value> {
     }
     stream.set_write_timeout(remaining(start, budget)).ok()?;
     let req = format!(
-        "POST /inject HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST /inject HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nX-Agent-Console-Token: {token}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream.write_all(req.as_bytes()).ok()?;
@@ -353,15 +363,21 @@ fn run_userprompt(dir: &Path) {
     if prompt.chars().count() < MIN_PROMPT_CHARS || prompt.starts_with('/') {
         return;
     }
-    let Some(port) = inject_port() else { return };
+    let Some((port, token)) = inject_target() else {
+        return;
+    };
     let body = json!({
         "prompt": prompt,
         "cwd": event.get("cwd").and_then(|v| v.as_str()).unwrap_or(""),
         "termId": term_id.as_deref().filter(|t| !t.is_empty()),
     })
     .to_string();
-    let Some(answer) = fetch_injection(port, &body, Duration::from_millis(INJECT_TIMEOUT_MS))
-    else {
+    let Some(answer) = fetch_injection(
+        port,
+        &token,
+        &body,
+        Duration::from_millis(INJECT_TIMEOUT_MS),
+    ) else {
         return;
     };
     let mut out = Map::new();
@@ -713,7 +729,14 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (mut s, _) = listener.accept().unwrap();
             let mut buf = [0u8; 4096];
-            let _ = s.read(&mut buf);
+            let n = s.read(&mut buf).unwrap_or(0);
+            // The shared secret must travel as a header, verbatim.
+            let req = String::from_utf8_lossy(&buf[..n]);
+            assert!(
+                req.contains("X-Agent-Console-Token: sekrit\r\n"),
+                "token header missing in: {req}"
+            );
+            assert!(req.contains("Content-Type: application/json\r\n"));
             let body = r#"{"context":"remembered","sessionTitle":"my session"}"#;
             let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -721,7 +744,7 @@ mod tests {
             );
             s.write_all(resp.as_bytes()).unwrap();
         });
-        let answer = fetch_injection(port, "{}", Duration::from_millis(2000)).unwrap();
+        let answer = fetch_injection(port, "sekrit", "{}", Duration::from_millis(2000)).unwrap();
         assert_eq!(answer["context"], "remembered");
         assert_eq!(answer["sessionTitle"], "my session");
         server.join().unwrap();
@@ -737,7 +760,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(600));
         });
         let start = Instant::now();
-        let answer = fetch_injection(port, "{}", Duration::from_millis(200));
+        let answer = fetch_injection(port, "sekrit", "{}", Duration::from_millis(200));
         assert!(answer.is_none());
         assert!(start.elapsed() < Duration::from_millis(550));
         server.join().unwrap();
