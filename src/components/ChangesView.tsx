@@ -5,6 +5,7 @@ import { DiffViewer } from "./DiffViewer";
 import { SideBySideDiffViewer } from "./SideBySideDiffViewer";
 import { ChangeTree } from "./ChangeTree";
 import { BranchSwitcher } from "./BranchSwitcher";
+import { confirmDialog } from "../stores/confirmStore";
 
 const SUBJECT_LIMIT = 72;
 
@@ -100,24 +101,41 @@ export function ChangesView() {
   // reset to its last commit (uncommitted edits lost), while an UNTRACKED file
   // is deleted from disk outright (git can't bring it back). Make the confirm
   // honest about which one is about to happen.
-  const confirmRevert = (path: string) => {
+  const confirmRevert = async (path: string) => {
     const change = allChanges.find((c) => c.path === path);
-    const msg = change?.untracked
+    const untracked = !!change?.untracked;
+    const message = untracked
       ? `Delete the new file "${path}"?\n\n` +
         `It isn't tracked by git, so this permanently removes it from disk and can't be undone.`
       : `Discard uncommitted changes in "${path}"?\n\n` +
         `The file returns to its last committed state. This can't be undone.`;
-    if (confirm(msg)) revert(path);
+    if (
+      await confirmDialog({
+        title: untracked ? "Delete file" : "Discard changes",
+        message,
+        confirmLabel: untracked ? "Delete" : "Discard",
+        danger: true,
+      })
+    )
+      revert(path);
   };
 
-  const confirmRevertAll = () => {
+  const confirmRevertAll = async () => {
     const untracked = allChanges.filter((c) => c.untracked).length;
     const tracked = allChanges.length - untracked;
     const lines = [`Discard all ${allChanges.length} change(s)?`, ""];
     if (tracked) lines.push(`• Revert ${tracked} edited file(s) to their last commit`);
     if (untracked) lines.push(`• Permanently DELETE ${untracked} new file(s) from disk`);
     lines.push("", "This can't be undone.");
-    if (confirm(lines.join("\n"))) revertAll();
+    if (
+      await confirmDialog({
+        title: "Discard all changes",
+        message: lines.join("\n"),
+        confirmLabel: "Discard all",
+        danger: true,
+      })
+    )
+      revertAll();
   };
 
   const canCommit = (amend || stagedCount > 0) && commitMessage.trim().length > 0 && !committing;

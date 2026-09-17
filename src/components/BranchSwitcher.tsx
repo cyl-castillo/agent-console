@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useChangesStore } from "../stores/changesStore";
 import type { BranchInfo } from "../types/domain";
+import { useToastStore } from "../stores/toastStore";
 
 interface Props {
   currentBranch: string | null;
@@ -56,7 +57,7 @@ export function BranchSwitcher({ currentBranch }: Props) {
       await checkoutBranch(b.name);
       setOpen(false);
     } catch (e) {
-      alert(`Could not switch: ${e}`);
+      useToastStore.getState().show(`Could not switch: ${e}`, "error");
     } finally {
       setSwitching(null);
     }

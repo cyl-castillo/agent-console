@@ -14,6 +14,7 @@ import { isWorkbenchTab } from "../lib/workbenchTabs";
 import { isTabEnabled } from "./modulesStore";
 import { typeIntoActiveSession } from "../lib/termInput";
 import { startLoginSession } from "../lib/loginSession";
+import { confirmDialog } from "./confirmStore";
 
 export type PaletteItemKind = "file" | "action" | "session" | "branch";
 
@@ -244,7 +245,12 @@ const ACTIONS: PaletteAction[] = [
       if (!active) return;
       if (
         active.status === "live" &&
-        !confirm(`Close session "${active.name}"? Process will be killed.`)
+        !(await confirmDialog({
+          title: "Close session",
+          message: `Close session "${active.name}"? Process will be killed.`,
+          confirmLabel: "Close",
+          danger: true,
+        }))
       )
         return;
       await st.close(active.id);
@@ -351,11 +357,15 @@ const ACTIONS: PaletteAction[] = [
       const event = useSkillsStore.getState().recent.find((e) => !!e.snapshotCommitSha);
       if (!event?.snapshotCommitSha) return;
       if (
-        !confirm(
-          "Restore to before the latest turn?\n\n" +
+        !(await confirmDialog({
+          title: "Restore working tree",
+          message:
+            "Restore to before the latest turn?\n\n" +
             "This discards ALL changes made since that turn — not just the last one. " +
             "A backup is taken first, so you can undo from the command palette.",
-        )
+          confirmLabel: "Restore",
+          danger: true,
+        }))
       )
         return;
       // restoreSnapshot handles the success/error toast and the undo backup.

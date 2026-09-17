@@ -25,6 +25,7 @@ import {
 } from "../lib/jira";
 import { PanelError } from "./PanelError";
 import type { JiraIssue, WorklogDigestEntry } from "../types/domain";
+import { confirmDialog } from "../stores/confirmStore";
 
 export function JiraPanel() {
   const status = useJiraStore((s) => s.status);
@@ -206,8 +207,16 @@ function IssueList() {
         </span>
         <button
           className="wb-link"
-          onClick={() => {
-            if (confirm("Disconnect Jira? The stored token is removed.")) void disconnect();
+          onClick={async () => {
+            if (
+              await confirmDialog({
+                title: "Disconnect Jira",
+                message: "Disconnect Jira? The stored token is removed.",
+                confirmLabel: "Disconnect",
+                danger: true,
+              })
+            )
+              void disconnect();
           }}
         >
           disconnect

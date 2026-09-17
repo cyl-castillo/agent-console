@@ -6,6 +6,7 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 
 import type { CenterTab } from "../stores/uiStore";
+import { confirmDialog } from "../stores/confirmStore";
 
 interface Args {
   setTab: (tab: CenterTab) => void;
@@ -36,13 +37,18 @@ export function useKeyboardShortcuts({ setTab }: Args) {
       return true;
     };
 
-    const closeActiveSession = () => {
+    const closeActiveSession = async () => {
       const terminals = useTerminalsStore.getState();
       const active = terminals.sessions.find((s) => s.id === terminals.activeId);
       if (!active) return;
       if (
         active.status === "live" &&
-        !confirm(`Close session "${active.name}"? Process will be killed.`)
+        !(await confirmDialog({
+          title: "Close session",
+          message: `Close session "${active.name}"? Process will be killed.`,
+          confirmLabel: "Close",
+          danger: true,
+        }))
       )
         return;
       void terminals.close(active.id);
@@ -119,7 +125,7 @@ export function useKeyboardShortcuts({ setTab }: Args) {
         case "W":
           // Ctrl+W is readline delete-previous-word inside the terminal — don't steal it.
           if (inTerminal || inField) return;
-          closeActiveSession();
+          void closeActiveSession();
           e.preventDefault();
           break;
         case "/":

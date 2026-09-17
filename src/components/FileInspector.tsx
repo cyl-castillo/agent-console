@@ -5,6 +5,7 @@ import { useChangesStore } from "../stores/changesStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { ipc } from "../ipc/tauri";
 import type { GitCommitInfo, GitFileChange } from "../types/domain";
+import { useToastStore } from "../stores/toastStore";
 
 export function FileInspector() {
   const status = useChangesStore((s) => s.status);
@@ -68,7 +69,7 @@ export function FileInspector() {
     try {
       await openPath(absPath);
     } catch (e) {
-      alert(`Could not open file: ${e}`);
+      useToastStore.getState().show(`Could not open file: ${e}`, "error");
     }
   };
 

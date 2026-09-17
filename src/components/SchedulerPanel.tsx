@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { SCHEDULER_EVENTS, useSchedulerStore } from "../stores/schedulerStore";
 import { useSkillsStore } from "../stores/skillsStore";
+import { confirmDialog } from "../stores/confirmStore";
 import type {
   Action,
   Job,
@@ -383,11 +384,14 @@ export function SchedulerPanel() {
                       onRun={() => void runNow(job.id)}
                       onToggle={() => void setEnabled(job.id, !job.enabled)}
                       onEdit={() => startEdit(job)}
-                      onDelete={() => {
+                      onDelete={async () => {
                         if (
-                          confirm(
-                            `Delete the scheduled job "${job.name}"?\n\nThis can't be undone.`,
-                          )
+                          await confirmDialog({
+                            title: "Delete scheduled job",
+                            message: `Delete the scheduled job "${job.name}"?\n\nThis can't be undone.`,
+                            confirmLabel: "Delete",
+                            danger: true,
+                          })
                         ) {
                           void deleteJob(job.id);
                         }
