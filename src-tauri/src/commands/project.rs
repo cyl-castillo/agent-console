@@ -54,7 +54,7 @@ pub fn open_project(
             crate::services::snapshot_service::SNAPSHOT_RETENTION_DAYS,
             now_unix(),
         ) {
-            eprintln!("snapshot retention sweep: {e}");
+            tracing::warn!("snapshot retention sweep: {e}");
         }
     });
     // Start the git filesystem watcher so the UI auto-refreshes Changes.

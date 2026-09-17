@@ -600,19 +600,19 @@ pub fn start(app: tauri::AppHandle) {
         let listener = match TcpListener::bind(("127.0.0.1", 0)) {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("inject: cannot bind loopback listener: {e}");
+                tracing::warn!("inject: cannot bind loopback listener: {e}");
                 return;
             }
         };
         let port = match listener.local_addr() {
             Ok(a) => a.port(),
             Err(e) => {
-                eprintln!("inject: no local addr: {e}");
+                tracing::warn!("inject: no local addr: {e}");
                 return;
             }
         };
         if let Err(e) = write_port_file(port) {
-            eprintln!("inject: cannot write port file: {e}");
+            tracing::warn!("inject: cannot write port file: {e}");
             return;
         }
         for stream in listener.incoming() {

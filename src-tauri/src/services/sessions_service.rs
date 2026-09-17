@@ -229,7 +229,7 @@ impl SessionsService {
                 // never overwrite) — but a successful quarantine unblocks
                 // persistence for good.
                 fs::rename(&path, &quarantine)?;
-                eprintln!(
+                tracing::warn!(
                     "sessions: corrupt history quarantined to {} — starting fresh",
                     quarantine.display()
                 );

@@ -1,5 +1,6 @@
 pub mod advisor;
 pub mod context;
+pub mod diagnostics;
 pub mod feedback;
 pub mod git;
 pub mod hooks;
