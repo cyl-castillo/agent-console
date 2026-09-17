@@ -11,110 +11,12 @@ import {
   buildRaw,
   isHardDenyAllow,
   assessCommand,
-  toRelative,
   codexEquivalent,
   resolveApprovalEngine,
 } from "../permissions/rules";
 import type { RuleSuggestion, Scope } from "../permissions/types";
 import type { ApprovalRequest } from "../types/domain";
-
-function describe(req: ApprovalRequest): { primary: string; secondary?: string } {
-  const inp = req.input ?? {};
-  if (req.tool === "Bash") {
-    return {
-      primary: typeof inp.command === "string" ? inp.command : "(no command)",
-      secondary: typeof inp.description === "string" ? inp.description : undefined,
-    };
-  }
-  if (typeof inp.file_path === "string") {
-    // Show the path relative to the working dir so it's clear which file in
-    // *this* repo is being touched (absolute agent-supplied paths are noisy).
-    return { primary: toRelative(inp.file_path, req.cwd) ?? inp.file_path, secondary: req.tool };
-  }
-  return { primary: JSON.stringify(inp).slice(0, 200), secondary: req.tool };
-}
-
-// --- Edit/Write diff preview ---
-
-interface DiffLine {
-  type: "add" | "del" | "ctx";
-  text: string;
-}
-
-// LCS-based line diff so unchanged lines render as context instead of being
-// counted as a delete+add pair. Keeps the +N/-N stat honest: editing one line
-// inside a 20-line block shows +1/-1, not +20/-20.
-function diffLines(oldStr: string, newStr: string): DiffLine[] {
-  // Pure insertion / deletion: skip the LCS and the spurious empty-line pair
-  // that "".split("\n") would otherwise introduce.
-  if (oldStr === "")
-    return newStr === "" ? [] : newStr.split("\n").map((l) => ({ type: "add", text: l }));
-  if (newStr === "") return oldStr.split("\n").map((l) => ({ type: "del", text: l }));
-  const a = oldStr.split("\n");
-  const b = newStr.split("\n");
-  const n = a.length;
-  const m = b.length;
-
-  // LCS length table.
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-    }
-  }
-
-  const lines: DiffLine[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      lines.push({ type: "ctx", text: a[i] });
-      i++;
-      j++;
-    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
-      lines.push({ type: "del", text: a[i] });
-      i++;
-    } else {
-      lines.push({ type: "add", text: b[j] });
-      j++;
-    }
-  }
-  while (i < n) lines.push({ type: "del", text: a[i++] });
-  while (j < m) lines.push({ type: "add", text: b[j++] });
-  return lines;
-}
-
-function editPreview(req: ApprovalRequest): DiffLine[] | null {
-  const inp = req.input ?? {};
-  const tool = req.tool;
-
-  if (tool === "Edit" || tool === "StrReplace") {
-    const oldStr = typeof inp.old_string === "string" ? inp.old_string : null;
-    const newStr = typeof inp.new_string === "string" ? inp.new_string : null;
-    if (!oldStr && !newStr) return null;
-    return diffLines(oldStr ?? "", newStr ?? "");
-  }
-
-  if (tool === "Write") {
-    const content = typeof inp.content === "string" ? inp.content : null;
-    if (!content) return null;
-    return content.split("\n").map((l) => ({ type: "add" as const, text: l }));
-  }
-
-  if (tool === "MultiEdit") {
-    const edits = Array.isArray(inp.edits)
-      ? (inp.edits as Array<{ old_string?: string; new_string?: string }>)
-      : [];
-    const lines: DiffLine[] = [];
-    edits.forEach((edit, i) => {
-      if (i > 0) lines.push({ type: "ctx", text: "···" });
-      lines.push(...diffLines(edit.old_string ?? "", edit.new_string ?? ""));
-    });
-    return lines.length > 0 ? lines : null;
-  }
-
-  return null;
-}
+import { describe, editPreview, type DiffLine } from "../lib/approvalPreview";
 
 function DiffPreview({ lines }: { lines: DiffLine[] }) {
   const LIMIT = 50;
