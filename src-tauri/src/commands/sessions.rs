@@ -4,7 +4,7 @@ use crate::error::AppResult;
 use crate::services::sessions_service::PersistedSession;
 use crate::state::AppState;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sessions_list(
     project_root: String,
     app: tauri::AppHandle,
@@ -23,7 +23,7 @@ pub fn sessions_list(
     Ok(sessions)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sessions_save(
     project_root: String,
     sessions: Vec<PersistedSession>,

@@ -1960,7 +1960,14 @@ mod tests {
             for body in bodies {
                 let (mut s, _) = listener.accept().unwrap();
                 let mut buf = [0u8; 4096];
-                let _ = s.read(&mut buf);
+                let n = s.read(&mut buf).unwrap_or(0);
+                // The script must send the shared secret from the port file
+                // back as a header — the app refuses the request otherwise.
+                let req = String::from_utf8_lossy(&buf[..n]);
+                assert!(
+                    req.contains("X-Agent-Console-Token: tok-e2e\r\n"),
+                    "token header missing in request: {req}"
+                );
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -1970,7 +1977,7 @@ mod tests {
         });
         fs::write(
             data_dir.join("inject-port.json"),
-            format!("{{\"port\":{port},\"pid\":1}}"),
+            format!("{{\"port\":{port},\"pid\":1,\"token\":\"tok-e2e\"}}"),
         )
         .unwrap();
 
@@ -2033,8 +2040,19 @@ mod tests {
         // Without a port file (app closed): silent, but the event still logs.
         let stdout = run(&base.join("nowhere"));
         assert!(stdout.trim().is_empty(), "no app → no output, no error");
+        // A port file without a token (older app, or a tampered file): the
+        // script must not even try — the app would refuse it anyway.
+        let untokened = base.join("untokened");
+        fs::create_dir_all(untokened.join("agent-console")).unwrap();
+        fs::write(
+            untokened.join("agent-console").join("inject-port.json"),
+            format!("{{\"port\":{port},\"pid\":1}}"),
+        )
+        .unwrap();
+        let stdout = run(&untokened);
+        assert!(stdout.trim().is_empty(), "no token → no request, no output");
         let events = fs::read_to_string(session_dir.join("events.jsonl")).unwrap();
-        assert_eq!(events.lines().count(), 3, "every run must log the prompt");
+        assert_eq!(events.lines().count(), 4, "every run must log the prompt");
         assert!(events.contains("how do we cut a release"));
     }
 }

@@ -39,13 +39,18 @@ function dataDir() {
   return process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
 }
 
-function injectPort() {
+// Port + per-process token of the app's loopback endpoint. Both come from the
+// same owner-only file; a request without the token is refused, so a file we
+// can't read (or an older app that wrote no token) simply means "no injection".
+function injectTarget() {
   try {
     const base = dataDir();
     if (!base) return null;
     const raw = fs.readFileSync(path.join(base, "agent-console", "inject-port.json"), "utf8");
-    const port = JSON.parse(raw).port;
-    return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
+    const { port, token } = JSON.parse(raw);
+    if (!(Number.isInteger(port) && port > 0 && port < 65536)) return null;
+    if (typeof token !== "string" || token.length === 0) return null;
+    return { port, token };
   } catch { return null; }
 }
 
@@ -56,8 +61,9 @@ function str(v) { return typeof v === "string" && v.length > 0 ? v : null; }
 
 // POST the prompt to the app; call done({context, sessionTitle}) exactly once.
 function fetchInjection(prompt, cwd, done) {
-  const port = injectPort();
-  if (!port) { done(EMPTY); return; }
+  const target = injectTarget();
+  if (!target) { done(EMPTY); return; }
+  const { port, token } = target;
   let finished = false;
   const finish = (res) => { if (!finished) { finished = true; done(res || EMPTY); } };
   // Outer guard: covers connect + response + parsing, whatever stalls.
@@ -67,7 +73,11 @@ function fetchInjection(prompt, cwd, done) {
     const body = JSON.stringify({ prompt, cwd, termId: process.env.AGENT_CONSOLE_TERM_ID || null });
     const req = http.request(
       { host: "127.0.0.1", port, path: "/inject", method: "POST",
-        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          "X-Agent-Console-Token": token,
+        },
         timeout: INJECT_TIMEOUT_MS },
       (res) => {
         let out = [];

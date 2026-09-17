@@ -27,7 +27,7 @@ pub struct ExportResult {
 /// Build the archive for `project_root` per `options` and write it to
 /// `dest_path` (a location the user picked via the save dialog). The file is the
 /// single source of truth that another user imports.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_work(
     project_root: String,
     options: ExportOptions,
@@ -62,7 +62,7 @@ pub fn export_work(
 
 /// Read an archive file, validate it, and preview what importing it into
 /// `project_root` would do (counts + collisions per block). No mutation.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_work_preview(
     project_root: String,
     src_path: String,
@@ -76,7 +76,7 @@ pub fn import_work_preview(
 
 /// Apply an archive file to `project_root` with the user's per-block decisions,
 /// re-keying everything to the destination project.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn import_work_apply(
     project_root: String,
     src_path: String,

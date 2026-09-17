@@ -10,17 +10,17 @@ fn project_root(state: &AppState) -> Option<std::path::PathBuf> {
     state.inner.lock().project.as_ref().map(|p| p.root.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn context_status(state: State<'_, AppState>) -> AppResult<ContextStatus> {
     context_service::status(project_root(&state).as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn context_read_md(state: State<'_, AppState>, scope: String) -> AppResult<String> {
     context_service::read_md(project_root(&state).as_deref(), &scope)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn context_write_md(
     state: State<'_, AppState>,
     scope: String,
@@ -35,7 +35,7 @@ pub fn context_write_md(
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn context_open_md_externally(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
@@ -47,14 +47,14 @@ pub fn context_open_md_externally(
         .map_err(|e| AppError::Other(format!("open failed: {e}")))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn context_generate_starter(state: State<'_, AppState>) -> AppResult<String> {
     let root =
         project_root(&state).ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
     context_service::generate_starter(&root)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_list(state: State<'_, AppState>) -> AppResult<Vec<MemoryEntry>> {
     match project_root(&state) {
         Some(root) => memory_service::list(&root),
@@ -62,14 +62,14 @@ pub fn memory_list(state: State<'_, AppState>) -> AppResult<Vec<MemoryEntry>> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_read(state: State<'_, AppState>, name: String) -> AppResult<String> {
     let root =
         project_root(&state).ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
     memory_service::read(&root, &name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_delete(state: State<'_, AppState>, name: String) -> AppResult<()> {
     let root =
         project_root(&state).ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;

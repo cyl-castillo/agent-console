@@ -8,14 +8,14 @@ use crate::services::semantic_index::{self, ReindexReport, SearchHit};
 /// re-embedded). First run initializes/downloads the local embedding model.
 /// Sync command on purpose: it runs on tauri's command thread pool, and the
 /// model init is blocking work.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn semantic_reindex(project_root: String) -> AppResult<ReindexReport> {
     semantic_index::ensure_fresh(&project_root, &mut CandleEmbedder::new())
 }
 
 /// Top-k semantic search. Auto-builds the index when missing so the first
 /// search "just works" (at the cost of that first model download).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn semantic_search(
     project_root: String,
     query: String,

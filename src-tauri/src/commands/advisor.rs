@@ -19,7 +19,7 @@ pub async fn advisor_analyze(state: State<'_, AppState>) -> AppResult<AnalysisRe
         .map_err(|e| AppError::Other(format!("analysis task panicked: {e}")))?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn advisor_create_skill(
     state: State<'_, AppState>,
     scope: String,

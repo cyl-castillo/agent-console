@@ -54,7 +54,7 @@ pub async fn learning_curate(state: State<'_, AppState>) -> AppResult<CurationRe
 }
 
 /// Read back the raw activity ledger (most recent first), for inspection.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn activity_list(
     state: State<'_, AppState>,
     limit: Option<usize>,
@@ -67,7 +67,7 @@ pub fn activity_list(
 
 /// Materialize an accepted "skill" suggestion. Learned skills are project-scoped
 /// (they came from this project's activity), reusing the Advisor's writer.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn learning_create_skill(
     state: State<'_, AppState>,
     name: String,
@@ -80,7 +80,7 @@ pub fn learning_create_skill(
 
 /// Materialize an accepted "plugin" suggestion: scaffold a shareable plugin in
 /// the user's skills dir (auto-loads as `<name>@skills-dir` next session).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn learning_create_plugin(
     name: String,
     description: String,
@@ -92,7 +92,7 @@ pub fn learning_create_plugin(
 }
 
 /// Materialize an accepted "memory" suggestion into the project's memory dir.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn learning_save_memory(
     state: State<'_, AppState>,
     name: String,
@@ -121,7 +121,7 @@ fn memory_file_name(name: &str) -> AppResult<String> {
 /// Apply a reflect "profile" suggestion: append the proposed line to the
 /// user's global work profile. Validates the section against the known set —
 /// a hallucinated heading must not spawn arbitrary sections.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn learning_apply_profile(section: String, line: String) -> AppResult<()> {
     const SECTIONS: [&str; 3] = ["## Conventions", "## Cadence", "## Recurring corrections"];
     if !SECTIONS.contains(&section.trim()) {
@@ -137,7 +137,7 @@ fn unknown_kind(kind: &str) -> AppError {
 }
 
 /// Apply a curation "refactor": overwrite a single entry's content in place.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn learning_apply_refactor(
     state: State<'_, AppState>,
     target_kind: String,
@@ -156,7 +156,7 @@ pub fn learning_apply_refactor(
 
 /// Apply a curation "merge": write the consolidated entry, then archive every
 /// source it replaced (except the surviving name, which the write overwrote).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn learning_apply_merge(
     state: State<'_, AppState>,
     target_kind: String,
@@ -192,7 +192,7 @@ pub fn learning_apply_merge(
 }
 
 /// Apply a curation "archive": retire an obsolete/redundant entry (reversible).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn learning_apply_archive(
     state: State<'_, AppState>,
     target_kind: String,

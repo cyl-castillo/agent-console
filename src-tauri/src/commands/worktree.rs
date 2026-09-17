@@ -51,7 +51,7 @@ pub struct WorktreeCreated {
 
 /// Create an isolated worktree for a new session: branch `agent/<name>` off
 /// `base` (default: the branch the main checkout is on), plus workspace setup.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_create(
     name: String,
     base: Option<String>,
@@ -87,7 +87,7 @@ pub fn worktree_create(
 /// The branch name to propose for a ticket worktree — from a skill's
 /// `branch-template`, else the project's worktree-setup.json, else "{key}".
 /// The UI shows it pre-filled and editable; nothing is imposed.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_suggest_branch(
     key: String,
     summary: String,
@@ -103,7 +103,7 @@ pub fn worktree_suggest_branch(
     ))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_status(
     path: String,
     branch: String,
@@ -117,7 +117,7 @@ pub fn worktree_status(
 /// Merge the session branch back into its base (in the main checkout), then
 /// optionally tear the worktree down. A conflicted merge is aborted and
 /// reported; nothing is torn down in that case.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_merge(
     path: String,
     branch: String,
@@ -135,7 +135,7 @@ pub fn worktree_merge(
     Ok(outcome)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_discard(
     path: String,
     branch: String,
@@ -146,7 +146,7 @@ pub fn worktree_discard(
     worktree_service::discard(&repo, &PathBuf::from(path), &branch, delete_branch)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_list(state: State<'_, AppState>) -> AppResult<Vec<WorktreeEntry>> {
     let repo = repo(&state)?;
     worktree_service::list(&repo)
@@ -156,7 +156,7 @@ pub fn worktree_list(state: State<'_, AppState>) -> AppResult<Vec<WorktreeEntry>
 /// session's checkout. `None` or the project root itself clears the override.
 /// Anything else must be a registered worktree of the open project — we never
 /// let the UI aim git commands at an arbitrary directory.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_active_repo(
     path: Option<String>,
     app: tauri::AppHandle,
@@ -192,7 +192,7 @@ pub fn set_active_repo(
 /// Remove managed worktree checkouts that no persisted session references any
 /// more (e.g. the app died before a session was cleaned up). Branches are kept
 /// — only the checkout dirs go. Returns the removed paths.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_prune_orphans(
     keep: Vec<String>,
     state: State<'_, AppState>,
@@ -218,13 +218,13 @@ pub fn worktree_prune_orphans(
     Ok(removed)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_setup_get(state: State<'_, AppState>) -> AppResult<SetupConfig> {
     let repo = repo(&state)?;
     Ok(worktree_service::load_setup_config(&repo))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn worktree_setup_set(config: SetupConfig, state: State<'_, AppState>) -> AppResult<()> {
     let repo = repo(&state)?;
     worktree_service::save_setup_config(&repo, &config)
