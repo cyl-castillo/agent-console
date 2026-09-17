@@ -29,6 +29,7 @@ const MAX_RECENT = 30;
 /// Tracks the project skill count across refreshes so we can fire the
 /// "corpus_grew" scheduler event only when a skill is actually added (not on the
 /// first load, and not on removals). -1 = no baseline yet.
+let warnedRefresh = false;
 let lastSkillCount = -1;
 
 /// Turn a user prompt into a short, file-name-ish label for the session row.
@@ -129,6 +130,12 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       lastSkillCount = n;
     } catch (e) {
       console.error("[skills] refresh failed:", e);
+      // Once: a refresh runs on every project open, and an error toast
+      // persists until dismissed — one is a signal, ten is noise.
+      if (!warnedRefresh) {
+        warnedRefresh = true;
+        useToastStore.getState().show(`Couldn't read skills/hooks status: ${e}`, "error");
+      }
     }
   },
 
@@ -137,7 +144,9 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const status = await ipc.hooksInstall();
       set({ hooks: status });
     } catch (e) {
-      console.error("[skills] install failed:", e);
+      // Silent failure here is exactly the "app does less than promised"
+      // class: approvals, proof, snapshots and resume all hang on this.
+      useToastStore.getState().show(`Hooks install failed: ${e}`, "error");
     }
   },
 
@@ -146,7 +155,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const status = await ipc.hooksUninstall();
       set({ hooks: status });
     } catch (e) {
-      console.error("[skills] uninstall failed:", e);
+      useToastStore.getState().show(`Hooks uninstall failed: ${e}`, "error");
     }
   },
 

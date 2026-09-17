@@ -11,6 +11,7 @@ import { attachGitWatcherListener, useChangesStore } from "./stores/changesStore
 import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
+import { attachHooksHealthListeners } from "./stores/hooksHealthStore";
 import { attachSchedulerListeners, useSchedulerStore } from "./stores/schedulerStore";
 import { attachInjectListener, useInjectStore } from "./stores/injectStore";
 import { attachApprovalListener, useApprovalStore } from "./stores/approvalStore";
@@ -371,6 +372,11 @@ export default function App() {
       if (disposed) u();
       else offInject = u;
     });
+    let offHooksHealth: (() => void) | null = null;
+    attachHooksHealthListeners().then((u) => {
+      if (disposed) u();
+      else offHooksHealth = u;
+    });
     const offVoiceApproval = attachVoiceApprovalWatcher();
     return () => {
       disposed = true;
@@ -382,6 +388,7 @@ export default function App() {
       offVoiceApproval();
       offInject?.();
       offQuarantine?.();
+      offHooksHealth?.();
     };
   }, []);
 
