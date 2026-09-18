@@ -792,11 +792,13 @@ mod tests {
             };
             assert_eq!(prev_hash, prev, "linkage must hold across all entries");
             if let Some(line) = raw {
-                let idx = line.rfind("\"hash\":\"").unwrap();
-                let unhashed = format!("{}\"hash\":\"\"}}", &line[..idx]);
-                let mut h = Sha256::new();
-                h.update(unhashed.as_bytes());
-                assert_eq!(format!("{:x}", h.finalize()), hash, "clean line recomputes");
+                // Byte-exact, final-member recompute (spec §1.5) — never
+                // rebuild the suffix from the last `"hash":"` occurrence.
+                assert_eq!(
+                    crate::services::testigo_service::recompute_line_hash(&line).as_deref(),
+                    Some(hash.as_str()),
+                    "clean line recomputes"
+                );
             }
             prev = hash;
         }

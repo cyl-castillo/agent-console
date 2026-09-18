@@ -142,9 +142,14 @@ async function load(f) {
     else { linkageOk = false; break; }
     if (prevHash !== prev) { linkageOk = false; break; }
     if (line && !isRedacted) {
-      const idx = line.lastIndexOf('"hash":"');
-      const got = await sha256hex(enc.encode(line.slice(0, idx) + '"hash":""}'));
-      if (got === hash) recomputed++; else contentFail++;
+      // Require the final hash member and preserve the complete raw line.
+      const field = /("hash"\s*:\s*")([0-9a-f]{64})("\s*}\s*)$/.exec(line);
+      if (!field || field[2] !== hash) contentFail++;
+      else {
+        const unhashed = line.slice(0, field.index) + field[1] + field[3];
+        const got = await sha256hex(enc.encode(unhashed));
+        if (got === hash) recomputed++; else contentFail++;
+      }
     }
     if (isRedacted) redacted++;
     prev = hash;

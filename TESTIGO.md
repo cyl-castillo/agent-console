@@ -222,5 +222,12 @@ ProofEvent {
   diseño en doc antes de código.
 - **V2-D — Requirements más allá de Jira + cases cross-project**: prefijos de case para otros
   trackers (github:, linear:) y agrupación de cases entre proyectos.
+- **Fix §1.5 — recómputo byte-exacto del hash** (2026-09-18, en paralelo con testigo#7 de
+  Fredy): `verify` recomputaba re-serializando la struct, así que un miembro agregado después
+  de `hash` (p. ej. un segundo `payload`) desaparecía del recómputo mientras cambiaba lo que
+  la línea parsea — hash y linkage seguían "verificando". Ahora `recompute_line_hash` exige
+  `hash` como miembro final (64 hex minúsculas), vacía solo ese valor y hashea todos los demás
+  bytes de la línea cruda; el test de export usa la misma función y el verificador embebido
+  lleva el hunk equivalente de testigo#7 (re-sincronizar cuando #7/#9/#17 mergeen).
 
 Cadencia estándar: plan → fase → commit → release por fase (`/phased-feature-build`).
