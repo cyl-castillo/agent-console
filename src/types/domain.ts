@@ -194,6 +194,8 @@ export interface HooksStatus {
   permissionrequestInstalled: boolean;
   permissionrequestSupported: boolean;
   notificationInstalled: boolean;
+  /// Our statusLine stand-in is configured (chains to the user's own line).
+  statuslineInstalled: boolean;
   posttooluseInstalled: boolean;
   settingsPath: string;
   /// Codex mirror: same bridge scripts, wired via ~/.codex/hooks.json.

@@ -12,6 +12,7 @@ import { usePreviewStore } from "./stores/previewStore";
 import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { attachHooksHealthListeners } from "./stores/hooksHealthStore";
+import { attachLiveStatusListener } from "./stores/liveStatusStore";
 import { attachSchedulerListeners, useSchedulerStore } from "./stores/schedulerStore";
 import { attachInjectListener, useInjectStore } from "./stores/injectStore";
 import { attachApprovalListener, useApprovalStore } from "./stores/approvalStore";
@@ -378,6 +379,11 @@ export default function App() {
       if (disposed) u();
       else offHooksHealth = u;
     });
+    let offLiveStatus: (() => void) | null = null;
+    attachLiveStatusListener().then((u) => {
+      if (disposed) u();
+      else offLiveStatus = u;
+    });
     const offVoiceApproval = attachVoiceApprovalWatcher();
     return () => {
       disposed = true;
@@ -390,6 +396,7 @@ export default function App() {
       offInject?.();
       offQuarantine?.();
       offHooksHealth?.();
+      offLiveStatus?.();
     };
   }, []);
 
