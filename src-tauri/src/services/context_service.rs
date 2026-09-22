@@ -169,16 +169,33 @@ fn global_claude_md_path() -> AppResult<PathBuf> {
     Ok(home.join(".claude").join("CLAUDE.md"))
 }
 
-/// Encode the absolute project path into the slug Claude Code uses for
-/// per-project state: replace each `/` (or `\` on Windows) with `-`. The
-/// leading separator becomes a leading `-` too.
+/// The project's memory dir under `~/.claude/projects/<slug>/memory`, using
+/// the slug Claude Code actually derives (every non-alphanumeric char → `-`;
+/// see `fs_names::project_slug` — the old separator-only munge broke dir
+/// creation on Windows with os error 123).
 pub fn memory_dir_for(project_root: &Path) -> AppResult<PathBuf> {
-    let abs = project_root
-        .canonicalize()
-        .unwrap_or_else(|_| project_root.to_path_buf());
-    let s = abs.to_string_lossy().replace(['/', '\\'], "-");
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home dir".into()))?;
-    Ok(home.join(".claude").join("projects").join(s).join("memory"))
+    let projects = home.join(".claude").join("projects");
+    let dir = projects
+        .join(crate::services::fs_names::project_slug(project_root))
+        .join("memory");
+    // Legacy fallback: older agent-console munged only separators, so a
+    // corpus it created for a path with dots or underscores lives under the
+    // old slug. Prefer Claude Code's real dir; fall back only when it doesn't
+    // exist and the legacy one does. (On Windows the legacy slug contains
+    // `:` and can never exist — the probe just answers false.)
+    if !dir.exists() {
+        let abs = project_root
+            .canonicalize()
+            .unwrap_or_else(|_| project_root.to_path_buf());
+        let legacy = projects
+            .join(abs.to_string_lossy().replace(['/', '\\'], "-"))
+            .join("memory");
+        if legacy.exists() {
+            return Ok(legacy);
+        }
+    }
+    Ok(dir)
 }
 
 fn file_stat(path: &Path) -> FileStat {
@@ -355,8 +372,7 @@ mod tests {
             None => std::env::remove_var("HOME"),
         }
 
-        let canon = root.canonicalize().unwrap();
-        let expected_slug = canon.to_string_lossy().replace(['/', '\\'], "-");
+        let expected_slug = crate::services::fs_names::project_slug(&root);
         assert!(dir.starts_with(&fake_home));
         assert!(dir.ends_with(Path::new(&expected_slug).join("memory")));
         // The slug is a single path component — no separators survive.

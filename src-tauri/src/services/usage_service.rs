@@ -41,14 +41,11 @@ pub struct UsageStats {
     pub context_window: u64,
 }
 
-/// Path to the transcript for `session_id` under `project_root`. Mirrors the
-/// slug scheme Claude Code uses (and `context_service::memory_dir_for`):
-/// each path separator becomes `-`.
+/// Path to the transcript for `session_id` under `project_root`, using the
+/// slug Claude Code actually derives (`fs_names::project_slug`) — the old
+/// separator-only munge never matched CC's dirs on Windows (drive colon).
 fn transcript_path(project_root: &Path, session_id: &str) -> AppResult<PathBuf> {
-    let abs = project_root
-        .canonicalize()
-        .unwrap_or_else(|_| project_root.to_path_buf());
-    let slug = abs.to_string_lossy().replace(['/', '\\'], "-");
+    let slug = crate::services::fs_names::project_slug(project_root);
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home dir".into()))?;
     Ok(home
         .join(".claude")
@@ -247,8 +244,7 @@ mod tests {
             // No transcript yet → None, indicator hidden.
             assert!(read_usage(&project, "sess-1").unwrap().is_none());
 
-            let canon = project.canonicalize().unwrap();
-            let slug = canon.to_string_lossy().replace(['/', '\\'], "-");
+            let slug = crate::services::fs_names::project_slug(&project);
             let dir = fake_home.join(".claude").join("projects").join(&slug);
             fs::create_dir_all(&dir).unwrap();
             let path = dir.join("sess-1.jsonl");
