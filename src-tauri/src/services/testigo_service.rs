@@ -2,8 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 
 use parking_lot::Mutex;
+use regex::Regex;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -49,6 +51,30 @@ pub struct ProofEvent {
     pub payload: Value,
     pub prev_hash: String,
     pub hash: String,
+}
+
+/// `"hash":"<64 lowercase hex>"}` as the FINAL member of the line, tolerating
+/// whitespace around it (JSON allows it; the spec says "preserve every byte").
+static FINAL_HASH_MEMBER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"("hash"\s*:\s*")([0-9a-f]{64})("\s*\}\s*)$"#).expect("static regex")
+});
+
+/// Byte-exact recompute of a raw ledger line's content hash (spec §1.5).
+///
+/// `hash` MUST be the final member and its value 64 lowercase hex characters;
+/// only that value is emptied, every other byte of the line is hashed as-is.
+/// Never rebuild the suffix from the last `"hash":"` occurrence: a member
+/// appended after `hash` (a second `payload`, say) would vanish from the
+/// recomputation while changing what the line parses to — the hash and the
+/// linkage would still "verify". Returns `None` when the line does not end in
+/// a well-formed final `hash` member, which is itself a verification failure.
+pub fn recompute_line_hash(line: &str) -> Option<String> {
+    let m = FINAL_HASH_MEMBER.captures(line)?;
+    let start = m.get(0)?.start();
+    let unhashed = format!("{}{}{}", &line[..start], &m[1], &m[3]);
+    let mut h = Sha256::new();
+    h.update(unhashed.as_bytes());
+    Some(format!("{:x}", h.finalize()))
 }
 
 /// Instruction files an agent reads implicitly (spec §1.7, `prompt.payload.context`).
@@ -1137,8 +1163,13 @@ impl TestigoService {
                 .map(|(_, h)| h.clone())
                 .unwrap_or_else(|| "genesis".into());
             let expected_seq = prev.as_ref().map(|(s, _)| s + 1).unwrap_or(0);
-            let recomputed = Self::event_hash(&ev);
-            if ev.prev_hash != expected_prev || ev.seq != expected_seq || ev.hash != recomputed {
+            // Recompute over the RAW bytes (spec §1.5). Round-tripping through
+            // the struct would silently drop a member appended after `hash`.
+            let recomputed = recompute_line_hash(line);
+            if ev.prev_hash != expected_prev
+                || ev.seq != expected_seq
+                || recomputed.as_deref() != Some(ev.hash.as_str())
+            {
                 return Ok(VerifyReport {
                     ok: false,
                     total,
@@ -1730,6 +1761,104 @@ mod tests {
         assert_eq!(r.seq, 1, "torn tail healed, chain continues from seq 0");
         let v = svc4.verify(root).unwrap();
         assert!(v.ok && !v.torn_tail, "healed chain verifies clean");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Spec §1.5 (testigo#7): a member appended AFTER `hash` must break
+    /// verification. The struct round-trip used to drop it (serde ignores
+    /// unknown fields), so the stored hash still "recomputed" while the
+    /// parsed event had changed. `hash` must be the final member and every
+    /// other byte of the line is covered.
+    #[test]
+    fn verify_rejects_members_appended_after_hash() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "ac-testigo-suffix-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let svc = TestigoService::new();
+        let root = "/proj/suffix";
+        svc.on_prompt(root, 1, Some("t1"), None, Some("first"), None, None)
+            .unwrap();
+        svc.on_prompt(root, 2, Some("t1"), None, Some("second"), None, None)
+            .unwrap();
+        let path = TestigoService::ledger_path(root).unwrap();
+        let original = fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = original.lines().collect();
+        assert_eq!(lines.len(), 2);
+
+        // The sealed lines recompute byte-exactly; malformed final members don't.
+        for line in &lines {
+            let v: Value = serde_json::from_str(line).unwrap();
+            assert_eq!(
+                recompute_line_hash(line).as_deref(),
+                Some(v["hash"].as_str().unwrap())
+            );
+        }
+        let no_final_hash = format!("{},\"x\":1}}", &lines[0][..lines[0].len() - 1]);
+        assert_eq!(recompute_line_hash(&no_final_hash), None);
+        assert_eq!(recompute_line_hash(&lines[0].to_uppercase()), None);
+        assert_eq!(recompute_line_hash("{}"), None);
+
+        // Each mutation keeps the stored hash and the linkage intact — only a
+        // byte-exact recompute catches it. Index 0 is a middle line; index 1
+        // is the tail, where an unparseable line would be tolerated as torn —
+        // but an appended member still PARSES, so it must be caught there too.
+        let mutations: [(&str, fn(&str) -> String); 4] = [
+            ("member after hash", |l| {
+                format!("{},\"unhashed\":true}}", &l[..l.len() - 1])
+            }),
+            ("duplicate payload", |l| {
+                format!(
+                    "{},\"payload\":{{\"prompt\":\"replaced\"}}}}",
+                    &l[..l.len() - 1]
+                )
+            }),
+            ("escaped duplicate payload", |l| {
+                format!(
+                    "{},\"paylo\\u0061d\":{{\"prompt\":\"replaced\"}}}}",
+                    &l[..l.len() - 1]
+                )
+            }),
+            ("trailing whitespace", |l| format!("{} \t", l)),
+        ];
+        for (name, mutate) in mutations {
+            for idx in 0..2 {
+                let mut tampered: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+                tampered[idx] = mutate(&tampered[idx]);
+                fs::write(&path, tampered.join("\n") + "\n").unwrap();
+                let v = TestigoService::new().verify(root).unwrap();
+                if v.ok {
+                    // serde rejects a duplicate key outright; on the FINAL
+                    // line that is tolerated as a torn tail — the event is
+                    // dropped from the chain, never accepted with new content.
+                    assert!(
+                        idx == 1 && v.torn_tail && v.total == 1,
+                        "{name} at index {idx}: only a torn tail may be tolerated"
+                    );
+                } else {
+                    assert!(
+                        !v.torn_tail,
+                        "{name} at index {idx} is tampering, not a torn tail"
+                    );
+                    assert_eq!(v.broken_at_seq, Some(idx as u64), "{name} at index {idx}");
+                }
+            }
+        }
+
+        // Untouched, the chain still verifies clean.
+        fs::write(&path, &original).unwrap();
+        let v = TestigoService::new().verify(root).unwrap();
+        assert!(v.ok && !v.torn_tail && v.total == 2);
 
         let _ = std::fs::remove_dir_all(&base);
     }
