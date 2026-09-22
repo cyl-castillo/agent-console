@@ -136,6 +136,14 @@ pub struct TurnState {
     pub cwd: Option<String>,
 }
 
+/// Correlation ids a PostToolUse payload may carry (both optional: older
+/// CLIs and Codex send neither).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ToolResultIds<'a> {
+    pub tool_use_id: Option<&'a str>,
+    pub agent_id: Option<&'a str>,
+}
+
 #[derive(Default)]
 struct Inner {
     /// project_root -> last (seq, hash); None = ledger empty. Lazily loaded
@@ -147,9 +155,21 @@ struct Inner {
     /// term_id -> currently open turn (in-memory only: a restart mid-turn
     /// loses attribution until the next prompt, which is acceptable).
     turns: HashMap<String, TurnState>,
-    /// approval id -> (term_id, tool), so the decision event can name what it
-    /// approved even though the respond() path only carries the id.
-    approvals: HashMap<String, (Option<String>, Option<String>)>,
+    /// approval id -> (term_id, tool, project_root), so the decision event
+    /// can name what it approved — and land in the SAME ledger the request
+    /// did — even though the respond() path only carries the id.
+    approvals: HashMap<String, (Option<String>, Option<String>, String)>,
+    /// term_id -> corpus doc ids the inject endpoint just handed the agent.
+    /// Consumed by the NEXT prompt of that terminal: the injection happens
+    /// inside the UserPromptSubmit hook, before the prompt event reaches the
+    /// watcher, so binding it to "the open turn" would pin it to the previous
+    /// one. Parking it until the prompt opens its turn gets the attribution
+    /// right by construction.
+    pending_injections: HashMap<String, Vec<String>>,
+    /// (session_id, model) pairs already recorded as `session_start`, so the
+    /// status line's per-render model report yields one line per session,
+    /// not one per render.
+    seen_session_models: std::collections::HashSet<(String, String)>,
     /// Per-project policy, lazily loaded from testigo-settings.json.
     settings: Option<HashMap<String, TestigoSettings>>,
 }
@@ -409,18 +429,116 @@ impl TestigoService {
                 payload["context"] = Value::Array(ctx);
             }
         }
-        Self::record(
+        let ev = Self::record(
             &mut inner,
             project_root,
             ts,
-            case,
-            Some(turn_id),
+            case.clone(),
+            Some(turn_id.clone()),
             "prompt",
             term_id.map(String::from),
             session_id.map(String::from),
             "human",
             payload,
+        )?;
+        // What the inject endpoint fed this very prompt (memories/skills), now
+        // that the turn exists to hang it on. Evidence of influence: the
+        // packet can say which memory shaped this turn — the hook the flywheel
+        // needs to measure itself (F1).
+        let docs = term_id.and_then(|t| inner.pending_injections.remove(t));
+        if let Some(docs) = docs.filter(|d| !d.is_empty()) {
+            let _ = Self::record(
+                &mut inner,
+                project_root,
+                ts,
+                case,
+                Some(turn_id),
+                "context_injected",
+                term_id.map(String::from),
+                session_id.map(String::from),
+                "system",
+                json!({ "docs": docs }),
+            );
+        }
+        Ok(ev)
+    }
+
+    /// The inject endpoint handed `doc_ids` to the agent for `term_id`'s
+    /// next prompt. Parked, not recorded: see `pending_injections`.
+    pub fn note_injection(&self, term_id: &str, doc_ids: Vec<String>) {
+        self.inner
+            .lock()
+            .pending_injections
+            .insert(term_id.to_string(), doc_ids);
+    }
+
+    /// PostModelSwitch: the session changed model mid-conversation. The
+    /// export reads `payload.to` into the packet's `languageModels`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_model_switch(
+        &self,
+        project_root: &str,
+        ts: i64,
+        term_id: Option<&str>,
+        session_id: Option<&str>,
+        to: &str,
+        from: Option<&str>,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        let turn_id = term_id
+            .and_then(|t| inner.turns.get(t))
+            .map(|s| s.turn_id.clone());
+        let case = Self::case_for(&inner, term_id);
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case,
+            turn_id,
+            "model_switch",
+            term_id.map(String::from),
+            session_id.map(String::from),
+            "agent",
+            json!({ "to": to, "from": from }),
         )
+    }
+
+    /// The model a session runs, as the CLI's own status line reports it
+    /// (T3). Recorded once per (session, model) as `session_start` — the kind
+    /// the export reads `payload.model` from — so packets carry
+    /// `languageModels` even when no switch ever happened. Returns None when
+    /// this pair was already recorded.
+    pub fn on_session_model(
+        &self,
+        project_root: &str,
+        ts: i64,
+        term_id: Option<&str>,
+        session_id: &str,
+        model: &str,
+    ) -> AppResult<Option<ProofEvent>> {
+        let mut inner = self.inner.lock();
+        let key = (session_id.to_string(), model.to_string());
+        if inner.seen_session_models.contains(&key) {
+            return Ok(None);
+        }
+        let turn_id = term_id
+            .and_then(|t| inner.turns.get(t))
+            .map(|s| s.turn_id.clone());
+        let case = Self::case_for(&inner, term_id);
+        let ev = Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case,
+            turn_id,
+            "session_start",
+            term_id.map(String::from),
+            Some(session_id.to_string()),
+            "system",
+            json!({ "model": model, "observedVia": "statusline" }),
+        )?;
+        inner.seen_session_models.insert(key);
+        Ok(Some(ev))
     }
 
     /// Context of the turn currently open in `term_id`, if any — what the
@@ -462,6 +580,7 @@ impl TestigoService {
     /// Record what one tool call produced inside the open turn. The hook
     /// already bounds the excerpt; `bounded_input` is a second guard.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub fn on_tool_result(
         &self,
         project_root: &str,
@@ -471,6 +590,7 @@ impl TestigoService {
         tool: Option<&str>,
         excerpt: Option<&str>,
         truncated: bool,
+        ids: ToolResultIds<'_>,
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
         let turn_id = term_id
@@ -478,6 +598,17 @@ impl TestigoService {
             .map(|s| s.turn_id.clone());
         let case = Self::case_for(&inner, term_id);
         let excerpt_v = bounded_input(json!(excerpt));
+        let mut payload = json!({ "tool": tool, "excerpt": excerpt_v, "truncated": truncated });
+        // Correlation handles the hook payload carries (Claude 2.1.x): the
+        // tool_use_id pairs this result with its request; agent_id says it
+        // ran inside a subagent (a Task), not the session's main thread —
+        // until now those 30-odd calls per case read as the parent's own.
+        if let Some(id) = ids.tool_use_id.filter(|s| !s.is_empty()) {
+            payload["toolUseId"] = json!(id);
+        }
+        if let Some(id) = ids.agent_id.filter(|s| !s.is_empty()) {
+            payload["agentId"] = json!(id);
+        }
         Self::record(
             &mut inner,
             project_root,
@@ -488,7 +619,7 @@ impl TestigoService {
             term_id.map(String::from),
             session_id.map(String::from),
             "agent",
-            json!({ "tool": tool, "excerpt": excerpt_v, "truncated": truncated }),
+            payload,
         )
     }
 
@@ -594,9 +725,10 @@ impl TestigoService {
         let input = bounded_input(v.get("input").cloned().unwrap_or(Value::Null));
 
         let mut inner = self.inner.lock();
-        inner
-            .approvals
-            .insert(id.to_string(), (term_id.clone(), tool.clone()));
+        inner.approvals.insert(
+            id.to_string(),
+            (term_id.clone(), tool.clone(), project_root.to_string()),
+        );
         let turn_id = term_id
             .as_deref()
             .and_then(|t| inner.turns.get(t))
@@ -634,8 +766,14 @@ impl TestigoService {
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
         // remove(): one decision closes one request. A post-restart decision
-        // (empty map) still records, just without tool/term context.
-        let (term_id, tool) = inner.approvals.remove(id).unwrap_or((None, None));
+        // (empty map) still records, just without tool/term context — and in
+        // the caller's project, since the request's is unknown by then.
+        let (term_id, tool, root) =
+            inner
+                .approvals
+                .remove(id)
+                .unwrap_or((None, None, project_root.to_string()));
+        let project_root: &str = &root;
         let turn_id = term_id
             .as_deref()
             .and_then(|t| inner.turns.get(t))
@@ -906,6 +1044,149 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// T4a: the pieces that make a packet say WHICH model ran, WHICH memory
+    /// shaped a turn, which result belongs to which request — and that a
+    /// decision lands in the ledger its request came from, whatever project
+    /// the UI shows when the human clicks.
+    #[test]
+    fn model_events_injections_ids_and_decision_attribution() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-testigo-t4a-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let svc = TestigoService::new();
+        let a = "/proj/a";
+        let b = "/proj/b";
+
+        // An injection parked before the prompt lands right after it, inside
+        // ITS turn — not the previous one.
+        svc.note_injection("t1", vec!["memory:release.md".into()]);
+        let p = svc
+            .on_prompt(a, 1, Some("t1"), Some("s1"), Some("go"), None, None)
+            .unwrap();
+        let events = svc.list(a, None, None).unwrap();
+        let ci = events
+            .iter()
+            .find(|e| e.kind == "context_injected")
+            .expect("context_injected recorded");
+        assert_eq!(ci.turn_id, p.turn_id);
+        assert_eq!(ci.payload["docs"][0], "memory:release.md");
+        assert_eq!(ci.actor, "system");
+        assert_eq!(ci.seq, p.seq + 1, "immediately after the prompt");
+        // A prompt with nothing parked records no injection line.
+        svc.on_prompt(a, 2, Some("t1"), Some("s1"), Some("more"), None, None)
+            .unwrap();
+        let n = svc
+            .list(a, None, None)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "context_injected")
+            .count();
+        assert_eq!(n, 1);
+
+        // session_start once per (session, model); a new model is a new line.
+        assert!(svc
+            .on_session_model(a, 3, Some("t1"), "s1", "claude-opus-5")
+            .unwrap()
+            .is_some());
+        assert!(svc
+            .on_session_model(a, 4, Some("t1"), "s1", "claude-opus-5")
+            .unwrap()
+            .is_none());
+        let hk = svc
+            .on_session_model(a, 5, Some("t1"), "s1", "claude-haiku-4-5")
+            .unwrap()
+            .unwrap();
+        assert_eq!(hk.kind, "session_start");
+        assert_eq!(hk.payload["model"], "claude-haiku-4-5");
+        assert_eq!(hk.session_id.as_deref(), Some("s1"));
+        // model_switch carries `to` (what the export reads) and `from`.
+        let ms = svc
+            .on_model_switch(
+                a,
+                6,
+                Some("t1"),
+                Some("s1"),
+                "claude-sonnet-5",
+                Some("claude-opus-5"),
+            )
+            .unwrap();
+        assert_eq!(ms.kind, "model_switch");
+        assert_eq!(ms.payload["to"], "claude-sonnet-5");
+        assert_eq!(ms.payload["from"], "claude-opus-5");
+        assert!(ms.turn_id.is_some(), "inside the open turn");
+
+        // tool_result carries the correlation ids when the hook had them…
+        let tr = svc
+            .on_tool_result(
+                a,
+                7,
+                Some("t1"),
+                Some("s1"),
+                Some("Bash"),
+                Some("ok"),
+                false,
+                ToolResultIds {
+                    tool_use_id: Some("toolu_9"),
+                    agent_id: Some("sub-1"),
+                },
+            )
+            .unwrap();
+        assert_eq!(tr.payload["toolUseId"], "toolu_9");
+        assert_eq!(tr.payload["agentId"], "sub-1");
+        // …and no keys at all when it didn't (older CLI, Codex).
+        let bare = svc
+            .on_tool_result(
+                a,
+                8,
+                Some("t1"),
+                Some("s1"),
+                Some("Read"),
+                Some("x"),
+                false,
+                ToolResultIds::default(),
+            )
+            .unwrap();
+        assert!(bare.payload.get("toolUseId").is_none());
+        assert!(bare.payload.get("agentId").is_none());
+
+        // A request filed under project b is decided while the UI shows a:
+        // the decision goes to b's ledger, where the request is.
+        let req = json!({
+            "id": "apX", "ts": 9, "tool": "Bash", "input": {}, "cwd": "/proj/b", "termId": "t2"
+        });
+        svc.on_approval_request(b, &req).unwrap();
+        let d = svc
+            .on_approval_decision(a, 10, "apX", "deny", None)
+            .unwrap();
+        assert_eq!(d.payload["tool"], "Bash");
+        let in_b = svc
+            .list(b, None, None)
+            .unwrap()
+            .iter()
+            .any(|e| e.kind == "approval_decision");
+        let in_a = svc
+            .list(a, None, None)
+            .unwrap()
+            .iter()
+            .any(|e| e.kind == "approval_decision");
+        assert!(in_b && !in_a);
+        // An unknown id (post-restart) still records — in the caller's ledger.
+        let orphan = svc
+            .on_approval_decision(a, 11, "never-seen", "allow", None)
+            .unwrap();
+        assert!(orphan.payload["tool"].is_null());
+        assert!(svc.verify(a).unwrap().ok);
+        assert!(svc.verify(b).unwrap().ok);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// One test fn on purpose (mutates process-global XDG_DATA_HOME): exercises
     /// the full chain — prompt opens a turn, approvals attach to it, turn_end
     /// closes it, case_link rebinds, list filters, verify detects tampering
@@ -972,6 +1253,10 @@ mod tests {
                 Some("Bash"),
                 Some("ok\n"),
                 false,
+                ToolResultIds {
+                    tool_use_id: Some("toolu_1"),
+                    agent_id: None,
+                },
             )
             .unwrap();
         assert_eq!(tr.turn_id.as_deref(), Some(turn.as_str()));

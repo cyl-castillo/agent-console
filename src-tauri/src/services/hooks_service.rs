@@ -1396,11 +1396,13 @@ fn handle_event(v: &Value, app: &AppHandle) {
     if kind == "user_prompt" {
         let state = app.state::<AppState>();
         let project = state.inner.lock().project.clone();
-        if let Some(p) = project {
+        // Ledger attribution by the event's cwd (see `event_root`), never by
+        // the project the UI happens to show.
+        if let (Some(p), Some(root)) = (project, event_root(v, &state)) {
             // Persist the prompt to the durable per-project ledger that
             // "learning mode" reflects over. Best-effort: a failed append must
             // never block the snapshot or the UI event.
-            let root = p.root.to_string_lossy();
+            let root = root.as_str();
             let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
             // Best-effort but never SILENT: a failed persistence append (disk
             // full, permissions) is data loss the user can't see happening —
@@ -1486,8 +1488,8 @@ fn handle_event(v: &Value, app: &AppHandle) {
         // is what it had changed by then".
         let state = app.state::<AppState>();
         let project = state.inner.lock().project.clone();
-        if let Some(p) = project {
-            let root = p.root.to_string_lossy();
+        if let (Some(p), Some(root)) = (project, event_root(v, &state)) {
+            let root = root.as_str();
             let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
             let term_id = str_field(v, "termId");
 
@@ -1589,12 +1591,12 @@ fn handle_event(v: &Value, app: &AppHandle) {
     } else if kind == "tool_result" {
         // Testigo: what one tool call produced inside the open turn.
         let state = app.state::<AppState>();
-        let project = state.inner.lock().project.clone();
-        if let Some(p) = project {
-            let root = p.root.to_string_lossy();
+        if let Some(root) = event_root(v, &state) {
             let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            let tool_use_id = str_field(v, "toolUseId");
+            let agent_id = str_field(v, "agentId");
             let _ = state.testigo.on_tool_result(
-                root.as_ref(),
+                &root,
                 ts,
                 str_field(v, "termId").as_deref(),
                 str_field(v, "sessionId").as_deref(),
@@ -1603,6 +1605,44 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 v.get("truncated")
                     .and_then(|t| t.as_bool())
                     .unwrap_or(false),
+                crate::services::testigo_service::ToolResultIds {
+                    tool_use_id: tool_use_id.as_deref(),
+                    agent_id: agent_id.as_deref(),
+                },
+            );
+        }
+    } else if kind == "model_switch" {
+        // Testigo: the export reads model_switch/session_start into the
+        // packet's `languageModels`; until now this event only reached the
+        // UI, so packets from the console carried no model at all.
+        let state = app.state::<AppState>();
+        if let (Some(root), Some(to)) = (event_root(v, &state), str_field(v, "model")) {
+            let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            let _ = state.testigo.on_model_switch(
+                &root,
+                ts,
+                str_field(v, "termId").as_deref(),
+                str_field(v, "sessionId").as_deref(),
+                &to,
+                str_field(v, "fromModel").as_deref(),
+            );
+        }
+    } else if kind == "status" {
+        // The status line names the session's model on every render; one
+        // `session_start` line per (session, model) is what the packet needs.
+        let state = app.state::<AppState>();
+        if let (Some(root), Some(sid), Some(model)) = (
+            event_root(v, &state),
+            str_field(v, "sessionId"),
+            str_field(v, "modelId"),
+        ) {
+            let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            let _ = state.testigo.on_session_model(
+                &root,
+                ts,
+                str_field(v, "termId").as_deref(),
+                &sid,
+                &model,
             );
         }
     }
@@ -1615,6 +1655,45 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
         .and_then(|x| x.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// Which project's ledger an event belongs to: the one its `cwd` falls under
+/// — the event's own evidence — never "whatever project the UI has open".
+/// With two projects open in two terminals the old rule wrote one terminal's
+/// prompts, approvals and diffs into the other's ledger: contaminated
+/// evidence. Order: the event's cwd; else the open turn's cwd for that
+/// terminal (turn_end payloads may lack one); else the open project. Known
+/// roots are the recent-projects list plus the open project, longest match
+/// wins (a worktree under a project resolves to the project), so an unknown
+/// cwd resolves to itself: evidence of a run in a folder the console never
+/// opened is still evidence, filed under that folder.
+fn event_root(v: &Value, state: &AppState) -> Option<String> {
+    let open = state
+        .inner
+        .lock()
+        .project
+        .as_ref()
+        .map(|p| p.root.to_string_lossy().to_string());
+    let cwd = str_field(v, "cwd").or_else(|| {
+        str_field(v, "termId")
+            .and_then(|t| state.testigo.peek_turn(&t))
+            .and_then(|t| t.cwd)
+    });
+    match cwd {
+        Some(cwd) => {
+            let mut roots: Vec<String> = crate::services::projects_service::load()
+                .into_iter()
+                .map(|p| p.path)
+                .collect();
+            if let Some(o) = &open {
+                roots.push(o.clone());
+            }
+            Some(crate::services::inject_service::resolve_project_root(
+                &cwd, &roots,
+            ))
+        }
+        None => open,
+    }
 }
 
 /// Cap on the turn summary stored in the ledger. Mirrors the hook script's own
@@ -1669,10 +1748,8 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
             // the durable record. Best-effort, never blocks the UI event.
             {
                 let state = app.state::<AppState>();
-                let project = state.inner.lock().project.clone();
-                if let Some(p) = project {
-                    let root = p.root.to_string_lossy();
-                    let _ = state.testigo.on_approval_request(root.as_ref(), &v);
+                if let Some(root) = event_root(&v, &state) {
+                    let _ = state.testigo.on_approval_request(&root, &v);
                 }
             }
             seen.insert(name);

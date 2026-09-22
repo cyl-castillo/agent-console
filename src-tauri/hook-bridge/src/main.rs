@@ -118,6 +118,14 @@ fn posttooluse_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
     if let Some(sid) = str_field(input, "session_id", "sessionId") {
         e.insert("sessionId".into(), json!(sid));
     }
+    // Correlation handles: tool_use_id pairs the result with its request;
+    // agent_id means "inside a subagent" (absent on the main thread).
+    if let Some(id) = str_field(input, "tool_use_id", "toolUseId") {
+        e.insert("toolUseId".into(), json!(id));
+    }
+    if let Some(id) = str_field(input, "agent_id", "agentId") {
+        e.insert("agentId".into(), json!(id));
+    }
     if let Some(t) = term_id.filter(|t| !t.is_empty()) {
         e.insert("termId".into(), json!(t));
     }
@@ -1057,6 +1065,23 @@ mod tests {
         assert_eq!(e["skill"], "review-pr");
         let plain = userprompt_event(&json!({"prompt": "hello world"}), None, 1);
         assert!(plain.get("skill").is_none());
+    }
+
+    #[test]
+    fn posttooluse_event_carries_correlation_ids_when_present() {
+        let e = posttooluse_event(
+            &json!({
+                "tool_name": "Bash", "tool_response": "ok", "session_id": "s",
+                "tool_use_id": "toolu_1", "agent_id": "sub-1"
+            }),
+            Some("t"),
+            1,
+        );
+        assert_eq!(e["toolUseId"], "toolu_1");
+        assert_eq!(e["agentId"], "sub-1");
+        let bare = posttooluse_event(&json!({"tool_name": "Read", "tool_response": "x"}), None, 1);
+        assert!(bare.get("toolUseId").is_none());
+        assert!(bare.get("agentId").is_none());
     }
 
     #[test]

@@ -40,6 +40,10 @@ process.stdin.on("end", () => {
 
   const sid = input.session_id ?? input.sessionId;
   if (typeof sid === "string" && sid.length > 0) event.sessionId = sid;
+  // Correlation handles (Claude 2.1.x): pair the result with its request,
+  // and say when it ran inside a subagent.
+  if (typeof input.tool_use_id === "string" && input.tool_use_id.length > 0) event.toolUseId = input.tool_use_id;
+  if (typeof input.agent_id === "string" && input.agent_id.length > 0) event.agentId = input.agent_id;
 
   // Same terminal binding as the other hooks: attributes the result to the
   // exact session (and thus the open Testigo turn), not "whatever is active".
