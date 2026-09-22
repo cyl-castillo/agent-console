@@ -293,6 +293,13 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 /// shows next to "agent memory NOT rewound". Deliberately NOT gated on hook
 /// markers: the trust marker is known-broken (W5), and `--version` answers
 /// for the binary that will actually run `--resume`.
+/// `claude --version` as a semver triple, or None when the CLI can't be run
+/// or its output isn't recognized. Shared gate for features that depend on
+/// what the installed binary supports (transcript fork, PermissionRequest).
+pub fn claude_version() -> Option<(u64, u64, u64)> {
+    parse_semver(&version_line()?)
+}
+
 pub fn fork_gate() -> Result<(), String> {
     let line = version_line().ok_or_else(|| "could not run `claude --version`".to_string())?;
     let v = parse_semver(&line)

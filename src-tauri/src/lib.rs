@@ -73,6 +73,16 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_modelswitch_autoinstalled() {
                 tracing::warn!("hooks: modelswitch auto-install failed: {e}");
             }
+            // Notification observer (Claude only): "waiting for you" as a real
+            // signal from the CLI instead of a decay window.
+            if let Err(e) = state.hooks.ensure_notification_autoinstalled() {
+                tracing::warn!("hooks: notification auto-install failed: {e}");
+            }
+            // Approvals bridge, second generation: existing installs move their
+            // PreToolUse entry to PermissionRequest once the CLI supports it.
+            if let Err(e) = state.hooks.ensure_permissionrequest_migrated() {
+                tracing::warn!("hooks: permissionrequest migration failed: {e}");
+            }
             // Migrate legacy bare-path hook commands to `node "<path>"` on
             // installs that predate the format (on Windows the old format
             // never executed at all — no shebangs in cmd.exe, and the path

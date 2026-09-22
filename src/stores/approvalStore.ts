@@ -83,6 +83,29 @@ export async function attachApprovalListener(): Promise<UnlistenFn> {
   const un = await listen<ApprovalRequest>("approval://request", (e) => {
     useApprovalStore.getState()._enqueue(e.payload);
   });
+  // The hook gave up waiting on us (timeout, or an explicit "ask"): the CLI
+  // decides now, in its own prompt. Drop the stale modal entry and say so —
+  // an answer clicked here after this point would go nowhere.
+  const unDeferred = await listen<{ approvalId?: string; tool?: string }>(
+    "hook://approval_deferred",
+    (e) => {
+      const id = e.payload?.approvalId;
+      if (!id) return;
+      let wasQueued = false;
+      useApprovalStore.setState((s) => {
+        wasQueued = s.queue.some((r) => r.id === id);
+        return { queue: s.queue.filter((r) => r.id !== id) };
+      });
+      if (wasQueued) {
+        useToastStore
+          .getState()
+          .show(
+            `${e.payload?.tool ?? "A tool"} approval timed out here — answer it in the terminal`,
+            "info",
+          );
+      }
+    },
+  );
   // Event stream + disk resync: events give latency, the resync gives truth.
   // Initial sync covers requests that arrived before this listener existed;
   // the focus sync covers anything missed while the webview was reloading or
@@ -93,6 +116,7 @@ export async function attachApprovalListener(): Promise<UnlistenFn> {
   return () => {
     window.removeEventListener("focus", onFocus);
     un();
+    unDeferred();
   };
 }
 

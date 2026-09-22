@@ -35,6 +35,10 @@ const MIN_PROMPT_CHARS: usize = 12;
 const INJECT_TIMEOUT_MS: u64 = 2500;
 const APPROVAL_POLL_MS: u64 = 80;
 const DEFAULT_APPROVAL_TIMEOUT_MS: u64 = 90_000;
+/// Cap on the `permission_suggestions` array forwarded from PermissionRequest.
+const MAX_SUGGESTIONS: usize = 16;
+/// Cap on a Notification's message text.
+const NOTIFICATION_MAX: usize = 500;
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -452,6 +456,139 @@ fn pretooluse_request(
     Value::Object(req)
 }
 
+/// PermissionRequest (Claude 2.1.x) carries what PreToolUse does — minus
+/// `tool_use_id` — plus `permission_mode` and the CLI's own
+/// `permission_suggestions` (the "always allow" rules it would offer). The
+/// request is tagged `source` so the ledger and the modal can tell the two
+/// bridges apart: this one only fires when Claude was about to ASK, so every
+/// request here is a real decision point, never a tool the rules already
+/// allowed.
+fn permissionrequest_request(
+    input: &Value,
+    session_dir: &Path,
+    term_id: Option<&str>,
+    id: &str,
+    ts: u64,
+    timeout_ms: u64,
+) -> Value {
+    let mut req = pretooluse_request(input, session_dir, term_id, id, ts, timeout_ms);
+    let obj = req
+        .as_object_mut()
+        .expect("pretooluse_request builds an object");
+    obj.insert("source".into(), json!("permission_request"));
+    if let Some(m) = input.get("permission_mode").and_then(|v| v.as_str()) {
+        obj.insert("permissionMode".into(), json!(m));
+    }
+    if let Some(s) = input
+        .get("permission_suggestions")
+        .and_then(|v| v.as_array())
+    {
+        // Bounded: the array is the CLI's, but it ends up in a JSON file the
+        // UI reads and the ledger stores.
+        if s.len() <= MAX_SUGGESTIONS {
+            obj.insert("permissionSuggestions".into(), Value::Array(s.clone()));
+        }
+    }
+    if let Some(sid) = str_field(input, "session_id", "sessionId") {
+        obj.insert("sessionId".into(), json!(sid));
+    }
+    req
+}
+
+/// PermissionRequest's decision schema differs from PreToolUse's: a nested
+/// `decision` object with `behavior`, `message` (deny) — and exit code 2 is
+/// NOT honored for this event, so the object is the only lever. None / ask
+/// ⇒ `{}`: the CLI shows its own prompt (interactive) or, where it can't
+/// prompt, auto-denies — its documented default, not ours.
+fn permission_decision_output(decision: Option<&Value>) -> String {
+    let Some(res) = decision else {
+        return "{}".into();
+    };
+    let d = res.get("decision").and_then(|v| v.as_str()).unwrap_or("");
+    let reason = res
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let decision = match d {
+        "allow" => json!({ "behavior": "allow" }),
+        "deny" => json!({
+            "behavior": "deny",
+            "message": reason.unwrap_or_else(|| "denied in the Agent Console approval modal".into()),
+        }),
+        _ => return "{}".into(),
+    };
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": decision,
+        }
+    })
+    .to_string()
+}
+
+/// The console did NOT answer this request in time (timeout, or an explicit
+/// "ask"): the decision is about to be made outside it — in the CLI's own
+/// prompt, or by its auto-deny where it can't prompt. Recorded so the ledger
+/// never shows a request with no outcome; until now 58 % of approval
+/// requests ended exactly like that.
+fn approval_deferred_event(id: &str, tool: Option<&str>, term_id: Option<&str>, ts: u64) -> Value {
+    let mut e = Map::new();
+    e.insert("type".into(), json!("approval_deferred"));
+    e.insert("ts".into(), json!(ts));
+    e.insert("approvalId".into(), json!(id));
+    if let Some(t) = tool {
+        e.insert("tool".into(), json!(t));
+    }
+    if let Some(t) = term_id.filter(|t| !t.is_empty()) {
+        e.insert("termId".into(), json!(t));
+    }
+    Value::Object(e)
+}
+
+fn is_decided(decision: Option<&Value>) -> bool {
+    matches!(
+        decision
+            .and_then(|d| d.get("decision"))
+            .and_then(|v| v.as_str()),
+        Some("allow") | Some("deny")
+    )
+}
+
+/// Notification (Claude): `permission_prompt`, `idle_prompt`,
+/// `agent_needs_input`, `agent_completed`, … — the CLI saying what it is
+/// waiting for. Observer only; the CLI ignores our output.
+fn notification_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
+    let mut e = Map::new();
+    e.insert("type".into(), json!("notification"));
+    e.insert("ts".into(), json!(ts));
+    if let Some(k) = str_field(input, "notification_type", "notificationType") {
+        e.insert("notificationType".into(), json!(k));
+    }
+    if let Some(m) = input.get("message").and_then(|v| v.as_str()) {
+        let (m, _) = cap(m, NOTIFICATION_MAX);
+        e.insert("message".into(), json!(m));
+    }
+    if let Some(t) = input.get("title").and_then(|v| v.as_str()) {
+        let (t, _) = cap(t, 200);
+        e.insert("title".into(), json!(t));
+    }
+    if let Some(sid) = str_field(input, "session_id", "sessionId") {
+        e.insert("sessionId".into(), json!(sid));
+    }
+    if let Some(t) = term_id.filter(|t| !t.is_empty()) {
+        e.insert("termId".into(), json!(t));
+    }
+    if let Some(cwd) = input
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        e.insert("cwd".into(), json!(cwd));
+    }
+    Value::Object(e)
+}
+
 /// The decision output for stdout. None ⇒ emit `{}` (defer to the CLI's own
 /// prompt); the empty object means "no decision" to BOTH engines.
 fn decision_output(decision: Option<&Value>) -> String {
@@ -478,32 +615,18 @@ fn decision_output(decision: Option<&Value>) -> String {
     .to_string()
 }
 
-fn run_pretooluse(session_dir: &Path) {
-    if std::env::var("AGENT_CONSOLE_BRIDGE").as_deref() != Ok("1") {
-        return;
-    }
+/// Shared half of both approval bridges: write the request where the app's
+/// watcher sees it, poll for the answer until the deadline, clean up. None ⇒
+/// no decision arrived in time.
+fn await_decision(session_dir: &Path, id: &str, req: &Value, timeout_ms: u64) -> Option<Value> {
     let approvals = session_dir.join("approvals");
     let _ = std::fs::create_dir_all(&approvals);
-
-    let input = read_stdin_json();
-    let id = uuid::Uuid::new_v4().to_string();
-    let timeout_ms = approval_timeout_ms();
-    let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
-    let req = pretooluse_request(
-        &input,
-        session_dir,
-        term_id.as_deref(),
-        &id,
-        now_ms(),
-        timeout_ms,
-    );
     let req_path = approvals.join(format!("{id}.req.json"));
     let res_path = approvals.join(format!("{id}.res.json"));
     if std::fs::write(&req_path, req.to_string()).is_err() {
         // If we can't write the request, fail open to the CLI's native prompt.
-        return;
+        return None;
     }
-
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut decision: Option<Value> = None;
     while Instant::now() < deadline {
@@ -520,7 +643,89 @@ fn run_pretooluse(session_dir: &Path) {
     }
     let _ = std::fs::remove_file(&req_path);
     let _ = std::fs::remove_file(&res_path);
+    decision
+}
+
+/// Both bridges share the same shape of "what happens when the console
+/// doesn't answer": leave a `approval_deferred` line so the ledger closes the
+/// request as decided-outside, then defer to the CLI.
+fn record_if_deferred(
+    session_dir: &Path,
+    decision: Option<&Value>,
+    id: &str,
+    req: &Value,
+    term_id: Option<&str>,
+) {
+    if !is_decided(decision) {
+        append_event(
+            session_dir,
+            &approval_deferred_event(
+                id,
+                req.get("tool").and_then(|v| v.as_str()),
+                term_id,
+                now_ms(),
+            ),
+        );
+    }
+}
+
+/// Legacy approvals bridge (PreToolUse): fires on EVERY tool call. Kept for
+/// Codex, whose hooks table mirrors Claude's but has no PermissionRequest.
+fn run_pretooluse(session_dir: &Path) {
+    if std::env::var("AGENT_CONSOLE_BRIDGE").as_deref() != Ok("1") {
+        return;
+    }
+    let input = read_stdin_json();
+    let id = uuid::Uuid::new_v4().to_string();
+    let timeout_ms = approval_timeout_ms();
+    let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
+    let req = pretooluse_request(
+        &input,
+        session_dir,
+        term_id.as_deref(),
+        &id,
+        now_ms(),
+        timeout_ms,
+    );
+    let decision = await_decision(session_dir, &id, &req, timeout_ms);
+    record_if_deferred(
+        session_dir,
+        decision.as_ref(),
+        &id,
+        &req,
+        term_id.as_deref(),
+    );
     print!("{}", decision_output(decision.as_ref()));
+}
+
+/// Approvals bridge, second generation (PermissionRequest, Claude): fires
+/// only when the CLI was about to ask the human — tools its rules already
+/// allow never reach the modal and never spawn this process.
+fn run_permissionrequest(session_dir: &Path) {
+    if std::env::var("AGENT_CONSOLE_BRIDGE").as_deref() != Ok("1") {
+        return;
+    }
+    let input = read_stdin_json();
+    let id = uuid::Uuid::new_v4().to_string();
+    let timeout_ms = approval_timeout_ms();
+    let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
+    let req = permissionrequest_request(
+        &input,
+        session_dir,
+        term_id.as_deref(),
+        &id,
+        now_ms(),
+        timeout_ms,
+    );
+    let decision = await_decision(session_dir, &id, &req, timeout_ms);
+    record_if_deferred(
+        session_dir,
+        decision.as_ref(),
+        &id,
+        &req,
+        term_id.as_deref(),
+    );
+    print!("{}", permission_decision_output(decision.as_ref()));
 }
 
 // --- main ------------------------------------------------------------------
@@ -532,6 +737,15 @@ fn main() {
     match mode.as_str() {
         "userprompt" => run_userprompt(&dir),
         "pretooluse" => run_pretooluse(&dir),
+        "permissionrequest" => run_permissionrequest(&dir),
+        "notification" => {
+            let input = read_stdin_json();
+            let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
+            append_event(
+                &dir,
+                &notification_event(&input, term_id.as_deref(), now_ms()),
+            );
+        }
         "posttooluse" => {
             let input = read_stdin_json();
             let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
@@ -702,6 +916,106 @@ mod tests {
         assert_eq!(req["input"]["command"], "git push");
         assert_eq!(req["timeoutMs"], 90_000);
         assert_eq!(req["termId"], "t-9");
+    }
+
+    #[test]
+    fn permissionrequest_request_adds_source_mode_and_suggestions() {
+        let input = json!({
+            "session_id": "s-1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf node_modules"},
+            "cwd": "/repo",
+            "permission_mode": "default",
+            "permission_suggestions": [
+                {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "rm -rf node_modules"}],
+                 "behavior": "allow", "destination": "localSettings"}
+            ],
+        });
+        let req =
+            permissionrequest_request(&input, Path::new("/sess"), Some("t-9"), "abc", 7, 90_000);
+        // Everything PreToolUse carried…
+        assert_eq!(req["tool"], "Bash");
+        assert_eq!(req["input"]["command"], "rm -rf node_modules");
+        assert_eq!(req["termId"], "t-9");
+        assert_eq!(req["timeoutMs"], 90_000);
+        // …plus what makes this a real decision point.
+        assert_eq!(req["source"], "permission_request");
+        assert_eq!(req["permissionMode"], "default");
+        assert_eq!(req["sessionId"], "s-1");
+        assert_eq!(req["permissionSuggestions"][0]["type"], "addRules");
+        // Absent fields stay absent (older CLI payloads).
+        let bare = permissionrequest_request(
+            &json!({"tool_name": "Read", "tool_input": {}}),
+            Path::new("/sess"),
+            None,
+            "x",
+            1,
+            10,
+        );
+        assert!(bare.get("permissionSuggestions").is_none());
+        assert!(bare.get("permissionMode").is_none());
+        assert!(bare.get("termId").is_none());
+    }
+
+    #[test]
+    fn permission_decision_output_uses_the_nested_decision_object() {
+        assert_eq!(permission_decision_output(None), "{}");
+        assert_eq!(
+            permission_decision_output(Some(&json!({"decision": "ask"}))),
+            "{}"
+        );
+        let allow = permission_decision_output(Some(&json!({"decision": "allow"})));
+        let v: Value = serde_json::from_str(&allow).unwrap();
+        assert_eq!(
+            v["hookSpecificOutput"]["hookEventName"],
+            "PermissionRequest"
+        );
+        assert_eq!(v["hookSpecificOutput"]["decision"]["behavior"], "allow");
+        assert!(v["hookSpecificOutput"]["decision"].get("message").is_none());
+        let deny = permission_decision_output(Some(&json!({"decision": "deny", "reason": "nope"})));
+        let v: Value = serde_json::from_str(&deny).unwrap();
+        assert_eq!(v["hookSpecificOutput"]["decision"]["behavior"], "deny");
+        assert_eq!(v["hookSpecificOutput"]["decision"]["message"], "nope");
+        let deny_default = permission_decision_output(Some(&json!({"decision": "deny"})));
+        assert!(deny_default.contains("approval modal"));
+    }
+
+    #[test]
+    fn deferral_is_recorded_only_when_no_decision_reached_the_hook() {
+        assert!(is_decided(Some(&json!({"decision": "allow"}))));
+        assert!(is_decided(Some(&json!({"decision": "deny"}))));
+        assert!(!is_decided(Some(&json!({"decision": "ask"}))));
+        assert!(!is_decided(None));
+        let e = approval_deferred_event("abc", Some("Bash"), Some("t-1"), 42);
+        assert_eq!(e["type"], "approval_deferred");
+        assert_eq!(e["approvalId"], "abc");
+        assert_eq!(e["tool"], "Bash");
+        assert_eq!(e["termId"], "t-1");
+        assert_eq!(e["ts"], 42);
+    }
+
+    #[test]
+    fn notification_event_carries_type_message_and_binding() {
+        let input = json!({
+            "session_id": "s-1",
+            "cwd": "/repo",
+            "hook_event_name": "Notification",
+            "message": "Claude needs your permission",
+            "title": "Permission needed",
+            "notification_type": "permission_prompt",
+        });
+        let e = notification_event(&input, Some("t-2"), 9);
+        assert_eq!(e["type"], "notification");
+        assert_eq!(e["notificationType"], "permission_prompt");
+        assert_eq!(e["message"], "Claude needs your permission");
+        assert_eq!(e["title"], "Permission needed");
+        assert_eq!(e["sessionId"], "s-1");
+        assert_eq!(e["termId"], "t-2");
+        assert_eq!(e["cwd"], "/repo");
+        assert_eq!(e["ts"], 9);
+        // A message beyond the cap is cut, never dropped.
+        let long = notification_event(&json!({"message": "x".repeat(2000)}), None, 1);
+        assert!(long["message"].as_str().unwrap().chars().count() <= NOTIFICATION_MAX + 1);
     }
 
     #[test]
