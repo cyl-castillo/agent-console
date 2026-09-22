@@ -377,6 +377,39 @@ export function ProofPanel() {
                       {t.summaryTruncated && " …"}
                     </p>
                   )}
+                  {t.checks.length > 0 && (
+                    <p className="wb-hint proof-turn-checks">
+                      {t.checks.map((c, i) => (
+                        <span
+                          key={i}
+                          className={`proof-check proof-check-${c.status}`}
+                          title={`${c.command}${c.exitCode !== undefined ? ` — exit ${c.exitCode}` : ""}${c.durationMs !== undefined ? ` — ${Math.round(c.durationMs / 1000)}s` : ""}`}
+                        >
+                          {i > 0 && " · "}
+                          {c.status === "passed" ? "✓" : c.status === "failed" ? "✗" : "⏸"}{" "}
+                          <code>
+                            {c.command.length > 48 ? `${c.command.slice(0, 48)}…` : c.command}
+                          </code>
+                          {c.status === "failed" &&
+                            c.exitCode !== undefined &&
+                            ` exit ${c.exitCode}`}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  {t.commits.length > 0 && (
+                    <p className="wb-hint proof-turn-commits">
+                      {t.commits.map((c, i) => (
+                        <span key={i} title={`${c.files} file(s)${c.amend ? " · amend" : ""}`}>
+                          {i > 0 && " · "}⎇ committed <code>{c.sha.slice(0, 7)}</code>
+                          {c.subject
+                            ? ` — ${c.subject.length > 60 ? `${c.subject.slice(0, 60)}…` : c.subject}`
+                            : ""}
+                          {c.amend ? " (amend)" : ""}
+                        </span>
+                      ))}
+                    </p>
+                  )}
                   {(t.toolResults > 0 || t.files.length > 0) && (
                     <p className="wb-hint">
                       {t.toolResults > 0 && `${t.toolResults} tool calls`}

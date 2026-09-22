@@ -39,6 +39,8 @@ const DEFAULT_APPROVAL_TIMEOUT_MS: u64 = 90_000;
 const MAX_SUGGESTIONS: usize = 16;
 /// Cap on a Notification's message text.
 const NOTIFICATION_MAX: usize = 500;
+/// Cap on a recorded tool command line.
+const COMMAND_MAX: usize = 500;
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -114,6 +116,23 @@ fn posttooluse_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
         let (excerpt, truncated) = cap(&text, EXCERPT_MAX);
         e.insert("excerpt".into(), json!(excerpt));
         e.insert("truncated".into(), json!(truncated));
+        // Evidence by hash: the FULL output, which the excerpt can't carry.
+        // A reviewer holding the packet can check a preserved log against it.
+        e.insert("outputSha256".into(), json!(sha256_hex(text.as_bytes())));
+        if let Some(i) = resp.get("interrupted").and_then(|v| v.as_bool()) {
+            e.insert("interrupted".into(), json!(i));
+        }
+    }
+    // What was run (Bash): the command is what makes a result a check run.
+    if let Some(cmd) = input
+        .pointer("/tool_input/command")
+        .and_then(|v| v.as_str())
+        .filter(|c| !c.is_empty())
+    {
+        e.insert("command".into(), json!(cap(cmd, COMMAND_MAX).0));
+    }
+    if let Some(d) = input.get("duration_ms").and_then(|v| v.as_u64()) {
+        e.insert("durationMs".into(), json!(d));
     }
     if let Some(sid) = str_field(input, "session_id", "sessionId") {
         e.insert("sessionId".into(), json!(sid));
@@ -137,6 +156,76 @@ fn posttooluse_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
         e.insert("cwd".into(), json!(cwd));
     }
     Value::Object(e)
+}
+
+/// PostToolUseFailure → `tool_failed`: the tool ran and failed (a test
+/// suite that exits non-zero lands HERE, not in PostToolUse). Same
+/// correlation fields as a result; `error` is the text Claude saw, and the
+/// exit code is parsed from its documented `Exit code N` first line.
+fn posttoolusefailure_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
+    let mut e = Map::new();
+    e.insert("type".into(), json!("tool_failed"));
+    e.insert("ts".into(), json!(ts));
+    if let Some(tool) = str_field(input, "tool_name", "toolName") {
+        e.insert("tool".into(), json!(tool));
+    }
+    if let Some(cmd) = input
+        .pointer("/tool_input/command")
+        .and_then(|v| v.as_str())
+        .filter(|c| !c.is_empty())
+    {
+        e.insert("command".into(), json!(cap(cmd, COMMAND_MAX).0));
+    }
+    if let Some(err) = input.get("error").and_then(|v| v.as_str()) {
+        let (excerpt, truncated) = cap(err, EXCERPT_MAX);
+        e.insert("excerpt".into(), json!(excerpt));
+        e.insert("truncated".into(), json!(truncated));
+        e.insert("outputSha256".into(), json!(sha256_hex(err.as_bytes())));
+        if let Some(code) = parse_exit_code(err) {
+            e.insert("exitCode".into(), json!(code));
+        }
+    }
+    if let Some(i) = input.get("is_interrupt").and_then(|v| v.as_bool()) {
+        e.insert("interrupted".into(), json!(i));
+    }
+    if let Some(d) = input.get("duration_ms").and_then(|v| v.as_u64()) {
+        e.insert("durationMs".into(), json!(d));
+    }
+    if let Some(sid) = str_field(input, "session_id", "sessionId") {
+        e.insert("sessionId".into(), json!(sid));
+    }
+    if let Some(id) = str_field(input, "tool_use_id", "toolUseId") {
+        e.insert("toolUseId".into(), json!(id));
+    }
+    if let Some(id) = str_field(input, "agent_id", "agentId") {
+        e.insert("agentId".into(), json!(id));
+    }
+    if let Some(t) = term_id.filter(|t| !t.is_empty()) {
+        e.insert("termId".into(), json!(t));
+    }
+    if let Some(cwd) = input
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        e.insert("cwd".into(), json!(cwd));
+    }
+    Value::Object(e)
+}
+
+/// `Exit code N` on the first line of a Bash failure (documented format);
+/// anything else ⇒ None (the rest of the string is display text).
+fn parse_exit_code(error: &str) -> Option<i64> {
+    let first = error.lines().next()?.trim();
+    let rest = first.strip_prefix("Exit code ")?;
+    rest.split_whitespace().next()?.parse().ok()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    h.update(bytes);
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // --- stop ------------------------------------------------------------------
@@ -921,6 +1010,14 @@ fn main() {
                 &posttooluse_event(&input, term_id.as_deref(), now_ms()),
             );
         }
+        "posttoolusefailure" => {
+            let input = read_stdin_json();
+            let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
+            append_event(
+                &dir,
+                &posttoolusefailure_event(&input, term_id.as_deref(), now_ms()),
+            );
+        }
         "stop" => {
             let input = read_stdin_json();
             let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
@@ -1082,6 +1179,63 @@ mod tests {
         let bare = posttooluse_event(&json!({"tool_name": "Read", "tool_response": "x"}), None, 1);
         assert!(bare.get("toolUseId").is_none());
         assert!(bare.get("agentId").is_none());
+    }
+
+    #[test]
+    fn posttooluse_event_records_command_hash_and_interrupt_for_bash() {
+        let e = posttooluse_event(
+            &json!({
+                "tool_name": "Bash",
+                "tool_input": {"command": "cargo test --workspace"},
+                "tool_response": {"stdout": "test result: ok. 3 passed", "stderr": "", "interrupted": false},
+                "duration_ms": 1234
+            }),
+            Some("t"),
+            1,
+        );
+        assert_eq!(e["command"], "cargo test --workspace");
+        assert_eq!(e["interrupted"], false);
+        assert_eq!(e["durationMs"], 1234);
+        let sha = e["outputSha256"].as_str().unwrap();
+        assert_eq!(sha.len(), 64);
+        // Deterministic over the FULL text, not the excerpt.
+        let again = posttooluse_event(
+            &json!({"tool_name": "Bash", "tool_input": {"command": "x"},
+                    "tool_response": {"stdout": "test result: ok. 3 passed", "stderr": "", "interrupted": false}}),
+            None,
+            2,
+        );
+        assert_eq!(again["outputSha256"], sha);
+        // Non-Bash tools carry no command.
+        let read = posttooluse_event(&json!({"tool_name": "Read", "tool_response": "x"}), None, 1);
+        assert!(read.get("command").is_none());
+        assert!(read.get("outputSha256").is_some());
+    }
+
+    #[test]
+    fn posttoolusefailure_event_parses_the_exit_code_line() {
+        let e = posttoolusefailure_event(
+            &json!({
+                "session_id": "s", "tool_name": "Bash", "tool_use_id": "toolu_2",
+                "tool_input": {"command": "npm test"},
+                "error": "Exit code 1\nError: Cannot find module 'express'",
+                "is_interrupt": false, "duration_ms": 4187
+            }),
+            Some("t"),
+            9,
+        );
+        assert_eq!(e["type"], "tool_failed");
+        assert_eq!(e["tool"], "Bash");
+        assert_eq!(e["command"], "npm test");
+        assert_eq!(e["exitCode"], 1);
+        assert_eq!(e["interrupted"], false);
+        assert_eq!(e["durationMs"], 4187);
+        assert_eq!(e["toolUseId"], "toolu_2");
+        assert!(e["excerpt"].as_str().unwrap().starts_with("Exit code 1"));
+        assert_eq!(e["outputSha256"].as_str().unwrap().len(), 64);
+        assert_eq!(parse_exit_code("Exit code 130 (interrupted)"), Some(130));
+        assert_eq!(parse_exit_code("Something else"), None);
+        assert_eq!(parse_exit_code(""), None);
     }
 
     #[test]

@@ -55,6 +55,26 @@ export interface TimelineTurn {
   /// True when a later rewind event points at this turn — the timeline shows
   /// where history was rewound to.
   rewound: boolean;
+  /// Test/check runs the agent made inside the turn (`check_run` events,
+  /// T4b): the "tests ran, and this is what they said" evidence a reviewer
+  /// reads before any prompt.
+  checks: TimelineCheck[];
+  /// Commits the human made from the turn's diff (`commit` events, T4b).
+  commits: TimelineCommit[];
+}
+
+export interface TimelineCheck {
+  command: string;
+  status: "passed" | "failed" | "interrupted" | string;
+  exitCode?: number;
+  durationMs?: number;
+}
+
+export interface TimelineCommit {
+  sha: string;
+  subject: string;
+  files: number;
+  amend: boolean;
 }
 
 interface ProofState {
@@ -135,6 +155,8 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         summaryTruncated: false,
         failed: false,
         rewound: false,
+        checks: [],
+        commits: [],
       };
       byId.set(e.turnId, t);
       turns.push(t);
@@ -168,6 +190,20 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       });
     } else if (e.kind === "tool_result") {
       t.toolResults += 1;
+    } else if (e.kind === "check_run") {
+      t.checks.push({
+        command: typeof p.command === "string" ? p.command : "",
+        status: typeof p.status === "string" ? p.status : "passed",
+        exitCode: typeof p.exitCode === "number" ? p.exitCode : undefined,
+        durationMs: typeof p.durationMs === "number" ? p.durationMs : undefined,
+      });
+    } else if (e.kind === "commit") {
+      t.commits.push({
+        sha: typeof p.sha === "string" ? p.sha : "",
+        subject: typeof p.subject === "string" ? p.subject : "",
+        files: Array.isArray(p.files) ? p.files.length : 0,
+        amend: p.amend === true,
+      });
     } else if (e.kind === "turn_end") {
       t.endTs = e.ts;
       if (Array.isArray(p.filesChanged)) {

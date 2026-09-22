@@ -35,11 +35,17 @@ process.stdin.on("end", () => {
     if (typeof text === "string") {
       event.excerpt = text.length > EXCERPT_MAX ? text.slice(0, EXCERPT_MAX) : text;
       event.truncated = text.length > EXCERPT_MAX;
+      // Evidence by hash: the FULL output, which the excerpt can't carry.
+      event.outputSha256 = require("crypto").createHash("sha256").update(text).digest("hex");
+      if (resp && typeof resp === "object" && typeof resp.interrupted === "boolean") event.interrupted = resp.interrupted;
     }
   }
 
   const sid = input.session_id ?? input.sessionId;
   if (typeof sid === "string" && sid.length > 0) event.sessionId = sid;
+  const cmd = input.tool_input && typeof input.tool_input.command === "string" ? input.tool_input.command : "";
+  if (cmd) event.command = cmd.length > 500 ? cmd.slice(0, 500) : cmd;
+  if (typeof input.duration_ms === "number") event.durationMs = input.duration_ms;
   // Correlation handles (Claude 2.1.x): pair the result with its request,
   // and say when it ran inside a subagent.
   if (typeof input.tool_use_id === "string" && input.tool_use_id.length > 0) event.toolUseId = input.tool_use_id;

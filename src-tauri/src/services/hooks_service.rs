@@ -27,6 +27,7 @@ const MODELSWITCH_HOOK: &str = include_str!("../../resources/modelswitch-hook.cj
 const PERMISSIONREQUEST_HOOK: &str = include_str!("../../resources/permissionrequest-hook.cjs");
 const NOTIFICATION_HOOK: &str = include_str!("../../resources/notification-hook.cjs");
 const STATUSLINE_HOOK: &str = include_str!("../../resources/statusline-hook.cjs");
+const POSTTOOLUSEFAILURE_HOOK: &str = include_str!("../../resources/posttoolusefailure-hook.cjs");
 
 /// Oldest Claude Code the PermissionRequest bridge is verified on (the
 /// binary this was built and tested against). Older CLIs keep the PreToolUse
@@ -79,6 +80,9 @@ pub struct HooksRuntime {
     /// Claude-only statusLine stand-in (T3): records each render for the app
     /// and chains to whatever status line the user had.
     statusline_script_path: PathBuf,
+    /// Claude-only PostToolUseFailure observer (T4b): failed tool runs —
+    /// the test suite that exited non-zero — as `tool_failed` events.
+    posttoolusefailure_script_path: PathBuf,
     watcher_started: Mutex<bool>,
     approvals_watcher_started: Mutex<bool>,
 }
@@ -151,6 +155,11 @@ impl HooksRuntime {
             ensure_hook_script(&cache, "notification-hook.cjs", NOTIFICATION_HOOK)?;
         let statusline_script_path =
             ensure_hook_script(&cache, "statusline-hook.cjs", STATUSLINE_HOOK)?;
+        let posttoolusefailure_script_path = ensure_hook_script(
+            &cache,
+            "posttoolusefailure-hook.cjs",
+            POSTTOOLUSEFAILURE_HOOK,
+        )?;
         let binary_path = ensure_hook_binary(&cache);
         Ok(Self {
             session_dir,
@@ -164,6 +173,7 @@ impl HooksRuntime {
             permissionrequest_script_path,
             notification_script_path,
             statusline_script_path,
+            posttoolusefailure_script_path,
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
         })
@@ -320,6 +330,13 @@ impl HooksRuntime {
             &mut settings,
             "PostToolUse",
             &self.posttooluse_script_path,
+            self.binary_path.as_deref(),
+        );
+        // Claude-only: failed tool runs (Codex has no PostToolUseFailure).
+        upsert_hook(
+            &mut settings,
+            "PostToolUseFailure",
+            &self.posttoolusefailure_script_path,
             self.binary_path.as_deref(),
         );
         // Claude-only (see `ensure_stopfailure_autoinstalled`): the event and
@@ -479,6 +496,35 @@ impl HooksRuntime {
             settings = json!({});
         }
         self.install_statusline_into(&mut settings)?;
+        write_settings_atomic(&settings_path, &settings)?;
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
+    /// Auto-install the PostToolUseFailure observer (Claude only), under its
+    /// own marker. Observer-class: records a tool that ran and failed — the
+    /// half of every test run PostToolUse never sees.
+    pub fn ensure_posttoolusefailure_autoinstalled(&self) -> AppResult<()> {
+        let marker = self
+            .script_path
+            .with_file_name(".posttoolusefailure-autoinstalled");
+        if marker.exists() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = read_settings(&settings_path).unwrap_or(json!({}));
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        upsert_hook(
+            &mut settings,
+            "PostToolUseFailure",
+            &self.posttoolusefailure_script_path,
+            self.binary_path.as_deref(),
+        );
         write_settings_atomic(&settings_path, &settings)?;
         let _ = fs::write(&marker, b"1");
         Ok(())
@@ -745,7 +791,7 @@ impl HooksRuntime {
     /// upsert_hook. Only rewrites events where the script is ALREADY
     /// registered — a deliberate uninstall stays uninstalled.
     pub fn normalize_hook_commands(&self) -> AppResult<()> {
-        let pairs: [(&str, &PathBuf); 8] = [
+        let pairs: [(&str, &PathBuf); 9] = [
             ("UserPromptSubmit", &self.script_path),
             ("PreToolUse", &self.pretooluse_script_path),
             ("Stop", &self.stop_script_path),
@@ -754,6 +800,7 @@ impl HooksRuntime {
             ("PostModelSwitch", &self.modelswitch_script_path),
             ("PermissionRequest", &self.permissionrequest_script_path),
             ("Notification", &self.notification_script_path),
+            ("PostToolUseFailure", &self.posttoolusefailure_script_path),
         ];
         for path in [settings_path(), codex_hooks_path()] {
             if !path.exists() {
@@ -812,6 +859,7 @@ impl HooksRuntime {
                     ("PostModelSwitch", &self.modelswitch_script_path),
                     ("PermissionRequest", &self.permissionrequest_script_path),
                     ("Notification", &self.notification_script_path),
+                    ("PostToolUseFailure", &self.posttoolusefailure_script_path),
                 ] {
                     if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
                         arr.retain(|e| {
@@ -1198,6 +1246,7 @@ fn bridge_mode(event: &str) -> &'static str {
         "PermissionRequest" => "permissionrequest",
         "Notification" => "notification",
         "StatusLine" => "statusline",
+        "PostToolUseFailure" => "posttoolusefailure",
         _ => "stop",
     }
 }
@@ -1588,13 +1637,17 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 Some("not answered in the console in time — decided in the CLI prompt or auto-denied"),
             );
         }
-    } else if kind == "tool_result" {
-        // Testigo: what one tool call produced inside the open turn.
+    } else if kind == "tool_result" || kind == "tool_failed" {
+        // Testigo: what one tool call produced inside the open turn — or how
+        // it failed (PostToolUseFailure). A recognized test runner in either
+        // also leaves a `check_run` line (see TestigoService::on_tool_result).
         let state = app.state::<AppState>();
         if let Some(root) = event_root(v, &state) {
             let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
             let tool_use_id = str_field(v, "toolUseId");
             let agent_id = str_field(v, "agentId");
+            let command = str_field(v, "command");
+            let output_sha256 = str_field(v, "outputSha256");
             let _ = state.testigo.on_tool_result(
                 &root,
                 ts,
@@ -1608,6 +1661,12 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 crate::services::testigo_service::ToolResultIds {
                     tool_use_id: tool_use_id.as_deref(),
                     agent_id: agent_id.as_deref(),
+                    command: command.as_deref(),
+                    output_sha256: output_sha256.as_deref(),
+                    failed: kind == "tool_failed",
+                    exit_code: v.get("exitCode").and_then(|c| c.as_i64()),
+                    interrupted: v.get("interrupted").and_then(|i| i.as_bool()),
+                    duration_ms: v.get("durationMs").and_then(|d| d.as_u64()),
                 },
             );
         }
