@@ -34,9 +34,18 @@ export interface AgentLaunch {
 /// Minimal session shape buildLaunch needs — kept structural to avoid a cyclic
 /// import with terminalsStore (which imports AgentKind from here).
 export interface LaunchContext {
-  /// Captured agent session id, via the UserPromptSubmit hook (both Claude and
-  /// Codex emit it — Codex since the hooks bridge landed).
+  /// The agent session id this terminal owns. Claude: assigned by the console
+  /// at first launch (`--session-id`, T1) — so the id exists before any prompt
+  /// — or captured from the UserPromptSubmit hook / `claude agents` for
+  /// sessions started by hand. Codex: hook-captured only.
   agentSessionId?: string;
+  /// Claude only. Whether a transcript for `agentSessionId` exists on disk
+  /// (asked of the backend right before launch). `false` ⇒ the id is ours
+  /// but unused yet, so launch with `--session-id` and let the CLI create the
+  /// conversation under it; `true`/unknown ⇒ `--resume`. Guessing wrong fails
+  /// loudly either way ("No conversation found" / "already in use"), which
+  /// is why this is a real question and not a flag on the session.
+  transcriptExists?: boolean;
   /// Chosen model/tuning value, or undefined for the account/config default.
   model?: string;
   /// Whether this terminal has prior scrollback (affects the "fresh"/"resuming" note).
@@ -128,7 +137,16 @@ const CLAUDE: AgentProfile = {
     let cmd: string;
     let label: string;
     let note: string;
-    if (isSafeSessionId(ctx.agentSessionId)) {
+    if (isSafeSessionId(ctx.agentSessionId) && ctx.transcriptExists === false) {
+      // Our id, no conversation under it yet: reserve it. From here on every
+      // hook event, the rewind fork and the Testigo ledger agree on the id
+      // from turn 0 — nothing waits for a hook to learn it.
+      cmd = `claude --session-id ${ctx.agentSessionId}`;
+      label = `claude (${ctx.agentSessionId.slice(0, 8)}…)`;
+      note = ctx.hasScrollback
+        ? "starting fresh (no conversation on disk for this id)"
+        : "starting";
+    } else if (isSafeSessionId(ctx.agentSessionId)) {
       cmd = `claude --resume ${ctx.agentSessionId}`;
       label = `claude (${ctx.agentSessionId.slice(0, 8)}…)`;
       note = "auto-resuming";

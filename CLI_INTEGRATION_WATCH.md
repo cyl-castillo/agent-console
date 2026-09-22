@@ -15,7 +15,7 @@ backlog y aplica UNA mejora (PR, nunca merge/release sin OK de Carlos).
 
 | Superficie | Dónde |
 |---|---|
-| PTY interactivo: `claude --resume <id> --model <m>` / `codex resume <id>`; login repair `claude` / `codex login` | `src/agents/profiles.ts` |
+| PTY interactivo: `claude --session-id <uuid>` (id asignado por la consola al primer lanzamiento, T1) o `claude --resume <id>` (transcript existe, decidido por `claude_session_exists`) `--model <m>` / `codex resume <id>`; login repair `claude` / `codex login` | `src/agents/profiles.ts`, `src/components/Terminal.tsx`, `commands/rewind.rs` |
 | Headless: `claude -p --output-format stream-json` / `codex exec --json` (+ `codex exec resume <id>`), parsing de usage | `src-tauri/src/services/engine_runner.rs` |
 | Headless permission flags: `--permission-mode plan\|acceptEdits`, `--dangerously-skip-permissions` | engine_runner, scheduler_service, advisor_service, learning_service |
 | Hooks: 6 bridges (UserPromptSubmit/PreToolUse/PostToolUse/Stop/StopFailure/PostModelSwitch) como `node "<path>"` en `~/.claude/settings.json` + espejo idéntico en `~/.codex/hooks.json` para los 4 primeros (StopFailure y PostModelSwitch son solo Claude) | `src-tauri/src/services/hooks_service.rs`, `src-tauri/resources/*.cjs` |

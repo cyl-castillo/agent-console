@@ -148,3 +148,30 @@ fn now_ms() -> i64 {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
+
+/// Whether Claude has a transcript for `session_id` on this machine. This is
+/// the question the launch builder asks to choose between `--resume <id>`
+/// (the conversation exists) and `--session-id <id>` (reserve the id for a
+/// fresh one): the CLI errors either way when guessed wrong — "No
+/// conversation found" / "Session ID … is already in use" — and the terminal
+/// would drop to a bare shell. Unsafe ids answer false without touching disk.
+#[tauri::command(async)]
+pub fn claude_session_exists(session_id: String) -> bool {
+    rewind_service::is_safe_session_id(&session_id)
+        && rewind_service::locate_transcript(&session_id).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_exists_is_false_for_unsafe_or_unknown_ids() {
+        assert!(!claude_session_exists("$(evil)".into()));
+        assert!(!claude_session_exists("".into()));
+        // A well-formed id with no transcript anywhere on this machine.
+        assert!(!claude_session_exists(
+            "00000000-0000-4000-8000-000000000000".into()
+        ));
+    }
+}
