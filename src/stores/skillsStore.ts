@@ -279,6 +279,21 @@ export async function attachSkillsListeners(): Promise<UnlistenFn> {
       if (next !== null) useTerminalsStore.getState().setModel(termId, next);
     }),
   );
+  // Notification (Claude, T2): the CLI itself says "waiting for you" — at its
+  // own permission prompt (bridge off, or it timed out), an MCP elicitation,
+  // or a minute idle after a turn. Until now the pill could only guess from
+  // an 8 s decay window.
+  offs.push(
+    await listen<{ notificationType?: string; termId?: string }>("hook://notification", (e) => {
+      useAgentStatusStore
+        .getState()
+        .noteNotification(e.payload?.notificationType, e.payload?.termId ?? undefined);
+    }),
+  );
+  // A tool finished ⇒ the agent is working (and past any prompt it sat at).
+  // Without this the pill decayed to idle mid-turn during any tool longer
+  // than 8 s.
+  offs.push(await listen("hook://tool_result", () => useAgentStatusStore.getState().markActive()));
   // A turn the API refused never fires Stop — Claude sends StopFailure instead
   // (2.1.78+). Without this the pill sat "working" until the decay window gave
   // up and the reason only existed as text scrolling past in the terminal.

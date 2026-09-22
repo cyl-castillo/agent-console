@@ -187,7 +187,13 @@ export interface HooksStatus {
   scriptPath: string;
   pretooluseScriptPath: string;
   installed: boolean;
+  /// Claude approvals bridge on — either generation.
   pretooluseInstalled: boolean;
+  /// The PermissionRequest generation specifically (modal only when Claude
+  /// would ask). False on CLIs below the verified floor, which keep PreToolUse.
+  permissionrequestInstalled: boolean;
+  permissionrequestSupported: boolean;
+  notificationInstalled: boolean;
   posttooluseInstalled: boolean;
   settingsPath: string;
   /// Codex mirror: same bridge scripts, wired via ~/.codex/hooks.json.
@@ -364,6 +370,17 @@ export interface ApprovalRequest {
   /// terminal prompt (AGENT_CONSOLE_APPROVAL_TIMEOUT_MS, default 90s).
   /// Missing on requests from older hook scripts.
   timeoutMs?: number;
+  /// Which bridge raised it. `permission_request` (Claude 2.1.248+) fires only
+  /// when Claude was about to ask — a real decision point. Missing/`undefined`
+  /// = the legacy PreToolUse bridge (every tool call; Codex still uses it).
+  source?: "permission_request";
+  /// PermissionRequest only: the CLI's permission mode at the time.
+  permissionMode?: string;
+  /// PermissionRequest only: the "always allow"-style updates the CLI itself
+  /// would offer for this request (permission update entries, verbatim).
+  permissionSuggestions?: unknown[];
+  /// Agent session id the request belongs to (PermissionRequest only).
+  sessionId?: string;
 }
 
 export interface StoredRule {

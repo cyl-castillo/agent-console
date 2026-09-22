@@ -249,6 +249,7 @@ function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
   const blocked = useApprovalStore((s) => s.queue.length);
   const workingUntil = useAgentStatusStore((s) => s.workingUntil);
   const workingSince = useAgentStatusStore((s) => s.workingSince);
+  const waiting = useAgentStatusStore((s) => s.waiting);
   const [, force] = useState(0);
 
   // Tick every second while working: keeps the elapsed readout live and also
@@ -259,10 +260,31 @@ function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
     return () => clearInterval(t);
   }, [workingUntil]);
 
-  const state: "blocked" | "working" | "idle" =
-    blocked > 0 ? "blocked" : Date.now() < workingUntil ? "working" : "idle";
+  const state: "blocked" | "waiting" | "working" | "idle" =
+    blocked > 0 ? "blocked" : waiting ? "waiting" : Date.now() < workingUntil ? "working" : "idle";
 
   if (state === "idle") return null;
+
+  if (state === "waiting" && waiting) {
+    // The CLI said so itself (Notification hook): it sits at its own prompt.
+    // Not a queued approval — nothing to click here but the terminal.
+    const what =
+      waiting.kind === "permission_prompt"
+        ? "a permission prompt in the terminal"
+        : waiting.kind === "agent_needs_input"
+          ? "your input in the terminal"
+          : "an MCP dialog in the terminal";
+    return (
+      <button
+        className="sb-item sb-clickable sb-agent sb-agent-blocked"
+        onClick={onShowTerminal}
+        title={`Claude is waiting on ${what} (reported by its Notification hook). Answer it there.`}
+      >
+        <span className="sb-agent-dot" />
+        <span>waiting on you · terminal</span>
+      </button>
+    );
+  }
 
   if (state === "blocked") {
     return (

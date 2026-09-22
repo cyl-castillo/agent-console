@@ -24,6 +24,14 @@ const STOP_HOOK: &str = include_str!("../../resources/stop-hook.cjs");
 const STOPFAILURE_HOOK: &str = include_str!("../../resources/stopfailure-hook.cjs");
 const POSTTOOLUSE_HOOK: &str = include_str!("../../resources/posttooluse-hook.cjs");
 const MODELSWITCH_HOOK: &str = include_str!("../../resources/modelswitch-hook.cjs");
+const PERMISSIONREQUEST_HOOK: &str = include_str!("../../resources/permissionrequest-hook.cjs");
+const NOTIFICATION_HOOK: &str = include_str!("../../resources/notification-hook.cjs");
+
+/// Oldest Claude Code the PermissionRequest bridge is verified on (the
+/// binary this was built and tested against). Older CLIs keep the PreToolUse
+/// bridge; the daily CLI watch can lower this once an older release is
+/// checked. Verified on the CLI, not guessed from docs.
+const MIN_CLAUDE_PERMISSIONREQUEST_VERSION: (u64, u64, u64) = (2, 1, 248);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +40,14 @@ pub struct HooksStatus {
     pub script_path: PathBuf,
     pub pretooluse_script_path: PathBuf,
     pub installed: bool,
+    /// Claude approvals bridge on — either generation (PermissionRequest, or
+    /// the legacy PreToolUse entry on a CLI too old for it).
     pub pretooluse_installed: bool,
+    /// The second-generation bridge specifically (Claude 2.1.248+).
+    pub permissionrequest_installed: bool,
+    /// Whether the installed CLI supports PermissionRequest at all.
+    pub permissionrequest_supported: bool,
+    pub notification_installed: bool,
     pub posttooluse_installed: bool,
     pub settings_path: PathBuf,
     /// Codex mirror (same bridge scripts, wired via ~/.codex/hooks.json).
@@ -54,6 +69,9 @@ pub struct HooksRuntime {
     posttooluse_script_path: PathBuf,
     /// Claude-only (PostModelSwitch, 2.1.251+) — never mirrored into Codex.
     modelswitch_script_path: PathBuf,
+    /// Claude-only: PermissionRequest (approvals, 2nd gen) and Notification.
+    permissionrequest_script_path: PathBuf,
+    notification_script_path: PathBuf,
     watcher_started: Mutex<bool>,
     approvals_watcher_started: Mutex<bool>,
 }
@@ -120,6 +138,10 @@ impl HooksRuntime {
             ensure_hook_script(&cache, "posttooluse-hook.cjs", POSTTOOLUSE_HOOK)?;
         let modelswitch_script_path =
             ensure_hook_script(&cache, "modelswitch-hook.cjs", MODELSWITCH_HOOK)?;
+        let permissionrequest_script_path =
+            ensure_hook_script(&cache, "permissionrequest-hook.cjs", PERMISSIONREQUEST_HOOK)?;
+        let notification_script_path =
+            ensure_hook_script(&cache, "notification-hook.cjs", NOTIFICATION_HOOK)?;
         let binary_path = ensure_hook_binary(&cache);
         Ok(Self {
             session_dir,
@@ -130,6 +152,8 @@ impl HooksRuntime {
             stopfailure_script_path,
             posttooluse_script_path,
             modelswitch_script_path,
+            permissionrequest_script_path,
+            notification_script_path,
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
         })
@@ -172,9 +196,22 @@ impl HooksRuntime {
         let settings_path = settings_path();
         let installed = is_hook_installed(&settings_path, "UserPromptSubmit", &self.script_path)
             .unwrap_or(false);
-        let pretooluse_installed =
+        let legacy_pretooluse =
             is_hook_installed(&settings_path, "PreToolUse", &self.pretooluse_script_path)
                 .unwrap_or(false);
+        let permissionrequest_installed = is_hook_installed(
+            &settings_path,
+            "PermissionRequest",
+            &self.permissionrequest_script_path,
+        )
+        .unwrap_or(false);
+        let pretooluse_installed = legacy_pretooluse || permissionrequest_installed;
+        let notification_installed = is_hook_installed(
+            &settings_path,
+            "Notification",
+            &self.notification_script_path,
+        )
+        .unwrap_or(false);
         let posttooluse_installed =
             is_hook_installed(&settings_path, "PostToolUse", &self.posttooluse_script_path)
                 .unwrap_or(false);
@@ -194,6 +231,9 @@ impl HooksRuntime {
             pretooluse_script_path: self.pretooluse_script_path.clone(),
             installed,
             pretooluse_installed,
+            permissionrequest_installed,
+            permissionrequest_supported: permissionrequest_supported(),
+            notification_installed,
             posttooluse_installed,
             settings_path,
             codex_available: codex_available(),
@@ -229,10 +269,29 @@ impl HooksRuntime {
             &self.script_path,
             self.binary_path.as_deref(),
         );
+        // Approvals bridge: PermissionRequest where the CLI supports it (fires
+        // only when Claude would ask), PreToolUse below the floor (fires on
+        // every tool). Never both: with both, PreToolUse answers first and
+        // PermissionRequest never sees a request.
+        if permissionrequest_supported() {
+            migrate_pretooluse_to_permissionrequest(
+                &mut settings,
+                &self.pretooluse_script_path,
+                &self.permissionrequest_script_path,
+                self.binary_path.as_deref(),
+            );
+        } else {
+            upsert_hook(
+                &mut settings,
+                "PreToolUse",
+                &self.pretooluse_script_path,
+                self.binary_path.as_deref(),
+            );
+        }
         upsert_hook(
             &mut settings,
-            "PreToolUse",
-            &self.pretooluse_script_path,
+            "Notification",
+            &self.notification_script_path,
             self.binary_path.as_deref(),
         );
         upsert_hook(
@@ -311,6 +370,97 @@ impl HooksRuntime {
         if n > 0 {
             tracing::warn!("hooks: mirrored {n} claude hook(s) into codex");
         }
+        // Claude's approvals bridge may be the PermissionRequest generation,
+        // which Codex doesn't have: its mirror is still PreToolUse.
+        let claude_pr = is_hook_installed(
+            &settings_path(),
+            "PermissionRequest",
+            &self.permissionrequest_script_path,
+        )
+        .unwrap_or(false);
+        let codex_pre = is_hook_installed(
+            &codex_hooks_path(),
+            "PreToolUse",
+            &self.pretooluse_script_path,
+        )
+        .unwrap_or(false);
+        if claude_pr && !codex_pre {
+            self.install_codex(&[("PreToolUse", &self.pretooluse_script_path)])?;
+            tracing::warn!("hooks: mirrored the approvals bridge into codex as PreToolUse");
+        }
+        Ok(())
+    }
+
+    /// Auto-install the Notification observer (Claude only: Codex has no such
+    /// event), under its own marker like the other observers. It changes no
+    /// behavior — the CLI ignores its output — and gives the status bar a real
+    /// "waiting for you" signal instead of a decay window.
+    pub fn ensure_notification_autoinstalled(&self) -> AppResult<()> {
+        let marker = self
+            .script_path
+            .with_file_name(".notification-autoinstalled");
+        if marker.exists() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = if settings_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
+        } else {
+            json!({})
+        };
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        upsert_hook(
+            &mut settings,
+            "Notification",
+            &self.notification_script_path,
+            self.binary_path.as_deref(),
+        );
+        write_settings_atomic(&settings_path, &settings)?;
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
+    /// Existing installs carry the legacy PreToolUse approvals bridge on the
+    /// Claude side. Once per install (marker), and only when the CLI is new
+    /// enough, move it to PermissionRequest: same modal, same ledger, but it
+    /// runs only when Claude would actually ask — no spawn per auto-allowed
+    /// tool, no request the human never needed to see. Touches nothing when
+    /// the bridge was never enabled (it stays opt-in).
+    pub fn ensure_permissionrequest_migrated(&self) -> AppResult<()> {
+        let marker = self
+            .script_path
+            .with_file_name(".permissionrequest-migrated");
+        if marker.exists() || !permissionrequest_supported() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if !settings_path.exists() {
+            return Ok(());
+        }
+        let mut settings: Value =
+            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}));
+        if !settings.is_object() {
+            return Ok(());
+        }
+        let had_legacy =
+            is_hook_installed(&settings_path, "PreToolUse", &self.pretooluse_script_path)
+                .unwrap_or(false);
+        if had_legacy {
+            migrate_pretooluse_to_permissionrequest(
+                &mut settings,
+                &self.pretooluse_script_path,
+                &self.permissionrequest_script_path,
+                self.binary_path.as_deref(),
+            );
+            write_settings_atomic(&settings_path, &settings)?;
+            tracing::info!("hooks: approvals bridge migrated PreToolUse → PermissionRequest");
+        }
+        let _ = fs::write(&marker, b"1");
         Ok(())
     }
 
@@ -536,13 +686,15 @@ impl HooksRuntime {
     /// upsert_hook. Only rewrites events where the script is ALREADY
     /// registered — a deliberate uninstall stays uninstalled.
     pub fn normalize_hook_commands(&self) -> AppResult<()> {
-        let pairs: [(&str, &PathBuf); 6] = [
+        let pairs: [(&str, &PathBuf); 8] = [
             ("UserPromptSubmit", &self.script_path),
             ("PreToolUse", &self.pretooluse_script_path),
             ("Stop", &self.stop_script_path),
             ("StopFailure", &self.stopfailure_script_path),
             ("PostToolUse", &self.posttooluse_script_path),
             ("PostModelSwitch", &self.modelswitch_script_path),
+            ("PermissionRequest", &self.permissionrequest_script_path),
+            ("Notification", &self.notification_script_path),
         ];
         for path in [settings_path(), codex_hooks_path()] {
             if !path.exists() {
@@ -596,6 +748,8 @@ impl HooksRuntime {
                     // Codex never had is a no-op, and skipping it here would
                     // strand the entry if a future Codex ever grows one.
                     ("PostModelSwitch", &self.modelswitch_script_path),
+                    ("PermissionRequest", &self.permissionrequest_script_path),
+                    ("Notification", &self.notification_script_path),
                 ] {
                     if let Some(arr) = hooks.get_mut(key).and_then(|v| v.as_array_mut()) {
                         arr.retain(|e| {
@@ -787,6 +941,44 @@ fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path, binary: Op
         .insert("hooks".to_string(), hooks);
 }
 
+/// Does the installed Claude CLI run PermissionRequest hooks? Version-gated
+/// on `claude --version` (never on hook markers — the trust marker lesson,
+/// W5). Unknown ⇒ false: an unrecognized event key in settings.json is a
+/// risk we don't take on a CLI we couldn't identify.
+fn permissionrequest_supported() -> bool {
+    crate::services::rewind_service::claude_version()
+        .is_some_and(|v| v >= MIN_CLAUDE_PERMISSIONREQUEST_VERSION)
+}
+
+/// Replace OUR PreToolUse approvals entry with a PermissionRequest one. Pure
+/// on the settings value; returns whether a legacy entry was removed. Other
+/// PreToolUse entries (the user's own hooks) are untouched.
+fn migrate_pretooluse_to_permissionrequest(
+    settings: &mut Value,
+    pretooluse_script: &Path,
+    permissionrequest_script: &Path,
+    binary: Option<&Path>,
+) -> bool {
+    let mut removed = false;
+    if let Some(arr) = settings
+        .pointer_mut("/hooks/PreToolUse")
+        .and_then(|v| v.as_array_mut())
+    {
+        let before = arr.len();
+        arr.retain(|e| {
+            !has_command_path(e, pretooluse_script) && !has_bridge_command(e, "pretooluse")
+        });
+        removed = arr.len() != before;
+    }
+    upsert_hook(
+        settings,
+        "PermissionRequest",
+        permissionrequest_script,
+        binary,
+    );
+    removed
+}
+
 fn settings_path() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(".claude/settings.json"))
@@ -830,6 +1022,8 @@ fn bridge_mode(event: &str) -> &'static str {
         // OUR entry — sharing it would make removing one strip the other.
         "StopFailure" => "stopfailure",
         "PostModelSwitch" => "modelswitch",
+        "PermissionRequest" => "permissionrequest",
+        "Notification" => "notification",
         _ => "stop",
     }
 }
@@ -1200,6 +1394,24 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 }
             }
         }
+    } else if kind == "approval_deferred" {
+        // The console didn't answer in time: the CLI decided (own prompt or
+        // auto-deny). Close the request in the ledger as decided OUTSIDE the
+        // console — explicit, instead of a request with no outcome (58 % of
+        // them, before this).
+        let state = app.state::<AppState>();
+        let project = state.inner.lock().project.clone();
+        if let (Some(p), Some(id)) = (project, str_field(v, "approvalId")) {
+            let root = p.root.to_string_lossy();
+            let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            let _ = state.testigo.on_approval_decision(
+                root.as_ref(),
+                ts,
+                &id,
+                "external",
+                Some("not answered in the console in time — decided in the CLI prompt or auto-denied"),
+            );
+        }
     } else if kind == "tool_result" {
         // Testigo: what one tool call produced inside the open turn.
         let state = app.state::<AppState>();
@@ -1305,6 +1517,75 @@ mod tests {
     /// prune removes stale per-PID dirs, keeps the current one regardless of
     /// age, and ignores files. Cutoff is injected so the test doesn't need to
     /// fake mtimes: a future cutoff makes everything (except `keep`) stale.
+    #[test]
+    fn migration_swaps_only_our_pretooluse_entry_for_permissionrequest() {
+        let pre = Path::new("/cache/pretooluse-hook.cjs");
+        let pr = Path::new("/cache/permissionrequest-hook.cjs");
+        let bin = Path::new("/cache/bin/hook-bridge");
+        let mut settings = json!({ "hooks": { "PreToolUse": [
+            { "matcher": "*", "hooks": [{ "type": "command", "command": "\"/cache/bin/hook-bridge\" pretooluse" }] },
+            { "matcher": "Bash", "hooks": [{ "type": "command", "command": "/home/u/my-own-hook.sh" }] }
+        ]}});
+        assert!(migrate_pretooluse_to_permissionrequest(
+            &mut settings,
+            pre,
+            pr,
+            Some(bin)
+        ));
+        let pre_arr = settings
+            .pointer("/hooks/PreToolUse")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(pre_arr.len(), 1, "the user's own PreToolUse hook survives");
+        assert!(pre_arr[0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .contains("my-own-hook"));
+        let pr_arr = settings
+            .pointer("/hooks/PermissionRequest")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(pr_arr.len(), 1);
+        assert_eq!(pr_arr[0]["matcher"], "*");
+        assert_eq!(
+            pr_arr[0]["hooks"][0]["command"],
+            "\"/cache/bin/hook-bridge\" permissionrequest"
+        );
+        // Idempotent: a second pass removes nothing and adds nothing.
+        assert!(!migrate_pretooluse_to_permissionrequest(
+            &mut settings,
+            pre,
+            pr,
+            Some(bin)
+        ));
+        assert_eq!(
+            settings
+                .pointer("/hooks/PermissionRequest")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        // No bridge at all (never opted in): nothing to remove, but the
+        // caller decides whether to add — this helper only adds when asked.
+        let mut fresh = json!({});
+        assert!(!migrate_pretooluse_to_permissionrequest(
+            &mut fresh,
+            pre,
+            pr,
+            Some(bin)
+        ));
+    }
+
+    #[test]
+    fn bridge_mode_covers_the_new_events() {
+        assert_eq!(bridge_mode("PermissionRequest"), "permissionrequest");
+        assert_eq!(bridge_mode("Notification"), "notification");
+    }
+
     #[test]
     fn prune_removes_stale_session_dirs_keeps_current() {
         let nanos = SystemTime::now()

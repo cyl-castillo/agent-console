@@ -145,8 +145,18 @@ export function SkillsPanel() {
               )}
               {integrationActive && hooks?.pretooluseInstalled && (
                 <p className="wb-hint">
-                  Approvals bridge active: permission requests surface in the console and every
-                  decision is recorded.
+                  {hooks.permissionrequestInstalled
+                    ? "Approvals bridge active (PermissionRequest): the modal opens only when Claude would ask you — tools your rules already allow never stop — and every decision is recorded."
+                    : "Approvals bridge active: permission requests surface in the console and every decision is recorded."}
+                  {hooks.pretooluseInstalled &&
+                    !hooks.permissionrequestInstalled &&
+                    hooks.permissionrequestSupported && (
+                      <>
+                        {" "}
+                        Your CLI supports the newer PermissionRequest bridge; it will be migrated on
+                        the next start.
+                      </>
+                    )}
                 </p>
               )}
               {/* Codex installed AFTER the bridge was enabled: install() only

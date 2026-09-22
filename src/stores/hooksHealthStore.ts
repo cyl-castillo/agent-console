@@ -128,6 +128,8 @@ export async function attachHooksHealthListeners(): Promise<UnlistenFn> {
     "hook://turn_end",
     "hook://turn_failed",
     "hook://model_switch",
+    "hook://notification",
+    "hook://approval_deferred",
     "approval://request",
   ];
   const offs: UnlistenFn[] = [];

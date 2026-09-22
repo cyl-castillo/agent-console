@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-// Agent Console hook — PreToolUse bridge.
+// Agent Console hook — PermissionRequest bridge (Claude 2.1.x).
+//
+// Same file protocol as the PreToolUse bridge, but this event only fires
+// when Claude was about to ASK the human — tools its rules already allow
+// never reach here. Output uses PermissionRequest's nested `decision`
+// object (exit code 2 is not honored for this event).
 //
 // Gated on two env vars set by Agent Console when it spawns `claude`:
 //   AGENT_CONSOLE_BRIDGE=1
@@ -44,6 +49,7 @@ process.stdin.on("end", () => {
     cwd: input.cwd || process.cwd(),
     tool: input.tool_name || "Unknown",
     input: input.tool_input || {},
+    source: "permission_request",
     // How long this hook will wait before falling back to the terminal
     // prompt — lets the UI show an honest countdown instead of a silent
     // stall (MEJORAS-2026-07 R2.8).
@@ -54,6 +60,11 @@ process.stdin.on("end", () => {
   // session is blocked waiting on this approval.
   const termId = process.env.AGENT_CONSOLE_TERM_ID;
   if (typeof termId === "string" && termId.length > 0) req.termId = termId;
+  if (typeof input.permission_mode === "string") req.permissionMode = input.permission_mode;
+  if (Array.isArray(input.permission_suggestions) && input.permission_suggestions.length <= 16) {
+    req.permissionSuggestions = input.permission_suggestions;
+  }
+  if (typeof input.session_id === "string" && input.session_id.length > 0) req.sessionId = input.session_id;
 
   const reqPath = path.join(approvalsDir, `${id}.req.json`);
   const resPath = path.join(approvalsDir, `${id}.res.json`);
@@ -99,11 +110,8 @@ process.stdin.on("end", () => {
     try { fs.appendFileSync(path.join(sessionDir, "events.jsonl"), JSON.stringify(deferred) + "\n"); } catch { /* ignore */ }
   }
 
-  // "ask" (or timeout/garbage) defers to the agent's own permission prompt.
-  // Emit empty JSON for that: it means "no decision" to BOTH Claude and Codex
-  // (Codex documents {} as the defer shape and doesn't know "ask"), so one
-  // script serves both engines. allow/deny use the identical schema both
-  // engines share.
+  // "ask" (or timeout/garbage) ⇒ `{}`: Claude shows its own prompt, or
+  // auto-denies where it can't prompt (its documented default, not ours).
   if (!decision || !["allow", "deny"].includes(decision)) {
     process.stdout.write("{}");
     process.exit(0);
@@ -111,9 +119,11 @@ process.stdin.on("end", () => {
 
   const out = {
     hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: decision,
-      permissionDecisionReason: reason || `agent-console approval modal: ${decision}`,
+      hookEventName: "PermissionRequest",
+      decision:
+        decision === "allow"
+          ? { behavior: "allow" }
+          : { behavior: "deny", message: reason || "denied in the Agent Console approval modal" },
     },
   };
   process.stdout.write(JSON.stringify(out));
