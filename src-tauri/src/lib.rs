@@ -120,6 +120,7 @@ pub fn run() {
             commands::snapshot::snapshot_restore,
             commands::snapshot::snapshot_delete,
             commands::rewind::turn_rewind,
+            commands::rewind::claude_session_exists,
             commands::worktree::worktree_create,
             commands::worktree::worktree_suggest_branch,
             commands::worktree::worktree_status,

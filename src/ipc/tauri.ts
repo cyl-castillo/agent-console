@@ -154,6 +154,10 @@ export const ipc = {
   // post-turn snapshot AND fork the Claude transcript truncated after that
   // turn (M9). The restore is the core action; a failed fork degrades into
   // forkError on the result instead of failing the call.
+  /// Whether Claude has a transcript for this id on disk (see
+  /// `claude_session_exists`). Decides `--resume` vs `--session-id` on launch.
+  claudeSessionExists: (sessionId: string) =>
+    invoke<boolean>("claude_session_exists", { sessionId }),
   turnRewind: (args: {
     repo?: string;
     commitSha: string;

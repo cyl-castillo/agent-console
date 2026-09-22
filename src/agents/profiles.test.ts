@@ -53,6 +53,54 @@ describe("CLAUDE buildLaunch", () => {
   it("rejects a shell-unsafe session id (falls back to fresh)", () => {
     const { cmd } = claude.buildLaunch({ agentSessionId: "$(evil)", hasScrollback: true });
     expect(cmd).toBe("claude");
+    // …even when the id is "ours" and unused: never interpolate it.
+    const fresh = claude.buildLaunch({
+      agentSessionId: "$(evil)",
+      transcriptExists: false,
+      hasScrollback: false,
+    });
+    expect(fresh.cmd).toBe("claude");
+  });
+
+  it("reserves an id the console assigned when no conversation exists for it yet (T1)", () => {
+    const { cmd, note } = claude.buildLaunch({
+      agentSessionId: UUID,
+      transcriptExists: false,
+      model: "sonnet",
+      hasScrollback: false,
+    });
+    expect(cmd).toBe(`claude --session-id ${UUID} --model sonnet`);
+    expect(note).toBe("starting");
+  });
+
+  it("resumes when the transcript exists — or when nobody could tell", () => {
+    expect(
+      claude.buildLaunch({ agentSessionId: UUID, transcriptExists: true, hasScrollback: true }).cmd,
+    ).toBe(`claude --resume ${UUID}`);
+    expect(
+      claude.buildLaunch({ agentSessionId: UUID, transcriptExists: undefined, hasScrollback: true })
+        .cmd,
+    ).toBe(`claude --resume ${UUID}`);
+  });
+
+  it("names the honest note when our id had no conversation but the terminal has history", () => {
+    const { note } = claude.buildLaunch({
+      agentSessionId: UUID,
+      transcriptExists: false,
+      hasScrollback: true,
+    });
+    expect(note).toContain("no conversation on disk");
+  });
+});
+
+describe("CODEX ignores transcriptExists (no --session-id equivalent)", () => {
+  it("still resumes by id whatever the flag says", () => {
+    const { cmd } = profileFor("codex").buildLaunch({
+      agentSessionId: UUID,
+      transcriptExists: false,
+      hasScrollback: true,
+    });
+    expect(cmd).toBe(`codex resume ${UUID}`);
   });
 });
 

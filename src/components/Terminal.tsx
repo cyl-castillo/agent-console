@@ -308,11 +308,32 @@ export function Terminal({ session, visible }: Props) {
               const loginCmd = await resolveLoginCmd(profile);
               return { cmd: loginCmd, label: loginCmd, note: "fixing login —" };
             })()
-          : profile.buildLaunch({
-              agentSessionId: session.agentSessionId,
-              model: session.model,
-              hasScrollback: Boolean(session.initialScrollback),
-            });
+          : await (async () => {
+              // T1: the console owns the Claude session id. A terminal that
+              // never had one gets a fresh uuid NOW, before the CLI starts,
+              // so hooks, rewind and the ledger correlate from turn 0 and a
+              // restart never "starts fresh (no session id)" again. Whether
+              // to `--resume` it or `--session-id` it is a fact on disk the
+              // backend answers; an IPC failure leaves it unknown, which
+              // keeps the pre-T1 behaviour (resume when we have an id).
+              let agentSessionId = session.agentSessionId;
+              let transcriptExists: boolean | undefined;
+              if (profile.kind === "claude") {
+                if (!agentSessionId) {
+                  agentSessionId = crypto.randomUUID();
+                  useTerminalsStore.getState().setAgentSessionId(session.id, agentSessionId);
+                }
+                transcriptExists = await ipc
+                  .claudeSessionExists(agentSessionId)
+                  .catch(() => undefined);
+              }
+              return profile.buildLaunch({
+                agentSessionId,
+                transcriptExists,
+                model: session.model,
+                hasScrollback: Boolean(session.initialScrollback),
+              });
+            })();
         const tid = termId;
         // Fresh worktree sessions may carry a one-shot install command (from
         // .claude/worktree-setup.json). Chain it before the agent launch so it
