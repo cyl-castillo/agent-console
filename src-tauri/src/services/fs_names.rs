@@ -13,6 +13,30 @@
 /// project paths clear of Windows' 260-char default path limit.
 pub const MAX_COMPONENT_LEN: usize = 80;
 
+/// The slug Claude Code derives from a project's absolute path for its
+/// per-project state under `~/.claude/projects/<slug>`: EVERY character that
+/// is not ASCII alphanumeric becomes `-` — separators, dots, and crucially
+/// the Windows drive colon (`C:\Users\x` → `C--Users-x`). The old
+/// separator-only munge kept the `:`, so creating the dir failed on Windows
+/// with os error 123, and read-side lookups (usage, transcripts) never
+/// matched the dirs Claude Code actually writes.
+pub fn project_slug(project_root: &std::path::Path) -> String {
+    let abs = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    let mut s = abs.to_string_lossy().into_owned();
+    // Windows canonicalize() returns verbatim paths (`\\?\C:\…`, `\\?\UNC\…`);
+    // Claude Code slugs the plain cwd, so drop the prefix before munging.
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        s = format!(r"\\{rest}");
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        s = rest.to_owned();
+    }
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
 /// Why `name` can't become a single file/dir name on every platform we ship
 /// to, or `None` when it is safe. Callers wrap the reason in their own error.
 pub fn component_problem(name: &str) -> Option<String> {
@@ -122,6 +146,38 @@ mod tests {
         ] {
             assert_eq!(component_problem(ok), None, "{ok}");
         }
+    }
+
+    #[test]
+    fn project_slug_matches_claude_codes_encoding() {
+        use std::path::Path;
+        // Non-alphanumerics (separators, dots) all become `-`, like Claude
+        // Code's own project dirs (`/home/u/.config/X` → `-home-u--config-X`).
+        // Paths that don't exist skip canonicalize and munge as-is.
+        assert_eq!(
+            project_slug(Path::new("/home/u/.config/My App")),
+            "-home-u--config-My-App"
+        );
+        // Windows shapes, exercised as raw strings on any host: the verbatim
+        // prefix is dropped and the drive colon munges to `-`, never surviving
+        // into a directory name (the os error 123 case).
+        assert_eq!(
+            project_slug(Path::new(r"\\?\C:\Users\carlos\proj")),
+            "C--Users-carlos-proj"
+        );
+        assert_eq!(
+            project_slug(Path::new(r"C:\Users\carlos\proj")),
+            "C--Users-carlos-proj"
+        );
+        assert_eq!(
+            project_slug(Path::new(r"\\?\UNC\server\share\p")),
+            "--server-share-p"
+        );
+        let s = project_slug(Path::new(r"\\?\C:\Users\ñandú\proj"));
+        assert!(
+            s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+            "{s}"
+        );
     }
 
     #[test]
