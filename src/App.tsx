@@ -64,6 +64,7 @@ import { StatusBar } from "./components/StatusBar";
 import { ShortcutsModal } from "./components/ShortcutsModal";
 import { ModulesModal } from "./components/ModulesModal";
 import { Toasts } from "./components/Toasts";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { useThemeStore } from "./stores/themeStore";
 import { Icon } from "./components/Icon";
 import { usePaletteStore } from "./stores/paletteStore";
@@ -601,6 +602,8 @@ export default function App() {
         {showWizard && <WelcomeWizard onClose={() => setShowWizard(false)} />}
         <UpdateBanner />
         <Toasts />
+        <ConfirmDialog />
+        <ConfirmDialog />
       </>
     );
   }

@@ -9,6 +9,7 @@ import { useModelStore, isValidModel, modelLabel } from "../stores/modelStore";
 import { AGENT_PROFILES, profileFor, DEFAULT_AGENT, type AgentKind } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
 import type { BranchInfo } from "../types/domain";
+import { confirmDialog } from "../stores/confirmStore";
 
 /// The worktree opt-in from the chooser: branch-name component + base branch.
 export interface WorktreePick {
@@ -133,7 +134,12 @@ export function SessionList() {
               onClose={async () => {
                 if (
                   s.status === "live" &&
-                  !confirm(`Close session "${s.name}"? Process will be killed.`)
+                  !(await confirmDialog({
+                    title: "Close session",
+                    message: `Close session "${s.name}"? Process will be killed.`,
+                    confirmLabel: "Close",
+                    danger: true,
+                  }))
                 )
                   return;
                 await close(s.id);
@@ -178,7 +184,14 @@ export function SessionList() {
                   <button
                     className="session-close"
                     onClick={async () => {
-                      if (confirm(`Delete archived session "${s.name}"? This is permanent.`))
+                      if (
+                        await confirmDialog({
+                          title: "Delete archived session",
+                          message: `Delete archived session "${s.name}"? This is permanent.`,
+                          confirmLabel: "Delete",
+                          danger: true,
+                        })
+                      )
                         await close(s.id);
                     }}
                     title="Delete permanently"

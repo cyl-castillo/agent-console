@@ -8,6 +8,7 @@ import { useUIStore } from "../stores/uiStore";
 import type { Skill } from "../types/domain";
 import type { TermInputDetail } from "./Terminal";
 import { MarkdownText } from "./MarkdownText";
+import { confirmDialog } from "../stores/confirmStore";
 
 type KindFilter = "all" | "skill" | "command" | "agent";
 
@@ -414,14 +415,18 @@ function EventRow({ event, onRestore }: { event: PromptEvent; onRestore: (sha: s
         <button
           className="wb-event-restore"
           title="Restore the working tree to before this turn (a backup is taken first)"
-          onClick={() => {
+          onClick={async () => {
             if (
               event.snapshotCommitSha &&
-              confirm(
-                "Restore the working tree to before this turn?\n\n" +
+              (await confirmDialog({
+                title: "Restore working tree",
+                message:
+                  "Restore the working tree to before this turn?\n\n" +
                   "This discards ALL changes made after this point — not just this turn's. " +
                   "A backup is taken first, so you can undo from the command palette.",
-              )
+                confirmLabel: "Restore",
+                danger: true,
+              }))
             ) {
               onRestore(event.snapshotCommitSha);
             }

@@ -4,6 +4,8 @@ import { useVaultStore } from "../stores/vaultStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { PanelError } from "./PanelError";
 import type { VaultEntryView } from "../types/domain";
+import { confirmDialog } from "../stores/confirmStore";
+import { useToastStore } from "../stores/toastStore";
 
 type Scope = "project" | "global";
 
@@ -181,7 +183,7 @@ function VaultRow({
       const v = await reveal(entry.scope, entry.key);
       setShown(v);
     } catch (e) {
-      alert(`Could not reveal: ${e}`);
+      useToastStore.getState().show(`Could not reveal: ${e}`, "error");
     } finally {
       setRevealing(false);
     }
@@ -194,12 +196,19 @@ function VaultRow({
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch (e) {
-      alert(`Could not copy: ${e}`);
+      useToastStore.getState().show(`Could not copy: ${e}`, "error");
     }
   };
 
-  const onDelete = () => {
-    if (confirm(`Delete vault entry "${entry.key}"? This cannot be undone.`)) {
+  const onDelete = async () => {
+    if (
+      await confirmDialog({
+        title: "Delete vault entry",
+        message: `Delete vault entry "${entry.key}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      })
+    ) {
       remove(entry.scope, entry.key);
     }
   };
