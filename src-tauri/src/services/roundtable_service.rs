@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use crate::error::{AppError, AppResult};
-use crate::services::engine_runner::{self, Engine, RunCtx, ToolPolicy};
+use crate::services::engine_runner::{self, ChildSlot, Engine, RunCtx, ToolPolicy};
 use crate::services::proc;
 
 /// One conversation participant. Either an AI agent or, for the special id
@@ -137,6 +137,15 @@ struct RoundtableActivity {
 struct RunControl {
     paused: AtomicBool,
     stopped: AtomicBool,
+    /// The turn's live child process, parked by the engine runner so stop /
+    /// discard / the idle watchdog can kill it. Flagging `stopped` alone only
+    /// asked the loop not to START another turn; the running `claude`/`codex`
+    /// kept its blocking thread until it finished by itself — forever, for a
+    /// hung one.
+    child: ChildSlot,
+    /// Wall-clock ms of the last activity event from the current turn (0 =
+    /// none yet). The idle watchdog kills a turn that goes quiet too long.
+    last_activity_ms: AtomicU64,
     /// Whether a driver loop is currently active (guards against double-spawn).
     driving: AtomicBool,
     /// Last completed AI turn; human messages are stamped with it so they sort
@@ -623,6 +632,8 @@ impl RoundtableService {
             branch,
             rooms: self.rooms.clone(),
             notice,
+            child: ChildSlot::default(),
+            last_activity_ms: AtomicU64::new(0),
         });
         self.runs.lock().insert(id.clone(), control.clone());
 
@@ -715,6 +726,8 @@ impl RoundtableService {
             repo,
             rooms: self.rooms.clone(),
             notice,
+            child: ChildSlot::default(),
+            last_activity_ms: AtomicU64::new(0),
         });
         self.runs.lock().insert(id.clone(), control);
         Ok(id)
@@ -811,6 +824,8 @@ impl RoundtableService {
     pub fn stop(&self, id: &str) -> AppResult<()> {
         if let Some(c) = self.runs.lock().get(id).cloned() {
             c.stopped.store(true, Ordering::SeqCst);
+            // Stop means now: the turn in flight dies with its process.
+            engine_runner::kill_parked(&c.child);
         }
         Ok(())
     }
@@ -822,6 +837,9 @@ impl RoundtableService {
     pub fn discard(&self, id: &str) -> AppResult<()> {
         if let Some(c) = self.runs.lock().remove(id) {
             c.stopped.store(true, Ordering::SeqCst);
+            // Kill BEFORE tearing down the worktree: a live agent would keep
+            // writing into a directory we're deleting.
+            engine_runner::kill_parked(&c.child);
             if let Some(wt) = &c.worktree {
                 remove_room_worktree(&c.repo, wt);
             }
@@ -918,6 +936,29 @@ impl RoundtableService {
 
 /// One terminal state of a driver loop. Carries how the loop ended so the tail
 /// can emit the right status after `driving` is cleared.
+/// Default silence a room turn may keep before the watchdog kills it. Long
+/// tool runs (a full build) emit nothing until they finish, so this is
+/// generous; a genuinely hung CLI still dies well within the hour.
+const DEFAULT_TURN_IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const WATCHDOG_TICK: Duration = Duration::from_secs(5);
+
+/// `AGENT_CONSOLE_ROOM_TURN_IDLE_SECS` overrides the default; anything that
+/// isn't a positive integer keeps it.
+fn turn_idle_timeout() -> Duration {
+    idle_timeout_from(
+        std::env::var("AGENT_CONSOLE_ROOM_TURN_IDLE_SECS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn idle_timeout_from(raw: Option<&str>) -> Duration {
+    raw.and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_TURN_IDLE_TIMEOUT)
+}
+
 enum DriveEnd {
     /// Reached the turn target — the conversation pauses for the human, who can
     /// continue it. The run stays alive.
@@ -1004,8 +1045,34 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         let app_t = app.clone();
         let id_t = id.clone();
         let author_t = participant.id.clone();
+        // Idle watchdog: a headless turn that produces nothing for
+        // `turn_idle_timeout()` is hung (network stall, wedged CLI) — kill it
+        // instead of holding a blocking thread and a "running" room forever.
+        // The frontend's staleness clock only *shows* the silence; this ends it.
+        control.last_activity_ms.store(now_ms(), Ordering::SeqCst);
+        let turn_done = Arc::new(AtomicBool::new(false));
+        let timed_out = Arc::new(AtomicBool::new(false));
+        {
+            let control = control.clone();
+            let turn_done = turn_done.clone();
+            let timed_out = timed_out.clone();
+            let limit = turn_idle_timeout();
+            std::thread::spawn(move || {
+                while !turn_done.load(Ordering::SeqCst) {
+                    std::thread::sleep(WATCHDOG_TICK);
+                    let last = control.last_activity_ms.load(Ordering::SeqCst);
+                    if now_ms().saturating_sub(last) > limit.as_millis() as u64 {
+                        timed_out.store(true, Ordering::SeqCst);
+                        engine_runner::kill_parked(&control.child);
+                        return;
+                    }
+                }
+            });
+        }
+        let control_t = control.clone();
         let outcome = tokio::task::spawn_blocking(move || {
             let on_activity = |kind: &str, label: &str, text: &str| {
+                control_t.last_activity_ms.store(now_ms(), Ordering::SeqCst);
                 emit_activity(&app_t, &id_t, &author_t, turn, kind, label, text);
             };
             let ctx = RunCtx {
@@ -1014,15 +1081,28 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                 tools,
                 prompt: &prompt,
                 resume: resume_id.as_deref(),
+                child_slot: Some(&control_t.child),
             };
             engine_runner::runner_for(engine).run(&ctx, &on_activity)
         })
         .await;
+        turn_done.store(true, Ordering::SeqCst);
 
         let outcome = match outcome {
             Ok(Ok(o)) => o,
+            // The human stopped/discarded the room mid-turn: the runner reports
+            // the killed child as an error, but the room's end is "stopped".
+            Ok(Err(_)) if control.stopped.load(Ordering::SeqCst) => break DriveEnd::Stopped,
             Ok(Err(e)) => {
-                emit_status(&app, &id, "error", turn, total_tokens, Some(e.to_string()));
+                let msg = if timed_out.load(Ordering::SeqCst) {
+                    format!(
+                        "turn killed after {} min without output (set AGENT_CONSOLE_ROOM_TURN_IDLE_SECS to change): {e}",
+                        turn_idle_timeout().as_secs() / 60
+                    )
+                } else {
+                    e.to_string()
+                };
+                emit_status(&app, &id, "error", turn, total_tokens, Some(msg));
                 break DriveEnd::Errored;
             }
             Err(e) => {
@@ -1788,6 +1868,19 @@ fn parse_remote(url: &str) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn idle_timeout_env_override_only_accepts_positive_seconds() {
+        use super::{idle_timeout_from, DEFAULT_TURN_IDLE_TIMEOUT};
+        assert_eq!(idle_timeout_from(None), DEFAULT_TURN_IDLE_TIMEOUT);
+        assert_eq!(idle_timeout_from(Some("")), DEFAULT_TURN_IDLE_TIMEOUT);
+        assert_eq!(idle_timeout_from(Some("0")), DEFAULT_TURN_IDLE_TIMEOUT);
+        assert_eq!(idle_timeout_from(Some("abc")), DEFAULT_TURN_IDLE_TIMEOUT);
+        assert_eq!(
+            idle_timeout_from(Some(" 90 ")),
+            std::time::Duration::from_secs(90)
+        );
+    }
+
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 

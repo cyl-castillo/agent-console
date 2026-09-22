@@ -54,6 +54,22 @@ pub enum ToolPolicy {
     Full,
 }
 
+/// Where a runner parks the child process for the duration of a turn, so the
+/// orchestrator can kill it from another thread (stop, discard, idle
+/// watchdog). The runner puts the `Child` in right after spawn and takes it
+/// back to `wait()`; a kill in between makes the read loop hit EOF and the
+/// wait report the signal. Nobody but the runner ever *takes* the child —
+/// callers only `kill()` through the guard — so there is no reap race.
+pub type ChildSlot = parking_lot::Mutex<Option<std::process::Child>>;
+
+/// Kill whatever child is parked in `slot`, if any. Idempotent; a child that
+/// already exited is not an error.
+pub fn kill_parked(slot: &ChildSlot) {
+    if let Some(child) = slot.lock().as_mut() {
+        let _ = child.kill();
+    }
+}
+
 /// Everything a single headless turn needs, independent of engine.
 pub struct RunCtx<'a> {
     /// Working directory the turn runs in.
@@ -66,6 +82,9 @@ pub struct RunCtx<'a> {
     pub prompt: &'a str,
     /// Resume id from a prior turn of the SAME participant, to retain its memory.
     pub resume: Option<&'a str>,
+    /// Where to park the child so the caller can kill it mid-turn. `None`
+    /// keeps it private to the runner (nothing can interrupt the turn).
+    pub child_slot: Option<&'a ChildSlot>,
 }
 
 /// Normalized result of one turn, regardless of engine.
@@ -100,39 +119,47 @@ pub fn runner_for(engine: Engine) -> &'static dyn EngineRunner {
 
 pub struct ClaudeRunner;
 
+/// `claude -p` argv for one turn. The prompt is NOT here: it travels over
+/// stdin (bare `-p` reads it), which keeps a multi-kilobyte room prompt out of
+/// argv — Windows caps a command line at 32 KiB and fails the spawn with
+/// os error 206 past it, the same failure #181 fixed for the scheduler,
+/// advisor and learning runs.
+fn claude_args(ctx: &RunCtx) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "-p".into(),
+        "--output-format".into(),
+        "stream-json".into(),
+        "--verbose".into(),
+        // Stream token deltas, not just whole messages — so the staleness
+        // clock can tell a healthy 40s reasoning burst from a hang. The
+        // store coalesces these deltas back into one growing block.
+        "--include-partial-messages".into(),
+        "--model".into(),
+        ctx.model.into(),
+    ];
+    match ctx.tools {
+        // No flag: headless `claude -p` allows read-style tools without
+        // approval and auto-denies edits/shell (it can't prompt) — exactly
+        // read-only.
+        ToolPolicy::ReadOnly => {}
+        ToolPolicy::AcceptEdits => {
+            args.push("--permission-mode".into());
+            args.push("acceptEdits".into());
+        }
+        ToolPolicy::Full => args.push("--dangerously-skip-permissions".into()),
+    }
+    if let Some(r) = ctx.resume {
+        args.push("--resume".into());
+        args.push(r.into());
+    }
+    args
+}
+
 impl EngineRunner for ClaudeRunner {
     fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
-        let mut args: Vec<String> = vec![
-            "-p".into(),
-            ctx.prompt.into(),
-            "--output-format".into(),
-            "stream-json".into(),
-            "--verbose".into(),
-            // Stream token deltas, not just whole messages — so the staleness
-            // clock can tell a healthy 40s reasoning burst from a hang. The
-            // store coalesces these deltas back into one growing block.
-            "--include-partial-messages".into(),
-            "--model".into(),
-            ctx.model.into(),
-        ];
-        match ctx.tools {
-            // No flag: headless `claude -p` allows read-style tools without
-            // approval and auto-denies edits/shell (it can't prompt) — exactly
-            // read-only.
-            ToolPolicy::ReadOnly => {}
-            ToolPolicy::AcceptEdits => {
-                args.push("--permission-mode".into());
-                args.push("acceptEdits".into());
-            }
-            ToolPolicy::Full => args.push("--dangerously-skip-permissions".into()),
-        }
-        if let Some(r) = ctx.resume {
-            args.push("--resume".into());
-            args.push(r.into());
-        }
-
+        let args = claude_args(ctx);
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        let mut cmd = claude_cli::command(&arg_refs);
+        let mut cmd = claude_cli::command_with_stdin(&arg_refs);
         cmd.current_dir(ctx.cwd);
         let mut child = cmd.spawn().map_err(|e| {
             AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?"))
@@ -143,6 +170,18 @@ impl EngineRunner for ClaudeRunner {
             .take()
             .ok_or_else(|| AppError::Other("claude produced no stdout pipe".into()))?;
         let err_handle = drain_stderr(child.stderr.take());
+        // Prompt over stdin; closing it is what tells `claude -p` the prompt
+        // is complete.
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Other("claude produced no stdin pipe".into()))?;
+        stdin
+            .write_all(ctx.prompt.as_bytes())
+            .map_err(|e| AppError::Other(format!("claude stdin write failed: {e}")))?;
+        drop(stdin);
+        let local = ChildSlot::default();
+        let slot = park(ctx.child_slot, &local, child);
 
         let mut final_text = String::new();
         let mut session_id: Option<String> = None;
@@ -229,7 +268,7 @@ impl EngineRunner for ClaudeRunner {
             }
         }
 
-        finish(child.wait(), err_handle, "claude")?;
+        finish(unpark(slot)?.wait(), err_handle, "claude")?;
         Ok(TurnOutput {
             text: final_text,
             session_id,
@@ -269,6 +308,8 @@ impl EngineRunner for CodexRunner {
             .write_all(ctx.prompt.as_bytes())
             .map_err(|e| AppError::Other(format!("codex stdin write failed: {e}")))?;
         drop(stdin);
+        let local = ChildSlot::default();
+        let slot = park(ctx.child_slot, &local, child);
 
         let mut final_text = String::new();
         let mut session_id: Option<String> = None;
@@ -331,7 +372,7 @@ impl EngineRunner for CodexRunner {
             }
         }
 
-        finish(child.wait(), err_handle, "codex")?;
+        finish(unpark(slot)?.wait(), err_handle, "codex")?;
         // Codex does not report a dollar cost — only token usage.
         Ok(TurnOutput {
             text: final_text,
@@ -381,6 +422,26 @@ fn codex_exec_args(ctx: &RunCtx) -> Vec<String> {
     // escaped safely. `-` asks Codex to read the prompt from stdin instead.
     args.push("-".into());
     args
+}
+
+/// Park the child where the caller can reach it (or in `local` when the
+/// caller passed no slot). Returns the slot to `unpark` from.
+fn park<'a>(
+    shared: Option<&'a ChildSlot>,
+    local: &'a ChildSlot,
+    child: std::process::Child,
+) -> &'a ChildSlot {
+    let slot = shared.unwrap_or(local);
+    *slot.lock() = Some(child);
+    slot
+}
+
+/// Take the child back to wait on it. Empty means something other than the
+/// runner reaped it, which the contract forbids — report rather than hang.
+fn unpark(slot: &ChildSlot) -> AppResult<std::process::Child> {
+    slot.lock()
+        .take()
+        .ok_or_else(|| AppError::Other("turn child vanished from its slot".into()))
 }
 
 /// Drain a child's stderr on its own thread so a chatty stream can't fill the
@@ -524,6 +585,67 @@ mod tests {
     }
 
     #[test]
+    fn claude_argv_carries_no_prompt_and_reads_stdin() {
+        let prompt = "A room prompt\nlong enough to matter & full of | shell < chars >";
+        let ctx = RunCtx {
+            cwd: std::path::Path::new("."),
+            model: "opus",
+            tools: ToolPolicy::AcceptEdits,
+            prompt,
+            resume: Some("sess-1"),
+            child_slot: None,
+        };
+        let args = claude_args(&ctx);
+        assert_eq!(args.first().map(String::as_str), Some("-p"));
+        // Bare `-p`: the next argument is a flag, not the prompt.
+        assert_eq!(args.get(1).map(String::as_str), Some("--output-format"));
+        assert!(!args.iter().any(|a| a.contains("room prompt")));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "acceptEdits"]));
+        assert!(args.windows(2).any(|w| w == ["--resume", "sess-1"]));
+        assert!(args.windows(2).any(|w| w == ["--model", "opus"]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parked_child_can_be_killed_from_outside_and_unpark_reports_the_signal() {
+        let shared = ChildSlot::default();
+        let local = ChildSlot::default();
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("sleep exists on unix");
+        let slot = park(Some(&shared), &local, child);
+        assert!(std::ptr::eq(slot, &shared), "shared slot wins over local");
+        assert!(local.lock().is_none());
+        // Another thread (stop / discard / watchdog) kills it through the slot.
+        kill_parked(&shared);
+        kill_parked(&shared); // idempotent
+        let mut child = unpark(&shared).unwrap();
+        let status = child.wait().unwrap();
+        assert!(!status.success());
+        assert!(unpark(&shared).is_err(), "taken once, gone after");
+    }
+
+    #[test]
+    fn without_a_shared_slot_the_local_one_holds_the_child() {
+        let local = ChildSlot::default();
+        let child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+            .args(if cfg!(windows) {
+                vec!["/C", "exit 0"]
+            } else {
+                vec![]
+            })
+            .spawn();
+        let Ok(child) = child else { return };
+        let slot = park(None, &local, child);
+        assert!(std::ptr::eq(slot, &local));
+        assert!(unpark(slot).is_ok());
+    }
+
+    #[test]
     fn codex_exec_reads_prompt_from_stdin_for_fresh_turn() {
         let prompt = "Investigate this room turn\nwith symbols like & | < >";
         let ctx = RunCtx {
@@ -532,6 +654,7 @@ mod tests {
             tools: ToolPolicy::ReadOnly,
             prompt,
             resume: None,
+            child_slot: None,
         };
         let args = codex_exec_args(&ctx);
 
@@ -549,6 +672,7 @@ mod tests {
             tools: ToolPolicy::ReadOnly,
             prompt,
             resume: Some("thread-123"),
+            child_slot: None,
         };
         let args = codex_exec_args(&ctx);
 
@@ -574,6 +698,7 @@ mod tests {
             tools: ToolPolicy::ReadOnly,
             prompt: "Reply with exactly: PONG. Nothing else.",
             resume: None,
+            child_slot: None,
         };
         let activity_kinds = std::cell::RefCell::new(Vec::<String>::new());
         let sink = |kind: &str, _label: &str, _text: &str| {
