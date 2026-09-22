@@ -39,6 +39,7 @@ use crate::services::embedding_service::{self, model_ready, Embedder};
 use crate::services::projects_service;
 use crate::services::semantic_index::{self, SearchHit};
 use crate::services::work_profile;
+use crate::state::AppState;
 
 /// How many hits may be injected into one prompt. Deliberately small: the
 /// point is a nudge in the right direction, not a memory dump.
@@ -148,7 +149,7 @@ pub fn set_enabled(project_root: &str, enabled: bool) -> AppResult<()> {
 /// Map a session cwd onto a known project root (longest match wins, so a
 /// worktree under a project resolves to the project). Falls back to the cwd
 /// itself — a project outside the recents list may still have an index.
-fn resolve_project_root(cwd: &str, known_roots: &[String]) -> String {
+pub fn resolve_project_root(cwd: &str, known_roots: &[String]) -> String {
     let norm = cwd.trim_end_matches(['/', '\\']);
     known_roots
         .iter()
@@ -540,6 +541,12 @@ fn serve_connection(stream: &mut TcpStream, app: &tauri::AppHandle) {
             })
             .to_string();
             remember(record.clone());
+            // Park the doc ids for the prompt that is about to open its turn
+            // (see TestigoService::pending_injections for why not "now").
+            if let Some(t) = &term_id {
+                let ids: Vec<String> = record.hits.iter().map(|h| h.id.clone()).collect();
+                app.state::<AppState>().testigo.note_injection(t, ids);
+            }
             let _ = app.emit("inject://done", &record);
             respond_json(stream, &payload)
         }
