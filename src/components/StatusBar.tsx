@@ -8,6 +8,10 @@ import { useModelStore, modelLabel } from "../stores/modelStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import { useApprovalStore } from "../stores/approvalStore";
 import { useAgentStatusStore } from "../stores/agentStatusStore";
+import { useToastStore } from "../stores/toastStore";
+import { useSkillsStore } from "../stores/skillsStore";
+import { CHECK_INTERVAL_MS, useHooksHealthStore } from "../stores/hooksHealthStore";
+import { formatAge } from "../lib/hooksHealth";
 import { useInjectStore } from "../stores/injectStore";
 import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
@@ -94,6 +98,7 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
         />
       )}
       <VoicePill />
+      <HooksPill />
       <span className="sb-item sb-muted" title="Live PTY sessions">
         {liveCount} live
       </span>
@@ -127,6 +132,76 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
       )}
     </footer>
   );
+}
+
+/// Is the CLI→console bridge alive? Four states, two of them actionable:
+/// off (hooks not installed — click installs), silent (installed, nothing
+/// seen yet), ok (last event N ago), stale (a live Claude session swallowed
+/// prompts with no hook event — click reinstalls; the toast explains trust).
+function HooksPill() {
+  const verdict = useHooksHealthStore((s) => s.verdict);
+  const check = useHooksHealthStore((s) => s.check);
+  const install = useSkillsStore((s) => s.install);
+  const [, force] = useState(0);
+
+  useEffect(() => {
+    void check();
+    const t = setInterval(() => {
+      void check();
+      force((n) => n + 1);
+    }, CHECK_INTERVAL_MS);
+    return () => clearInterval(t);
+  }, [check]);
+
+  const reinstall = async () => {
+    await install();
+    useToastStore
+      .getState()
+      .show("Hooks reinstalled. Send a prompt in the terminal to confirm they report.", "info");
+    void check();
+  };
+
+  switch (verdict.kind) {
+    case "off":
+      return (
+        <button
+          className="sb-item sb-clickable sb-warn"
+          onClick={() => void reinstall()}
+          title="Hooks are not installed: no approval modal, no proof ledger, no snapshots, no session resume. Click to install them (~/.claude/settings.json and, if present, ~/.codex/hooks.json)."
+        >
+          hooks off
+        </button>
+      );
+    case "silent":
+      return (
+        <span
+          className="sb-item sb-muted"
+          title="Hooks are installed. The first prompt you send inside a terminal confirms they report; until then there is nothing to judge."
+        >
+          hooks · no events yet
+        </span>
+      );
+    case "stale":
+      return (
+        <button
+          className="sb-item sb-clickable sb-agent sb-agent-blocked"
+          onClick={() => void reinstall()}
+          title={`Prompts were sent in ${verdict.termIds.length} terminal${verdict.termIds.length === 1 ? "" : "s"} with a live Claude session and no hook event arrived. Approvals, proof, snapshots and resume are blind there. Most often the folder isn't trusted by Claude Code (hooks silently skip untrusted directories): run \`claude\` there once and accept the trust prompt. Click to reinstall hooks in case settings were overwritten.`}
+        >
+          <span className="sb-agent-dot" />
+          <span>hooks · not reporting</span>
+        </button>
+      );
+    case "ok":
+      return (
+        <span
+          className="sb-item sb-muted"
+          title={`Hooks are reporting. Last event ${formatAge(Date.now() - verdict.lastEventMs)} ago.`}
+        >
+          hooks · {formatAge(Date.now() - verdict.lastEventMs)}
+        </span>
+      );
+  }
 }
 
 /// Format elapsed working time compactly: 42s / 2m 05s / 1h 12m.

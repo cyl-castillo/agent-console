@@ -6,6 +6,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "@xterm/xterm/css/xterm.css";
 
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
+import { useHooksHealthStore } from "../stores/hooksHealthStore";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useToastStore } from "../stores/toastStore";
@@ -342,7 +343,11 @@ export function Terminal({ session, visible }: Props) {
       }
 
       term.onData((data) => {
-        if (termId) ipc.termWrite(termId, data).catch(() => {});
+        if (!termId) return;
+        ipc.termWrite(termId, data).catch(() => {});
+        // Hooks health: what the user submits is the hook-independent half of
+        // "did the bridge see this prompt?" (see lib/hooksHealth.ts).
+        useHooksHealthStore.getState().noteInput(termId, data);
       });
       // Dedupe resize calls: conpty (Windows) re-emits the whole buffer on
       // resize, and that redraw can change DOM metrics, which would re-trigger
