@@ -192,7 +192,7 @@ fn claude_auth() -> EngineAuth {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn preflight_check() -> Preflight {
     let mut tools = vec![probe("claude"), probe("node"), probe("git"), probe("codex")];
     let node_found = tools.iter().any(|t| t.name == "node" && t.found);
@@ -220,7 +220,7 @@ pub fn preflight_check() -> Preflight {
 /// question couldn't be answered — CLI missing, or older than the 2.1.41 that
 /// made `claude auth` scriptable — and callers must treat that as "unknown",
 /// not as "logged out".
-#[tauri::command]
+#[tauri::command(async)]
 pub fn claude_auth_status() -> Option<crate::services::claude_cli::AuthStatus> {
     crate::services::claude_cli::auth_status()
 }

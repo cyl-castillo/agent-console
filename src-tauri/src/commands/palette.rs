@@ -6,7 +6,7 @@ use crate::state::AppState;
 
 const DEFAULT_LIMIT: usize = 10_000;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn palette_index_files(
     limit: Option<usize>,
     state: State<'_, AppState>,

@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 use crate::error::AppResult;
 use crate::state::AppState;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn term_spawn(
     cwd: String,
     term_key: Option<String>,
@@ -47,7 +47,7 @@ pub fn term_spawn(
 /// process ancestry (see `agent_sessions`). The frontend polls this so a
 /// terminal learns its resume handle even when no hook ever fired for it.
 /// Terminals with no match are simply absent from the result.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn term_agent_sessions(
     state: State<'_, AppState>,
 ) -> Vec<crate::services::agent_sessions::TermBinding> {
@@ -64,7 +64,7 @@ pub fn term_resize(id: String, cols: u16, rows: u16, state: State<'_, AppState>)
     state.terminals.resize(&id, cols, rows)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn term_kill(id: String, state: State<'_, AppState>) -> AppResult<()> {
     state.terminals.kill(&id)
 }

@@ -9,7 +9,7 @@ pub fn feedback_dev_enabled() -> bool {
     feedback_service::dev_enabled()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn feedback_context(state: State<'_, AppState>) -> FeedbackContext {
     let s = state.inner.lock();
     let project = s.project.as_ref();
@@ -19,7 +19,7 @@ pub fn feedback_context(state: State<'_, AppState>) -> FeedbackContext {
     )
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn feedback_submit(input: FeedbackInput, state: State<'_, AppState>) -> AppResult<String> {
     let ctx = {
         let s = state.inner.lock();

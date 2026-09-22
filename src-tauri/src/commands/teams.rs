@@ -3,7 +3,7 @@ use crate::services::teams_service::{
     self, DeviceLoginStart, LoginPoll, TeamsChat, TeamsMessage, TeamsStatus,
 };
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn teams_status() -> TeamsStatus {
     teams_service::status()
 }
@@ -28,7 +28,7 @@ pub fn teams_cancel_login() {
     teams_service::cancel_login()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn teams_disconnect() -> AppResult<()> {
     teams_service::disconnect()
 }

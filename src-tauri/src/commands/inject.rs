@@ -5,12 +5,12 @@ use crate::error::AppResult;
 use crate::services::corpus_feedback;
 use crate::services::inject_service::{self, InjectionRecord};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_injection_enabled(project_root: String) -> bool {
     inject_service::is_enabled(&project_root)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_injection_set_enabled(project_root: String, enabled: bool) -> AppResult<()> {
     inject_service::set_enabled(&project_root, enabled)
 }
@@ -47,7 +47,7 @@ fn to_doc_feedback(doc_id: String, s: corpus_feedback::DocStats) -> DocFeedback 
 
 /// Flywheel metrics (E4). `day_starts` = ascending LOCAL day boundaries
 /// computed by the frontend (N+1 boundaries → N-day curve).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn flywheel_metrics(
     project_root: String,
     day_starts: Vec<i64>,
@@ -55,17 +55,17 @@ pub fn flywheel_metrics(
     crate::services::flywheel::metrics(&project_root, &day_starts)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn work_profile_get() -> String {
     crate::services::work_profile::get()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn work_profile_set(content: String) -> AppResult<()> {
     crate::services::work_profile::set(&content)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_feedback_stats(project_root: String) -> Vec<DocFeedback> {
     let mut out: Vec<DocFeedback> = corpus_feedback::stats(&project_root)
         .into_iter()
@@ -76,7 +76,7 @@ pub fn memory_feedback_stats(project_root: String) -> Vec<DocFeedback> {
     out
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_feedback_set(
     project_root: String,
     doc_id: String,
@@ -86,7 +86,7 @@ pub fn memory_feedback_set(
     Ok(to_doc_feedback(doc_id, s))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_feedback_pin(
     project_root: String,
     doc_id: String,
@@ -96,7 +96,7 @@ pub fn memory_feedback_pin(
     Ok(to_doc_feedback(doc_id, s))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn memory_feedback_reset(project_root: String, doc_id: String) -> AppResult<DocFeedback> {
     let s = corpus_feedback::reset_verdicts(&project_root, &doc_id)?;
     Ok(to_doc_feedback(doc_id, s))

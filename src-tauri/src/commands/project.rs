@@ -5,6 +5,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
+use crate::services::path_guard;
 use crate::services::project_manager::{self, FileNode, Project, WorkspaceContext};
 use crate::state::AppState;
 
@@ -19,7 +20,7 @@ pub struct FileContent {
     pub truncated: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_project(
     path: String,
     app: AppHandle,
@@ -70,10 +71,36 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-#[tauri::command]
-pub fn read_tree(path: String, depth: Option<usize>) -> AppResult<FileNode> {
+/// Roots a file-reading command may look under: the open project, the
+/// active session's checkout and the project's registered worktrees. Nothing
+/// else — a path from the webview is data, not authority.
+fn readable_roots(state: &AppState) -> AppResult<Vec<PathBuf>> {
+    let (root, active) = {
+        let s = state.inner.lock();
+        let root = s
+            .project
+            .as_ref()
+            .map(|p| p.root.clone())
+            .ok_or_else(|| AppError::InvalidArgument("no project open".into()))?;
+        (root, s.active_repo.clone())
+    };
+    let mut roots = vec![root.clone()];
+    roots.extend(active);
+    if let Ok(list) = crate::services::worktree_service::list(&root) {
+        roots.extend(list.into_iter().map(|e| PathBuf::from(e.path)));
+    }
+    Ok(roots)
+}
+
+#[tauri::command(async)]
+pub fn read_tree(
+    path: String,
+    depth: Option<usize>,
+    state: State<'_, AppState>,
+) -> AppResult<FileNode> {
     let depth = depth.unwrap_or(3);
-    project_manager::read_tree(&PathBuf::from(path), depth)
+    let path = path_guard::confine(&PathBuf::from(path), &readable_roots(&state)?)?;
+    project_manager::read_tree(&path, depth)
 }
 
 #[tauri::command]
@@ -97,7 +124,7 @@ pub fn app_build_info() -> serde_json::Value {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn workspace_context(state: State<'_, AppState>) -> AppResult<WorkspaceContext> {
     let root = state
         .inner
@@ -111,12 +138,9 @@ pub fn workspace_context(state: State<'_, AppState>) -> AppResult<WorkspaceConte
 
 /// Read a file for the Preview tab. Truncates to 1 MB and detects binaries
 /// (null byte in the first 8 KB) so we never blast the webview with garbage.
-#[tauri::command]
-pub fn read_file_text(path: String) -> AppResult<FileContent> {
-    let p = PathBuf::from(&path);
-    if !p.exists() {
-        return Err(AppError::NotFound(p.display().to_string()));
-    }
+#[tauri::command(async)]
+pub fn read_file_text(path: String, state: State<'_, AppState>) -> AppResult<FileContent> {
+    let p = path_guard::confine(&PathBuf::from(&path), &readable_roots(&state)?)?;
     if !p.is_file() {
         return Err(AppError::InvalidArgument(format!("not a file: {path}")));
     }

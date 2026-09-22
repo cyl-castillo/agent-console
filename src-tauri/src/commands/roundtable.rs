@@ -20,7 +20,7 @@ fn project_root(state: &State<'_, AppState>) -> AppResult<String> {
         .ok_or_else(|| AppError::Other("no project open".into()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn roundtable_start(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -71,14 +71,14 @@ pub fn roundtable_stop(state: State<'_, AppState>, id: String) -> AppResult<()> 
     state.roundtable.stop(&id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn roundtable_discard(state: State<'_, AppState>, id: String) -> AppResult<()> {
     state.roundtable.discard(&id)
 }
 
 /// Share a working room with collaborators: push its `room/<id>` branch to the
 /// shared remote and return an MR/PR link the human can hand to a colleague.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn roundtable_share(state: State<'_, AppState>, id: String) -> AppResult<ShareResult> {
     state.roundtable.share(&id)
 }
@@ -86,20 +86,20 @@ pub fn roundtable_share(state: State<'_, AppState>, id: String) -> AppResult<Sha
 /// Sync a colleague's commits into a live working room: fetch its `room/<id>`
 /// branch from the remote and merge them into the worktree so the next turn
 /// builds on top. The inbound mirror of `roundtable_share`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn roundtable_sync(state: State<'_, AppState>, id: String) -> AppResult<SyncResult> {
     state.roundtable.sync(&id)
 }
 
 /// Persisted rooms for the open project (lightweight, for the sidebar list).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn roundtable_list_rooms(state: State<'_, AppState>) -> AppResult<Vec<RoomSummary>> {
     let root = project_root(&state)?;
     state.roundtable.rooms().summaries(&root)
 }
 
 /// Full saved state of one room, for read-only re-hydration.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn roundtable_get_room(
     state: State<'_, AppState>,
     id: String,
@@ -109,7 +109,7 @@ pub fn roundtable_get_room(
 }
 
 /// Drop a saved room from this project's history. Idempotent.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn roundtable_delete_room(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let root = project_root(&state)?;
     state.roundtable.rooms().delete_room(&root, &id)
@@ -117,7 +117,7 @@ pub fn roundtable_delete_room(state: State<'_, AppState>, id: String) -> AppResu
 
 /// Rebuild a live run from a saved room so it can be continued (Fase B). Returns
 /// the (unchanged) room id, now registered as a live run in the "awaiting" state.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn roundtable_resume_room(state: State<'_, AppState>, id: String) -> AppResult<String> {
     let root = project_root(&state)?;
     let room: PersistedRoom = state

@@ -25,7 +25,7 @@ fn repo(state: &AppState) -> AppResult<PathBuf> {
 /// we first capture the current tree as a fresh "pre-restore" snapshot. That makes
 /// the restore itself undoable. The returned commit sha (if any) lets the UI offer
 /// an "undo last restore". Capturing the backup never blocks the restore.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_restore(
     commit_sha: String,
     state: State<'_, AppState>,
@@ -48,7 +48,7 @@ fn now_nanos() -> u128 {
         .unwrap_or(0)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn snapshot_delete(id: String, state: State<'_, AppState>) -> AppResult<()> {
     let repo = repo(&state)?;
     snapshot_service::delete(&repo, &id)

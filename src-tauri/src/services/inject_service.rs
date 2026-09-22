@@ -56,8 +56,32 @@ const MAX_CONTEXT_CHARS: usize = 1200;
 const MAX_BODY_BYTES: usize = 64 * 1024;
 /// Socket read timeout: a stuck local client must not wedge the accept loop.
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
+/// Header the hooks send the shared secret in (matched case-insensitively).
+const TOKEN_HEADER: &str = "x-agent-console-token:";
 /// Recent injections kept for the GUI ("what was the agent fed lately?").
 const RECENT_CAP: usize = 20;
+
+/// Per-process shared secret for the loopback endpoint. Written to the port
+/// file (0600 on unix) next to the port; every hook reads both and sends the
+/// token back as `X-Agent-Console-Token`. The listener is loopback-only, but
+/// loopback is not "us": any local process — or a browser tab doing a
+/// cross-origin POST to 127.0.0.1 — can reach it. The token turns "can open
+/// a socket" into "can read the user's data dir", which is the boundary the
+/// rest of the app already lives behind.
+static TOKEN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn token() -> &'static str {
+    TOKEN.get_or_init(|| uuid::Uuid::new_v4().simple().to_string())
+}
+
+/// Constant-time equality so a wrong token costs the same as a right one.
+fn token_matches(given: &str, expected: &str) -> bool {
+    let (a, b) = (given.as_bytes(), expected.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
 /// Cap on an exported session title. The CLI shows it in one line of a list;
 /// a Jira-seeded name can be much longer than that line.
 const MAX_TITLE_CHARS: usize = 80;
@@ -407,17 +431,32 @@ fn port_file_path() -> AppResult<PathBuf> {
 
 fn write_port_file(port: u16) -> AppResult<()> {
     let path = port_file_path()?;
-    let raw = serde_json::json!({ "port": port, "pid": std::process::id() }).to_string();
+    let raw = serde_json::json!({
+        "port": port,
+        "pid": std::process::id(),
+        "token": token(),
+    })
+    .to_string();
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, raw)?;
+    // The file now carries the secret: owner-only before it gets its final
+    // name, so no reader ever sees a world-readable copy.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+    }
     fs::rename(&tmp, path)?;
     Ok(())
 }
 
-/// Read one request: request line + headers (Content-Length is the only one
-/// we care about), then exactly the body. Returns the body for POST /inject;
-/// anything else is a 404-worth of None.
-fn read_request(stream: &mut TcpStream) -> Option<String> {
+/// Read one request: request line + headers, then exactly the body. Returns
+/// the body for an authenticated `POST /inject` (token header matches
+/// `expected`, JSON content type); anything else is a 404-worth of None.
+/// The content-type gate is the CSRF belt: a browser can fire a cross-origin
+/// POST at loopback, but only as a "simple" request (text/plain, no custom
+/// headers) — which never gets past either check.
+fn read_request(stream: &mut TcpStream, expected_token: &str) -> Option<String> {
     stream.set_read_timeout(Some(READ_TIMEOUT)).ok()?;
     let mut reader = BufReader::new(stream);
     let mut request_line = String::new();
@@ -427,6 +466,8 @@ fn read_request(stream: &mut TcpStream) -> Option<String> {
         parts.next() == Some("POST") && parts.next().is_some_and(|p| p.starts_with("/inject"))
     };
     let mut content_length: usize = 0;
+    let mut json_body = false;
+    let mut authed = false;
     loop {
         let mut line = String::new();
         reader.read_line(&mut line).ok()?;
@@ -434,16 +475,29 @@ fn read_request(stream: &mut TcpStream) -> Option<String> {
         if line.is_empty() {
             break;
         }
-        if let Some(v) = line
-            .to_ascii_lowercase()
+        let lower = line.to_ascii_lowercase();
+        if let Some(v) = lower
             .strip_prefix("content-length:")
             .map(str::trim)
             .and_then(|v| v.parse::<usize>().ok())
         {
             content_length = v;
+        } else if let Some(v) = lower.strip_prefix("content-type:").map(str::trim) {
+            json_body = v.starts_with("application/json");
+        } else if let Some(v) = line
+            .get(..TOKEN_HEADER.len())
+            .filter(|h| h.eq_ignore_ascii_case(TOKEN_HEADER))
+            .map(|_| line[TOKEN_HEADER.len()..].trim())
+        {
+            authed = token_matches(v, expected_token);
         }
     }
-    if !is_inject_post || content_length == 0 || content_length > MAX_BODY_BYTES {
+    if !is_inject_post
+        || !authed
+        || !json_body
+        || content_length == 0
+        || content_length > MAX_BODY_BYTES
+    {
         return None;
     }
     let mut body = vec![0u8; content_length];
@@ -465,7 +519,7 @@ fn respond_json(stream: &mut TcpStream, body: &str) -> bool {
 const NOTHING: &str = "{\"context\":null}";
 
 fn serve_connection(stream: &mut TcpStream, app: &tauri::AppHandle) {
-    let Some(body) = read_request(stream) else {
+    let Some(body) = read_request(stream, token()) else {
         respond_json(stream, NOTHING);
         return;
     };
@@ -996,25 +1050,60 @@ mod tests {
                 let _ = c.read(&mut buf);
             });
             let (mut s, _) = listener.accept().unwrap();
-            let out = read_request(&mut s);
+            let out = read_request(&mut s, "sekrit");
             respond_json(&mut s, NOTHING);
             t.join().unwrap();
             out
         };
 
         let body = r#"{"prompt":"p","cwd":"/x"}"#;
+        let auth = "X-Agent-Console-Token: sekrit\r\nContent-Type: application/json\r\n";
         let good = format!(
-            "POST /inject HTTP/1.1\r\nHost: l\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /inject HTTP/1.1\r\nHost: l\r\n{auth}Content-Length: {}\r\n\r\n{body}",
             body.len()
         );
         assert_eq!(send(&good).as_deref(), Some(body));
+        // Header names are case-insensitive; a charset suffix is still JSON.
+        let odd_case = format!(
+            "POST /inject HTTP/1.1\r\nx-agent-console-token: sekrit\r\ncontent-type: application/json; charset=utf-8\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        assert_eq!(send(&odd_case).as_deref(), Some(body));
 
         // Wrong path, wrong method, missing length: all read as None.
         assert_eq!(
-            send("POST /other HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}"),
+            send(&format!(
+                "POST /other HTTP/1.1\r\n{auth}Content-Length: 2\r\n\r\n{{}}"
+            )),
             None
         );
-        assert_eq!(send("GET /inject HTTP/1.1\r\n\r\n"), None);
-        assert_eq!(send("POST /inject HTTP/1.1\r\n\r\n"), None);
+        assert_eq!(send(&format!("GET /inject HTTP/1.1\r\n{auth}\r\n")), None);
+        assert_eq!(send(&format!("POST /inject HTTP/1.1\r\n{auth}\r\n")), None);
+
+        // No token, wrong token, or a browser-shaped "simple" POST
+        // (text/plain, no custom header): refused before the body is read.
+        let no_token = format!(
+            "POST /inject HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        assert_eq!(send(&no_token), None);
+        let wrong_token = format!(
+            "POST /inject HTTP/1.1\r\nX-Agent-Console-Token: sekrit2\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        assert_eq!(send(&wrong_token), None);
+        let text_plain = format!(
+            "POST /inject HTTP/1.1\r\nX-Agent-Console-Token: sekrit\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        assert_eq!(send(&text_plain), None);
+    }
+
+    #[test]
+    fn token_compare_is_exact() {
+        assert!(token_matches("abc", "abc"));
+        assert!(!token_matches("abc", "abd"));
+        assert!(!token_matches("ab", "abc"));
+        assert!(!token_matches("", "abc"));
     }
 }

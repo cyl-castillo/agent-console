@@ -6,17 +6,17 @@ use crate::error::AppResult;
 use crate::services::projects_service::{self, RecentProject};
 use crate::state::AppState;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn projects_recent() -> AppResult<Vec<RecentProject>> {
     Ok(projects_service::load())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn projects_last() -> AppResult<Option<RecentProject>> {
     Ok(projects_service::last())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn projects_forget(path: String, state: State<'_, AppState>) -> AppResult<()> {
     projects_service::forget(&path)?;
     // Forgetting a project also drops its persisted sessions (the scrollback
@@ -27,7 +27,7 @@ pub fn projects_forget(path: String, state: State<'_, AppState>) -> AppResult<()
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn projects_remember(path: String) -> AppResult<()> {
     projects_service::remember(&PathBuf::from(path))
 }

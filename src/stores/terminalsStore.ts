@@ -14,6 +14,8 @@ const AUTO_ARCHIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 /// zero signal (the invisible half of issue #72) — so the first failure and
 /// every 10th after it surface a toast.
 let persistFailures = 0;
+let persistInFlight: Promise<void> | null = null;
+let persistDirty = false;
 
 export interface TerminalSession {
   id: string;
@@ -114,6 +116,8 @@ interface TerminalsState {
   close: (id: string) => Promise<void>;
   /// Persist current session list (metadata + scrollback) for this project.
   persist: () => Promise<void>;
+  /// The actual write — always go through `persist`, which serializes calls.
+  _persistNow: () => Promise<void>;
 }
 
 function genId(): string {
@@ -339,6 +343,29 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
   },
 
   persist: async () => {
+    // One write in flight at a time. `sessions_save` runs off the main thread
+    // now, so two overlapping calls (interval tick + close) would race on the
+    // backend and the OLDER payload could land last. Coalesce instead: a call
+    // that arrives mid-write marks the store dirty and the in-flight write
+    // re-runs once with the latest state.
+    if (persistInFlight) {
+      persistDirty = true;
+      return persistInFlight;
+    }
+    persistInFlight = (async () => {
+      try {
+        do {
+          persistDirty = false;
+          await get()._persistNow();
+        } while (persistDirty);
+      } finally {
+        persistInFlight = null;
+      }
+    })();
+    return persistInFlight;
+  },
+
+  _persistNow: async () => {
     const { projectRoot, sessions, ready } = get();
     // Block until a successful hydrate: persisting while !ready could overwrite
     // saved history that we failed to (or haven't yet) read back.

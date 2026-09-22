@@ -4,17 +4,17 @@ use crate::error::AppResult;
 use crate::services::hooks_service::HooksStatus;
 use crate::state::AppState;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hooks_status(state: State<'_, AppState>) -> AppResult<HooksStatus> {
     Ok(state.hooks.status())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hooks_install(state: State<'_, AppState>) -> AppResult<HooksStatus> {
     state.hooks.install()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hooks_uninstall(state: State<'_, AppState>) -> AppResult<HooksStatus> {
     state.hooks.uninstall()
 }
@@ -25,12 +25,12 @@ pub fn hooks_start_watcher(app: AppHandle, state: State<'_, AppState>) -> AppRes
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn approvals_pending(state: State<'_, AppState>) -> AppResult<Vec<serde_json::Value>> {
     Ok(state.hooks.pending_approvals())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn approval_respond(
     id: String,
     decision: String,

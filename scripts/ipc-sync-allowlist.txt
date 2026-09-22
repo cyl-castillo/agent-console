@@ -1,0 +1,24 @@
+# Tauri commands allowed to stay synchronous (`#[tauri::command]` without `(async)`).
+# A sync command runs on the webview's main thread and freezes render + input for
+# its whole duration, so only two kinds belong here:
+#   - reads of in-memory state (state.inner, atomics, in-memory queues), and
+#   - writes to the PTY that must keep their invocation order (term_write/resize).
+# Everything that touches the filesystem, git, a child process or the network
+# must be `#[tauri::command(async)]`. scripts/check-ipc-sync.sh enforces this.
+app_build_info
+current_project
+feedback_dev_enabled
+hooks_start_watcher
+memory_injection_recent
+roundtable_continue
+roundtable_inject
+roundtable_pause
+roundtable_resume
+roundtable_stop
+scheduler_fire_event
+scheduler_is_paused
+teams_cancel_login
+term_resize
+term_save_paste_image
+term_write
+voice_status

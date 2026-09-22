@@ -7,7 +7,7 @@ use crate::services::testigo_export::{self, ExportPreview, ExportSummary};
 use crate::services::testigo_service::{ProofEvent, TestigoSettings, VerifyReport};
 use crate::state::AppState;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn testigo_list(
     project_root: String,
     case_id: Option<String>,
@@ -17,7 +17,7 @@ pub fn testigo_list(
     state.testigo.list(&project_root, case_id.as_deref(), limit)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn testigo_verify(project_root: String, state: State<'_, AppState>) -> AppResult<VerifyReport> {
     state.testigo.verify(&project_root)
 }
@@ -25,7 +25,7 @@ pub fn testigo_verify(project_root: String, state: State<'_, AppState>) -> AppRe
 /// Export a signed proof packet (DSSE-wrapped in-toto statement) for a case —
 /// or the whole ledger — into `dest_dir` (defaults to `<project>/proofpacks`),
 /// alongside the standalone HTML verifier.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn testigo_export(
     project_root: String,
     case_id: Option<String>,
@@ -47,7 +47,7 @@ pub fn testigo_export(
 
 /// The pre-sign review: what the packet WOULD contain, so the human can mark
 /// events for manual redaction before anything is signed.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn testigo_export_preview(
     project_root: String,
     case_id: Option<String>,
@@ -56,7 +56,7 @@ pub fn testigo_export_preview(
     testigo_export::preview(&state.testigo, &project_root, case_id.as_deref())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn testigo_get_settings(
     project_root: String,
     state: State<'_, AppState>,
@@ -64,7 +64,7 @@ pub fn testigo_get_settings(
     Ok(state.testigo.settings(&project_root))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn testigo_set_settings(
     project_root: String,
     settings: TestigoSettings,
@@ -74,7 +74,7 @@ pub fn testigo_set_settings(
 }
 
 /// The signing key id + public key, for sharing out-of-band with receivers.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn testigo_public_key() -> AppResult<serde_json::Value> {
     testigo_export::public_key_info()
 }
@@ -82,7 +82,7 @@ pub fn testigo_public_key() -> AppResult<serde_json::Value> {
 /// Bind a terminal session to a named case — called by the frontend when a
 /// session is seeded from a Jira ticket, so the ticket→session lineage is
 /// part of the evidence chain.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn testigo_link_case(
     project_root: String,
     term_id: String,

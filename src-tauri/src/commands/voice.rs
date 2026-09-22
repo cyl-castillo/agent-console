@@ -18,7 +18,7 @@ pub async fn voice_enable(app: AppHandle, state: State<'_, AppState>) -> AppResu
 }
 
 /// Drop the model and stop any capture; voice memory is fully released.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn voice_disable(state: State<'_, AppState>) -> AppResult<VoiceStatus> {
     state.voice.disable();
     Ok(state.voice.status())
