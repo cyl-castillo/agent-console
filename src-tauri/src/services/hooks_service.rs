@@ -26,6 +26,7 @@ const POSTTOOLUSE_HOOK: &str = include_str!("../../resources/posttooluse-hook.cj
 const MODELSWITCH_HOOK: &str = include_str!("../../resources/modelswitch-hook.cjs");
 const PERMISSIONREQUEST_HOOK: &str = include_str!("../../resources/permissionrequest-hook.cjs");
 const NOTIFICATION_HOOK: &str = include_str!("../../resources/notification-hook.cjs");
+const STATUSLINE_HOOK: &str = include_str!("../../resources/statusline-hook.cjs");
 
 /// Oldest Claude Code the PermissionRequest bridge is verified on (the
 /// binary this was built and tested against). Older CLIs keep the PreToolUse
@@ -48,6 +49,9 @@ pub struct HooksStatus {
     /// Whether the installed CLI supports PermissionRequest at all.
     pub permissionrequest_supported: bool,
     pub notification_installed: bool,
+    /// Our statusLine stand-in is the configured command (chaining to the
+    /// user's original, parked in statusline-chain.json). Claude only.
+    pub statusline_installed: bool,
     pub posttooluse_installed: bool,
     pub settings_path: PathBuf,
     /// Codex mirror (same bridge scripts, wired via ~/.codex/hooks.json).
@@ -72,6 +76,9 @@ pub struct HooksRuntime {
     /// Claude-only: PermissionRequest (approvals, 2nd gen) and Notification.
     permissionrequest_script_path: PathBuf,
     notification_script_path: PathBuf,
+    /// Claude-only statusLine stand-in (T3): records each render for the app
+    /// and chains to whatever status line the user had.
+    statusline_script_path: PathBuf,
     watcher_started: Mutex<bool>,
     approvals_watcher_started: Mutex<bool>,
 }
@@ -142,6 +149,8 @@ impl HooksRuntime {
             ensure_hook_script(&cache, "permissionrequest-hook.cjs", PERMISSIONREQUEST_HOOK)?;
         let notification_script_path =
             ensure_hook_script(&cache, "notification-hook.cjs", NOTIFICATION_HOOK)?;
+        let statusline_script_path =
+            ensure_hook_script(&cache, "statusline-hook.cjs", STATUSLINE_HOOK)?;
         let binary_path = ensure_hook_binary(&cache);
         Ok(Self {
             session_dir,
@@ -154,6 +163,7 @@ impl HooksRuntime {
             modelswitch_script_path,
             permissionrequest_script_path,
             notification_script_path,
+            statusline_script_path,
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
         })
@@ -206,6 +216,10 @@ impl HooksRuntime {
         )
         .unwrap_or(false);
         let pretooluse_installed = legacy_pretooluse || permissionrequest_installed;
+        let statusline_installed = read_settings(&settings_path)
+            .as_ref()
+            .map(|v| statusline_is_ours(v, &self.statusline_script_path))
+            .unwrap_or(false);
         let notification_installed = is_hook_installed(
             &settings_path,
             "Notification",
@@ -234,6 +248,7 @@ impl HooksRuntime {
             permissionrequest_installed,
             permissionrequest_supported: permissionrequest_supported(),
             notification_installed,
+            statusline_installed,
             posttooluse_installed,
             settings_path,
             codex_available: codex_available(),
@@ -294,6 +309,7 @@ impl HooksRuntime {
             &self.notification_script_path,
             self.binary_path.as_deref(),
         );
+        self.install_statusline_into(&mut settings)?;
         upsert_hook(
             &mut settings,
             "Stop",
@@ -420,6 +436,49 @@ impl HooksRuntime {
             &self.notification_script_path,
             self.binary_path.as_deref(),
         );
+        write_settings_atomic(&settings_path, &settings)?;
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
+    /// Put our stand-in in `statusLine`, parking the user's original command
+    /// (and padding) in statusline-chain.json so the stand-in can run it.
+    /// Idempotent: already ours ⇒ nothing changes and the parked original is
+    /// kept as it was.
+    fn install_statusline_into(&self, settings: &mut Value) -> AppResult<()> {
+        let bridge = bridge_command(
+            self.binary_path.as_deref(),
+            &self.statusline_script_path,
+            "statusline",
+        );
+        install_statusline(
+            settings,
+            &bridge,
+            &self.statusline_script_path,
+            &chain_path(),
+        )
+        .map(|_| ())
+    }
+
+    /// Auto-install the statusLine stand-in (Claude only), under its own
+    /// marker. It changes nothing the user sees — their own status line keeps
+    /// rendering through the chain — and gives the app the CLI's own cost,
+    /// context and model numbers per render instead of a transcript re-read
+    /// every 5 s with a guessed window size.
+    pub fn ensure_statusline_autoinstalled(&self) -> AppResult<()> {
+        let marker = self.script_path.with_file_name(".statusline-autoinstalled");
+        if marker.exists() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = read_settings(&settings_path).unwrap_or(json!({}));
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        self.install_statusline_into(&mut settings)?;
         write_settings_atomic(&settings_path, &settings)?;
         let _ = fs::write(&marker, b"1");
         Ok(())
@@ -737,6 +796,9 @@ impl HooksRuntime {
             }
             let txt = fs::read_to_string(&path)?;
             let mut settings: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
+            if path == settings_path() {
+                restore_statusline(&mut settings, &self.statusline_script_path, &chain_path());
+            }
             if let Some(hooks) = settings.get_mut("hooks").and_then(|v| v.as_object_mut()) {
                 for (key, target) in [
                     ("UserPromptSubmit", &self.script_path),
@@ -979,6 +1041,117 @@ fn migrate_pretooluse_to_permissionrequest(
     removed
 }
 
+/// Where the user's original statusLine is parked while ours stands in.
+/// Same data dir as inject-port.json, because the bridge already resolves it.
+fn chain_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("agent-console")
+        .join("statusline-chain.json")
+}
+
+fn read_settings(path: &Path) -> Option<Value> {
+    if !path.exists() {
+        return None;
+    }
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+/// Is the configured statusLine command ours (bridge `statusline` mode, or
+/// the node fallback script)?
+fn statusline_is_ours(settings: &Value, script_path: &Path) -> bool {
+    let Some(cmd) = settings
+        .pointer("/statusLine/command")
+        .and_then(|v| v.as_str())
+    else {
+        return false;
+    };
+    let script = format!("\"{}\"", script_path.to_string_lossy());
+    (cmd.contains(BRIDGE_BIN_NAME) && cmd.trim_end().ends_with("\" statusline"))
+        || cmd.contains(&script)
+}
+
+/// Pure: make `bridge` the statusLine command, parking whatever was there
+/// (command + padding) in `chain` so the stand-in can run it. Returns whether
+/// settings changed. Already ours ⇒ untouched, and the parked file is left
+/// alone (rewriting it would park OUR command as "the original" — the one
+/// way to lose the user's status line).
+fn install_statusline(
+    settings: &mut Value,
+    bridge: &str,
+    script_path: &Path,
+    chain: &Path,
+) -> AppResult<bool> {
+    if statusline_is_ours(settings, script_path) {
+        return Ok(false);
+    }
+    let original = settings.get("statusLine").cloned();
+    let parked = match &original {
+        Some(o) if o.is_object() => json!({
+            "command": o.get("command").and_then(|v| v.as_str()).unwrap_or(""),
+            "padding": o.get("padding").cloned().unwrap_or(Value::Null),
+            "type": o.get("type").cloned().unwrap_or(json!("command")),
+        }),
+        _ => json!({}),
+    };
+    if let Some(parent) = chain.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = chain.with_extension("json.tmp");
+    fs::write(&tmp, parked.to_string())?;
+    fs::rename(&tmp, chain)?;
+    let mut ours = json!({ "type": "command", "command": bridge });
+    if let Some(p) = original
+        .as_ref()
+        .and_then(|o| o.get("padding"))
+        .filter(|p| !p.is_null())
+    {
+        ours["padding"] = p.clone();
+    }
+    settings
+        .as_object_mut()
+        .ok_or_else(|| AppError::Other("settings is not an object".into()))?
+        .insert("statusLine".into(), ours);
+    Ok(true)
+}
+
+/// Pure-ish inverse: if the statusLine is ours, put the parked original back
+/// (or remove the key when they had none). Not ours ⇒ untouched.
+fn restore_statusline(settings: &mut Value, script_path: &Path, chain: &Path) -> bool {
+    if !statusline_is_ours(settings, script_path) {
+        return false;
+    }
+    let parked = fs::read_to_string(chain)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let Some(obj) = settings.as_object_mut() else {
+        return false;
+    };
+    match parked
+        .as_ref()
+        .and_then(|p| p.get("command"))
+        .and_then(|v| v.as_str())
+        .filter(|c| !c.is_empty())
+    {
+        Some(cmd) => {
+            let mut orig = json!({ "type": "command", "command": cmd });
+            if let Some(p) = parked
+                .as_ref()
+                .and_then(|p| p.get("padding"))
+                .filter(|p| !p.is_null())
+            {
+                orig["padding"] = p.clone();
+            }
+            obj.insert("statusLine".into(), orig);
+        }
+        None => {
+            obj.remove("statusLine");
+        }
+    }
+    let _ = fs::remove_file(chain);
+    true
+}
+
 fn settings_path() -> PathBuf {
     dirs::home_dir()
         .map(|h| h.join(".claude/settings.json"))
@@ -1024,6 +1197,7 @@ fn bridge_mode(event: &str) -> &'static str {
         "PostModelSwitch" => "modelswitch",
         "PermissionRequest" => "permissionrequest",
         "Notification" => "notification",
+        "StatusLine" => "statusline",
         _ => "stop",
     }
 }
@@ -1578,6 +1752,57 @@ mod tests {
             pr,
             Some(bin)
         ));
+    }
+
+    #[test]
+    fn statusline_install_parks_the_original_and_restore_puts_it_back() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ac-sl-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let chain = dir.join("statusline-chain.json");
+        let script = Path::new("/cache/statusline-hook.cjs");
+        let bridge = "\"/cache/bin/hook-bridge\" statusline";
+
+        // User had their own line with padding.
+        let mut settings = json!({
+            "statusLine": { "type": "command", "command": "bash ~/.claude/sl.sh", "padding": 2 },
+            "hooks": {}
+        });
+        assert!(install_statusline(&mut settings, bridge, script, &chain).unwrap());
+        assert_eq!(settings["statusLine"]["command"], bridge);
+        assert_eq!(settings["statusLine"]["padding"], 2, "padding survives");
+        let parked: Value = serde_json::from_str(&fs::read_to_string(&chain).unwrap()).unwrap();
+        assert_eq!(parked["command"], "bash ~/.claude/sl.sh");
+        assert_eq!(parked["padding"], 2);
+        // Idempotent, and the parked original is NOT overwritten with ours.
+        assert!(!install_statusline(&mut settings, bridge, script, &chain).unwrap());
+        let parked2: Value = serde_json::from_str(&fs::read_to_string(&chain).unwrap()).unwrap();
+        assert_eq!(parked2["command"], "bash ~/.claude/sl.sh");
+        assert!(statusline_is_ours(&settings, script));
+        // Restore.
+        assert!(restore_statusline(&mut settings, script, &chain));
+        assert_eq!(settings["statusLine"]["command"], "bash ~/.claude/sl.sh");
+        assert_eq!(settings["statusLine"]["padding"], 2);
+        assert!(!chain.exists());
+        assert!(
+            !restore_statusline(&mut settings, script, &chain),
+            "not ours ⇒ untouched"
+        );
+
+        // User had NO status line: parked `{}`, restore removes the key.
+        let mut none = json!({ "hooks": {} });
+        assert!(install_statusline(&mut none, bridge, script, &chain).unwrap());
+        assert!(none.get("statusLine").is_some());
+        assert!(restore_statusline(&mut none, script, &chain));
+        assert!(none.get("statusLine").is_none());
+
+        // Node-fallback form counts as ours too.
+        let node = json!({ "statusLine": { "type": "command", "command": "node \"/cache/statusline-hook.cjs\"" } });
+        assert!(statusline_is_ours(&node, script));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

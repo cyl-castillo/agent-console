@@ -11,6 +11,7 @@ import { useAgentStatusStore } from "../stores/agentStatusStore";
 import { useToastStore } from "../stores/toastStore";
 import { useSkillsStore } from "../stores/skillsStore";
 import { CHECK_INTERVAL_MS, useHooksHealthStore } from "../stores/hooksHealthStore";
+import { freshStatus, useLiveStatusStore } from "../stores/liveStatusStore";
 import { formatAge } from "../lib/hooksHealth";
 import { useInjectStore } from "../stores/injectStore";
 import { profileFor } from "../agents/profiles";
@@ -91,6 +92,7 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
       {activeSession && <ModelPill session={activeSession} projectRoot={project.root} />}
       {activeSession?.agentSessionId && (
         <UsagePill
+          termId={activeSession.id}
           sessionId={activeSession.agentSessionId}
           projectRoot={project.root}
           agent={activeSession.agent}
@@ -523,19 +525,27 @@ function VoicePill() {
 /// tracks the agent's progress; the totals live in the tooltip. Turns amber
 /// past 80% as a hint to compact.
 function UsagePill({
+  termId,
   sessionId,
   projectRoot,
   agent,
   live,
 }: {
+  termId: string;
   sessionId: string;
   projectRoot: string;
   agent?: string;
   live: boolean;
 }) {
   const [usage, setUsage] = useState<SessionUsage | null>(null);
+  // The CLI's own numbers, per status-line render (T3). While fresh they are
+  // the truth and the transcript poll stands down; when they go stale (idle
+  // session, Codex, older CLI) the poll is the fallback it always was.
+  const liveStatus = useLiveStatusStore((s) => freshStatus(s.byTerm, termId, Date.now()));
+  const hasLive = !!liveStatus && (liveStatus.contextUsed ?? 0) > 0;
 
   useEffect(() => {
+    if (hasLive) return;
     let cancelled = false;
     const load = () => {
       ipc
@@ -554,7 +564,43 @@ function UsagePill({
       cancelled = true;
       if (t) window.clearInterval(t);
     };
-  }, [sessionId, projectRoot, agent, live]);
+  }, [sessionId, projectRoot, agent, live, hasLive]);
+
+  if (hasLive && liveStatus) {
+    const used = liveStatus.contextUsed ?? 0;
+    const size = liveStatus.contextSize ?? 0;
+    const pct =
+      liveStatus.usedPct !== undefined
+        ? Math.round(liveStatus.usedPct)
+        : size > 0
+          ? Math.round((used / size) * 100)
+          : 0;
+    const warn = pct >= 80;
+    const cost = liveStatus.costUsd !== undefined ? `$${liveStatus.costUsd.toFixed(2)}` : null;
+    const tip =
+      `Context window: ${fmtTokens(used)} / ${size > 0 ? fmtTokens(size) : "?"} (${pct}%) — reported by the CLI\n` +
+      (liveStatus.modelName
+        ? `Model: ${liveStatus.modelName} (${liveStatus.modelId ?? ""})\n`
+        : "") +
+      (cost ? `Session cost: ${cost} (estimated at list price)\n` : "") +
+      (liveStatus.linesAdded !== undefined
+        ? `Lines: +${liveStatus.linesAdded} / -${liveStatus.linesRemoved ?? 0}\n`
+        : "") +
+      (liveStatus.inputTotal !== undefined
+        ? `Input (cumulative): ${fmtTokens(liveStatus.inputTotal)}\n`
+        : "") +
+      (liveStatus.outputTotal !== undefined
+        ? `Output (cumulative): ${fmtTokens(liveStatus.outputTotal)}`
+        : "");
+    return (
+      <span className={`sb-item sb-muted usage-pill ${warn ? "usage-warn" : ""}`} title={tip}>
+        <span className="usage-glyph">⌁</span>
+        <span>
+          {fmtTokens(used)} ({pct}%){cost ? ` · ${cost}` : ""}
+        </span>
+      </span>
+    );
+  }
 
   if (!usage || usage.contextTokens <= 0) return null;
 

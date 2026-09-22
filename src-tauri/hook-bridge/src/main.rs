@@ -728,11 +728,170 @@ fn run_permissionrequest(session_dir: &Path) {
     print!("{}", permission_decision_output(decision.as_ref()));
 }
 
+// --- statusline ------------------------------------------------------------
+
+/// Where the user's ORIGINAL statusLine setting is parked while ours is
+/// installed (same data dir as inject-port.json). `{"command": …, "padding": …}`
+/// or `{}` when they had none.
+fn statusline_chain_path() -> Option<PathBuf> {
+    Some(
+        data_dir()?
+            .join("agent-console")
+            .join("statusline-chain.json"),
+    )
+}
+
+/// The console's view of one status-line render: model, cost, context — the
+/// numbers the CLI computes itself, which until now the app re-derived from
+/// the transcript every 5 s (and guessed the window size). Input-only context
+/// sum matches `used_percentage`'s own formula.
+fn status_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
+    let mut e = Map::new();
+    e.insert("type".into(), json!("status"));
+    e.insert("ts".into(), json!(ts));
+    if let Some(sid) = str_field(input, "session_id", "sessionId") {
+        e.insert("sessionId".into(), json!(sid));
+    }
+    if let Some(t) = term_id.filter(|t| !t.is_empty()) {
+        e.insert("termId".into(), json!(t));
+    }
+    if let Some(m) = input.get("model") {
+        if let Some(id) = m.get("id").and_then(|v| v.as_str()) {
+            e.insert("modelId".into(), json!(id));
+        }
+        if let Some(n) = m.get("display_name").and_then(|v| v.as_str()) {
+            e.insert("modelName".into(), json!(n));
+        }
+    }
+    if let Some(c) = input.get("cost") {
+        if let Some(v) = c.get("total_cost_usd").and_then(|v| v.as_f64()) {
+            e.insert("costUsd".into(), json!(v));
+        }
+        if let Some(v) = c.get("total_lines_added").and_then(|v| v.as_u64()) {
+            e.insert("linesAdded".into(), json!(v));
+        }
+        if let Some(v) = c.get("total_lines_removed").and_then(|v| v.as_u64()) {
+            e.insert("linesRemoved".into(), json!(v));
+        }
+        if let Some(v) = c.get("total_duration_ms").and_then(|v| v.as_u64()) {
+            e.insert("durationMs".into(), json!(v));
+        }
+    }
+    if let Some(cw) = input.get("context_window") {
+        if let Some(v) = cw.get("context_window_size").and_then(|v| v.as_u64()) {
+            e.insert("contextSize".into(), json!(v));
+        }
+        if let Some(v) = cw.get("used_percentage").and_then(|v| v.as_f64()) {
+            e.insert("usedPct".into(), json!(v));
+        }
+        if let Some(u) = cw.get("current_usage") {
+            let n = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+            let used =
+                n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens");
+            e.insert("contextUsed".into(), json!(used));
+            e.insert("outputTokens".into(), json!(n("output_tokens")));
+        }
+        if let Some(v) = cw.get("total_input_tokens").and_then(|v| v.as_u64()) {
+            e.insert("inputTotal".into(), json!(v));
+        }
+        if let Some(v) = cw.get("total_output_tokens").and_then(|v| v.as_u64()) {
+            e.insert("outputTotal".into(), json!(v));
+        }
+    }
+    if let Some(b) = input.get("exceeds_200k_tokens").and_then(|v| v.as_bool()) {
+        e.insert("exceeds200k".into(), json!(b));
+    }
+    Value::Object(e)
+}
+
+/// Everything but `ts`: the fingerprint that decides whether this render
+/// changed anything worth a new line in events.jsonl (the status line
+/// re-renders on vim-mode toggles and the like, which change nothing here).
+fn status_fingerprint(event: &Value) -> String {
+    let mut m = event.as_object().cloned().unwrap_or_default();
+    m.remove("ts");
+    Value::Object(m).to_string()
+}
+
+/// Run the user's original status line command with the same stdin and pass
+/// its output through. No chain ⇒ print nothing (they had no status line,
+/// they still don't). Never lets a failure reach the CLI: an error here is
+/// an empty status line, not a broken session.
+fn chain_statusline(raw_input: &[u8]) {
+    let Some(chain) = statusline_chain_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    else {
+        return;
+    };
+    let Some(cmd) = chain
+        .get("command")
+        .and_then(|v| v.as_str())
+        .filter(|c| !c.trim().is_empty())
+    else {
+        return;
+    };
+    #[cfg(windows)]
+    let mut child = std::process::Command::new("cmd");
+    #[cfg(windows)]
+    child.args(["/C", cmd]);
+    #[cfg(not(windows))]
+    let mut child = std::process::Command::new("/bin/sh");
+    #[cfg(not(windows))]
+    child.args(["-c", cmd]);
+    let Ok(mut child) = child
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(raw_input);
+    }
+    if let Ok(out) = child.wait_with_output() {
+        let _ = std::io::stdout().write_all(&out.stdout);
+    }
+}
+
+/// statusLine mode: runs on EVERY render, inside and outside the console —
+/// so unlike the hooks it must not gate on the session dir. Inside: record
+/// the render (deduped) for the app. Always: chain to the user's own line.
+fn run_statusline() {
+    let mut raw = Vec::new();
+    let _ = std::io::stdin().read_to_end(&mut raw);
+    if let Some(dir) = session_dir() {
+        let input: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
+        let term_id = std::env::var("AGENT_CONSOLE_TERM_ID").ok();
+        let event = status_event(&input, term_id.as_deref(), now_ms());
+        let fp = status_fingerprint(&event);
+        let last_path = dir.join(format!(
+            "status-last-{}.txt",
+            term_id.as_deref().unwrap_or("default")
+        ));
+        let unchanged = std::fs::read_to_string(&last_path)
+            .map(|prev| prev == fp)
+            .unwrap_or(false);
+        if !unchanged {
+            append_event(&dir, &event);
+            let _ = std::fs::write(&last_path, fp);
+        }
+    }
+    chain_statusline(&raw);
+}
+
 // --- main ------------------------------------------------------------------
 
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_default();
-    // Every mode is a silent no-op outside Agent Console.
+    // The status line is the one mode that must run OUTSIDE the console too:
+    // it stands in for the user's own status line command and chains to it.
+    if mode == "statusline" {
+        run_statusline();
+        return;
+    }
+    // Every other mode is a silent no-op outside Agent Console.
     let Some(dir) = session_dir() else { return };
     match mode.as_str() {
         "userprompt" => run_userprompt(&dir),
@@ -1016,6 +1175,50 @@ mod tests {
         // A message beyond the cap is cut, never dropped.
         let long = notification_event(&json!({"message": "x".repeat(2000)}), None, 1);
         assert!(long["message"].as_str().unwrap().chars().count() <= NOTIFICATION_MAX + 1);
+    }
+
+    #[test]
+    fn status_event_extracts_model_cost_and_input_only_context() {
+        let input = json!({
+            "session_id": "s-1",
+            "model": {"id": "claude-opus-5-5", "display_name": "Opus"},
+            "cost": {"total_cost_usd": 0.01234, "total_lines_added": 156, "total_lines_removed": 23, "total_duration_ms": 45000},
+            "context_window": {
+                "total_input_tokens": 15500, "total_output_tokens": 1200,
+                "context_window_size": 200000, "used_percentage": 8,
+                "current_usage": {"input_tokens": 8500, "output_tokens": 1200,
+                                  "cache_creation_input_tokens": 5000, "cache_read_input_tokens": 2000}
+            },
+            "exceeds_200k_tokens": false
+        });
+        let e = status_event(&input, Some("t-1"), 5);
+        assert_eq!(e["type"], "status");
+        assert_eq!(e["sessionId"], "s-1");
+        assert_eq!(e["termId"], "t-1");
+        assert_eq!(e["modelId"], "claude-opus-5-5");
+        assert_eq!(e["modelName"], "Opus");
+        assert_eq!(e["costUsd"], 0.01234);
+        assert_eq!(e["linesAdded"], 156);
+        assert_eq!(e["contextSize"], 200000);
+        assert_eq!(e["usedPct"], 8.0);
+        // input + cache_creation + cache_read, never output.
+        assert_eq!(e["contextUsed"], 15500);
+        assert_eq!(e["outputTokens"], 1200);
+        assert_eq!(e["exceeds200k"], false);
+        // Sparse payload (early in a session): fields simply absent.
+        let bare = status_event(&json!({"session_id": "s"}), None, 1);
+        assert!(bare.get("contextUsed").is_none());
+        assert!(bare.get("costUsd").is_none());
+        assert!(bare.get("termId").is_none());
+    }
+
+    #[test]
+    fn status_fingerprint_ignores_the_timestamp_only() {
+        let a = status_event(&json!({"cost": {"total_cost_usd": 1.0}}), Some("t"), 1);
+        let b = status_event(&json!({"cost": {"total_cost_usd": 1.0}}), Some("t"), 2);
+        let c = status_event(&json!({"cost": {"total_cost_usd": 1.5}}), Some("t"), 2);
+        assert_eq!(status_fingerprint(&a), status_fingerprint(&b));
+        assert_ne!(status_fingerprint(&b), status_fingerprint(&c));
     }
 
     #[test]
