@@ -136,12 +136,48 @@ pub struct TurnState {
     pub cwd: Option<String>,
 }
 
-/// Correlation ids a PostToolUse payload may carry (both optional: older
-/// CLIs and Codex send neither).
+/// Correlation ids and run facts a PostToolUse / PostToolUseFailure payload
+/// may carry (all optional: older CLIs and Codex send few of them).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ToolResultIds<'a> {
     pub tool_use_id: Option<&'a str>,
     pub agent_id: Option<&'a str>,
+    /// The Bash command line (what makes a result a check run).
+    pub command: Option<&'a str>,
+    /// sha256 of the FULL output the excerpt was cut from.
+    pub output_sha256: Option<&'a str>,
+    /// PostToolUseFailure: the tool ran and failed.
+    pub failed: bool,
+    pub exit_code: Option<i64>,
+    pub interrupted: Option<bool>,
+    pub duration_ms: Option<u64>,
+}
+
+/// Does this Bash command line run a test/check suite? Conservative
+/// allow-list of common runners; a hit turns the result into a `check_run`
+/// event — the "tests ran, and this is what they said" line a reviewer
+/// reads before any prompt.
+pub fn is_check_command(cmd: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?x)(^|[\s;&|(])(
+                cargo\s+(test|clippy|check|fmt\s+--check)
+              | (npm|pnpm|yarn|bun)\s+(test|run\s+(test|tests|lint|typecheck|check|build|format:check))
+              | npx\s+(vitest|jest|playwright|tsc|eslint|prettier\s+--check|mocha)
+              | (vitest|jest|mocha|playwright\s+test|pytest|tox|nox|rspec|phpunit|dotnet\s+test|swift\s+test)
+              | python(3)?\s+-m\s+(pytest|unittest)
+              | go\s+(test|vet)
+              | make\s+(test|check|lint)
+              | (mvn|mvnw|\./mvnw)\s+(test|verify)
+              | (gradle|gradlew|\./gradlew)\s+(test|check)
+              | mix\s+test
+              | bundle\s+exec\s+rspec
+            )(\s|$)",
+        )
+        .expect("check-runner regex compiles")
+    });
+    re.is_match(cmd)
 }
 
 #[derive(Default)]
@@ -609,18 +645,146 @@ impl TestigoService {
         if let Some(id) = ids.agent_id.filter(|s| !s.is_empty()) {
             payload["agentId"] = json!(id);
         }
+        if let Some(c) = ids.command.filter(|s| !s.is_empty()) {
+            payload["command"] = json!(c);
+        }
+        if let Some(h) = ids.output_sha256.filter(|s| !s.is_empty()) {
+            payload["outputSha256"] = json!(h);
+        }
+        if ids.failed {
+            payload["failed"] = json!(true);
+        }
+        if let Some(code) = ids.exit_code {
+            payload["exitCode"] = json!(code);
+        }
+        if let Some(i) = ids.interrupted {
+            payload["interrupted"] = json!(i);
+        }
+        if let Some(d) = ids.duration_ms {
+            payload["durationMs"] = json!(d);
+        }
+        let ev = Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case.clone(),
+            turn_id.clone(),
+            "tool_result",
+            term_id.map(String::from),
+            session_id.map(String::from),
+            "agent",
+            payload,
+        )?;
+        // A recognized test/check runner also leaves a `check_run` line:
+        // command, verdict, exit code and the hash of its full output.
+        if tool == Some("Bash") {
+            if let Some(cmd) = ids.command.filter(|c| is_check_command(c)) {
+                let status = if ids.interrupted == Some(true) {
+                    "interrupted"
+                } else if ids.failed {
+                    "failed"
+                } else {
+                    "passed"
+                };
+                let _ = Self::record(
+                    &mut inner,
+                    project_root,
+                    ts,
+                    case,
+                    turn_id,
+                    "check_run",
+                    term_id.map(String::from),
+                    session_id.map(String::from),
+                    "agent",
+                    json!({
+                        "command": cmd,
+                        "status": status,
+                        "exitCode": ids.exit_code,
+                        "outputSha256": ids.output_sha256,
+                        "toolUseId": ids.tool_use_id,
+                        "durationMs": ids.duration_ms,
+                    }),
+                );
+            }
+        }
+        Ok(ev)
+    }
+
+    /// The human committed: the ledger's own record of "this work reached
+    /// git", bound to the case and turn whose diff produced the staged files
+    /// (same rule as the Testigo-Case trailer, but recorded whether or not
+    /// trailers are on). `None` turn ⇒ no recorded turn touched these files
+    /// within the window; the commit still records under "unbound".
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_commit(
+        &self,
+        project_root: &str,
+        ts: i64,
+        sha: &str,
+        subject: &str,
+        files: &[String],
+        amend: bool,
+        max_age_ms: i64,
+    ) -> AppResult<ProofEvent> {
+        let binding = self.turn_for_files(project_root, files, ts, max_age_ms)?;
+        let (case, turn_id) = match binding {
+            Some((c, t)) => (c, Some(t)),
+            None => ("unbound".to_string(), None),
+        };
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        let files_v: Vec<Value> = files.iter().take(500).map(|f| json!(f)).collect();
         Self::record(
             &mut inner,
             project_root,
             ts,
             case,
             turn_id,
-            "tool_result",
-            term_id.map(String::from),
-            session_id.map(String::from),
-            "agent",
-            payload,
+            "commit",
+            None,
+            None,
+            "human",
+            json!({
+                "sha": sha,
+                "subject": subject.lines().next().unwrap_or("").chars().take(200).collect::<String>(),
+                "files": files_v,
+                "filesTruncated": files.len() > 500,
+                "amend": amend,
+            }),
         )
+    }
+
+    /// Like `case_for_files`, but also names the turn: the most recent
+    /// `turn_end` within `max_age_ms` whose diff touched any of `files`.
+    pub fn turn_for_files(
+        &self,
+        project_root: &str,
+        files: &[String],
+        now_ms: i64,
+        max_age_ms: i64,
+    ) -> AppResult<Option<(String, String)>> {
+        if files.is_empty() {
+            return Ok(None);
+        }
+        let events = self.list(project_root, None, None)?;
+        for ev in events.iter().rev() {
+            if ev.kind != "turn_end" || now_ms - ev.ts > max_age_ms {
+                continue;
+            }
+            let Some(changed) = ev.payload.get("filesChanged").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            let touched = changed
+                .iter()
+                .filter_map(|f| f.get("path").and_then(|p| p.as_str()))
+                .any(|p| files.iter().any(|f| f == p));
+            if touched {
+                if let Some(t) = &ev.turn_id {
+                    return Ok(Some((ev.case_id.clone(), t.clone())));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// Record a scheduler job run under its own "job:<id>" case — scheduled
@@ -1135,6 +1299,7 @@ mod tests {
                 ToolResultIds {
                     tool_use_id: Some("toolu_9"),
                     agent_id: Some("sub-1"),
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1177,6 +1342,125 @@ mod tests {
             .iter()
             .any(|e| e.kind == "approval_decision");
         assert!(in_b && !in_a);
+        // A recognized runner leaves a check_run beside its tool_result:
+        // passed on PostToolUse, failed (with the exit code) on failure.
+        let ok = svc
+            .on_tool_result(
+                a,
+                12,
+                Some("t1"),
+                Some("s1"),
+                Some("Bash"),
+                Some("test result: ok"),
+                false,
+                ToolResultIds {
+                    command: Some("cargo test --workspace"),
+                    output_sha256: Some("ab".repeat(32).as_str()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(ok.payload["command"], "cargo test --workspace");
+        let evs = svc.list(a, None, None).unwrap();
+        let cr = evs.iter().rev().find(|e| e.kind == "check_run").unwrap();
+        assert_eq!(cr.payload["status"], "passed");
+        assert_eq!(cr.payload["command"], "cargo test --workspace");
+        assert_eq!(cr.turn_id, ok.turn_id);
+        assert_eq!(cr.seq, ok.seq + 1);
+        let failed = svc
+            .on_tool_result(
+                a,
+                13,
+                Some("t1"),
+                Some("s1"),
+                Some("Bash"),
+                Some("Exit code 1\nFAIL"),
+                false,
+                ToolResultIds {
+                    command: Some("npm test"),
+                    failed: true,
+                    exit_code: Some(1),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(failed.payload["failed"], true);
+        assert_eq!(failed.payload["exitCode"], 1);
+        let evs = svc.list(a, None, None).unwrap();
+        let cr = evs.iter().rev().find(|e| e.kind == "check_run").unwrap();
+        assert_eq!(cr.payload["status"], "failed");
+        assert_eq!(cr.payload["exitCode"], 1);
+        // A plain command is not a check.
+        svc.on_tool_result(
+            a,
+            14,
+            Some("t1"),
+            Some("s1"),
+            Some("Bash"),
+            Some("x"),
+            false,
+            ToolResultIds {
+                command: Some("ls -la"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let checks = svc
+            .list(a, None, None)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "check_run")
+            .count();
+        assert_eq!(checks, 2);
+
+        // A commit binds to the turn whose diff touched the staged files.
+        let turn_a = svc
+            .on_prompt(a, 15, Some("t1"), Some("s1"), Some("edit"), None, None)
+            .unwrap()
+            .turn_id
+            .unwrap();
+        svc.on_turn_end(
+            a,
+            16,
+            Some("t1"),
+            Some("s1"),
+            json!({ "filesChanged": [{ "status": "M", "path": "src/lib.rs" }] }),
+        )
+        .unwrap();
+        let c = svc
+            .on_commit(
+                a,
+                17,
+                "deadbeef",
+                "Fix the thing\n\nBody",
+                &["src/lib.rs".to_string()],
+                false,
+                60_000,
+            )
+            .unwrap();
+        assert_eq!(c.kind, "commit");
+        assert_eq!(c.actor, "human");
+        assert_eq!(c.turn_id.as_deref(), Some(turn_a.as_str()));
+        assert_eq!(c.payload["sha"], "deadbeef");
+        assert_eq!(c.payload["subject"], "Fix the thing");
+        assert_eq!(c.payload["files"][0], "src/lib.rs");
+        assert_eq!(c.payload["amend"], false);
+        // Files no turn touched ⇒ recorded, but unbound.
+        let orphan_commit = svc
+            .on_commit(
+                a,
+                18,
+                "cafe",
+                "docs",
+                &["README.md".to_string()],
+                true,
+                60_000,
+            )
+            .unwrap();
+        assert_eq!(orphan_commit.case_id, "unbound");
+        assert!(orphan_commit.turn_id.is_none());
+        assert_eq!(orphan_commit.payload["amend"], true);
+
         // An unknown id (post-restart) still records — in the caller's ledger.
         let orphan = svc
             .on_approval_decision(a, 11, "never-seen", "allow", None)
@@ -1185,6 +1469,38 @@ mod tests {
         assert!(svc.verify(a).unwrap().ok);
         assert!(svc.verify(b).unwrap().ok);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn check_command_allowlist_matches_runners_not_plain_shell() {
+        for c in [
+            "cargo test",
+            "cargo test --workspace -- --nocapture",
+            "cd src-tauri && cargo clippy -- -D warnings",
+            "npm test",
+            "npm run lint",
+            "pnpm run typecheck",
+            "npx vitest run",
+            "pytest -q tests/",
+            "python -m pytest",
+            "go test ./...",
+            "make check",
+            "./gradlew test",
+            "bundle exec rspec",
+        ] {
+            assert!(is_check_command(c), "{c}");
+        }
+        for c in [
+            "ls -la",
+            "git status",
+            "npm install",
+            "cargo build --release",
+            "echo test",
+            "cat pytest.ini",
+            "mytest",
+        ] {
+            assert!(!is_check_command(c), "{c}");
+        }
     }
 
     /// One test fn on purpose (mutates process-global XDG_DATA_HOME): exercises
@@ -1256,6 +1572,7 @@ mod tests {
                 ToolResultIds {
                     tool_use_id: Some("toolu_1"),
                     agent_id: None,
+                    ..Default::default()
                 },
             )
             .unwrap();

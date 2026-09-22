@@ -52,9 +52,32 @@ pub fn git_unstage_file(file: String, state: State<'_, AppState>) -> AppResult<(
 /// for "commit the work the agent just did", not archaeology.
 const TESTIGO_TRAILER_MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Ledger line for a commit the human just made (T4b): bound to the turn
+/// whose diff produced the staged files. Best-effort, never blocks the
+/// commit; witness-off projects simply record nothing.
+fn record_commit(state: &AppState, sha: &str, message: &str, files: &[String], amend: bool) {
+    let project = state.inner.lock().project.clone();
+    let Some(p) = project else { return };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let root = p.root.to_string_lossy();
+    let _ = state.testigo.on_commit(
+        root.as_ref(),
+        now,
+        sha,
+        message,
+        files,
+        amend,
+        TESTIGO_TRAILER_MAX_AGE_MS,
+    );
+}
+
 #[tauri::command(async)]
 pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<String> {
     let repo = current_repo(&state)?;
+    let staged_for_ledger = git_service::staged_files(&repo).unwrap_or_default();
     // Testigo trailer: stamp the commit with the case whose recorded turn
     // produced the staged files (ledger evidence, not active-session
     // guessing). Best-effort — a ledger miss never blocks the commit.
@@ -87,7 +110,9 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
             }
         }
     }
-    git_service::commit(&repo, &message)
+    let sha = git_service::commit(&repo, &message)?;
+    record_commit(&state, &sha, &message, &staged_for_ledger, false);
+    Ok(sha)
 }
 
 #[tauri::command(async)]
@@ -120,7 +145,10 @@ pub fn git_head_message(state: State<'_, AppState>) -> AppResult<String> {
 #[tauri::command(async)]
 pub fn git_amend_commit(message: String, state: State<'_, AppState>) -> AppResult<String> {
     let repo = current_repo(&state)?;
-    git_service::amend_commit(&repo, &message)
+    let staged_for_ledger = git_service::staged_files(&repo).unwrap_or_default();
+    let sha = git_service::amend_commit(&repo, &message)?;
+    record_commit(&state, &sha, &message, &staged_for_ledger, true);
+    Ok(sha)
 }
 
 #[tauri::command(async)]

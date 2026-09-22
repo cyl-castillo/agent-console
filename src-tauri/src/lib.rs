@@ -88,6 +88,11 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_statusline_autoinstalled() {
                 tracing::warn!("hooks: statusline auto-install failed: {e}");
             }
+            // Failed tool runs (Claude only): the test suite that exited
+            // non-zero is evidence too.
+            if let Err(e) = state.hooks.ensure_posttoolusefailure_autoinstalled() {
+                tracing::warn!("hooks: posttoolusefailure auto-install failed: {e}");
+            }
             // Migrate legacy bare-path hook commands to `node "<path>"` on
             // installs that predate the format (on Windows the old format
             // never executed at all — no shebangs in cmd.exe, and the path

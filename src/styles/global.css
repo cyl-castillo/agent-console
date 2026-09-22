@@ -2352,6 +2352,21 @@ select:focus-visible,
   color: var(--text-dim);
 }
 
+/* Test/check runs and commits inside a turn (T4b): the evidence lines a
+   reviewer reads first. */
+.proof-check-passed {
+  color: var(--success, #2ea44f);
+}
+.proof-check-failed {
+  color: var(--danger);
+}
+.proof-check-interrupted {
+  color: var(--text-faint);
+}
+.proof-turn-commits {
+  color: var(--text-dim);
+}
+
 /* Pre-sign export review: an event marked for manual redaction. */
 .proof-redacted {
   color: var(--danger);

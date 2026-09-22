@@ -199,6 +199,52 @@ describe("buildTimeline", () => {
     expect(turns[0].rewound).toBe(true);
   });
 
+  it("collects check runs and commits inside their turn (T4b)", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "fix" } }),
+      ev({
+        seq: 2,
+        ts: 11,
+        kind: "tool_result",
+        turnId: "T1",
+        payload: { tool: "Bash", command: "cargo test" },
+      }),
+      ev({
+        seq: 3,
+        ts: 11,
+        kind: "check_run",
+        turnId: "T1",
+        payload: { command: "cargo test", status: "failed", exitCode: 101, durationMs: 4200 },
+      }),
+      ev({
+        seq: 4,
+        ts: 12,
+        kind: "check_run",
+        turnId: "T1",
+        payload: { command: "cargo test", status: "passed" },
+      }),
+      ev({ seq: 5, ts: 13, kind: "turn_end", turnId: "T1", payload: {} }),
+      ev({
+        seq: 6,
+        ts: 14,
+        kind: "commit",
+        turnId: "T1",
+        actor: "human",
+        payload: { sha: "deadbeef1234", subject: "Fix it", files: ["a.rs", "b.rs"], amend: false },
+      }),
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].checks).toEqual([
+      { command: "cargo test", status: "failed", exitCode: 101, durationMs: 4200 },
+      { command: "cargo test", status: "passed", exitCode: undefined, durationMs: undefined },
+    ]);
+    expect(turns[0].commits).toEqual([
+      { sha: "deadbeef1234", subject: "Fix it", files: 2, amend: false },
+    ]);
+    // A tool_result still counts as a tool call; the check line is extra.
+    expect(turns[0].toolResults).toBe(1);
+  });
+
   it("skips turnless events (case_link, job_run)", () => {
     const turns = buildTimeline([
       ev({ seq: 0, ts: 1, kind: "case_link", actor: "system" }),
@@ -236,6 +282,8 @@ function turn(partial: Partial<TimelineTurn>): TimelineTurn {
     summaryTruncated: false,
     failed: false,
     rewound: false,
+    checks: [],
+    commits: [],
     termId: "term-1",
     sessionId: "sid-original",
     cwd: "/repo/worktree",
