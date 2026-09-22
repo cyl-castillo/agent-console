@@ -329,7 +329,7 @@ fn capture_thread(
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     sink.lock().extend_from_slice(data);
                 },
-                |e| eprintln!("voice: stream error: {e}"),
+                |e| tracing::warn!("voice: stream error: {e}"),
                 None,
             )
         }
@@ -340,7 +340,7 @@ fn capture_thread(
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
                     sink.lock().extend(data.iter().map(|&v| v as f32 / 32768.0));
                 },
-                |e| eprintln!("voice: stream error: {e}"),
+                |e| tracing::warn!("voice: stream error: {e}"),
                 None,
             )
         }
@@ -352,7 +352,7 @@ fn capture_thread(
                     sink.lock()
                         .extend(data.iter().map(|&v| (v as f32 - 32768.0) / 32768.0));
                 },
-                |e| eprintln!("voice: stream error: {e}"),
+                |e| tracing::warn!("voice: stream error: {e}"),
                 None,
             )
         }

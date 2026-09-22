@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // builder can be tested without a webview.
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+vi.mock("../ipc/tauri", () => ({ ipc: { diagnosticsBundle: vi.fn() } }));
 
 import { buildIssueUrl } from "./reportProblem";
 
@@ -36,6 +37,15 @@ describe("buildIssueUrl (prefilled GitHub issue)", () => {
     const url = new URL(buildIssueUrl({ version: "1", userAgent: "UA", error: long }));
     expect(url.searchParams.get("title")!.length).toBeLessThanOrEqual("[bug] ".length + 80);
     expect(url.searchParams.get("body")).toContain(long);
+  });
+
+  it("asks for a paste when the diagnostics bundle is on the clipboard", () => {
+    const withDiag = new URL(
+      buildIssueUrl({ version: "1", userAgent: "UA", diagnosticsOnClipboard: true }),
+    );
+    expect(withDiag.searchParams.get("body")).toContain("already on your clipboard");
+    const without = new URL(buildIssueUrl({ version: "1", userAgent: "UA" }));
+    expect(without.searchParams.get("body")).not.toContain("clipboard");
   });
 
   it("handles a missing version gracefully", () => {

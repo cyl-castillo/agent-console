@@ -117,7 +117,7 @@ impl GitWatcher {
             let mut debouncer = match debouncer {
                 Ok(d) => d,
                 Err(e) => {
-                    eprintln!("git_watcher: failed to create debouncer: {e}");
+                    tracing::warn!("git_watcher: failed to create debouncer: {e}");
                     return;
                 }
             };
@@ -189,7 +189,7 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) -> usize {
         }
         count += 1;
         if count >= MAX_WATCH_DIRS {
-            eprintln!(
+            tracing::warn!(
                 "git_watcher: hit {MAX_WATCH_DIRS} watch cap under {}",
                 root.display()
             );
@@ -201,7 +201,7 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) -> usize {
         let _ = watcher.watch(&git_dir, RecursiveMode::NonRecursive);
     }
     if count == 0 {
-        eprintln!(
+        tracing::warn!(
             "git_watcher: watched no directories under {}",
             root.display()
         );
@@ -212,7 +212,7 @@ fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) -> usize {
 #[cfg(not(target_os = "linux"))]
 fn register_watches(watcher: &mut dyn notify::Watcher, root: &Path) -> usize {
     if let Err(e) = watcher.watch(root, RecursiveMode::Recursive) {
-        eprintln!("git_watcher: failed to watch {}: {e}", root.display());
+        tracing::warn!("git_watcher: failed to watch {}: {e}", root.display());
         return 0;
     }
     1

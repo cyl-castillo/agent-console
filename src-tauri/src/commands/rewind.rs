@@ -108,7 +108,7 @@ pub fn turn_rewind(
         ) {
             let msg = e.to_string();
             if !msg.contains("witnessing disabled") {
-                eprintln!("rewind: testigo append failed: {msg}");
+                tracing::warn!("rewind: testigo append failed: {msg}");
             }
         }
     }

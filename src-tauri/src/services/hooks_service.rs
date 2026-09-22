@@ -106,7 +106,7 @@ impl HooksRuntime {
         if let Some(cutoff) = std::time::SystemTime::now().checked_sub(SESSION_DIR_MAX_AGE) {
             let n = prune_stale_session_dirs(&sessions_root, cutoff, &session_dir);
             if n > 0 {
-                eprintln!("hooks: pruned {n} stale session dirs");
+                tracing::info!("hooks: pruned {n} stale session dirs");
             }
         }
         fs::create_dir_all(session_dir.join("approvals"))?;
@@ -309,7 +309,7 @@ impl HooksRuntime {
             self.binary_path.as_deref(),
         )?;
         if n > 0 {
-            eprintln!("hooks: mirrored {n} claude hook(s) into codex");
+            tracing::warn!("hooks: mirrored {n} claude hook(s) into codex");
         }
         Ok(())
     }
@@ -936,7 +936,7 @@ fn dir_wake_source(
     .and_then(|mut w| match w.watch(dir, RecursiveMode::NonRecursive) {
         Ok(()) => Some(w),
         Err(e) => {
-            eprintln!("hooks: fs watch on {} failed, polling: {e}", dir.display());
+            tracing::warn!("hooks: fs watch on {} failed, polling: {e}", dir.display());
             None
         }
     });
@@ -998,7 +998,7 @@ fn drain_new_lines(path: &Path, last_size: u64) -> (Vec<Value>, u64) {
         .filter(|l| {
             let ok = l.len() <= MAX_EVENT_BYTES;
             if !ok {
-                eprintln!("hooks: dropping oversized event line ({} bytes)", l.len());
+                tracing::warn!("hooks: dropping oversized event line ({} bytes)", l.len());
             }
             ok
         })
@@ -1049,7 +1049,7 @@ fn handle_event(v: &Value, app: &AppHandle) {
                     snapshot_sha: None,
                 },
             ) {
-                eprintln!("hooks: activity append failed: {e}");
+                tracing::warn!("hooks: activity append failed: {e}");
             }
 
             // Testigo: the prompt is the intent — it opens a turn in the
@@ -1067,7 +1067,7 @@ fn handle_event(v: &Value, app: &AppHandle) {
             ) {
                 let msg = e.to_string();
                 if !msg.contains("witnessing disabled") {
-                    eprintln!("hooks: testigo append failed: {msg}");
+                    tracing::warn!("hooks: testigo append failed: {msg}");
                 }
             }
 
@@ -1650,7 +1650,7 @@ mod tests {
             .map(|o| !o.status.success())
             .unwrap_or(true)
         {
-            eprintln!("node not available — skipping modelswitch bridge test");
+            tracing::warn!("node not available — skipping modelswitch bridge test");
             return;
         }
 
@@ -1730,7 +1730,7 @@ mod tests {
             .map(|o| !o.status.success())
             .unwrap_or(true)
         {
-            eprintln!("node not available — skipping stop bridge test");
+            tracing::warn!("node not available — skipping stop bridge test");
             return;
         }
 
@@ -1843,7 +1843,7 @@ mod tests {
             .map(|o| !o.status.success())
             .unwrap_or(true)
         {
-            eprintln!("node not available — skipping stopfailure bridge test");
+            tracing::warn!("node not available — skipping stopfailure bridge test");
             return;
         }
 
@@ -1932,7 +1932,7 @@ mod tests {
             .map(|o| !o.status.success())
             .unwrap_or(true)
         {
-            eprintln!("node not available — skipping bridge test");
+            tracing::warn!("node not available — skipping bridge test");
             return;
         }
 

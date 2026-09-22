@@ -105,6 +105,7 @@ export function FeedbackPanel() {
                 Branch: <code>{ctx.branch}</code>
               </li>
             )}
+            <li>Diagnostics: hooks state, store sizes, last {300} log lines (home dir redacted)</li>
           </ul>
         </div>
       )}

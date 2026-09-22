@@ -509,7 +509,7 @@ fn annotate_similarity(project_root: &Path, suggestions: &mut [LearningSuggestio
             }
             Ok(None) => {}
             Err(e) => {
-                eprintln!("learning: semantic annotate skipped: {e}");
+                tracing::warn!("learning: semantic annotate skipped: {e}");
                 return;
             }
         }
@@ -954,12 +954,12 @@ mod tests {
         let events = svc.list(&root, Some(400)).unwrap();
         assert_eq!(events.len(), 6, "ledger round-trip");
         let result = reflect(&project, &events).expect("reflect should succeed");
-        eprintln!("\n=== events_analyzed: {} ===", result.events_analyzed);
-        eprintln!("=== raw excerpt ===\n{}\n", result.raw_excerpt);
+        tracing::warn!("\n=== events_analyzed: {} ===", result.events_analyzed);
+        tracing::warn!("=== raw excerpt ===\n{}\n", result.raw_excerpt);
         for s in &result.suggestions {
-            eprintln!("- [{}] {}\n    {}", s.kind, s.title, s.rationale);
+            tracing::warn!("- [{}] {}\n    {}", s.kind, s.title, s.rationale);
             for e in &s.evidence {
-                eprintln!("    · {e}");
+                tracing::warn!("    · {e}");
             }
         }
         assert_eq!(result.events_analyzed, 6);

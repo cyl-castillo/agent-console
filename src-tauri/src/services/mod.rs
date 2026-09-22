@@ -4,6 +4,7 @@ pub mod agent_sessions;
 pub mod claude_cli;
 pub mod context_service;
 pub mod corpus_feedback;
+pub mod diagnostics;
 pub mod embedding_service;
 pub mod engine_runner;
 pub mod feedback_service;
