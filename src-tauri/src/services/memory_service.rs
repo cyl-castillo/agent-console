@@ -149,8 +149,15 @@ fn safe_path(project_root: &Path, name: &str) -> AppResult<PathBuf> {
     let dir = memory_dir_for(project_root)?;
     let path = dir.join(name);
     // Defense in depth: confirm canonical path is still inside the dir.
-    let canon = path.canonicalize().unwrap_or(path.clone());
-    let dir_canon = dir.canonicalize().unwrap_or(dir.clone());
+    // Both sides must land in the SAME canonical form: on Windows an existing
+    // dir canonicalizes to the verbatim shape (`\\?\C:\…`) while a file that
+    // doesn't exist yet can't canonicalize at all — the old plain-path
+    // fallback then compared the two shapes and rejected every NEW entry as
+    // "path escapes memory dir" (same trap on macOS, where /tmp is a
+    // symlink). A not-yet-existing entry resolves as canonical dir + name;
+    // an existing symlink still resolves to its real target and is caught.
+    let dir_canon = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+    let canon = path.canonicalize().unwrap_or_else(|_| dir_canon.join(name));
     if !canon.starts_with(&dir_canon) {
         return Err(AppError::InvalidArgument(format!(
             "path escapes memory dir: {name}"
@@ -259,6 +266,38 @@ mod tests {
         assert!(archive(&project, MEMORY_INDEX).is_err());
 
         let _ = fs::remove_dir_all(&home);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    /// Regression: writing a NEW entry must survive a memory dir whose path
+    /// canonicalizes to a different shape. On Windows that's the verbatim
+    /// prefix (`\\?\C:\…`); here we force the same class of mismatch with a
+    /// symlinked HOME (macOS /tmp works like this out of the box). The old
+    /// fallback compared plain-vs-canonical and rejected every new file as
+    /// "path escapes memory dir".
+    #[cfg(unix)]
+    #[test]
+    fn new_entry_writes_through_a_symlinked_memory_dir() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let real_home = std::env::temp_dir().join(format!("ac-mem-realhome-{nanos}"));
+        fs::create_dir_all(&real_home).unwrap();
+        let linked_home = std::env::temp_dir().join(format!("ac-mem-linkhome-{nanos}"));
+        std::os::unix::fs::symlink(&real_home, &linked_home).unwrap();
+        std::env::set_var("HOME", &linked_home);
+        let project = std::env::temp_dir().join(format!("ac-mem-linkproj-{nanos}"));
+        fs::create_dir_all(&project).unwrap();
+
+        let path = write(&project, "adt-registro-tickets.md", "body").unwrap();
+        assert!(path.exists());
+        // A traversal-shaped name is still rejected.
+        assert!(write(&project, "../escape.md", "x").is_err());
+
+        let _ = fs::remove_dir_all(&real_home);
+        let _ = fs::remove_file(&linked_home);
         let _ = fs::remove_dir_all(&project);
     }
 }
