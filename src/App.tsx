@@ -13,6 +13,8 @@ import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { attachHooksHealthListeners } from "./stores/hooksHealthStore";
 import { attachLiveStatusListener } from "./stores/liveStatusStore";
+import { attachProofListeners } from "./stores/proofStore";
+import { TurnsPanel } from "./components/TurnsPanel";
 import { attachSchedulerListeners, useSchedulerStore } from "./stores/schedulerStore";
 import { attachInjectListener, useInjectStore } from "./stores/injectStore";
 import { attachApprovalListener, useApprovalStore } from "./stores/approvalStore";
@@ -127,7 +129,9 @@ export default function App() {
   const seenWelcome = useOnboardingStore((s) => s.seenWelcome);
   const markVisitedPermissions = useOnboardingStore((s) => s.markVisitedPermissions);
   type WbTab = WorkbenchTab;
-  const [workbenchTab, setWorkbenchTabState] = useState<WbTab>("skills");
+  // Turns by default: the first thing a user sees next to the terminal is
+  // what the agent is doing, structured — not its playbook.
+  const [workbenchTab, setWorkbenchTabState] = useState<WbTab>("turns");
   const setWorkbenchTab = (t: WbTab) => {
     setWorkbenchTabState(t);
     if (project) {
@@ -384,6 +388,11 @@ export default function App() {
       if (disposed) u();
       else offLiveStatus = u;
     });
+    let offProof: (() => void) | null = null;
+    attachProofListeners().then((u) => {
+      if (disposed) u();
+      else offProof = u;
+    });
     const offVoiceApproval = attachVoiceApprovalWatcher();
     return () => {
       disposed = true;
@@ -397,6 +406,7 @@ export default function App() {
       offQuarantine?.();
       offHooksHealth?.();
       offLiveStatus?.();
+      offProof?.();
     };
   }, []);
 
@@ -810,6 +820,7 @@ export default function App() {
                 {workbenchTab === "agenda" && <AgendaPanel />}
                 {workbenchTab === "notes" && <NotesPanel />}
                 {workbenchTab === "proof" && <ProofPanel />}
+                {workbenchTab === "turns" && <TurnsPanel />}
                 {workbenchTab === "plugins" && <PluginsPanel />}
                 {workbenchTab === "mcp" && <McpPanel />}
                 {workbenchTab === "transfer" && <ExportImportPanel />}
