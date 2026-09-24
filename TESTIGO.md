@@ -231,3 +231,125 @@ ProofEvent {
   lleva el hunk equivalente de testigo#7 (re-sincronizar cuando #7/#9/#17 mergeen).
 
 Cadencia estándar: plan → fase → commit → release por fase (`/phased-feature-build`).
+
+## 6. Monorepo: protocolo puro + plugins por engine (plan 2026-09-23)
+
+**Decisión de Carlos (2026-09-23):** el repo `testigo` queda como **protocolo** (spec, schema,
+conformance, verificador) más una librería de referencia neutra; la captura por engine se
+vuelve **plugins aparte** que implementan el protocolo — Claude Code y Codex primero, después
+cualquiera (LangChain #3, etc.). **Monorepo** (un `marketplace.json` lista N plugins) y el
+plugin de Claude **conserva el nombre `testigo`** para no romper a quien ya tiene
+`testigo@testigo` instalado. agent-console sigue siendo la implementación de referencia
+completa (Rust) y no cambia código en este arco.
+
+### Estado de partida (lo que hay que desenredar)
+- `SPEC.md`, `schema/`, `predicate/`, `conformance/`, `verifier/`, `docs/` ya son neutros de
+  engine (Claude aparece solo como ejemplo; `session_start.engine` y `external_evidence.source`
+  son strings abiertos).
+- `cli/` mezcla dos cosas: el **núcleo neutro** (`ledger.mjs`, `export.mjs`, `verify.mjs`,
+  `rfc3161.mjs`, `evidence.mjs`) y el **adaptador de Claude Code** (`hook.mjs` con
+  `engine: "claude-code"` hardcodeado y `transcript_path` como evidencia externa,
+  `hooks/hooks.json`, `commands/*.md`, `bin/testigo.mjs` con `init` que escribe
+  `.claude/settings.json`). `package.json` se autodescribe como "captura desde hooks de Claude".
+- Ledger compartido por diseño: `~/.local/share/testigo/ledgers/<key(root)>.jsonl`, estado de
+  sesiones keyed por `session_id`. Dos engines sobre el mismo repo escriben el mismo ledger y el
+  case sale multi-engine solo — es la tesis del protocolo, no un problema.
+- El repo **no tiene CI** (`.github/workflows` no existe); los tests corren a mano
+  (`cli/test.mjs`, `cli/test-concurrency.mjs`, `conformance/verify.mjs`).
+
+### Restricción descubierta que fija el diseño
+Claude Code instala **solo el subdirectorio `source`** del plugin, copiado a
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` (verificado 2026-09-23 con
+`aimem-plugins`: 3 plugins de un repo, cada caché contiene únicamente su carpeta). Por lo tanto
+un plugin en `plugins/claude/` **no puede importar `../../packages/core`** en runtime.
+Solución: cada plugin lleva el núcleo **vendoreado** (`plugins/<engine>/vendor/core/`,
+generado por `scripts/sync-vendor.mjs`, **commiteado**, y `scripts/check-vendor.mjs` en CI
+falla si difiere de `packages/core`). Se mantiene cero dependencias y no se depende de npm
+(la máquina no tiene login npm; `testigo` y `@testigo/core` están libres — E404 — reservarlos
+cuando haya token, no antes).
+
+### Layout objetivo
+```
+testigo/
+  SPEC.md  schema/  predicate/  conformance/  verifier/  docs/   ← protocolo, no se mueve
+  packages/core/            ledger.mjs export.mjs verify.mjs rfc3161.mjs evidence.mjs + test.mjs
+  packages/hooks-adapter/   hook.mjs neutro (schema de hooks Anthropic, que Codex copió):
+                            createHookHandler({ engine, events, evidence }) + test con fixtures
+  plugins/claude/           .claude-plugin/plugin.json  hooks/hooks.json  commands/*.md
+                            bin/testigo.mjs  README.md  vendor/{core,hooks-adapter}/
+  plugins/codex/            bin/testigo-codex.mjs (init → ~/.codex/hooks.json)  README.md  vendor/…
+  conformance/producer/     fixtures hook-input → ledger esperado + verify.mjs (M5)
+  scripts/sync-vendor.mjs   scripts/check-vendor.mjs
+  .claude-plugin/marketplace.json   testigo → ./plugins/claude · testigo-codex → ./plugins/codex
+  .github/workflows/ci.yml  core + adapter + plugins + conformance + check-vendor
+```
+
+### Fases (una fase = un PR en `testigo`; commits de `git mv` separados de los de contenido)
+- **M0 — Despejar la pista (antes de mover nada).** Hay 6 PRs de Fredy abiertos que tocan
+  `cli/lib/*`: #7 y #9 mergeables; #14, #17, #19 y #23 ya en conflicto entre sí (#19 hasta
+  agrega `cli/lib/command.mjs` e `init.mjs`). Mover archivos debajo de ellos multiplica los
+  conflictos. Orden: mergear #7 y #9; que #14 → #23 → #19 → #17 se rebaseen en secuencia y se
+  mergeen; abrir un issue "Monorepo: protocol + per-engine plugins" con este plan, enlazando
+  #2 (Codex adapter) y #3 (LangChain), para que nadie abra PRs nuevos contra `cli/`.
+  *Gate:* ningún PR abierto que toque `cli/`.
+  **Avance 2026-09-24:** #9 y #7 MERGEADOS (tests verdes por separado y en árbol combinado);
+  la interacción esperada entre ambos (test 2 de `hash.test.mjs` simulaba el DOM en `vm` y el
+  render por DOM de #9 lo rompía) resuelta en **#24 MERGEADO** (el chequeo byte-exacto pasa al
+  harness de Playwright, 14/14 con Chrome; `hash.test.mjs` 2/2; 27+7 vectores). Issue del plan:
+  **cyl-castillo/testigo#25**. Pedidos de rebase secuencial posteados en #14 → #23 → #19 → #17.
+  ⏳ Falta: que Fredy rebasee y se mergeen los 4. Pendiente en agent-console: re-sincronizar
+  `resources/testigo-verifier.html` con el del repo (ya tiene el hunk de #7; falta el de #9).
+- **M1 — Extraer el núcleo sin cambiar comportamiento.** `git mv` de los 5 módulos a
+  `packages/core/`; `cli/` importa temporalmente de `../packages/core`; las secciones 2-4 de
+  `cli/test.mjs` (link/chain/heal, export/redact, conformance como oráculo) pasan a
+  `packages/core/test.mjs` sin tocar asserts. Agregar `ci.yml` acá (hoy no existe).
+  *Gate:* `cli/test.mjs` + `test-concurrency.mjs` + conformance 20+7 verdes; un export con la
+  misma seed de test produce el mismo packet que antes salvo `exportedAtMs`.
+- **M2 — Adaptador de hooks neutro.** `hook.mjs` → `packages/hooks-adapter/` con
+  `createHookHandler({ engine, events, evidence })`: `engine` deja de ser constante; la
+  evidencia externa es estrategia inyectada (Claude: `transcript_path`; Codex: el rollout
+  `~/.codex/sessions/**/rollout-*-<id>.jsonl` si se puede localizar por session id, y si no,
+  nada — declarado); `hooksConfig(command, events)` parametrizado por los eventos que cada
+  engine soporta. *Gate:* tests actuales + test unitario del handler con fixtures por engine.
+- **M3 — Plugin `testigo` (Claude) en `plugins/claude/`.** Mover `cli/bin`, `cli/hooks`,
+  `cli/commands`, `cli/README.md`; `marketplace.json` → `source: "./plugins/claude"` con el
+  **mismo** `name: "testigo"` (las instalaciones existentes actualizan sin reinstalar);
+  `vendor/` generado + `check-vendor` en CI; `cli/` desaparece (queda un `cli/README.md` stub
+  de redirección durante un release). Actualizar rutas en `README.md` y en
+  `docs/demo-inversor-2026-09.md` (apunta a `cli/bin` con rutas absolutas del disco de Carlos).
+  *Gate:* e2e verde **y** prueba humana: `/plugin marketplace add` desde el branch, sesión
+  completa, `/testigo:status`, export, packet verificado con `conformance/verify.mjs` — el
+  plugin corriendo desde la caché, no desde el clone.
+- **M4 — Plugin `testigo-codex` en `plugins/codex/`.** `init` escribe/mergea
+  `~/.codex/hooks.json` con los 4 eventos que Codex tiene (UserPromptSubmit, PreToolUse,
+  PostToolUse, Stop; sin SessionStart ni PostModelSwitch → `session_start` con
+  `engine: "codex"` se emite en el primer prompt de cada sesión, modelo solo si llega).
+  Investigar `SessionEnd` (Codex 0.145) e `Interrupt` (0.150) para cerrar turnos sin Stop
+  (hoy en agent-console quedan abiertos: M3/M7 del CLI watch). README con la declaración
+  honesta de alcance (approvals fuera; qué campos manda Codex de verdad). Codex **no tiene
+  marketplace**: distribución = `node plugins/codex/bin/testigo-codex.mjs init` desde el clone
+  o desde la copia del marketplace de Claude (`~/.claude/plugins/marketplaces/testigo/`),
+  documentado. Cierra el issue #2. *Gate:* sesión real de Codex → ledger → export → verifica;
+  Claude y Codex sobre el mismo repo producen un case multi-engine (esa es la demo).
+- **M5 — Conformance de productores.** Hoy los vectores solo prueban verificadores. Nuevo
+  `conformance/producer/`: fixtures de secuencias de hook-input (Claude y Codex) → ledger
+  esperado (kinds, actores, bindings turno/case, payload normalizado sin ts ni hashes) y un
+  runner que alimenta cualquier adaptador por stdin y compara. Los dos plugins lo pasan; los
+  tests de `testigo_service.rs` en agent-console consumen las mismas fixtures. SPEC §6
+  "Producer conformance" (aditivo, sin bump). Esto es lo que vuelve real "todos los que
+  quieran después": un adaptador nuevo (#3 LangChain) trae su fixture y pasa el runner.
+- **M6 — Versionado y release.** Versiones por paquete: core 0.3.0, `testigo` (Claude) 0.3.0,
+  `testigo-codex` 0.1.0; tags `core-v*` / `claude-v*` / `codex-v*`; CHANGELOG por paquete.
+  README raíz: "reference implementation: agent-console; lightweight reference producers:
+  plugins/". M1-M3 salen juntos como plugin 0.3.0 (un salto visible); M4 es su propio release.
+
+### Riesgos
+| Riesgo | Mitigación |
+|---|---|
+| Rebases de Fredy contra archivos movidos | M0 primero; `git mv` en commits propios para que `--follow` y los rebases resuelvan |
+| Deriva entre `packages/core` y `vendor/` | `check-vendor` bloqueante en CI; `sync-vendor` idempotente |
+| Doble testimonio (plugin + `testigo init` viejo, o dos plugins) | Ya advertido en el README; entre engines no hay doble: session ids distintos, mismo ledger por diseño |
+| Codex cambia hooks (async 0.148, SessionEnd, Interrupt) | El adapter recibe la lista de eventos por engine; la declaración de alcance vive en el README del plugin, no en el spec |
+| Nombre `testigo-codex` o scopes npm tomados | npm libre hoy (E404 en `testigo` y `@testigo/core`); reservar solo cuando haya token, el plan no depende de npm |
+
+Regla de oro intacta: nada entra al spec (M5) sin estar implementado y usado por nosotros.
