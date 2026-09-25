@@ -108,7 +108,7 @@ export function WorkbenchTabs({
       icon: "shield-check",
       label: "Proof",
       title:
-        "Proof — attach a verifiable proof packet to your next PR: what was asked, what you approved, what changed. Verified in any browser, no install.",
+        "Proof — the active session turn by turn (prompt, tools, tests, files, approvals), and the hash-chained ledger behind it: export a proof packet anyone verifies in a browser.",
     },
     context: {
       icon: "file-text",
@@ -236,6 +236,8 @@ export function WorkbenchSubTabs({
   const meta: Partial<Record<WorkbenchTab, { label: string; count?: number; flagged?: number }>> = {
     jira: { label: "Queue", count: jiraCount },
     agenda: { label: "Agenda" },
+    turns: { label: "Turns" },
+    proof: { label: "Ledger" },
     skills: { label: "Skills", count: skillsCount },
     advisor: { label: advisorAnalyzing ? "Advisor…" : "Advisor", count: advisorPending },
     learning: { label: learningReflecting ? "Learning…" : "Learning", count: learningPending },

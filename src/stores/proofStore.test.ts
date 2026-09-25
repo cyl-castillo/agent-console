@@ -245,6 +245,98 @@ describe("buildTimeline", () => {
     expect(turns[0].toolResults).toBe(1);
   });
 
+  it("lists tool calls, injected docs, model and case per turn (T5)", () => {
+    const turns = buildTimeline([
+      ev({
+        seq: 1,
+        ts: 10,
+        kind: "prompt",
+        turnId: "T1",
+        caseId: "jira:X-1",
+        payload: { prompt: "go" },
+      }),
+      ev({
+        seq: 2,
+        ts: 10,
+        kind: "context_injected",
+        turnId: "T1",
+        payload: { docs: ["memory:a.md", "skill:b"] },
+      }),
+      ev({
+        seq: 3,
+        ts: 11,
+        kind: "session_start",
+        turnId: "T1",
+        payload: { model: "claude-opus-5" },
+      }),
+      ev({
+        seq: 4,
+        ts: 12,
+        kind: "tool_result",
+        turnId: "T1",
+        payload: { tool: "Bash", command: "cargo test", excerpt: "ok", agentId: "sub-1" },
+      }),
+      ev({
+        seq: 5,
+        ts: 13,
+        kind: "tool_result",
+        turnId: "T1",
+        payload: {
+          tool: "Bash",
+          command: "npm test",
+          excerpt: "Exit code 1",
+          failed: true,
+          exitCode: 1,
+        },
+      }),
+      ev({
+        seq: 6,
+        ts: 14,
+        kind: "tool_result",
+        turnId: "T1",
+        payload: { tool: "Read", excerpt: "line 1" },
+      }),
+      ev({
+        seq: 7,
+        ts: 15,
+        kind: "model_switch",
+        turnId: "T1",
+        payload: { to: "claude-haiku-4-5" },
+      }),
+    ]);
+    const t = turns[0];
+    expect(t.caseId).toBe("jira:X-1");
+    expect(t.injected).toEqual(["memory:a.md", "skill:b"]);
+    expect(t.model).toBe("claude-haiku-4-5");
+    expect(t.toolResults).toBe(3);
+    expect(t.tools).toEqual([
+      {
+        tool: "Bash",
+        command: "cargo test",
+        excerpt: "ok",
+        failed: false,
+        exitCode: undefined,
+        agentId: "sub-1",
+      },
+      {
+        tool: "Bash",
+        command: "npm test",
+        excerpt: "Exit code 1",
+        failed: true,
+        exitCode: 1,
+        agentId: undefined,
+      },
+      {
+        tool: "Read",
+        command: undefined,
+        excerpt: "line 1",
+        failed: false,
+        exitCode: undefined,
+        agentId: undefined,
+      },
+    ]);
+  });
+
   it("skips turnless events (case_link, job_run)", () => {
     const turns = buildTimeline([
       ev({ seq: 0, ts: 1, kind: "case_link", actor: "system" }),
@@ -284,6 +376,8 @@ function turn(partial: Partial<TimelineTurn>): TimelineTurn {
     rewound: false,
     checks: [],
     commits: [],
+    tools: [],
+    injected: [],
     termId: "term-1",
     sessionId: "sid-original",
     cwd: "/repo/worktree",

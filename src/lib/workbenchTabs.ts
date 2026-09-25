@@ -20,6 +20,7 @@ export const WORKBENCH_TABS = [
   "agenda",
   "teams",
   "notes",
+  "turns",
   "proof",
 ] as const;
 
@@ -39,7 +40,9 @@ export const WORKBENCH_GROUPS = [
   { key: "tasks", tabs: ["jira", "agenda"] },
   { key: "teams", tabs: ["teams"] },
   { key: "notes", tabs: ["notes"] },
-  { key: "proof", tabs: ["proof"] },
+  // Turns first: the active session's turns are what you look at while the
+  // agent works; the ledger view is the audit behind them.
+  { key: "proof", tabs: ["turns", "proof"] },
   { key: "context", tabs: ["context"] },
   { key: "coach", tabs: ["skills", "advisor", "learning"] },
   { key: "room", tabs: ["roundtable"] },
