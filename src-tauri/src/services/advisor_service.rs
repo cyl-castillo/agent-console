@@ -44,16 +44,12 @@ pub fn analyze(project_root: &Path) -> AppResult<AnalysisResult> {
     // the login-shell PATH, so the bare name would fail to spawn. stdio + the
     // Windows no-window flag are set inside claude_cli. The prompt goes over
     // stdin, never argv: Windows caps the command line (os error 206).
-    let mut cmd = crate::services::claude_cli::command_with_stdin(&[
-        "-p",
-        "--permission-mode",
-        "plan",
-        "--output-format",
-        "text",
-    ]);
-    cmd.current_dir(project_root);
-    let output = crate::services::claude_cli::output_with_stdin(cmd, &prompt)
-        .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
+    let output = crate::services::claude_cli::headless_output(
+        &["-p", "--permission-mode", "plan", "--output-format", "text"],
+        project_root,
+        &prompt,
+    )
+    .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
 
     if !output.status.success() {
         return Err(AppError::Other(crate::services::claude_cli::exit_error(

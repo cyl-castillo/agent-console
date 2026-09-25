@@ -96,6 +96,83 @@ pub fn output_with_stdin(mut cmd: Command, prompt: &str) -> std::io::Result<std:
     child.wait_with_output()
 }
 
+/// Headless `claude -p …` in `cwd` with the prompt over stdin — the one
+/// runner for advisor, reflect, curator and scheduler jobs.
+///
+/// These runs pass no `--model`: the CLI uses whatever the user configured
+/// (`settings.json` `model`, typically written by `/model`). When that is a
+/// full id newer than the Claude Code installed on THIS machine — a `/model`
+/// picked on a newer install, or settings synced across machines — an
+/// interactive session only warns, but `-p` exits 1 ("… isn't described by
+/// this version's model catalog"), and every Advisor/Learning run dies with
+/// it. The honest recovery is the family alias (`claude-opus-5-5` → `opus`:
+/// "the newest Opus this CLI knows"), so the run is retried once with
+/// `--model <family>`. A second failure reaches the caller, where
+/// `exit_error` names the fix.
+pub fn headless_output(
+    base_args: &[&str],
+    cwd: &std::path::Path,
+    prompt: &str,
+) -> std::io::Result<std::process::Output> {
+    let mut cmd = command_with_stdin(base_args);
+    cmd.current_dir(cwd);
+    let first = output_with_stdin(cmd, prompt)?;
+    if first.status.success() {
+        return Ok(first);
+    }
+    let stderr = String::from_utf8_lossy(&first.stderr);
+    let Some(alias) = unknown_model_in(&stderr).and_then(|id| family_alias(&id)) else {
+        return Ok(first);
+    };
+    tracing::warn!(
+        "claude -p: configured model unknown to this CLI; retrying with --model {alias}"
+    );
+    let mut args: Vec<&str> = base_args.to_vec();
+    args.push("--model");
+    args.push(alias);
+    let mut cmd = command_with_stdin(&args);
+    cmd.current_dir(cwd);
+    output_with_stdin(cmd, prompt)
+}
+
+/// The model id the CLI refused because its catalog predates it, from
+/// either shape it prints: `"<id>" isn't described by this version's model
+/// catalog` (the human line) or `[claude-code:unrecognized_model]
+/// {"model":"<id>",…}` (the headless log line). None ⇒ some other failure.
+pub fn unknown_model_in(text: &str) -> Option<String> {
+    if let Some(i) = text.find("isn't described by this version's model catalog") {
+        // The id is the last double-quoted token before the phrase.
+        let head = &text[..i];
+        let end = head.rfind('"')?;
+        let start = head[..end].rfind('"')?;
+        let id = head[start + 1..end].trim();
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+    if let Some(i) = text.find("unrecognized_model") {
+        let tail = &text[i..];
+        let j = tail.find("\"model\":\"")?;
+        let rest = &tail[j + 9..];
+        let end = rest.find('"')?;
+        let id = rest[..end].trim();
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+    None
+}
+
+/// The family word inside a canonical Claude model id — the alias every CLI
+/// version resolves to its newest release of that family. None for ids that
+/// name no family this build knows (better no retry than a wrong model).
+pub fn family_alias(model_id: &str) -> Option<&'static str> {
+    let m = model_id.to_ascii_lowercase();
+    ["fable", "opus", "sonnet", "haiku"]
+        .into_iter()
+        .find(|f| m.contains(f))
+}
+
 /// A `codex <args>` command with stdin piped for callers that intentionally
 /// feed the prompt over stdin instead of passing it as an argv value. Codex's
 /// `exec` mode blocks until stdin is closed, so the caller must write and then
@@ -466,6 +543,11 @@ fn exit_error_with(output: &std::process::Output, auth_hint: Option<String>) -> 
     let lower = reason.to_lowercase();
     if lower.contains("authenticate") || lower.contains("oauth") || lower.contains("logged in") {
         msg.push_str(" — run `claude auth login` in a terminal and log in again");
+    } else if let Some(id) = unknown_model_in(&reason) {
+        msg.push_str(&format!(
+            " — the model configured for Claude on this machine (`{id}`, from `model` in ~/.claude/settings.json) is newer than the installed Claude Code: run `claude update`, or set `model` to a family alias such as `{}`",
+            family_alias(&id).unwrap_or("opus")
+        ));
     }
     msg
 }
@@ -517,6 +599,50 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn unknown_model_is_parsed_from_both_cli_shapes() {
+        assert_eq!(
+            unknown_model_in(
+                "\"claude-opus-5-5\" isn't described by this version's model catalog; update Claude Code, or map it with behavesAs"
+            )
+            .as_deref(),
+            Some("claude-opus-5-5")
+        );
+        assert_eq!(
+            unknown_model_in(
+                "[claude-code:unrecognized_model] {\"model\":\"claude-opus-9-9\",\"query_source\":\"sdk\"}"
+            )
+            .as_deref(),
+            Some("claude-opus-9-9")
+        );
+        assert_eq!(unknown_model_in("Error: Not logged in"), None);
+        assert_eq!(unknown_model_in(""), None);
+    }
+
+    #[test]
+    fn family_alias_names_the_family_or_nothing() {
+        assert_eq!(family_alias("claude-opus-5-5"), Some("opus"));
+        assert_eq!(family_alias("claude-sonnet-5"), Some("sonnet"));
+        assert_eq!(family_alias("claude-haiku-4-5-20251001"), Some("haiku"));
+        assert_eq!(family_alias("claude-fable-5-1"), Some("fable"));
+        assert_eq!(family_alias("gpt-5"), None);
+        assert_eq!(family_alias(""), None);
+    }
+
+    #[test]
+    fn exit_error_names_the_fix_for_a_model_newer_than_the_cli() {
+        // Not through fake_output: the apostrophes in the CLI's own wording
+        // would break its shell quoting. Only the exit status comes from it.
+        let mut out = fake_output("1", "", "");
+        out.stderr =
+            b"\"claude-opus-5-5\" isn't described by this version's model catalog; update Claude Code"
+                .to_vec();
+        let msg = exit_error_with(&out, None);
+        assert!(msg.contains("claude update"), "{msg}");
+        assert!(msg.contains("`opus`"), "{msg}");
+        assert!(msg.contains("settings.json"), "{msg}");
+    }
+
     #[test]
     fn exit_error_prefers_stderr_but_surfaces_stdout_reasons() {
         let both = fake_output("1", "stdout says A", "stderr says B");
