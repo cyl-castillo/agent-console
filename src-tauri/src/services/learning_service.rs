@@ -117,16 +117,12 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
     // login-shell PATH, so the bare `claude` name would fail to spawn. The
     // prompt goes over stdin, never argv — this one embeds the activity digest
     // plus every memory title and would hit Windows' command-line cap.
-    let mut cmd = crate::services::claude_cli::command_with_stdin(&[
-        "-p",
-        "--permission-mode",
-        "plan",
-        "--output-format",
-        "text",
-    ]);
-    cmd.current_dir(project_root);
-    let output = crate::services::claude_cli::output_with_stdin(cmd, &prompt)
-        .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
+    let output = crate::services::claude_cli::headless_output(
+        &["-p", "--permission-mode", "plan", "--output-format", "text"],
+        project_root,
+        &prompt,
+    )
+    .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
 
     if !output.status.success() {
         return Err(AppError::Other(crate::services::claude_cli::exit_error(
@@ -611,16 +607,12 @@ pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Curati
     }
     // Prompt over stdin, never argv: this prompt embeds every existing memory,
     // so it is the first to outgrow Windows' command-line cap (os error 206).
-    let mut cmd = crate::services::claude_cli::command_with_stdin(&[
-        "-p",
-        "--permission-mode",
-        "plan",
-        "--output-format",
-        "text",
-    ]);
-    cmd.current_dir(project_root);
-    let output = crate::services::claude_cli::output_with_stdin(cmd, &prompt)
-        .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
+    let output = crate::services::claude_cli::headless_output(
+        &["-p", "--permission-mode", "plan", "--output-format", "text"],
+        project_root,
+        &prompt,
+    )
+    .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
 
     if !output.status.success() {
         return Err(AppError::Other(crate::services::claude_cli::exit_error(

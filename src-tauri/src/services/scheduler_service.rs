@@ -753,26 +753,17 @@ fn step_should_run(when: &Option<StepCondition>, prev: Option<(&str, &str)>) -> 
 /// command-line cap, os error 206). Plan mode is the suggest-only guarantee:
 /// it cannot mutate.
 fn run_claude(project_root: &Path, prompt: &str) -> (String, String) {
-    let mut cmd = crate::services::claude_cli::command_with_stdin(&[
-        "-p",
-        "--permission-mode",
-        "plan",
-        "--output-format",
-        "text",
-    ]);
-    cmd.current_dir(project_root);
-    match crate::services::claude_cli::output_with_stdin(cmd, prompt) {
+    match crate::services::claude_cli::headless_output(
+        &["-p", "--permission-mode", "plan", "--output-format", "text"],
+        project_root,
+        prompt,
+    ) {
         Ok(o) if o.status.success() => {
             ("ok".into(), String::from_utf8_lossy(&o.stdout).to_string())
         }
-        Ok(o) => (
-            "error".into(),
-            format!(
-                "claude exited {}: {}",
-                o.status,
-                String::from_utf8_lossy(&o.stderr)
-            ),
-        ),
+        // Same wording (and the same login / model hints) as the interactive
+        // paths: a job that dies unattended must at least name its fix.
+        Ok(o) => ("error".into(), crate::services::claude_cli::exit_error(&o)),
         Err(e) => (
             "error".into(),
             format!("failed to spawn `claude`: {e}. Is it on PATH?"),
