@@ -610,7 +610,6 @@ export default function App() {
         <UpdateBanner />
         <Toasts />
         <ConfirmDialog />
-        <ConfirmDialog />
       </>
     );
   }
@@ -857,6 +856,7 @@ export default function App() {
       <ApprovalModal />
       <CommandPalette />
       <Toasts />
+      <ConfirmDialog />
     </>
   );
 }
