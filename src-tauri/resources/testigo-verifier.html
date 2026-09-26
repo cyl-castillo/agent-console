@@ -28,6 +28,8 @@
   .ok   { background: rgba(60,160,90,.14); }
   .warn { background: rgba(220,160,40,.16); }
   .fail { background: rgba(220,70,70,.16); }
+  #summary { font-weight: 600; font-size: 1.05rem; padding: .55rem .8rem; }
+  #summary:empty { display: none; }
   .mono { font-family: ui-monospace, monospace; font-size: .82rem; word-break: break-all; }
   table { border-collapse: collapse; width: 100%; margin-top: 1rem; font-size: .85rem; }
   td, th { padding: .3rem .5rem; border-bottom: 1px solid rgba(128,128,128,.25); text-align: left; vertical-align: top; }
@@ -42,7 +44,7 @@
 <span class="muted">Nothing leaves this page — verification runs entirely in your browser.</span></div>
 <input type="file" id="file" accept=".json,application/json" hidden>
 <div id="result">
-  <div id="checks"></div>
+  <div id="checks"><div id="summary" class="check"></div><div id="oks"></div><div id="notes"></div></div>
   <h3>Packet</h3><div id="meta" class="mono"></div>
   <div id="tsp"></div>
   <h3>Events</h3><div id="events"></div>
@@ -69,11 +71,30 @@ function pae(type, payload) {
   return out;
 }
 
+// Passing checks are grouped first, then warnings and failures, under a one-line summary.
 function check(cls, text) {
   const d = document.createElement("div");
   d.className = "check " + cls;
   d.textContent = (cls === "ok" ? "✔ " : cls === "warn" ? "⚠ " : "✘ ") + text;
-  $("checks").appendChild(d);
+  $(cls === "ok" ? "oks" : "notes").appendChild(d);
+  summarize();
+}
+
+function summarize() {
+  const n = (cls) => $("checks").querySelectorAll(`#oks .${cls}, #notes .${cls}`).length;
+  const fails = n("fail"), warns = n("warn"), oks = n("ok");
+  const s = $("summary");
+  const plural = (k, w) => `${k} ${w}${k === 1 ? "" : "s"}`;
+  if (fails) { s.className = "check fail"; s.textContent = `✘ Not verified — ${plural(fails, "check")} failed${warns ? `, ${plural(warns, "note")}` : ""}.`; }
+  else if (oks) { s.className = "check ok"; s.textContent = `✔ Verified — ${plural(oks, "check")} passed${warns ? `, ${plural(warns, "note")} below` : ""}.`; }
+  else { s.className = "check"; s.textContent = ""; }
+}
+
+function cell(row, value, cls = "") {
+  const td = document.createElement("td");
+  td.className = cls;
+  td.textContent = String(value);
+  row.appendChild(td);
 }
 
 function renderTimestamp(tsp, digest, tokenBytes, genTime) {
@@ -97,7 +118,7 @@ function renderTimestamp(tsp, digest, tokenBytes, genTime) {
 }
 
 async function load(f) {
-  $("checks").innerHTML = ""; $("meta").innerHTML = ""; $("events").innerHTML = ""; $("tsp").innerHTML = "";
+  $("summary").textContent = ""; $("summary").className = "check"; $("oks").innerHTML = ""; $("notes").innerHTML = ""; $("meta").innerHTML = ""; $("events").innerHTML = ""; $("tsp").innerHTML = "";
   $("result").style.display = "block";
   let packet;
   try { packet = JSON.parse(await f.text()); } catch { check("fail", "Not valid JSON."); return; }
@@ -261,8 +282,12 @@ async function load(f) {
   tbl.innerHTML = "<tr><th>seq</th><th>kind</th><th>actor</th><th>detail</th></tr>";
   for (const e of events) {
     const tr = document.createElement("tr");
+    // Packet values are untrusted even when the signature verifies.
     if (e.stub) {
-      tr.innerHTML = `<td>${e.stub.seq}</td><td class="kind muted">stub</td><td class="muted">—</td><td class="muted">${e.stub.kind ?? ""} (other case, linkage only)</td>`;
+      cell(tr, e.stub.seq);
+      cell(tr, "stub", "kind muted");
+      cell(tr, "—", "muted");
+      cell(tr, `${e.stub.kind ?? ""} (other case, linkage only)`, "muted");
     } else {
       let v = {}; try { v = JSON.parse(e.line); } catch {}
       const p = v.payload || {};
@@ -279,8 +304,10 @@ async function load(f) {
       else if (v.kind === "model_switch") detail = `${p.from ?? "?"} → ${p.to ?? "?"}`;
       else if (v.kind === "tool_call") detail = `tool=${p.tool ?? ""}`;
       else if (v.kind === "external_evidence") detail = `${p.source ?? "evidence"} · sha256 ${(p.sha256 || "").slice(0, 12)}… · ${p.uri ?? ""}${p.note ? " · " + p.note : ""}`;
-      const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-      tr.innerHTML = `<td>${v.seq}</td><td class="kind">${esc(v.kind)}${e.redacted ? " ⚠" : ""}</td><td>${esc(v.actor ?? "")}</td><td>${esc(detail)}</td>`;
+      cell(tr, v.seq);
+      cell(tr, `${v.kind}${e.redacted ? " ⚠" : ""}`, "kind");
+      cell(tr, v.actor ?? "");
+      cell(tr, detail);
     }
     tbl.appendChild(tr);
   }
