@@ -2352,6 +2352,77 @@ select:focus-visible,
   color: var(--text-dim);
 }
 
+/* Turns view (T5): the active session, one card per turn. */
+.turns-card {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+}
+.turns-card.turns-open {
+  border-left-color: var(--accent);
+}
+.turns-card.turns-failed {
+  border-left-color: var(--danger);
+}
+.turns-head {
+  margin: 0 0 4px;
+}
+.turns-status-open {
+  color: var(--accent);
+}
+.turns-meta {
+  margin-right: 8px;
+}
+.turns-prompt {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-elevated, rgba(127, 127, 127, 0.08));
+  border-radius: 4px;
+  color: var(--text);
+}
+.turns-injected {
+  color: var(--accent);
+}
+.turns-tools {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  font-size: 11px;
+}
+.turns-tools li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.turns-tool-name {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  min-width: 56px;
+}
+.turns-tool-cmd,
+.turns-tool-excerpt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turns-tool-failed .turns-tool-name {
+  color: var(--danger);
+}
+.turns-actions {
+  display: flex;
+  gap: 10px;
+  margin: 4px 0 0;
+}
+.turns-actions .wb-link[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Test/check runs and commits inside a turn (T4b): the evidence lines a
    reviewer reads first. */
 .proof-check-passed {

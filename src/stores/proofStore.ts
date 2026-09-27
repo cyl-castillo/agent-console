@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
@@ -61,7 +62,32 @@ export interface TimelineTurn {
   checks: TimelineCheck[];
   /// Commits the human made from the turn's diff (`commit` events, T4b).
   commits: TimelineCommit[];
+  /// Every tool call recorded in the turn, in order (capped; `toolResults`
+  /// keeps the true count). What the Turns view lists under a prompt.
+  tools: TimelineTool[];
+  /// Corpus doc ids the console injected into this prompt (`context_injected`).
+  injected: string[];
+  /// Model the session reported during the turn (session_start /
+  /// model_switch), when any.
+  model?: string;
+  /// Case the turn belongs to (from its prompt event) — the Ledger view's key.
+  caseId?: string;
 }
+
+export interface TimelineTool {
+  tool: string;
+  /// Bash: the command line. Other tools: absent.
+  command?: string;
+  /// Head of the tool's output (the ledger keeps ≤1 KB; the view shows less).
+  excerpt?: string;
+  failed: boolean;
+  exitCode?: number;
+  /// Ran inside a subagent (Task), not the session's main thread.
+  agentId?: string;
+}
+
+/// Tool calls kept per turn in the timeline (the count stays exact).
+export const TIMELINE_TOOLS_CAP = 60;
 
 export interface TimelineCheck {
   command: string;
@@ -157,6 +183,8 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         rewound: false,
         checks: [],
         commits: [],
+        tools: [],
+        injected: [],
       };
       byId.set(e.turnId, t);
       turns.push(t);
@@ -177,6 +205,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
     const p = e.payload as Record<string, unknown>;
     if (e.kind === "prompt") {
       t.ts = e.ts;
+      t.caseId = e.caseId;
       t.prompt = typeof p.prompt === "string" ? p.prompt : "";
       if (typeof p.skill === "string") t.skill = p.skill;
       if (e.termId) t.termId = e.termId;
@@ -190,6 +219,24 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       });
     } else if (e.kind === "tool_result") {
       t.toolResults += 1;
+      if (t.tools.length < TIMELINE_TOOLS_CAP) {
+        t.tools.push({
+          tool: typeof p.tool === "string" ? p.tool : "tool",
+          command: typeof p.command === "string" ? p.command : undefined,
+          excerpt: typeof p.excerpt === "string" ? p.excerpt : undefined,
+          failed: p.failed === true,
+          exitCode: typeof p.exitCode === "number" ? p.exitCode : undefined,
+          agentId: typeof p.agentId === "string" ? p.agentId : undefined,
+        });
+      }
+    } else if (e.kind === "context_injected") {
+      if (Array.isArray(p.docs)) {
+        for (const d of p.docs) if (typeof d === "string") t.injected.push(d);
+      }
+    } else if (e.kind === "session_start") {
+      if (typeof p.model === "string" && p.model) t.model = p.model;
+    } else if (e.kind === "model_switch") {
+      if (typeof p.to === "string" && p.to) t.model = p.to;
     } else if (e.kind === "check_run") {
       t.checks.push({
         command: typeof p.command === "string" ? p.command : "",
@@ -379,3 +426,38 @@ export const useProofStore = create<ProofState>((set, get) => ({
     }
   },
 }));
+
+/// Keep the ledger view live: every hook-borne event that lands in the
+/// ledger re-reads it (debounced — a turn can emit a dozen tool results in
+/// a second). Until now Proof loaded on project open and on a manual ↻; the
+/// Turns view is watched while the agent works, so it has to move by itself.
+export const PROOF_RELOAD_DEBOUNCE_MS = 400;
+
+export async function attachProofListeners(): Promise<UnlistenFn> {
+  let timer: number | null = null;
+  const schedule = () => {
+    if (timer !== null) return;
+    timer = window.setTimeout(() => {
+      timer = null;
+      const root = useProofStore.getState().projectRoot;
+      if (root) void useProofStore.getState().load(root);
+    }, PROOF_RELOAD_DEBOUNCE_MS);
+  };
+  const kinds = [
+    "hook://user_prompt",
+    "hook://tool_result",
+    "hook://tool_failed",
+    "hook://turn_end",
+    "hook://turn_failed",
+    "hook://model_switch",
+    "hook://approval_deferred",
+    "approval://request",
+    "snapshot://created",
+  ];
+  const offs: UnlistenFn[] = [];
+  for (const k of kinds) offs.push(await listen(k, schedule));
+  return () => {
+    if (timer !== null) window.clearTimeout(timer);
+    for (const off of offs) off();
+  };
+}
