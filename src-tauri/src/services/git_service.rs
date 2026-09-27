@@ -666,3 +666,346 @@ mod tests {
         let _ = std::fs::remove_file(&outside);
     }
 }
+
+// ---- push + pull request (P1) ---------------------------------------------
+
+/// `git <args>` in `repo`, output captured (same shape as worktree_service's).
+fn git(repo: &Path, args: &[&str]) -> AppResult<std::process::Output> {
+    Ok(proc::command("git").args(args).current_dir(repo).output()?)
+}
+
+/// What `push_current` did, and where the PR lives.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PushResult {
+    pub branch: String,
+    pub remote: String,
+    /// True when this push created the upstream (`git push -u`).
+    pub set_upstream: bool,
+    /// The remote's default branch (`origin/HEAD`), when known.
+    pub default_branch: Option<String>,
+    /// "Create PR/MR for this branch" URL for hosts we recognize (GitHub,
+    /// GitLab); None on the default branch or an unknown host.
+    pub pr_url: Option<String>,
+}
+
+/// Push the current branch. No upstream yet ⇒ `git push -u <remote> <branch>`
+/// (remote = the branch's, else `origin`); with one ⇒ plain `git push`. The
+/// loop the console had ended in `commit`; every other tool in the space
+/// ends in a PR — this is the first half of closing that gap, the PR link
+/// is the second (`pr_url_for`).
+pub fn push_current(repo: &Path) -> AppResult<PushResult> {
+    let branch = current_branch(repo)?;
+    let upstream = upstream_of(repo, &branch);
+    let remote = upstream
+        .as_deref()
+        .and_then(|u| u.split_once('/').map(|(r, _)| r.to_string()))
+        .unwrap_or_else(|| "origin".to_string());
+    let remotes = git(repo, &["remote"])?;
+    let remotes = String::from_utf8_lossy(&remotes.stdout);
+    if !remotes.lines().any(|r| r.trim() == remote) {
+        return Err(AppError::Other(format!(
+            "no remote named '{remote}' — add one (git remote add origin <url>) before pushing"
+        )));
+    }
+    let set_upstream = upstream.is_none();
+    let out = if set_upstream {
+        git(repo, &["push", "-u", &remote, &branch])?
+    } else {
+        git(repo, &["push"])?
+    };
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(AppError::Other(format!("git push failed: {err}")));
+    }
+    let default_branch = default_branch(repo, &remote);
+    let pr_url = if default_branch.as_deref() == Some(branch.as_str()) {
+        None
+    } else {
+        remote_url(repo, &remote).and_then(|u| pr_url_for(&u, &branch))
+    };
+    Ok(PushResult {
+        branch,
+        remote,
+        set_upstream,
+        default_branch,
+        pr_url,
+    })
+}
+
+/// The PR/MR link for the current branch as it stands (no push): Some only
+/// when the branch has an upstream, is not the remote's default branch, and
+/// the host is one we recognize.
+pub fn pr_url_current(repo: &Path) -> AppResult<Option<String>> {
+    let branch = current_branch(repo)?;
+    let Some(upstream) = upstream_of(repo, &branch) else {
+        return Ok(None);
+    };
+    let remote = upstream
+        .split_once('/')
+        .map(|(r, _)| r.to_string())
+        .unwrap_or_else(|| "origin".into());
+    if default_branch(repo, &remote).as_deref() == Some(branch.as_str()) {
+        return Ok(None);
+    }
+    Ok(remote_url(repo, &remote).and_then(|u| pr_url_for(&u, &branch)))
+}
+
+fn current_branch(repo: &Path) -> AppResult<String> {
+    let out = git(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let b = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || b.is_empty() || b == "HEAD" {
+        return Err(AppError::Other(
+            "not on a branch (detached HEAD) — check out a branch to push".into(),
+        ));
+    }
+    Ok(b)
+}
+
+/// `origin/feature` for a tracking branch, None when it has no upstream.
+fn upstream_of(repo: &Path, branch: &str) -> Option<String> {
+    let out = git(
+        repo,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            &format!("{branch}@{{u}}"),
+        ],
+    )
+    .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// The remote's default branch from `refs/remotes/<remote>/HEAD`, when the
+/// clone recorded it (clones do; a bare `git remote add` doesn't).
+fn default_branch(repo: &Path, remote: &str) -> Option<String> {
+    let out = git(
+        repo,
+        &[
+            "symbolic-ref",
+            "--short",
+            &format!("refs/remotes/{remote}/HEAD"),
+        ],
+    )
+    .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    default_branch_from_symbolic_ref(&s, remote)
+}
+
+/// `origin/main` → `main`; tolerant of the bare form.
+pub fn default_branch_from_symbolic_ref(short_ref: &str, remote: &str) -> Option<String> {
+    let s = short_ref.trim();
+    if s.is_empty() {
+        return None;
+    }
+    Some(
+        s.strip_prefix(&format!("{remote}/"))
+            .unwrap_or(s)
+            .to_string(),
+    )
+}
+
+fn remote_url(repo: &Path, remote: &str) -> Option<String> {
+    let out = git(repo, &["remote", "get-url", remote]).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// Turn a remote URL into a "create MR/PR for this branch" web URL for the
+/// hosts we recognize (GitHub, GitLab). `None` for anything else. Shared by
+/// the Changes tab and the rooms' Share.
+pub fn pr_url_for(remote_url: &str, branch: &str) -> Option<String> {
+    let (host, path) = parse_remote(remote_url)?;
+    let path = path.trim_end_matches('/').trim_end_matches(".git");
+    if host.contains("github") {
+        Some(format!("https://{host}/{path}/compare/{branch}?expand=1"))
+    } else if host.contains("gitlab") {
+        Some(format!(
+            "https://{host}/{path}/-/merge_requests/new?merge_request%5Bsource_branch%5D={branch}"
+        ))
+    } else {
+        None
+    }
+}
+
+/// Split a git remote URL into (host, "owner/repo"). Supports scp-like SSH
+/// (`git@host:owner/repo.git`), `ssh://`, and `http(s)://`, stripping any
+/// `user@` and the trailing `.git` so it round-trips into a web URL.
+pub fn parse_remote(url: &str) -> Option<(String, String)> {
+    let url = url.trim();
+    if let Some(rest) = url.strip_prefix("git@") {
+        let (host, path) = rest.split_once(':')?;
+        return Some((host.to_string(), path.to_string()));
+    }
+    for scheme in ["https://", "http://", "ssh://"] {
+        if let Some(rest) = url.strip_prefix(scheme) {
+            // Drop a leading user@ (ssh URLs) before the host.
+            let rest = rest.split_once('@').map(|(_, r)| r).unwrap_or(rest);
+            let (host, path) = rest.split_once('/')?;
+            return Some((host.to_string(), path.to_string()));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod push_tests {
+    use super::*;
+
+    #[test]
+    fn default_branch_strips_the_remote_prefix() {
+        assert_eq!(
+            default_branch_from_symbolic_ref("origin/main", "origin").as_deref(),
+            Some("main")
+        );
+        assert_eq!(
+            default_branch_from_symbolic_ref("master", "origin").as_deref(),
+            Some("master")
+        );
+        assert_eq!(default_branch_from_symbolic_ref("  ", "origin"), None);
+    }
+
+    #[test]
+    fn pr_url_for_github_and_gitlab_ssh_and_https() {
+        let b = "feat/x";
+        assert_eq!(
+            pr_url_for("git@github.com:acme/widgets.git", b).as_deref(),
+            Some("https://github.com/acme/widgets/compare/feat/x?expand=1")
+        );
+        assert_eq!(
+            pr_url_for("https://github.com/acme/widgets", b).as_deref(),
+            Some("https://github.com/acme/widgets/compare/feat/x?expand=1")
+        );
+        assert_eq!(
+            pr_url_for("ssh://git@gitlab.example.com/team/app.git", b).as_deref(),
+            Some("https://gitlab.example.com/team/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat/x")
+        );
+        assert_eq!(pr_url_for("git@bitbucket.org:x/y.git", b), None);
+    }
+
+    /// Real repos on disk: push into a bare "remote", first with no upstream
+    /// (sets it), then with one; the PR link follows the remote's URL shape,
+    /// and the default branch yields none.
+    #[test]
+    fn push_current_sets_upstream_then_pushes_plainly() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("ac-push-{}-{nanos}", std::process::id()));
+        let bare = base.join("remote.git");
+        let work = base.join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        let run = |dir: &Path, args: &[&str]| {
+            let out = proc::command("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&base, &["init", "--bare", "-q", "-b", "main", "remote.git"]);
+        run(&work, &["init", "-q", "-b", "main"]);
+        run(&work, &["config", "user.email", "t@t"]);
+        run(&work, &["config", "user.name", "t"]);
+        std::fs::write(work.join("a.txt"), "a").unwrap();
+        run(&work, &["add", "a.txt"]);
+        run(&work, &["commit", "-q", "-m", "init"]);
+        // A GitHub-shaped URL for the link; the fetch/push URL is the local bare repo.
+        run(
+            &work,
+            &["remote", "add", "origin", "git@github.com:acme/widgets.git"],
+        );
+        run(
+            &work,
+            &[
+                "remote",
+                "set-url",
+                "--push",
+                "origin",
+                bare.to_str().unwrap(),
+            ],
+        );
+        run(
+            &work,
+            &["remote", "set-url", "origin", bare.to_str().unwrap()],
+        );
+        run(
+            &work,
+            &[
+                "remote",
+                "set-url",
+                "--push",
+                "origin",
+                bare.to_str().unwrap(),
+            ],
+        );
+
+        // main: first push creates the upstream; no PR link on the default
+        // branch once origin/HEAD is known (set it as a clone would).
+        let r = push_current(&work).unwrap();
+        assert_eq!(r.branch, "main");
+        assert_eq!(r.remote, "origin");
+        assert!(r.set_upstream);
+        run(&work, &["remote", "set-head", "origin", "main"]);
+
+        // A feature branch: -u the first time, plain push after, PR link
+        // shaped by the remote URL — swap the URL to the GitHub form to check.
+        run(&work, &["checkout", "-q", "-b", "feat/x"]);
+        std::fs::write(work.join("b.txt"), "b").unwrap();
+        run(&work, &["add", "b.txt"]);
+        run(&work, &["commit", "-q", "-m", "feat"]);
+        let r = push_current(&work).unwrap();
+        assert!(r.set_upstream);
+        assert_eq!(r.default_branch.as_deref(), Some("main"));
+        assert_eq!(r.pr_url, None, "a local path remote is no known host");
+        run(
+            &work,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "git@github.com:acme/widgets.git",
+            ],
+        );
+        run(
+            &work,
+            &[
+                "remote",
+                "set-url",
+                "--push",
+                "origin",
+                bare.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(work.join("c.txt"), "c").unwrap();
+        run(&work, &["add", "c.txt"]);
+        run(&work, &["commit", "-q", "-m", "more"]);
+        let r = push_current(&work).unwrap();
+        assert!(!r.set_upstream, "second push is plain");
+        assert_eq!(
+            r.pr_url.as_deref(),
+            Some("https://github.com/acme/widgets/compare/feat/x?expand=1")
+        );
+        assert_eq!(pr_url_current(&work).unwrap(), r.pr_url);
+        // The default branch never offers a PR.
+        run(&work, &["checkout", "-q", "main"]);
+        assert_eq!(pr_url_current(&work).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}

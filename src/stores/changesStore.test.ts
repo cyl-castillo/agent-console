@@ -19,7 +19,13 @@ vi.mock("../ipc/tauri", () => ({
     gitHeadMessage: vi.fn(),
     gitBranches: vi.fn(),
     gitCheckoutBranch: vi.fn(),
+    gitPush: vi.fn(),
+    gitPrUrl: vi.fn(),
   },
+}));
+const showToast = vi.fn();
+vi.mock("./toastStore", () => ({
+  useToastStore: { getState: () => ({ show: showToast }) },
 }));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
@@ -38,6 +44,8 @@ const mockRevert = vi.mocked(ipc.gitRevertFile);
 const mockCommit = vi.mocked(ipc.gitCommit);
 const mockAmend = vi.mocked(ipc.gitAmendCommit);
 const mockBranches = vi.mocked(ipc.gitBranches);
+const mockPush = vi.mocked(ipc.gitPush);
+const mockPrUrl = vi.mocked(ipc.gitPrUrl);
 const mockCheckout = vi.mocked(ipc.gitCheckoutBranch);
 const mockFire = vi.mocked(fireSchedulerEvent);
 
@@ -242,5 +250,58 @@ describe("commit", () => {
     expect(store().commitMessage).toBe("feat: thing");
     expect(store().error).toContain("hook rejected");
     expect(store().committing).toBe(false);
+  });
+});
+
+describe("push + open PR (P1)", () => {
+  beforeEach(() => {
+    showToast.mockClear();
+    mockPush.mockReset();
+    mockPrUrl.mockReset();
+    mockBranches.mockResolvedValue([]);
+    useChangesStore.setState({ pushing: false, lastPrUrl: null });
+  });
+
+  it("push remembers the PR link and reports the upstream it set", async () => {
+    mockPush.mockResolvedValue({
+      branch: "feat/x",
+      remote: "origin",
+      setUpstream: true,
+      defaultBranch: "main",
+      prUrl: "https://github.com/acme/w/compare/feat/x?expand=1",
+    });
+    const r = await useChangesStore.getState().push();
+    expect(r?.branch).toBe("feat/x");
+    expect(useChangesStore.getState().lastPrUrl).toBe(
+      "https://github.com/acme/w/compare/feat/x?expand=1",
+    );
+    expect(useChangesStore.getState().pushing).toBe(false);
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("upstream set"), "success");
+  });
+
+  it("a failed push toasts the error and leaves no stale PR link", async () => {
+    mockPush.mockRejectedValue(new Error("git push failed: rejected"));
+    const r = await useChangesStore.getState().push();
+    expect(r).toBeNull();
+    expect(useChangesStore.getState().pushing).toBe(false);
+    expect(useChangesStore.getState().lastPrUrl).toBeNull();
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining("rejected"), "error");
+  });
+
+  it("openPr without a link asks the backend, and says so when there is none", async () => {
+    mockPrUrl.mockResolvedValue(null);
+    await useChangesStore.getState().openPr();
+    expect(mockPrUrl).toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining("push the branch first"),
+      "info",
+    );
+  });
+
+  it("push is single-flight", async () => {
+    useChangesStore.setState({ pushing: true });
+    const r = await useChangesStore.getState().push();
+    expect(r).toBeNull();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });

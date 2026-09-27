@@ -2,7 +2,8 @@ import { create } from "zustand";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
-import type { BranchInfo, GitStatus } from "../types/domain";
+import type { BranchInfo, GitStatus, PushResult } from "../types/domain";
+import { useToastStore } from "./toastStore";
 import { fireSchedulerEvent } from "./schedulerStore";
 
 interface ChangesState {
@@ -24,6 +25,16 @@ interface ChangesState {
   revert: (file: string) => Promise<void>;
   revertAll: () => Promise<void>;
   commit: (opts?: { amend?: boolean }) => Promise<string | null>;
+  /// Push the current branch (sets the upstream on first push) and remember
+  /// the PR link it came back with. Null on failure (error toast shown).
+  push: () => Promise<PushResult | null>;
+  /// Open the PR/MR page for the current branch in the browser (pushing
+  /// first is the user's call — the button says so when there is nothing to
+  /// open yet).
+  openPr: () => Promise<void>;
+  pushing: boolean;
+  /// PR link of the last push in this session, for the "Open PR" button.
+  lastPrUrl: string | null;
   loadCommitHistory: () => Promise<void>;
   loadHeadMessage: () => Promise<string>;
   recentMessages: string[];
@@ -46,6 +57,8 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
   recentMessages: [],
   branches: [],
   branchesLoading: false,
+  pushing: false,
+  lastPrUrl: null,
 
   refresh: async () => {
     set({ loading: true, error: null });
@@ -199,6 +212,54 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     }
   },
 
+  push: async () => {
+    if (get().pushing) return null;
+    set({ pushing: true, error: null });
+    try {
+      const r = await ipc.gitPush();
+      set({ pushing: false, lastPrUrl: r.prUrl ?? null });
+      await get().loadBranches();
+      useToastStore
+        .getState()
+        .show(
+          `Pushed ${r.branch} → ${r.remote}${r.setUpstream ? " (upstream set)" : ""}`,
+          "success",
+        );
+      return r;
+    } catch (e) {
+      set({ pushing: false });
+      useToastStore.getState().show(`Push failed: ${String(e).slice(0, 200)}`, "error");
+      return null;
+    }
+  },
+
+  openPr: async () => {
+    let url = get().lastPrUrl;
+    if (!url) {
+      try {
+        url = await ipc.gitPrUrl();
+      } catch (e) {
+        useToastStore.getState().show(`Couldn't resolve the PR link: ${e}`, "error");
+        return;
+      }
+    }
+    if (!url) {
+      useToastStore
+        .getState()
+        .show(
+          "No PR link: push the branch first, or this host isn't GitHub/GitLab — open the PR from your git host.",
+          "info",
+        );
+      return;
+    }
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    } catch (e) {
+      useToastStore.getState().show(`Couldn't open the browser: ${e}`, "error");
+    }
+  },
+
   clear: () =>
     set({
       status: null,
@@ -210,6 +271,8 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
       recentMessages: [],
       branches: [],
       branchesLoading: false,
+      pushing: false,
+      lastPrUrl: null,
     }),
 }));
 

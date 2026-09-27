@@ -115,6 +115,22 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
     Ok(sha)
 }
 
+/// Push the current branch (creating its upstream if needed) and hand back
+/// the PR/MR link for it. P1: the loop no longer ends at `commit`.
+#[tauri::command(async)]
+pub fn git_push(state: State<'_, AppState>) -> AppResult<git_service::PushResult> {
+    let repo = current_repo(&state)?;
+    git_service::push_current(&repo)
+}
+
+/// The PR/MR link for the current branch as pushed (None: no upstream,
+/// default branch, or an unrecognized host).
+#[tauri::command(async)]
+pub fn git_pr_url(state: State<'_, AppState>) -> AppResult<Option<String>> {
+    let repo = current_repo(&state)?;
+    git_service::pr_url_current(&repo)
+}
+
 #[tauri::command(async)]
 pub fn git_branches(state: State<'_, AppState>) -> AppResult<Vec<BranchInfo>> {
     let repo = current_repo(&state)?;
