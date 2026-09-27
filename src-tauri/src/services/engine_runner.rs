@@ -52,6 +52,11 @@ pub enum ToolPolicy {
     /// Everything, including shell (Claude `--dangerously-skip-permissions` /
     /// Codex `--dangerously-bypass-approvals-and-sandbox`).
     Full,
+    /// Plan mode: the agent may read and reason but Claude refuses every
+    /// mutation by construction (`--permission-mode plan`) — what every
+    /// unattended run (advisor, reflect, curator, scheduler) runs under.
+    /// Codex has no plan mode; `-s read-only` is the closest sandbox.
+    Plan,
 }
 
 /// Where a runner parks the child process for the duration of a turn, so the
@@ -134,9 +139,13 @@ fn claude_args(ctx: &RunCtx) -> Vec<String> {
         // clock can tell a healthy 40s reasoning burst from a hang. The
         // store coalesces these deltas back into one growing block.
         "--include-partial-messages".into(),
-        "--model".into(),
-        ctx.model.into(),
     ];
+    // Empty model = the user's configured default (settings.json `model`):
+    // unattended runs don't pick a model, rooms do.
+    if !ctx.model.is_empty() {
+        args.push("--model".into());
+        args.push(ctx.model.into());
+    }
     match ctx.tools {
         // No flag: headless `claude -p` allows read-style tools without
         // approval and auto-denies edits/shell (it can't prompt) — exactly
@@ -145,6 +154,10 @@ fn claude_args(ctx: &RunCtx) -> Vec<String> {
         ToolPolicy::AcceptEdits => {
             args.push("--permission-mode".into());
             args.push("acceptEdits".into());
+        }
+        ToolPolicy::Plan => {
+            args.push("--permission-mode".into());
+            args.push("plan".into());
         }
         ToolPolicy::Full => args.push("--dangerously-skip-permissions".into()),
     }
@@ -390,7 +403,6 @@ fn codex_exec_args(ctx: &RunCtx) -> Vec<String> {
     // memory); a fresh `codex exec` starts one. Resume has a reduced flag
     // set: it rejects -s/--sandbox/-C, inheriting the session's sandbox and
     // taking cwd from the process (set via current_dir below).
-    let effort = format!("model_reasoning_effort={}", ctx.model);
     let mut args: Vec<String> = vec!["exec".into()];
     if let Some(r) = ctx.resume {
         args.push("resume".into());
@@ -400,8 +412,11 @@ fn codex_exec_args(ctx: &RunCtx) -> Vec<String> {
     // Run outside a git repo without complaint — kills the "needs a commit"
     // requirement entirely.
     args.push("--skip-git-repo-check".into());
-    args.push("-c".into());
-    args.push(effort);
+    // Empty = the user's configured effort (no override).
+    if !ctx.model.is_empty() {
+        args.push("-c".into());
+        args.push(format!("model_reasoning_effort={}", ctx.model));
+    }
     match ctx.tools {
         // Full bypass mirrors Claude's skip-permissions: actually execute
         // commands instead of auto-denying them. Accepted on resume too.
@@ -411,7 +426,7 @@ fn codex_exec_args(ctx: &RunCtx) -> Vec<String> {
         policy if ctx.resume.is_none() => {
             args.push("-s".into());
             args.push(match policy {
-                ToolPolicy::ReadOnly => "read-only".into(),
+                ToolPolicy::ReadOnly | ToolPolicy::Plan => "read-only".into(),
                 _ => "workspace-write".into(),
             });
         }
@@ -476,6 +491,10 @@ fn finish(
         // of hoping its stderr names the real cause.
         if bin == "claude" {
             if let Some(hint) = crate::services::claude_cli::logged_out_hint() {
+                msg.push_str(&hint);
+            } else if let Some(hint) = crate::services::claude_cli::failure_hint(&err) {
+                // Text heuristics second: an expired login the probe missed,
+                // or a configured model newer than this CLI.
                 msg.push_str(&hint);
             }
         }
@@ -582,6 +601,29 @@ mod tests {
             "reasoning_output_tokens": 3,
         });
         assert_eq!(codex_sum_usage(&u), 12678);
+    }
+
+    #[test]
+    fn plan_policy_and_empty_model_map_to_the_unattended_shape() {
+        let ctx = RunCtx {
+            cwd: std::path::Path::new("."),
+            model: "",
+            tools: ToolPolicy::Plan,
+            prompt: "p",
+            resume: None,
+            child_slot: None,
+        };
+        let args = claude_args(&ctx);
+        assert!(args.windows(2).any(|w| w == ["--permission-mode", "plan"]));
+        assert!(
+            !args.iter().any(|a| a == "--model"),
+            "no model ⇒ user's default"
+        );
+        let codex = codex_exec_args(&ctx);
+        assert!(codex.windows(2).any(|w| w == ["-s", "read-only"]));
+        assert!(!codex
+            .iter()
+            .any(|a| a.starts_with("model_reasoning_effort")));
     }
 
     #[test]

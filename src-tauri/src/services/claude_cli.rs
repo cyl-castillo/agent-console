@@ -81,60 +81,6 @@ pub fn command_with_stdin(args: &[&str]) -> Command {
     spawn_command(bin(), args, Stdio::piped())
 }
 
-/// Spawn `cmd`, write `prompt` to its stdin, close it, and collect the output.
-/// `claude -p` reads stdin until EOF before answering, so dropping the handle
-/// right after the write is load-bearing, not just tidy. A failed write is
-/// deliberately ignored: it means the child died before reading (bad flag,
-/// missing binary), and `wait_with_output` surfaces its stderr — a far better
-/// error than "broken pipe".
-pub fn output_with_stdin(mut cmd: Command, prompt: &str) -> std::io::Result<std::process::Output> {
-    use std::io::Write;
-    let mut child = cmd.spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(prompt.as_bytes());
-    }
-    child.wait_with_output()
-}
-
-/// Headless `claude -p …` in `cwd` with the prompt over stdin — the one
-/// runner for advisor, reflect, curator and scheduler jobs.
-///
-/// These runs pass no `--model`: the CLI uses whatever the user configured
-/// (`settings.json` `model`, typically written by `/model`). When that is a
-/// full id newer than the Claude Code installed on THIS machine — a `/model`
-/// picked on a newer install, or settings synced across machines — an
-/// interactive session only warns, but `-p` exits 1 ("… isn't described by
-/// this version's model catalog"), and every Advisor/Learning run dies with
-/// it. The honest recovery is the family alias (`claude-opus-5-5` → `opus`:
-/// "the newest Opus this CLI knows"), so the run is retried once with
-/// `--model <family>`. A second failure reaches the caller, where
-/// `exit_error` names the fix.
-pub fn headless_output(
-    base_args: &[&str],
-    cwd: &std::path::Path,
-    prompt: &str,
-) -> std::io::Result<std::process::Output> {
-    let mut cmd = command_with_stdin(base_args);
-    cmd.current_dir(cwd);
-    let first = output_with_stdin(cmd, prompt)?;
-    if first.status.success() {
-        return Ok(first);
-    }
-    let stderr = String::from_utf8_lossy(&first.stderr);
-    let Some(alias) = unknown_model_in(&stderr).and_then(|id| family_alias(&id)) else {
-        return Ok(first);
-    };
-    tracing::warn!(
-        "claude -p: configured model unknown to this CLI; retrying with --model {alias}"
-    );
-    let mut args: Vec<&str> = base_args.to_vec();
-    args.push("--model");
-    args.push(alias);
-    let mut cmd = command_with_stdin(&args);
-    cmd.current_dir(cwd);
-    output_with_stdin(cmd, prompt)
-}
-
 /// The model id the CLI refused because its catalog predates it, from
 /// either shape it prints: `"<id>" isn't described by this version's model
 /// catalog` (the human line) or `[claude-code:unrecognized_model]
@@ -510,46 +456,22 @@ pub fn live_agents() -> Vec<LiveAgent> {
     parse_live_agents(&String::from_utf8_lossy(&output.stdout))
 }
 
-/// Build the error message for a non-zero `claude -p` exit. Claude Code often
-/// prints the actual reason (auth expiry, usage limits) to STDOUT, not stderr
-/// — the old stderr-only message reduced a real "OAuth session expired and
-/// could not be refreshed" to a bare "exit status 1:". Prefer stderr, fall
-/// back to stdout, cap the length, and add the fix-it hint for auth failures.
-pub fn exit_error(output: &std::process::Output) -> String {
-    exit_error_with(output, logged_out_hint())
-}
-
-/// Pure core of `exit_error`: `auth_hint` is the structured verdict from
-/// `logged_out_hint`, injected so the formatting can be tested without a CLI.
-fn exit_error_with(output: &std::process::Output, auth_hint: Option<String>) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let raw = if stderr.trim().is_empty() {
-        stdout.trim()
-    } else {
-        stderr.trim()
-    };
-    let reason: String = raw.chars().take(300).collect();
-    let mut msg = if reason.is_empty() {
-        format!("claude exited with status {} (no output)", output.status)
-    } else {
-        format!("claude exited with status {}: {reason}", output.status)
-    };
-    if let Some(hint) = auth_hint {
-        // The structured answer beats the text heuristic — say it and stop.
-        msg.push_str(&hint);
-        return msg;
-    }
+/// The one-line fix for a failure text the CLI printed, when the text says
+/// enough to name one: an expired login, or a configured model newer than
+/// the installed Claude Code (interactive sessions only warn; `-p` exits 1).
+/// Callers append it to the raw reason; None ⇒ nothing to add.
+pub fn failure_hint(reason: &str) -> Option<String> {
     let lower = reason.to_lowercase();
     if lower.contains("authenticate") || lower.contains("oauth") || lower.contains("logged in") {
-        msg.push_str(" — run `claude auth login` in a terminal and log in again");
-    } else if let Some(id) = unknown_model_in(&reason) {
-        msg.push_str(&format!(
+        return Some(" — run `claude auth login` in a terminal and log in again".into());
+    }
+    if let Some(id) = unknown_model_in(reason) {
+        return Some(format!(
             " — the model configured for Claude on this machine (`{id}`, from `model` in ~/.claude/settings.json) is newer than the installed Claude Code: run `claude update`, or set `model` to a family alias such as `{}`",
             family_alias(&id).unwrap_or("opus")
         ));
     }
-    msg
+    None
 }
 
 #[cfg(test)]
@@ -557,48 +479,21 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
-    fn fake_output(code: &str, stdout: &str, stderr: &str) -> std::process::Output {
-        std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!(
-                "printf %s '{stdout}'; printf %s '{stderr}' >&2; exit {code}"
-            ))
-            .output()
-            .unwrap()
-    }
-
-    #[cfg(unix)]
     #[test]
-    fn output_with_stdin_feeds_the_whole_prompt_and_collects_stdout() {
-        // Larger than the 32,767-char Windows argv cap that motivated the
-        // helper: the prompt must reach the child intact via stdin.
-        let prompt = "x".repeat(40_000);
-        let mut cmd = Command::new("cat");
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let out = output_with_stdin(cmd, &prompt).expect("spawns");
-        assert!(out.status.success());
-        assert_eq!(String::from_utf8_lossy(&out.stdout), prompt);
+    fn failure_hint_names_login_and_model_fixes_only_when_the_text_says_so() {
+        let login = failure_hint("Failed to authenticate: OAuth session expired").unwrap();
+        assert!(login.contains("claude auth login"));
+        let model = failure_hint(
+            "\"claude-opus-5-5\" isn't described by this version's model catalog; update Claude Code",
+        )
+        .unwrap();
+        assert!(model.contains("claude update"), "{model}");
+        assert!(model.contains("`opus`"), "{model}");
+        assert!(model.contains("settings.json"), "{model}");
+        assert_eq!(failure_hint("some other error"), None);
+        assert_eq!(failure_hint(""), None);
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn output_with_stdin_surfaces_the_childs_error_not_a_broken_pipe() {
-        // A child that exits without reading stdin: the write is best-effort
-        // and the caller still gets the real exit status + stderr.
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg("echo boom >&2; exit 3")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let out = output_with_stdin(cmd, &"y".repeat(1_000_000)).expect("spawns");
-        assert_eq!(out.status.code(), Some(3));
-        assert!(String::from_utf8_lossy(&out.stderr).contains("boom"));
-    }
-
-    #[cfg(unix)]
     #[test]
     fn unknown_model_is_parsed_from_both_cli_shapes() {
         assert_eq!(
@@ -627,53 +522,6 @@ mod tests {
         assert_eq!(family_alias("claude-fable-5-1"), Some("fable"));
         assert_eq!(family_alias("gpt-5"), None);
         assert_eq!(family_alias(""), None);
-    }
-
-    #[test]
-    fn exit_error_names_the_fix_for_a_model_newer_than_the_cli() {
-        // Not through fake_output: the apostrophes in the CLI's own wording
-        // would break its shell quoting. Only the exit status comes from it.
-        let mut out = fake_output("1", "", "");
-        out.stderr =
-            b"\"claude-opus-5-5\" isn't described by this version's model catalog; update Claude Code"
-                .to_vec();
-        let msg = exit_error_with(&out, None);
-        assert!(msg.contains("claude update"), "{msg}");
-        assert!(msg.contains("`opus`"), "{msg}");
-        assert!(msg.contains("settings.json"), "{msg}");
-    }
-
-    #[test]
-    fn exit_error_prefers_stderr_but_surfaces_stdout_reasons() {
-        let both = fake_output("1", "stdout says A", "stderr says B");
-        assert!(exit_error_with(&both, None).contains("stderr says B"));
-
-        // The real-world case: auth errors land on stdout with empty stderr.
-        let auth = fake_output(
-            "1",
-            "Failed to authenticate: OAuth session expired and could not be refreshed",
-            "",
-        );
-        let msg = exit_error_with(&auth, None);
-        assert!(msg.contains("OAuth session expired"), "{msg}");
-        assert!(msg.contains("log in again"), "{msg}");
-
-        let silent = fake_output("1", "", "");
-        assert!(exit_error_with(&silent, None).contains("no output"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn exit_error_names_a_logged_out_cli_even_when_the_text_blames_something_else() {
-        // The drift this closes: expired credentials reported as a model error.
-        let misleading = fake_output("1", "There was an issue with the selected model", "");
-        let msg = exit_error_with(&misleading, Some(" — not logged in".to_string()));
-        assert!(msg.contains("issue with the selected model"), "{msg}");
-        assert!(msg.contains("not logged in"), "{msg}");
-        // The structured verdict replaces the guess — no double hint.
-        let both_signals = fake_output("1", "Failed to authenticate", "");
-        let msg = exit_error_with(&both_signals, Some(" — not logged in".to_string()));
-        assert_eq!(msg.matches(" — ").count(), 1, "{msg}");
     }
 
     #[test]

@@ -815,6 +815,7 @@ impl TestigoService {
 
     /// Record a scheduler job run under its own "job:<id>" case — scheduled
     /// work is agentic action too, and its outcome belongs in the evidence.
+    #[allow(clippy::too_many_arguments)]
     pub fn on_job_run(
         &self,
         project_root: &str,
@@ -823,9 +824,21 @@ impl TestigoService {
         job_name: &str,
         status: &str,
         summary: &str,
+        usage: Option<(u64, f64)>,
+        session_id: Option<&str>,
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
         Self::ensure_tail(&mut inner, project_root)?;
+        let mut payload =
+            json!({ "jobId": job_id, "jobName": job_name, "status": status, "summary": summary });
+        // What the run cost (T6): the job's own accounting in the ledger.
+        if let Some((tokens, cost)) = usage {
+            payload["tokens"] = json!(tokens);
+            payload["costUsd"] = json!(cost);
+        }
+        if let Some(sid) = session_id.filter(|s| !s.is_empty()) {
+            payload["sessionId"] = json!(sid);
+        }
         Self::record(
             &mut inner,
             project_root,
@@ -836,7 +849,7 @@ impl TestigoService {
             None,
             None,
             "system",
-            json!({ "jobId": job_id, "jobName": job_name, "status": status, "summary": summary }),
+            payload,
         )
     }
 
@@ -1655,7 +1668,16 @@ mod tests {
 
         // Scheduler runs chain in under their own job case.
         let jr = svc
-            .on_job_run(root, 9, "j1", "nightly", "ok", "all good")
+            .on_job_run(
+                root,
+                9,
+                "j1",
+                "nightly",
+                "ok",
+                "all good",
+                Some((1200, 0.03)),
+                Some("job-sess"),
+            )
             .unwrap();
         assert_eq!(jr.case_id, "job:j1");
         assert_eq!(jr.actor, "system");
