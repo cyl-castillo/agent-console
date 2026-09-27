@@ -166,6 +166,12 @@ pub struct RunRecord {
     pub status: String,
     pub summary: String,
     pub output_excerpt: String,
+    /// What the run cost, as the engine reports it (T6): real new tokens and
+    /// estimated dollars. Absent on records written before this field.
+    #[serde(default)]
+    pub tokens: u64,
+    #[serde(default)]
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -483,16 +489,18 @@ impl SchedulerService {
             "scheduler://run_started",
             serde_json::json!({ "jobId": job.id, "jobName": job.name, "startedMs": started }),
         );
-        let (status, output) = run_action(Path::new(project_root), &job.action);
+        let outcome = run_action(Path::new(project_root), &job.action);
         let finished = now_ms();
         let rec = RunRecord {
             job_id: job.id.clone(),
             job_name: job.name.clone(),
             started_ms: started,
             finished_ms: finished,
-            status,
-            summary: summarize(&output),
-            output_excerpt: truncate(&output, OUTPUT_EXCERPT_MAX),
+            status: outcome.status,
+            summary: summarize(&outcome.output),
+            output_excerpt: truncate(&outcome.output, OUTPUT_EXCERPT_MAX),
+            tokens: outcome.tokens,
+            cost_usd: outcome.cost_usd,
         };
         let _ = Self::append_history(project_root, &rec);
         // Testigo: scheduled runs are agentic actions too — their outcome
@@ -505,6 +513,8 @@ impl SchedulerService {
             &job.name,
             &rec.status,
             &rec.summary,
+            Some((rec.tokens, rec.cost_usd)),
+            outcome.session_id.as_deref(),
         ) {
             if state.testigo.repo_marks(project_root) {
                 let _ = crate::services::testigo_service::anchor_head(
@@ -555,6 +565,8 @@ impl SchedulerService {
             status: "missed".into(),
             summary: "Skipped a firing that came due while the app was closed.".into(),
             output_excerpt: String::new(),
+            tokens: 0,
+            cost_usd: 0.0,
         };
         let _ = Self::append_history(project_root, &rec);
     }
@@ -692,8 +704,21 @@ impl SchedulerService {
 
 // ---- action execution (free fns; plan-mode claude) -----------------------
 
-/// Run an action and return ("ok"|"error", combined_output).
-fn run_action(project_root: &Path, action: &Action) -> (String, String) {
+/// What one action (or a whole pipeline) came to.
+#[derive(Debug, Default, Clone)]
+struct ActionOutcome {
+    /// "ok" | "error"
+    status: String,
+    output: String,
+    tokens: u64,
+    cost_usd: f64,
+    /// The engine session the run happened in (Claude) — correlates the
+    /// job_run ledger line with a transcript. Pipelines keep the last step's.
+    session_id: Option<String>,
+}
+
+/// Run an action.
+fn run_action(project_root: &Path, action: &Action) -> ActionOutcome {
     match action {
         Action::Skill { name, args } => {
             let prompt = match args {
@@ -710,10 +735,13 @@ fn run_action(project_root: &Path, action: &Action) -> (String, String) {
 /// Run pipeline steps in order, each gated by its condition against the previous
 /// *executed* step. The overall status is that of the last step that ran. A
 /// skipped step is noted in the output but doesn't change the tracked result.
-fn run_pipeline(project_root: &Path, steps: &[PipelineStep]) -> (String, String) {
+fn run_pipeline(project_root: &Path, steps: &[PipelineStep]) -> ActionOutcome {
     let mut out = String::new();
     let mut last: Option<(String, String)> = None; // (status, output)
     let mut last_status = "ok".to_string();
+    let mut tokens = 0u64;
+    let mut cost = 0.0f64;
+    let mut session_id: Option<String> = None;
     for (i, step) in steps.iter().enumerate() {
         let prev = last.as_ref().map(|(s, o)| (s.as_str(), o.as_str()));
         if !step_should_run(&step.when, prev) {
@@ -723,12 +751,28 @@ fn run_pipeline(project_root: &Path, steps: &[PipelineStep]) -> (String, String)
             ));
             continue;
         }
-        let (st, o) = run_action(project_root, &step.action);
-        out.push_str(&format!("\n--- step {} [{st}] ---\n{o}", i + 1));
-        last_status = st.clone();
-        last = Some((st, o));
+        let r = run_action(project_root, &step.action);
+        out.push_str(&format!(
+            "\n--- step {} [{}] ---\n{}",
+            i + 1,
+            r.status,
+            r.output
+        ));
+        tokens = tokens.saturating_add(r.tokens);
+        cost += r.cost_usd;
+        if r.session_id.is_some() {
+            session_id = r.session_id.clone();
+        }
+        last_status = r.status.clone();
+        last = Some((r.status, r.output));
     }
-    (last_status, out)
+    ActionOutcome {
+        status: last_status,
+        output: out,
+        tokens,
+        cost_usd: cost,
+        session_id,
+    }
 }
 
 /// Whether a step runs, given its condition and the previous executed step's
@@ -752,22 +796,36 @@ fn step_should_run(when: &Option<StepCondition>, prev: Option<(&str, &str)>) -> 
 /// project dir, feeding the prompt over stdin (argv would hit Windows'
 /// command-line cap, os error 206). Plan mode is the suggest-only guarantee:
 /// it cannot mutate.
-fn run_claude(project_root: &Path, prompt: &str) -> (String, String) {
-    match crate::services::claude_cli::headless_output(
-        &["-p", "--permission-mode", "plan", "--output-format", "text"],
-        project_root,
+/// One plan-mode turn through `agent_run`: the user's default model, the
+/// idle watchdog (a hung job no longer holds `run_lock` forever), the
+/// unknown-model retry, and the engine's own token/cost numbers.
+fn run_claude(project_root: &Path, prompt: &str) -> ActionOutcome {
+    use crate::services::agent_run::{self, RunSpec};
+    use crate::services::engine_runner::{Engine, ToolPolicy};
+    match agent_run::run(&RunSpec {
+        engine: Engine::Claude,
+        cwd: project_root,
         prompt,
-    ) {
-        Ok(o) if o.status.success() => {
-            ("ok".into(), String::from_utf8_lossy(&o.stdout).to_string())
-        }
-        // Same wording (and the same login / model hints) as the interactive
-        // paths: a job that dies unattended must at least name its fix.
-        Ok(o) => ("error".into(), crate::services::claude_cli::exit_error(&o)),
-        Err(e) => (
-            "error".into(),
-            format!("failed to spawn `claude`: {e}. Is it on PATH?"),
-        ),
+        policy: ToolPolicy::Plan,
+        model: None,
+        resume: None,
+        idle_timeout: agent_run::default_idle_timeout(),
+        on_activity: None,
+    }) {
+        Ok(o) => ActionOutcome {
+            status: "ok".into(),
+            output: o.text,
+            tokens: o.tokens,
+            cost_usd: o.cost_usd,
+            session_id: o.session_id,
+        },
+        // The error already names its fix (login, model, watchdog): a job that
+        // dies unattended must at least say why.
+        Err(e) => ActionOutcome {
+            status: "error".into(),
+            output: e.to_string(),
+            ..Default::default()
+        },
     }
 }
 
@@ -1104,6 +1162,8 @@ mod tests {
                 status: "ok".into(),
                 summary: "did a thing".into(),
                 output_excerpt: "output".into(),
+                tokens: 0,
+                cost_usd: 0.0,
             },
         )
         .unwrap();

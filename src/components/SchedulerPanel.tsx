@@ -496,6 +496,13 @@ function RunRow({ rec }: { rec: RunRecord }) {
         <span className="wb-run-when">{formatWhen(rec.startedMs)}</span>
       </div>
       {rec.summary && <div className="wb-run-summary">{rec.summary}</div>}
+      {((rec.tokens ?? 0) > 0 || (rec.costUsd ?? 0) > 0) && (
+        <div className="wb-hint" title="Reported by the CLI for this run">
+          {(rec.costUsd ?? 0) > 0 ? `$${(rec.costUsd ?? 0).toFixed(2)}` : ""}
+          {(rec.costUsd ?? 0) > 0 && (rec.tokens ?? 0) > 0 ? " · " : ""}
+          {(rec.tokens ?? 0) > 0 ? `${rec.tokens} tokens` : ""}
+        </div>
+      )}
     </div>
   );
 }

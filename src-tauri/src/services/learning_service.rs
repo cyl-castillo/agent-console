@@ -117,20 +117,19 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
     // login-shell PATH, so the bare `claude` name would fail to spawn. The
     // prompt goes over stdin, never argv — this one embeds the activity digest
     // plus every memory title and would hit Windows' command-line cap.
-    let output = crate::services::claude_cli::headless_output(
-        &["-p", "--permission-mode", "plan", "--output-format", "text"],
-        project_root,
-        &prompt,
-    )
-    .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
-
-    if !output.status.success() {
-        return Err(AppError::Other(crate::services::claude_cli::exit_error(
-            &output,
-        )));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    // Plan mode, the user's default model, idle watchdog, unknown-model
+    // retry — the unattended-run contract lives in agent_run.
+    let run = crate::services::agent_run::run(&crate::services::agent_run::RunSpec {
+        engine: crate::services::engine_runner::Engine::Claude,
+        cwd: project_root,
+        prompt: &prompt,
+        policy: crate::services::engine_runner::ToolPolicy::Plan,
+        model: None,
+        resume: None,
+        idle_timeout: crate::services::agent_run::default_idle_timeout(),
+        on_activity: None,
+    })?;
+    let stdout = run.text;
     let mut suggestions = parse_suggestions(&stdout)?;
     annotate_similarity(project_root, &mut suggestions);
     Ok(ReflectionResult {
@@ -607,20 +606,19 @@ pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Curati
     }
     // Prompt over stdin, never argv: this prompt embeds every existing memory,
     // so it is the first to outgrow Windows' command-line cap (os error 206).
-    let output = crate::services::claude_cli::headless_output(
-        &["-p", "--permission-mode", "plan", "--output-format", "text"],
-        project_root,
-        &prompt,
-    )
-    .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
-
-    if !output.status.success() {
-        return Err(AppError::Other(crate::services::claude_cli::exit_error(
-            &output,
-        )));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    // Plan mode, the user's default model, idle watchdog, unknown-model
+    // retry — the unattended-run contract lives in agent_run.
+    let run = crate::services::agent_run::run(&crate::services::agent_run::RunSpec {
+        engine: crate::services::engine_runner::Engine::Claude,
+        cwd: project_root,
+        prompt: &prompt,
+        policy: crate::services::engine_runner::ToolPolicy::Plan,
+        model: None,
+        resume: None,
+        idle_timeout: crate::services::agent_run::default_idle_timeout(),
+        on_activity: None,
+    })?;
+    let stdout = run.text;
     let suggestions = parse_curation(&stdout)?;
     Ok(CurationResult {
         suggestions,

@@ -575,6 +575,9 @@ export interface RunRecord {
   status: string;
   summary: string;
   outputExcerpt: string;
+  /// What the run cost, as the engine reports it (T6). Absent on older records.
+  tokens?: number;
+  costUsd?: number;
 }
 
 /// A persisted activity-ledger record (mirrors the Rust ActivityEvent).

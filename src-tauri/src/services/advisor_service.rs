@@ -44,20 +44,19 @@ pub fn analyze(project_root: &Path) -> AppResult<AnalysisResult> {
     // the login-shell PATH, so the bare name would fail to spawn. stdio + the
     // Windows no-window flag are set inside claude_cli. The prompt goes over
     // stdin, never argv: Windows caps the command line (os error 206).
-    let output = crate::services::claude_cli::headless_output(
-        &["-p", "--permission-mode", "plan", "--output-format", "text"],
-        project_root,
-        &prompt,
-    )
-    .map_err(|e| AppError::Other(format!("failed to spawn `claude`: {e}. Is it on PATH?")))?;
-
-    if !output.status.success() {
-        return Err(AppError::Other(crate::services::claude_cli::exit_error(
-            &output,
-        )));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    // Plan mode, the user's default model, idle watchdog, unknown-model
+    // retry — the unattended-run contract lives in agent_run.
+    let run = crate::services::agent_run::run(&crate::services::agent_run::RunSpec {
+        engine: crate::services::engine_runner::Engine::Claude,
+        cwd: project_root,
+        prompt: &prompt,
+        policy: crate::services::engine_runner::ToolPolicy::Plan,
+        model: None,
+        resume: None,
+        idle_timeout: crate::services::agent_run::default_idle_timeout(),
+        on_activity: None,
+    })?;
+    let stdout = run.text;
     let mut recommendations = parse_recommendations(&stdout)?;
     annotate_similarity(project_root, &mut recommendations);
     Ok(AnalysisResult {
