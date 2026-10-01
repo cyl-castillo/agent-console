@@ -256,6 +256,44 @@ pub fn head_sha(repo: &Path) -> AppResult<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// What HEAD points at right now: `(sha, subject, files touched, committer
+/// time in epoch seconds)`. Used to record a commit the AGENT just made in
+/// its terminal (the hook only hands us the command line, not the result);
+/// the committer time lets the caller reject a stale HEAD when the command
+/// merely LOOKED like a commit. Best-effort: None outside a repo, on an
+/// unborn branch, or on any git error — recording evidence must never break
+/// the event pipeline.
+pub fn commit_at_head(dir: &Path) -> Option<(String, String, Vec<String>, i64)> {
+    let run = |args: &[&str]| -> Option<String> {
+        let out = proc::command("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let sha = run(&["rev-parse", "HEAD"])?;
+    let meta = run(&["log", "-1", "--format=%ct%n%s"])?;
+    let (ct, subject) = meta.split_once('\n').unwrap_or((meta.as_str(), ""));
+    let committed_at = ct.trim().parse::<i64>().ok()?;
+    // --root: a repo's FIRST commit lists its files too.
+    let files = run(&[
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        "--root",
+        "HEAD",
+    ])?
+    .lines()
+    .map(str::to_string)
+    .filter(|l| !l.is_empty())
+    .collect();
+    Some((sha, subject.to_string(), files, committed_at))
+}
+
 /// Commit ONLY the given paths (`git commit -m <msg> -- <paths>`), leaving
 /// whatever else the user has staged exactly as staged. Untracked paths are
 /// added first; the pathspec form then commits their working-tree content
@@ -562,6 +600,31 @@ mod tests {
 
     fn change_for<'a>(st: &'a GitStatus, path: &str) -> Option<&'a GitFileChange> {
         st.changes.iter().find(|c| c.path == path)
+    }
+
+    /// The agent-terminal commit recorder reads HEAD honestly: sha, subject,
+    /// files and a committer time fresh enough to pass the hook's guard.
+    #[test]
+    fn commit_at_head_reports_the_fresh_commit() {
+        let repo = init_repo("athead");
+        assert!(
+            commit_at_head(&repo).is_none(),
+            "unborn branch reports nothing"
+        );
+        fs::write(repo.join("a.txt"), "one\n").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "Agent did this"], &repo);
+
+        let (sha, subject, files, committed_at) = commit_at_head(&repo).unwrap();
+        assert_eq!(sha, head_sha(&repo).unwrap());
+        assert_eq!(subject, "Agent did this");
+        assert_eq!(files, vec!["a.txt".to_string()]);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        assert!((now - committed_at).abs() < 60, "committer time is now-ish");
+        let _ = fs::remove_dir_all(&repo);
     }
 
     /// P2 attach flow: the packet commit must carry ONLY its own paths —
