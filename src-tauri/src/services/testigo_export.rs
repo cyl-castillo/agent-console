@@ -47,6 +47,10 @@ pub struct ExportSummary {
     /// the project opted in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamp_tsa: Option<String>,
+    /// Sha of the last in-case `commit` event, when the packet carries one —
+    /// the same value exported as the `gitCommit` subject (P2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
 }
 
 /// Load the ed25519 signing seed from the OS keychain, generating and storing
@@ -336,9 +340,24 @@ pub fn export_with_seed(
     let mut stub_count = 0usize;
     let mut redaction_count = 0usize;
     let mut included = 0usize;
+    let mut git_commit: Option<String> = None;
     for i in seg.first..=seg.last {
         let v = &seg.parsed[i];
         if seg.in_case(v) {
+            // P2: remember the last real commit the case produced — it
+            // becomes the packet's externally resolvable subject below.
+            // (turn_end's postSha is a local snapshot object, never pushed,
+            // so a receiver could not resolve it; commit shas travel.)
+            if v.get("kind").and_then(Value::as_str) == Some("commit") {
+                if let Some(sha) = v
+                    .get("payload")
+                    .and_then(|p| p.get("sha"))
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                {
+                    git_commit = Some(sha.to_string());
+                }
+            }
             let (mut line, n) = redact(&seg.raw_lines[i]);
             let mut redacted = n > 0;
             let seq = v.get("seq").and_then(|s| s.as_u64());
@@ -413,12 +432,24 @@ pub fn export_with_seed(
         predicate["endTimestamp"] = json!(rfc3339_ms(end));
     }
     predicate["events"] = Value::Array(events);
+    // Subject list (in-toto Statement): [0] stays the digest of the packed
+    // events — every existing verifier checks exactly that slot. P2 appends
+    // the case's last commit as a second subject (DigestSet key `gitCommit`):
+    // it binds the evidence to an artifact a reviewer or CI can resolve in
+    // the PR, where the events digest alone only describes the packet itself.
+    let mut subjects = vec![json!({
+        "name": case_id.unwrap_or("ledger"),
+        "digest": { "sha256": subject_digest }
+    })];
+    if let Some(sha) = &git_commit {
+        subjects.push(json!({
+            "name": format!("git:commit:{sha}"),
+            "digest": { "gitCommit": sha }
+        }));
+    }
     let statement = json!({
         "_type": STATEMENT_TYPE,
-        "subject": [{
-            "name": case_id.unwrap_or("ledger"),
-            "digest": { "sha256": subject_digest }
-        }],
+        "subject": subjects,
         "predicateType": PREDICATE_TYPE,
         "predicate": predicate,
     });
@@ -473,6 +504,7 @@ pub fn export_with_seed(
         subject_digest,
         chain_ok: true,
         timestamp_tsa: tsa.map(String::from),
+        git_commit,
     })
 }
 
@@ -767,6 +799,11 @@ mod tests {
                 .as_str()
                 .unwrap()
         );
+        assert_eq!(
+            statement["subject"].as_array().unwrap().len(),
+            1,
+            "no commit in the case ⇒ no git subject claimed"
+        );
 
         // Chain linkage: stored prevHash/hash link through clean, redacted
         // AND stub entries; clean lines also recompute.
@@ -883,6 +920,72 @@ mod tests {
         let svc2 = TestigoService::new();
         assert!(export_with_seed(&svc2, root, None, &dest, &seed, &[], None).is_err());
         assert!(preview(&svc2, root, None).is_err());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// P2: a case that produced a real commit exports that commit as a
+    /// second, externally resolvable in-toto subject (`gitCommit`), while
+    /// subject[0] — what every existing verifier checks — stays the digest
+    /// of the packed events.
+    #[test]
+    fn export_binds_last_commit_as_git_subject() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "ac-testigo-gitsubj-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let svc = TestigoService::new();
+        let root = "/proj/gitsubj";
+        svc.link_case(root, 1, "t1", "jira:FIXY-10").unwrap();
+        svc.on_prompt(root, 2, Some("t1"), None, Some("fix the bug"), None, None)
+            .unwrap();
+        svc.on_turn_end(
+            root,
+            3,
+            Some("t1"),
+            None,
+            serde_json::json!({ "filesChanged": [{ "status": "M", "path": "src/a.rs" }] }),
+        )
+        .unwrap();
+        // Two commits touching the turn's files: the LAST one must win.
+        svc.on_commit(root, 4, "a1b2c3d", "first", &["src/a.rs".into()], false, 60_000)
+            .unwrap();
+        svc.on_commit(root, 5, "e4f5a6b", "amended", &["src/a.rs".into()], true, 60_000)
+            .unwrap();
+
+        let seed = [9u8; 32];
+        let dest = base.join("out");
+        let sum =
+            export_with_seed(&svc, root, Some("jira:FIXY-10"), &dest, &seed, &[], None).unwrap();
+        assert_eq!(sum.git_commit.as_deref(), Some("e4f5a6b"));
+
+        let packet: Value = serde_json::from_str(&fs::read_to_string(&sum.path).unwrap()).unwrap();
+        let payload = B64
+            .decode(packet["envelope"]["payload"].as_str().unwrap())
+            .unwrap();
+        let st: Value = serde_json::from_slice(&payload).unwrap();
+        let subjects = st["subject"].as_array().unwrap();
+        assert_eq!(subjects.len(), 2);
+        // Slot 0 untouched: the packed-events digest the verifiers check.
+        let body = serde_json::to_string(&st["predicate"]["events"]).unwrap();
+        let mut h = Sha256::new();
+        h.update(body.as_bytes());
+        assert_eq!(
+            format!("{:x}", h.finalize()),
+            subjects[0]["digest"]["sha256"].as_str().unwrap()
+        );
+        // Slot 1: the resolvable git binding.
+        assert_eq!(subjects[1]["name"], "git:commit:e4f5a6b");
+        assert_eq!(subjects[1]["digest"]["gitCommit"], "e4f5a6b");
 
         let _ = std::fs::remove_dir_all(&base);
     }
