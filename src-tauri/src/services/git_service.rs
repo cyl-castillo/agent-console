@@ -241,6 +241,55 @@ pub fn commit(repo: &Path, message: &str) -> AppResult<String> {
     Ok(sha)
 }
 
+/// Current HEAD commit sha (full form).
+pub fn head_sha(repo: &Path) -> AppResult<String> {
+    let out = proc::command("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        return Err(AppError::Other(format!(
+            "git rev-parse HEAD failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Commit ONLY the given paths (`git commit -m <msg> -- <paths>`), leaving
+/// whatever else the user has staged exactly as staged. Untracked paths are
+/// added first; the pathspec form then commits their working-tree content
+/// without sweeping the rest of the index — the P2 attach flow must never
+/// smuggle the user's half-staged work into its packet commit.
+pub fn commit_paths(repo: &Path, message: &str, paths: &[String]) -> AppResult<String> {
+    if message.trim().is_empty() {
+        return Err(AppError::InvalidArgument("commit message is empty".into()));
+    }
+    if paths.is_empty() {
+        return Err(AppError::InvalidArgument("no paths to commit".into()));
+    }
+    let mut add = vec!["add", "--"];
+    add.extend(paths.iter().map(String::as_str));
+    let out = git(repo, &add)?;
+    if !out.status.success() {
+        return Err(AppError::Other(format!(
+            "git add failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )));
+    }
+    let mut args = vec!["commit", "-m", message, "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let out = git(repo, &args)?;
+    if !out.status.success() {
+        return Err(AppError::Other(format!(
+            "git commit failed: {}{}",
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&out.stdout)
+        )));
+    }
+    head_sha(repo)
+}
+
 /// `git log -n <limit> --pretty=... -- <file>`. Empty if file is untracked or
 /// has no history yet. Best-effort: returns empty list on failure.
 pub fn file_log(repo: &Path, file: &str, limit: u32) -> AppResult<Vec<GitCommitInfo>> {
@@ -513,6 +562,43 @@ mod tests {
 
     fn change_for<'a>(st: &'a GitStatus, path: &str) -> Option<&'a GitFileChange> {
         st.changes.iter().find(|c| c.path == path)
+    }
+
+    /// P2 attach flow: the packet commit must carry ONLY its own paths —
+    /// whatever the user had staged stays staged, untouched.
+    #[test]
+    fn commit_paths_leaves_the_rest_of_the_index_alone() {
+        let repo = init_repo("cpaths");
+        fs::write(repo.join("a.txt"), "one\n").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+
+        // The user half-staged their own work…
+        fs::write(repo.join("a.txt"), "two\n").unwrap();
+        git(&["add", "a.txt"], &repo);
+        // …and the attach flow drops an untracked packet.
+        fs::create_dir_all(repo.join(".testigo/proofs")).unwrap();
+        fs::write(repo.join(".testigo/proofs/p.proofpack.json"), "{}\n").unwrap();
+
+        let sha = commit_paths(
+            &repo,
+            "Attach proof packet (t)",
+            &[".testigo/proofs/p.proofpack.json".into()],
+        )
+        .unwrap();
+        assert_eq!(sha, head_sha(&repo).unwrap());
+
+        // The packet is committed; a.txt is NOT in that commit and stays staged.
+        let shown = git(&["show", "--name-only", "--format=", "HEAD"], &repo);
+        let files = String::from_utf8_lossy(&shown.stdout).to_string();
+        assert!(files.contains(".testigo/proofs/p.proofpack.json"));
+        assert!(
+            !files.contains("a.txt"),
+            "user's staged work must not be swept: {files}"
+        );
+        let st = status(&repo).unwrap();
+        let a = change_for(&st, "a.txt").expect("a.txt still pending");
+        assert!(a.staged, "a.txt stays staged after the packet commit");
     }
 
     #[test]

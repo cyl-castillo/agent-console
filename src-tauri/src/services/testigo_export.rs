@@ -957,10 +957,26 @@ mod tests {
         )
         .unwrap();
         // Two commits touching the turn's files: the LAST one must win.
-        svc.on_commit(root, 4, "a1b2c3d", "first", &["src/a.rs".into()], false, 60_000)
-            .unwrap();
-        svc.on_commit(root, 5, "e4f5a6b", "amended", &["src/a.rs".into()], true, 60_000)
-            .unwrap();
+        svc.on_commit(
+            root,
+            4,
+            "a1b2c3d",
+            "first",
+            &["src/a.rs".into()],
+            false,
+            60_000,
+        )
+        .unwrap();
+        svc.on_commit(
+            root,
+            5,
+            "e4f5a6b",
+            "amended",
+            &["src/a.rs".into()],
+            true,
+            60_000,
+        )
+        .unwrap();
 
         let seed = [9u8; 32];
         let dest = base.join("out");

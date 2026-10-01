@@ -30,8 +30,14 @@ interface ChangesState {
   push: () => Promise<PushResult | null>;
   /// Open the PR/MR page for the current branch in the browser (pushing
   /// first is the user's call — the button says so when there is nothing to
-  /// open yet).
+  /// open yet). With `attachProof` on, first commits the HEAD case's proof
+  /// packet under `.testigo/proofs/` and pushes, so the PR carries its own
+  /// evidence (P2) — and degrades to a plain open when there is no case.
   openPr: () => Promise<void>;
+  /// P2 proof-on-PR toggle, persisted. The packet is an upgrade, not a
+  /// gate: attach failures never block opening the PR.
+  attachProof: boolean;
+  setAttachProof: (v: boolean) => void;
   pushing: boolean;
   /// PR link of the last push in this session, for the "Open PR" button.
   lastPrUrl: string | null;
@@ -45,6 +51,15 @@ interface ChangesState {
   checkoutBranch: (name: string) => Promise<void>;
   clear: () => void;
 }
+
+const ATTACH_PROOF_KEY = "ac:attach-proof";
+const attachProofInitial = () => {
+  try {
+    return localStorage.getItem(ATTACH_PROOF_KEY) !== "0";
+  } catch {
+    return true;
+  }
+};
 
 export const useChangesStore = create<ChangesState>((set, get) => ({
   status: null,
@@ -233,7 +248,38 @@ export const useChangesStore = create<ChangesState>((set, get) => ({
     }
   },
 
+  attachProof: attachProofInitial(),
+  setAttachProof: (v) => {
+    try {
+      localStorage.setItem(ATTACH_PROOF_KEY, v ? "1" : "0");
+    } catch {
+      // storage unavailable: the toggle still works for this session
+    }
+    set({ attachProof: v });
+  },
+
   openPr: async () => {
+    if (get().attachProof) {
+      try {
+        const a = await ipc.gitAttachProof();
+        useToastStore
+          .getState()
+          .show(
+            `Proof packet attached: ${a.eventCount} events` +
+              `${a.redactionCount > 0 ? `, ${a.redactionCount} redacted` : ""} (${a.caseId})`,
+            "success",
+          );
+        // Publish the packet commit; a failed push already toasted.
+        if (!(await get().push())) return;
+        await get().refresh();
+      } catch (e) {
+        // No case for HEAD, witness off, export failed: the PR still opens —
+        // the packet is an upgrade, not a gate.
+        useToastStore
+          .getState()
+          .show(`No proof packet attached: ${String(e).slice(0, 180)}`, "info");
+      }
+    }
     let url = get().lastPrUrl;
     if (!url) {
       try {

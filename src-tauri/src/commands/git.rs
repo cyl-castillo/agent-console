@@ -131,6 +131,72 @@ pub fn git_pr_url(state: State<'_, AppState>) -> AppResult<Option<String>> {
     git_service::pr_url_current(&repo)
 }
 
+/// What `git_attach_proof` put on the branch.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachProofSummary {
+    pub case_id: String,
+    /// Repo-relative path of the committed packet.
+    pub path: String,
+    pub commit_sha: String,
+    pub event_count: usize,
+    pub redaction_count: usize,
+    /// The packet's `gitCommit` subject (the case's last recorded commit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
+}
+
+/// P2 proof-on-PR: export the packet for the case that produced HEAD and
+/// commit it under `.testigo/proofs/`, so the PR carries its own evidence
+/// and CI can verify it (signature, chain, diff coverage). The commit
+/// touches ONLY the packet file — whatever the user staged stays staged.
+/// Auto-redaction applies as in any export; manual redaction stays in the
+/// Proof panel flow, and the packet lands in the PR diff where it can be
+/// reviewed before merge.
+#[tauri::command(async)]
+pub fn git_attach_proof(state: State<'_, AppState>) -> AppResult<AttachProofSummary> {
+    let repo = current_repo(&state)?;
+    let root = repo.to_string_lossy().to_string();
+    let head = git_service::head_sha(&repo)?;
+    let case = state
+        .testigo
+        .case_for_commit_sha(&root, &head)?
+        .ok_or_else(|| {
+            AppError::InvalidArgument(
+                "HEAD has no case in the ledger — commit from the console first so the evidence binds to this branch".into(),
+            )
+        })?;
+    // Export into a scratch dir first: the repo gets ONLY the packet, not
+    // the standalone verifier HTML the export drops next to it.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("ac-attach-{}-{nanos}", std::process::id()));
+    let summary =
+        crate::services::testigo_export::export(&state.testigo, &root, Some(&case), &tmp, &[])?;
+    let file_name = std::path::Path::new(&summary.path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .ok_or_else(|| AppError::Other("packet path has no file name".into()))?;
+    let rel = format!(".testigo/proofs/{file_name}");
+    let dest_dir = repo.join(".testigo").join("proofs");
+    std::fs::create_dir_all(&dest_dir)?;
+    std::fs::copy(&summary.path, dest_dir.join(&file_name))?;
+    let _ = std::fs::remove_dir_all(&tmp);
+    let msg = format!("Attach proof packet ({case})");
+    let sha = git_service::commit_paths(&repo, &msg, std::slice::from_ref(&rel))?;
+    record_commit(&state, &sha, &msg, std::slice::from_ref(&rel), false);
+    Ok(AttachProofSummary {
+        case_id: case,
+        path: rel,
+        commit_sha: sha,
+        event_count: summary.event_count,
+        redaction_count: summary.redaction_count,
+        git_commit: summary.git_commit,
+    })
+}
+
 #[tauri::command(async)]
 pub fn git_branches(state: State<'_, AppState>) -> AppResult<Vec<BranchInfo>> {
     let repo = current_repo(&state)?;

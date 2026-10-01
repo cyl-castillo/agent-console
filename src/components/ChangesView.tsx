@@ -33,6 +33,8 @@ export function ChangesView() {
     push,
     openPr,
     pushing,
+    attachProof,
+    setAttachProof,
     branches,
   } = useChangesStore();
 
@@ -304,6 +306,17 @@ export function ChangesView() {
             >
               {pushing ? "Pushing…" : `Push${ahead > 0 ? ` ↑${ahead}` : ""}`}
             </button>
+            <label
+              className="attach-proof"
+              title="Attach this branch's proof packet (.testigo/proofs/) and push before opening the PR, so CI and reviewers can verify the evidence. Auto-redaction applies; the packet is reviewable in the PR diff."
+            >
+              <input
+                type="checkbox"
+                checked={attachProof}
+                onChange={(e) => setAttachProof(e.target.checked)}
+              />
+              Attach proof
+            </label>
             <button
               className="btn commit-pr"
               onClick={() => void openPr()}

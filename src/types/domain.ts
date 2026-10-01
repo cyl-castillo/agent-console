@@ -193,6 +193,18 @@ export interface PushResult {
   prUrl?: string | null;
 }
 
+/// What git_attach_proof committed onto the branch (P2 proof-on-PR).
+export interface AttachProofSummary {
+  caseId: string;
+  /// Repo-relative path of the committed packet.
+  path: string;
+  commitSha: string;
+  eventCount: number;
+  redactionCount: number;
+  /// The packet's gitCommit subject (the case's last recorded commit).
+  gitCommit?: string | null;
+}
+
 export interface HooksStatus {
   sessionDir: string;
   scriptPath: string;

@@ -780,6 +780,27 @@ impl TestigoService {
         )
     }
 
+    /// The case that produced a given commit, from the ledger's `commit`
+    /// events (last write wins — an amend re-records the sha). "unbound"
+    /// commits name no case: evidence that can't be attributed is not
+    /// evidence of anything in particular. P2's attach flow uses this to
+    /// pick WHICH packet belongs on the PR for the pushed HEAD.
+    pub fn case_for_commit_sha(&self, project_root: &str, sha: &str) -> AppResult<Option<String>> {
+        if sha.is_empty() {
+            return Ok(None);
+        }
+        let events = self.list(project_root, None, None)?;
+        Ok(events
+            .iter()
+            .rev()
+            .find(|e| {
+                e.kind == "commit"
+                    && e.payload.get("sha").and_then(|v| v.as_str()) == Some(sha)
+                    && e.case_id != "unbound"
+            })
+            .map(|e| e.case_id.clone()))
+    }
+
     /// Like `case_for_files`, but also names the turn: the most recent
     /// `turn_end` within `max_age_ms` whose diff touched any of `files`.
     pub fn turn_for_files(
@@ -1504,6 +1525,19 @@ mod tests {
         assert_eq!(orphan_commit.case_id, "unbound");
         assert!(orphan_commit.turn_id.is_none());
         assert_eq!(orphan_commit.payload["amend"], true);
+
+        // P2: the attach flow resolves WHICH case a pushed HEAD belongs to.
+        assert_eq!(
+            svc.case_for_commit_sha(a, "deadbeef").unwrap().as_deref(),
+            Some(c.case_id.as_str())
+        );
+        assert_eq!(
+            svc.case_for_commit_sha(a, "cafe").unwrap(),
+            None,
+            "unbound commits name no case — unattributable evidence attaches nothing"
+        );
+        assert_eq!(svc.case_for_commit_sha(a, "unknown").unwrap(), None);
+        assert_eq!(svc.case_for_commit_sha(a, "").unwrap(), None);
 
         // An unknown id (post-restart) still records — in the caller's ledger.
         let orphan = svc
