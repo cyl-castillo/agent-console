@@ -218,6 +218,24 @@ const ACTIONS: PaletteAction[] = [
     },
   },
   {
+    id: "git.push",
+    label: "Push Branch",
+    hint: "git push the current branch (sets the upstream on first push)",
+    keywords: ["git", "upload", "remote", "origin"],
+    run: async () => {
+      await useChangesStore.getState().push();
+    },
+  },
+  {
+    id: "git.open_pr",
+    label: "Open Pull Request",
+    hint: "Open the PR/MR page for the current branch in your browser",
+    keywords: ["git", "merge request", "review", "github", "gitlab"],
+    run: async () => {
+      await useChangesStore.getState().openPr();
+    },
+  },
+  {
     id: "git.refresh",
     label: "Refresh Git Status",
     hint: "Re-runs git status (safe)",

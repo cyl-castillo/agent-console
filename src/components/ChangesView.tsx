@@ -30,6 +30,10 @@ export function ChangesView() {
     commit,
     loadCommitHistory,
     loadHeadMessage,
+    push,
+    openPr,
+    pushing,
+    branches,
   } = useChangesStore();
 
   const [diffMode, setDiffMode] = useState<"unified" | "split">("split");
@@ -139,6 +143,16 @@ export function ChangesView() {
   };
 
   const canCommit = (amend || stagedCount > 0) && commitMessage.trim().length > 0 && !committing;
+  const current = branches.find((b) => b.name === status.branch);
+  const ahead = current?.ahead ?? 0;
+  const hasUpstream = !!current?.upstream;
+  const pushTitle = pushing
+    ? "Pushing…"
+    : !hasUpstream
+      ? `Push ${status.branch ?? "this branch"} and set its upstream`
+      : ahead > 0
+        ? `Push ${ahead} commit${ahead === 1 ? "" : "s"} to ${current?.upstream}`
+        : `Nothing to push — ${current?.upstream} is up to date`;
   const subjectLine = commitMessage.split("\n", 1)[0] ?? "";
   const subjectOver = subjectLine.length > SUBJECT_LIMIT;
 
@@ -282,6 +296,26 @@ export function ChangesView() {
               {subjectLine.length}/{SUBJECT_LIMIT}
             </span>
             <span className="spacer" />
+            <button
+              className="btn commit-push"
+              onClick={() => void push()}
+              disabled={pushing || (hasUpstream && ahead === 0)}
+              title={pushTitle}
+            >
+              {pushing ? "Pushing…" : `Push${ahead > 0 ? ` ↑${ahead}` : ""}`}
+            </button>
+            <button
+              className="btn commit-pr"
+              onClick={() => void openPr()}
+              disabled={!hasUpstream}
+              title={
+                hasUpstream
+                  ? "Open the pull request page for this branch in your browser"
+                  : "Push the branch first"
+              }
+            >
+              Open PR
+            </button>
             <button
               className="btn btn-solid commit-button"
               onClick={onCommit}

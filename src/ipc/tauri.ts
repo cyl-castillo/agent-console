@@ -72,6 +72,7 @@ import type {
   WorktreeSetupConfig,
   WorktreeStatusInfo,
   MergeOutcome,
+  PushResult,
 } from "../types/domain";
 
 export const ipc = {
@@ -112,6 +113,8 @@ export const ipc = {
   gitHeadMessage: () => invoke<string>("git_head_message"),
   gitFileLog: (file: string, limit = 5) => invoke<GitCommitInfo[]>("git_file_log", { file, limit }),
   gitBranches: () => invoke<BranchInfo[]>("git_branches"),
+  gitPush: () => invoke<PushResult>("git_push"),
+  gitPrUrl: () => invoke<string | null>("git_pr_url"),
   gitCheckoutBranch: (name: string) => invoke<void>("git_checkout_branch", { name }),
 
   // Memory injection (E1): per-project toggle + the recent-injections feed.

@@ -3610,6 +3610,10 @@ select:focus-visible,
   border-color: var(--accent);
 }
 
+.commit-push,
+.commit-pr {
+  margin-right: 6px;
+}
 .commit-box {
   margin-top: auto;
   padding: 8px;

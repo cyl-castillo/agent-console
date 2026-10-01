@@ -182,6 +182,17 @@ export interface PersistedSession {
   worktree?: WorktreeRef;
 }
 
+/// Outcome of `git_push` (P1).
+export interface PushResult {
+  branch: string;
+  remote: string;
+  setUpstream: boolean;
+  defaultBranch?: string | null;
+  /// "Create PR/MR" link for GitHub/GitLab; null on the default branch or an
+  /// unknown host.
+  prUrl?: string | null;
+}
+
 export interface HooksStatus {
   sessionDir: string;
   scriptPath: string;
