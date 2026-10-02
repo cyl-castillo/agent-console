@@ -73,6 +73,7 @@ import type {
   WorktreeStatusInfo,
   MergeOutcome,
   PushResult,
+  AttachProofSummary,
 } from "../types/domain";
 
 export const ipc = {
@@ -115,6 +116,7 @@ export const ipc = {
   gitBranches: () => invoke<BranchInfo[]>("git_branches"),
   gitPush: () => invoke<PushResult>("git_push"),
   gitPrUrl: () => invoke<string | null>("git_pr_url"),
+  gitAttachProof: () => invoke<AttachProofSummary>("git_attach_proof"),
   gitCheckoutBranch: (name: string) => invoke<void>("git_checkout_branch", { name }),
 
   // Memory injection (E1): per-project toggle + the recent-injections feed.

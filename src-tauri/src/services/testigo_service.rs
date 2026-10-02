@@ -206,6 +206,24 @@ pub fn is_check_command(cmd: &str) -> bool {
     re.is_match(cmd)
 }
 
+/// A shell command that creates a commit: `git commit` as the start of a
+/// shell statement (after `;`, `&`, `|`, `(` or the line start — NOT after a
+/// plain space, or `echo git commit` and quoted mentions would match),
+/// allowing git's global flags before the subcommand (`git -C dir commit`,
+/// `git -c x=y commit`). Conservative on purpose — a miss just records
+/// nothing, and the caller double-checks against the repo (commit freshness
+/// + sha dedupe) before writing a `commit` line.
+pub fn is_git_commit_command(cmd: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?:^|[;&|(])\s*git\s+(?:-[A-Za-z]\s+\S+\s+|--[A-Za-z-]+(?:=\S+)?\s+)*commit(?:\s|$)",
+        )
+        .expect("git-commit regex compiles")
+    });
+    re.is_match(cmd)
+}
+
 #[derive(Default)]
 struct Inner {
     /// project_root -> last (seq, hash); None = ledger empty. Lazily loaded
@@ -778,6 +796,74 @@ impl TestigoService {
                 "amend": amend,
             }),
         )
+    }
+
+    /// A commit the AGENT made in its terminal (detected via PostToolUse on
+    /// a successful `git commit`). Binds by the terminal's open turn/case —
+    /// we KNOW whose tool call it was, no file-overlap heuristic needed.
+    /// Same `commit` kind as the GUI path, so trailers, the export's
+    /// `gitCommit` subject and the PR coverage check see both equally;
+    /// `actor: "agent"` and `via: "terminal"` keep the provenance honest.
+    /// Without this, only GUI commits reached the ledger and agent-driven
+    /// branches could never bind a packet to their PR (P2).
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_agent_commit(
+        &self,
+        project_root: &str,
+        ts: i64,
+        term_id: Option<&str>,
+        session_id: Option<&str>,
+        sha: &str,
+        subject: &str,
+        files: &[String],
+        amend: bool,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        let turn_id = term_id
+            .and_then(|t| inner.turns.get(t))
+            .map(|s| s.turn_id.clone());
+        let case = Self::case_for(&inner, term_id);
+        let files_v: Vec<Value> = files.iter().take(500).map(|f| json!(f)).collect();
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case,
+            turn_id,
+            "commit",
+            term_id.map(String::from),
+            session_id.map(String::from),
+            "agent",
+            json!({
+                "sha": sha,
+                "subject": subject.lines().next().unwrap_or("").chars().take(200).collect::<String>(),
+                "files": files_v,
+                "filesTruncated": files.len() > 500,
+                "amend": amend,
+                "via": "terminal",
+            }),
+        )
+    }
+
+    /// The case that produced a given commit, from the ledger's `commit`
+    /// events (last write wins — an amend re-records the sha). "unbound"
+    /// commits name no case: evidence that can't be attributed is not
+    /// evidence of anything in particular. P2's attach flow uses this to
+    /// pick WHICH packet belongs on the PR for the pushed HEAD.
+    pub fn case_for_commit_sha(&self, project_root: &str, sha: &str) -> AppResult<Option<String>> {
+        if sha.is_empty() {
+            return Ok(None);
+        }
+        let events = self.list(project_root, None, None)?;
+        Ok(events
+            .iter()
+            .rev()
+            .find(|e| {
+                e.kind == "commit"
+                    && e.payload.get("sha").and_then(|v| v.as_str()) == Some(sha)
+                    && e.case_id != "unbound"
+            })
+            .map(|e| e.case_id.clone()))
     }
 
     /// Like `case_for_files`, but also names the turn: the most recent
@@ -1505,6 +1591,19 @@ mod tests {
         assert!(orphan_commit.turn_id.is_none());
         assert_eq!(orphan_commit.payload["amend"], true);
 
+        // P2: the attach flow resolves WHICH case a pushed HEAD belongs to.
+        assert_eq!(
+            svc.case_for_commit_sha(a, "deadbeef").unwrap().as_deref(),
+            Some(c.case_id.as_str())
+        );
+        assert_eq!(
+            svc.case_for_commit_sha(a, "cafe").unwrap(),
+            None,
+            "unbound commits name no case — unattributable evidence attaches nothing"
+        );
+        assert_eq!(svc.case_for_commit_sha(a, "unknown").unwrap(), None);
+        assert_eq!(svc.case_for_commit_sha(a, "").unwrap(), None);
+
         // An unknown id (post-restart) still records — in the caller's ledger.
         let orphan = svc
             .on_approval_decision(a, 11, "never-seen", "allow", None)
@@ -1545,6 +1644,88 @@ mod tests {
         ] {
             assert!(!is_check_command(c), "{c}");
         }
+    }
+
+    #[test]
+    fn git_commit_command_detection_is_statement_exact() {
+        for c in [
+            "git commit -m 'fix'",
+            "git add -A && git commit -s -m x",
+            "git -C /tmp/repo commit --amend --no-edit",
+            "git -c user.name=T commit -m y",
+            "cd src && git commit",
+            "cd src; git commit -m z",
+            "(git commit -m z)",
+        ] {
+            assert!(is_git_commit_command(c), "{c}");
+        }
+        for c in [
+            "git log --oneline",
+            "git commit-tree abc",
+            "echo git commit",
+            "grep -rn 'git commit' src/",
+            "git status",
+            "legit commit",
+        ] {
+            assert!(!is_git_commit_command(c), "{c}");
+        }
+    }
+
+    /// An agent's terminal commit binds by the terminal's own open turn —
+    /// no file-overlap heuristic — and is findable by sha like a GUI commit.
+    #[test]
+    fn agent_commit_binds_to_the_terminals_open_turn() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "ac-testigo-agentcommit-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let svc = TestigoService::new();
+        let root = "/proj/agentcommit";
+        svc.link_case(root, 1, "t1", "jira:FIXY-11").unwrap();
+        let turn = svc
+            .on_prompt(root, 2, Some("t1"), Some("s1"), Some("ship it"), None, None)
+            .unwrap()
+            .turn_id
+            .unwrap();
+
+        let ev = svc
+            .on_agent_commit(
+                root,
+                3,
+                Some("t1"),
+                Some("s1"),
+                "feedc0de",
+                "Ship the thing\n\nbody",
+                &["src/x.rs".into()],
+                false,
+            )
+            .unwrap();
+        assert_eq!(ev.kind, "commit");
+        assert_eq!(ev.actor, "agent");
+        assert_eq!(ev.case_id, "jira:FIXY-11");
+        assert_eq!(ev.turn_id.as_deref(), Some(turn.as_str()));
+        assert_eq!(ev.payload["sha"], "feedc0de");
+        assert_eq!(ev.payload["subject"], "Ship the thing");
+        assert_eq!(ev.payload["via"], "terminal");
+
+        assert_eq!(
+            svc.case_for_commit_sha(root, "feedc0de")
+                .unwrap()
+                .as_deref(),
+            Some("jira:FIXY-11"),
+            "the attach flow resolves agent commits exactly like GUI ones"
+        );
+        assert!(svc.verify(root).unwrap().ok);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// One test fn on purpose (mutates process-global XDG_DATA_HOME): exercises

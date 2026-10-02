@@ -1,0 +1,33 @@
+# P2 proof-on-PR: the check-run that makes an attached packet worth having.
+# Verifies every packet the PR adds/updates under .testigo/proofs/ with the
+# vendored reference verifier (signature, digest, linkage, recompute), then
+# the PR-level claims: the packet's gitCommit subject is in the PR's history,
+# and the PR's diff is covered by the recorded turns/commits. A PR without a
+# packet passes with a note — the packet is an upgrade, not a gate.
+name: testigo-verify
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  testigo-verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the gitCommit-subject ancestry check and the
+          # base...head diff both need more than the merge commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify proof packets
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node .github/testigo/testigo-verify.mjs "$BASE" "$HEAD"

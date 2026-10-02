@@ -1669,6 +1669,47 @@ fn handle_event(v: &Value, app: &AppHandle) {
                     duration_ms: v.get("durationMs").and_then(|d| d.as_u64()),
                 },
             );
+            // A successful `git commit` the agent ran in its terminal is a
+            // commit like any other: record it bound to the agent's own
+            // turn. Without this only GUI commits reached the ledger, so an
+            // agent-driven branch could never bind its packet to a PR (P2).
+            // Two guards keep lookalike commands (`git commit --help`, a
+            // matched-but-not-committing compound) from recording a stale
+            // HEAD: the commit must be fresh, and its sha not already in
+            // the ledger. Best-effort by design — a repo-less cwd or a
+            // failed read records nothing.
+            if kind == "tool_result" {
+                if let Some(cmd) = command
+                    .as_deref()
+                    .filter(|c| crate::services::testigo_service::is_git_commit_command(c))
+                {
+                    const FRESH_COMMIT_MAX_AGE_SECS: i64 = 300;
+                    let cwd = str_field(v, "cwd").unwrap_or_else(|| root.clone());
+                    if let Some((sha, subject, files, committed_at)) =
+                        crate::services::git_service::commit_at_head(std::path::Path::new(&cwd))
+                    {
+                        let fresh = (ts / 1000 - committed_at).abs() <= FRESH_COMMIT_MAX_AGE_SECS;
+                        let already = state
+                            .testigo
+                            .case_for_commit_sha(&root, &sha)
+                            .ok()
+                            .flatten()
+                            .is_some();
+                        if fresh && !already {
+                            let _ = state.testigo.on_agent_commit(
+                                &root,
+                                ts,
+                                str_field(v, "termId").as_deref(),
+                                str_field(v, "sessionId").as_deref(),
+                                &sha,
+                                &subject,
+                                &files,
+                                cmd.contains("--amend"),
+                            );
+                        }
+                    }
+                }
+            }
         }
     } else if kind == "model_switch" {
         // Testigo: the export reads model_switch/session_start into the
