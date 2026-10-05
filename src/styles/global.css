@@ -3614,6 +3614,21 @@ select:focus-visible,
 .commit-pr {
   margin-right: 6px;
 }
+.attach-proof {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.attach-proof input {
+  accent-color: var(--accent);
+  margin: 0;
+}
 .commit-box {
   margin-top: auto;
   padding: 8px;

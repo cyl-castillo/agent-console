@@ -21,7 +21,12 @@ vi.mock("../ipc/tauri", () => ({
     gitCheckoutBranch: vi.fn(),
     gitPush: vi.fn(),
     gitPrUrl: vi.fn(),
+    gitAttachProof: vi.fn(),
   },
+}));
+const openUrl = vi.fn();
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: (...a: unknown[]) => openUrl(...a),
 }));
 const showToast = vi.fn();
 vi.mock("./toastStore", () => ({
@@ -46,6 +51,7 @@ const mockAmend = vi.mocked(ipc.gitAmendCommit);
 const mockBranches = vi.mocked(ipc.gitBranches);
 const mockPush = vi.mocked(ipc.gitPush);
 const mockPrUrl = vi.mocked(ipc.gitPrUrl);
+const mockAttach = vi.mocked(ipc.gitAttachProof);
 const mockCheckout = vi.mocked(ipc.gitCheckoutBranch);
 const mockFire = vi.mocked(fireSchedulerEvent);
 
@@ -259,7 +265,9 @@ describe("push + open PR (P1)", () => {
     mockPush.mockReset();
     mockPrUrl.mockReset();
     mockBranches.mockResolvedValue([]);
-    useChangesStore.setState({ pushing: false, lastPrUrl: null });
+    // These tests cover the plain P1 loop; the P2 attach flow has its own
+    // describe below.
+    useChangesStore.setState({ pushing: false, lastPrUrl: null, attachProof: false });
   });
 
   it("push remembers the PR link and reports the upstream it set", async () => {
@@ -303,5 +311,83 @@ describe("push + open PR (P1)", () => {
     const r = await useChangesStore.getState().push();
     expect(r).toBeNull();
     expect(mockPush).not.toHaveBeenCalled();
+  });
+});
+
+describe("attach proof on Open PR (P2)", () => {
+  const summary = {
+    caseId: "jira:FIXY-9",
+    path: ".testigo/proofs/jira-FIXY-9.proofpack.json",
+    commitSha: "abc123",
+    eventCount: 12,
+    redactionCount: 2,
+    gitCommit: "def456",
+  };
+
+  beforeEach(() => {
+    showToast.mockClear();
+    openUrl.mockClear();
+    mockPush.mockReset();
+    mockPrUrl.mockReset();
+    mockAttach.mockReset();
+    mockBranches.mockResolvedValue([]);
+    useChangesStore.setState({ pushing: false, lastPrUrl: null, attachProof: true });
+  });
+
+  it("attaches, pushes the packet commit, and opens the PR from the push's link", async () => {
+    mockAttach.mockResolvedValue(summary);
+    mockPush.mockResolvedValue({
+      branch: "feat/x",
+      remote: "origin",
+      setUpstream: false,
+      defaultBranch: "main",
+      prUrl: "https://github.com/acme/w/compare/feat/x?expand=1",
+    });
+
+    await useChangesStore.getState().openPr();
+
+    expect(mockAttach).toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining("Proof packet attached: 12 events, 2 redacted"),
+      "success",
+    );
+    expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/w/compare/feat/x?expand=1");
+  });
+
+  it("a failed attach degrades to a plain open — the packet is not a gate", async () => {
+    mockAttach.mockRejectedValue("HEAD has no case in the ledger");
+    mockPrUrl.mockResolvedValue("https://github.com/acme/w/compare/feat/x?expand=1");
+
+    await useChangesStore.getState().openPr();
+
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining("No proof packet attached"),
+      "info",
+    );
+    expect(mockPush).not.toHaveBeenCalled();
+    expect(openUrl).toHaveBeenCalledWith("https://github.com/acme/w/compare/feat/x?expand=1");
+  });
+
+  it("a failed push after attaching stops the flow (the packet commit never reached the remote)", async () => {
+    mockAttach.mockResolvedValue(summary);
+    mockPush.mockRejectedValue(new Error("rejected"));
+
+    await useChangesStore.getState().openPr();
+
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("openPr respects the toggle when off", async () => {
+    // (localStorage persistence is a try/catch convenience — in this node
+    // test env there is no storage, and the toggle must still work.)
+    useChangesStore.getState().setAttachProof(false);
+    expect(useChangesStore.getState().attachProof).toBe(false);
+    mockPrUrl.mockResolvedValue("https://example.com/pr");
+
+    await useChangesStore.getState().openPr();
+
+    expect(mockAttach).not.toHaveBeenCalled();
+    expect(openUrl).toHaveBeenCalledWith("https://example.com/pr");
   });
 });
