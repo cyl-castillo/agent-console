@@ -117,15 +117,70 @@ function renderTimestamp(tsp, digest, tokenBytes, genTime) {
   d.append(meta, a, pre);
 }
 
+
+// This standalone page implements the Testigo profile only.
+const TESTIGO_TYPE = "https://github.com/cyl-castillo/testigo/attestation/v0.1";
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const isHash = (v) => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+const isSeq = (v) => Number.isSafeInteger(v) && v >= 0;
+
+// Validate the signed structure before using it. Unknown predicate/ledger
+// members and event kinds remain additive; entry wrappers retain schema oneOf.
+function checkStructure(st) {
+  if (!isObject(st)) return "payload";
+  if (st._type !== "https://in-toto.io/Statement/v1") return "statementType";
+  if (st.predicateType !== TESTIGO_TYPE) return "predicateType";
+  const p = st.predicate;
+  if (!isObject(p)) return "predicate";
+  if (typeof p.project !== "string" || typeof p.generator !== "string" || !Number.isInteger(p.exportedAtMs)) return "predicate";
+  if (p.caseId !== undefined && p.caseId !== null && typeof p.caseId !== "string") return "predicate";
+  if (p.ledgerHead !== undefined && (!isObject(p.ledgerHead) ||
+      (p.ledgerHead.seq != null && !Number.isInteger(p.ledgerHead.seq)) ||
+      (p.ledgerHead.hash != null && typeof p.ledgerHead.hash !== "string"))) return "predicate";
+  if (p.redactionCount !== undefined &&
+      (!Number.isInteger(p.redactionCount) || p.redactionCount < 0)) return "redactionCount";
+  if (!Array.isArray(st.subject) || !st.subject.length || st.subject.some((s) =>
+      !isObject(s) || typeof s.name !== "string" || !isObject(s.digest) ||
+      !Object.keys(s.digest).length || Object.values(s.digest).some((d) => typeof d !== "string"))) return "subject";
+  if (!Array.isArray(p.events)) return "events";
+  const r = p.range;
+  if (!isObject(r) || !isSeq(r.fromSeq) || !isSeq(r.toSeq) || r.toSeq < r.fromSeq ||
+      p.events.length !== r.toSeq - r.fromSeq + 1 ||
+      (r.fromSeq === 0 ? r.prevHashBefore !== "genesis" : !isHash(r.prevHashBefore))) return "range";
+  for (let i = 0; i < p.events.length; i++) {
+    const e = p.events[i];
+    if (!isObject(e)) return "entry";
+    let v;
+    if (Object.hasOwn(e, "line")) {
+      if (typeof e.line !== "string" || typeof e.redacted !== "boolean" ||
+          Object.keys(e).some((k) => !["line", "redacted"].includes(k))) return "entry";
+      try { v = JSON.parse(e.line); } catch { return "entry"; }
+      if (!isObject(v) || !Number.isInteger(v.ts) || typeof v.caseId !== "string" ||
+          typeof v.kind !== "string" || !["human", "agent", "system"].includes(v.actor) || !isObject(v.payload) ||
+          ["turnId", "termId", "sessionId"].some((k) => v[k] !== undefined && typeof v[k] !== "string")) return "entry";
+    } else {
+      if (!isObject(e.stub) || Object.keys(e).some((k) => k !== "stub")) return "entry";
+      v = e.stub;
+      // kind is optional on legacy stubs, as in the published schema.
+      if (v.kind !== undefined && typeof v.kind !== "string") return "entry";
+    }
+    if (!isSeq(v.seq) || v.seq !== r.fromSeq + i) return "sequence";
+    if (!isHash(v.hash) || !(v.prevHash === "genesis" || isHash(v.prevHash))) return "entry";
+  }
+  return null;
+}
+
 async function load(f) {
   $("summary").textContent = ""; $("summary").className = "check"; $("oks").innerHTML = ""; $("notes").innerHTML = ""; $("meta").innerHTML = ""; $("events").innerHTML = ""; $("tsp").innerHTML = "";
   $("result").style.display = "block";
   let packet;
   try { packet = JSON.parse(await f.text()); } catch { check("fail", "Not valid JSON."); return; }
-  if (packet.format !== "testigo-proofpack/v0.1") { check("fail", `Unknown format: ${packet.format}`); return; }
+  if (!isObject(packet) || packet.format !== "testigo-proofpack/v0.1") { check("fail", `Unknown format: ${packet?.format}`); return; }
 
   const env = packet.envelope || {};
-  const payloadBytes = b64ToBytes(env.payload || "");
+  if (env.payloadType !== "application/vnd.in-toto+json") { check("fail", "payloadType: expected application/vnd.in-toto+json."); return; }
+  let payloadBytes;
+  try { payloadBytes = b64ToBytes(env.payload || ""); } catch { check("fail", "payload: invalid base64."); return; }
   const sigEntry = (env.signatures || [])[0] || {};
 
   // 1. Signature (DSSE Ed25519 over the pre-auth encoding).
@@ -138,13 +193,17 @@ async function load(f) {
   } catch (e) { check("fail", `Signature check unavailable: ${e}`); }
   if (sigOk) check("ok", `Signature valid (Ed25519 / DSSE). Key id: ${keyId.slice(0, 16)}…`);
   else check("fail", "Signature INVALID — the packet does not match its signature.");
-  if (sigEntry.keyid && sigEntry.keyid !== keyId) check("fail", "Embedded key id does not match the public key.");
+  if (sigEntry.keyid !== keyId) { check("fail", "keyid: embedded key id does not match the public key."); return; }
+  if (!sigOk) return;
   check("warn", "Trust note: compare the key id with the publisher out-of-band — the packet carries its own key.");
 
   // 2. Statement + subject digest over the packed events.
   let st;
   try { st = JSON.parse(new TextDecoder().decode(payloadBytes)); } catch { check("fail", "Statement payload is not JSON."); return; }
-  const pred = st.predicate || {};
+  const structureFailure = checkStructure(st);
+  if (structureFailure) { check("fail", `${structureFailure}: packet does not satisfy the Testigo profile.`); return; }
+  check("ok", "Testigo profile, required fields, range and event sequence verified.");
+  const pred = st.predicate;
   const events = pred.events || [];
   const digestWant = ((st.subject || [])[0] || {}).digest?.sha256 || "";
   const digestGot = await sha256hex(enc.encode(JSON.stringify(events)));
@@ -198,7 +257,7 @@ async function load(f) {
   if (!ctxProblem && pred.contextArtifacts !== undefined) {
     if (!Array.isArray(pred.contextArtifacts)) ctxProblem = "contextArtifacts is not an array";
     else for (const a of pred.contextArtifacts) {
-      if (!isObj(a) || nonEmpty(a.uri) === nonEmpty(a.data)) { ctxProblem = "a context artifact needs exactly one of uri / data"; break; }
+      if (!isObj(a) || (Object.hasOwn(a, "uri") === Object.hasOwn(a, "data") || !nonEmpty(a.uri ?? a.data))) { ctxProblem = "a context artifact needs exactly one of uri / data"; break; }
       if (a.digest !== undefined && !(isObj(a.digest) && /^[0-9a-f]{64}$/.test(a.digest.sha256 ?? ""))) { ctxProblem = "a context artifact digest is not a lowercase hex sha256"; break; }
       if (a.tags !== undefined && !(Array.isArray(a.tags) && a.tags.every(nonEmpty))) { ctxProblem = "context artifact tags must be non-empty strings"; break; }
     }
@@ -216,6 +275,8 @@ async function load(f) {
     if (windowOk) check("ok", `Session window ${pred.startTimestamp} → ${pred.endTimestamp} matches the first and last event.`);
     else check("fail", "Declared session window does NOT match the first/last event's timestamp.");
   }
+
+  if (ctxProblem) return;
 
   // 4. Trusted timestamp (RFC 3161), if present. Informative only: the
   // token's CMS signature is NOT validated here — pretending to verify ASN.1
@@ -249,16 +310,17 @@ async function load(f) {
           if (/^\d{14}(\.\d+)?Z$/.test(s)) genTime = s;
         }
       }
-      if (!tokenBytes) check("fail", "RFC 3161 timestamp present but its token is not decodable base64.");
-      else if (!imprintOk || !embedded) check("fail", "RFC 3161 timestamp present but its imprint does not match this packet's signature.");
+      if (!tokenBytes) check("warn", "RFC 3161 timestamp present but its token is not decodable base64.");
+      else if (!imprintOk || !embedded) check("warn", "RFC 3161 timestamp present but its imprint does not match this packet's signature.");
       else check("warn", `RFC 3161 timestamp present (TSA: ${tsp.tsaUrl ?? "undeclared"})${genTime ? `, claimed genTime ${genTime}` : ""}. The signature's digest matches the declared imprint and appears inside the token — the token itself is NOT cryptographically verified here (see the Timestamp section for openssl verification).`);
       if (tokenBytes) renderTimestamp(tsp, sigDigest, tokenBytes, genTime);
     }
   }
 
   // 5. Render.
-  // exportedAtMs (testigo v0.1, epoch ms) or exportedAt (session-chain draft, RFC 3339).
-  const exported = pred.exportedAtMs != null ? new Date(pred.exportedAtMs).toISOString() : (pred.exportedAt ?? "?");
+  // Preserve schema-valid epoch integers outside Date's display range.
+  const exportDate = new Date(pred.exportedAtMs);
+  const exported = Number.isFinite(exportDate.getTime()) ? exportDate.toISOString() : String(pred.exportedAtMs);
   $("meta").textContent =
     `case: ${pred.caseId ?? "(full ledger)"} · project: ${pred.project} · exported: ${exported} · generator: ${pred.generator} · range: ${pred.range?.fromSeq}–${pred.range?.toSeq} · key id: ${keyId}`;
   // Process context (§2.6), producer-reported: shown as declared, never as verified.
