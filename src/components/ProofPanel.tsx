@@ -346,6 +346,15 @@ export function ProofPanel() {
                         · turn failed{t.error ? ` — ${t.error}` : ""}
                       </span>
                     )}
+                    {t.interrupted && (
+                      <span
+                        className="wb-hint"
+                        title="The turn was interrupted by the user before it finished"
+                      >
+                        {" "}
+                        · turn interrupted
+                      </span>
+                    )}
                     {t.rewound && (
                       <span
                         className="wb-hint"
