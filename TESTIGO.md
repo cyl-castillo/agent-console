@@ -229,6 +229,13 @@ ProofEvent {
   `hash` como miembro final (64 hex minúsculas), vacía solo ese valor y hashea todos los demás
   bytes de la línea cruda; el test de export usa la misma función y el verificador embebido
   lleva el hunk equivalente de testigo#7 (re-sincronizar cuando #7/#9/#17 mergeen).
+- **Re-sync del verificador embebido** (2026-10-05): `resources/testigo-verifier.html` vuelve a
+  ser byte-idéntico al de testigo `main` tras mergear los 8 PRs de Fredy. Trae: validación de
+  perfil y segmento (#17: `checkStructure`, códigos `firstFailure` nuevos, RFC 3161 inválido
+  pasa de fail a warn), render por `textContent` (#9), recómputo byte-exacto (#7, ya estaba),
+  resumen de checks agrupado (#24) y eventos de outcome (#26). Semántica nueva: la página se
+  detiene en la primera falla de firma, keyid, perfil o contexto y no pinta la tabla. Los
+  packets del productor (ej. Fixy 0.79.0) pasan el perfil sin cambios.
 
 Cadencia estándar: plan → fase → commit → release por fase (`/phased-feature-build`).
 
