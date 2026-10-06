@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  LinkedFolder,
   DocFeedback,
   FlywheelMetrics,
   InjectionRecord,
@@ -220,6 +221,13 @@ export const ipc = {
   // checkout (null = back to the project root).
   setActiveRepo: (path: string | null) => invoke<void>("set_active_repo", { path }),
   worktreePruneOrphans: (keep: string[]) => invoke<string[]>("worktree_prune_orphans", { keep }),
+  // Per-session folders: the backend opens the native picker and links the
+  // chosen folder to the open project (null = cancelled). Only linked folders
+  // are accepted by setActiveRepo.
+  folderPick: () => invoke<LinkedFolder | null>("folder_pick"),
+  linkedFoldersList: () => invoke<LinkedFolder[]>("linked_folders_list"),
+  // The ledger a session running in `cwd` writes its Testigo evidence to.
+  ledgerRootFor: (cwd: string) => invoke<string>("ledger_root_for", { cwd }),
 
   projectsRecent: () => invoke<RecentProject[]>("projects_recent"),
   projectsLast: () => invoke<RecentProject | null>("projects_last"),

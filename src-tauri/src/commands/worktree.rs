@@ -154,8 +154,9 @@ pub fn worktree_list(state: State<'_, AppState>) -> AppResult<Vec<WorktreeEntry>
 
 /// Point git/snapshot commands (and the change watcher) at the active
 /// session's checkout. `None` or the project root itself clears the override.
-/// Anything else must be a registered worktree of the open project — we never
-/// let the UI aim git commands at an arbitrary directory.
+/// Anything else must be a registered worktree of the open project or a folder
+/// the user linked to it through the native picker — we never let the UI aim
+/// git commands at an arbitrary directory.
 #[tauri::command(async)]
 pub fn set_active_repo(
     path: Option<String>,
@@ -173,9 +174,11 @@ pub fn set_active_repo(
                 let ep = PathBuf::from(&e.path);
                 ep.canonicalize().unwrap_or(ep) == canon
             });
-            if !registered {
+            let linked =
+                || crate::services::linked_folders_service::is_linked(&repo.to_string_lossy(), &pb);
+            if !registered && !linked() {
                 return Err(AppError::InvalidArgument(format!(
-                    "'{p}' is not a worktree of the open project"
+                    "'{p}' is neither a worktree nor a linked folder of the open project"
                 )));
             }
             Some(pb)

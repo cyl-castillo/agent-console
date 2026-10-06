@@ -55,16 +55,32 @@ const TESTIGO_TRAILER_MAX_AGE_MS: i64 = 24 * 60 * 60 * 1000;
 /// Ledger line for a commit the human just made (T4b): bound to the turn
 /// whose diff produced the staged files. Best-effort, never blocks the
 /// commit; witness-off projects simply record nothing.
+/// The Testigo ledger for the active checkout — the same rule hook events are
+/// filed by (`ledger_root_for_cwd`), so a commit lands in the ledger that holds
+/// the turn that produced it, whether the session runs in the project root, a
+/// worktree or a linked folder.
+fn ledger_root(state: &AppState) -> AppResult<String> {
+    let repo = current_repo(state)?;
+    let open = state
+        .inner
+        .lock()
+        .project
+        .as_ref()
+        .map(|p| p.root.to_string_lossy().to_string());
+    Ok(crate::services::hooks_service::ledger_root_for_cwd(
+        &repo.to_string_lossy(),
+        open.as_deref(),
+    ))
+}
+
 fn record_commit(state: &AppState, sha: &str, message: &str, files: &[String], amend: bool) {
-    let project = state.inner.lock().project.clone();
-    let Some(p) = project else { return };
+    let Ok(root) = ledger_root(state) else { return };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    let root = p.root.to_string_lossy();
     let _ = state.testigo.on_commit(
-        root.as_ref(),
+        &root,
         now,
         sha,
         message,
@@ -83,28 +99,26 @@ pub fn git_commit(message: String, state: State<'_, AppState>) -> AppResult<Stri
     // guessing). Best-effort — a ledger miss never blocks the commit.
     let mut message = message;
     if !message.contains("Testigo-Case:") {
-        let project = state.inner.lock().project.clone();
-        // Trailers are repo marks: per-project opt-in, off by default.
-        let project =
-            project.filter(|p| state.testigo.repo_marks(p.root.to_string_lossy().as_ref()));
-        if let Some(p) = project {
+        // Trailers are repo marks: per-ledger opt-in, off by default.
+        let root = ledger_root(&state)
+            .ok()
+            .filter(|r| state.testigo.repo_marks(r));
+        if let Some(root) = root {
             let staged = git_service::staged_files(&repo).unwrap_or_default();
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
-            let root = p.root.to_string_lossy();
-            if let Ok(Some(case)) = state.testigo.case_for_files(
-                root.as_ref(),
-                &staged,
-                now,
-                TESTIGO_TRAILER_MAX_AGE_MS,
-            ) {
+            if let Ok(Some(case)) =
+                state
+                    .testigo
+                    .case_for_files(&root, &staged, now, TESTIGO_TRAILER_MAX_AGE_MS)
+            {
                 message = format!("{}\n\nTestigo-Case: {case}", message.trim_end());
                 // V2-A: carry the ledger head into pushed history — the
                 // distributed half of the anchor (the local half lives in
                 // refs/agent-console/testigo-head).
-                if let Ok(Some((seq, hash))) = state.testigo.head(root.as_ref()) {
+                if let Ok(Some((seq, hash))) = state.testigo.head(&root) {
                     message = format!("{message}\nTestigo-Head: {seq}:{hash}");
                 }
             }
@@ -156,7 +170,7 @@ pub struct AttachProofSummary {
 #[tauri::command(async)]
 pub fn git_attach_proof(state: State<'_, AppState>) -> AppResult<AttachProofSummary> {
     let repo = current_repo(&state)?;
-    let root = repo.to_string_lossy().to_string();
+    let root = ledger_root(&state)?;
     let head = git_service::head_sha(&repo)?;
     let case = state
         .testigo

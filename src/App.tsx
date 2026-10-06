@@ -13,7 +13,7 @@ import { useUIStore } from "./stores/uiStore";
 import { attachSkillsListeners, useSkillsStore } from "./stores/skillsStore";
 import { attachHooksHealthListeners } from "./stores/hooksHealthStore";
 import { attachLiveStatusListener } from "./stores/liveStatusStore";
-import { attachProofListeners } from "./stores/proofStore";
+import { attachProofListeners, useProofStore } from "./stores/proofStore";
 import { TurnsPanel } from "./components/TurnsPanel";
 import { attachSchedulerListeners, useSchedulerStore } from "./stores/schedulerStore";
 import { attachInjectListener, useInjectStore } from "./stores/injectStore";
@@ -24,6 +24,7 @@ import { attachVoiceListeners, attachVoiceApprovalWatcher } from "./stores/voice
 import { useUpdaterStore } from "./stores/updaterStore";
 import { useTerminalsStore } from "./stores/terminalsStore";
 import { adoptLiveResumeHandles, RESUME_HANDLE_POLL_MS } from "./lib/resumeHandles";
+import { sessionCheckout } from "./lib/sessionCheckout";
 import { ProjectPicker } from "./components/ProjectPicker";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { useRoundtableStore } from "./stores/roundtableStore";
@@ -102,6 +103,8 @@ function clampW(v: number, min: number, max: number): number {
 
 export default function App() {
   const { project, closeProject } = useSessionStore();
+  const setTreeRoot = useSessionStore((s) => s.setTreeRoot);
+  const followProof = useProofStore((s) => s.followCheckout);
   const tab = useUIStore((s) => s.tab);
   const setTab = useUIStore((s) => s.setTab);
   const changesCount = useChangesStore((s) => s.status?.changes.length ?? 0);
@@ -188,20 +191,33 @@ export default function App() {
   };
 
   // Keep the backend's notion of "the checkout being worked on" in sync with
-  // the active session: git/snapshot commands and the change watcher follow
-  // the session's isolated worktree (or the project root). Refresh Changes
-  // after the switch so the view never shows the previous checkout's status.
-  const activeWorktreePath =
-    terminalSessions.find((s) => s.id === activeTerminalId)?.worktree?.path ?? null;
+  // the active session: git/snapshot commands, the change watcher, the file
+  // tree and the Proof/Turns ledger follow the session's isolated worktree or
+  // linked folder (or the project root). Refresh Changes after the switch so the view never shows
+  // the previous checkout's status.
+  const activeSession = terminalSessions.find((s) => s.id === activeTerminalId);
+  const activeCheckout = project ? sessionCheckout(activeSession, project.root) : null;
   useEffect(() => {
     if (!project) return;
     ipc
-      .setActiveRepo(activeWorktreePath)
-      .then(() => refreshChanges())
+      .setActiveRepo(activeCheckout)
+      .then(() => {
+        refreshChanges();
+        void setTreeRoot(activeCheckout);
+        void followProof(activeCheckout ?? project.root);
+      })
       .catch(() => {
-        /* stale session referencing a removed worktree — root stays */
+        // Stale session: its worktree was removed or its folder is no longer
+        // linked. A rejected path leaves the previous override in place, so
+        // reset it explicitly — never keep pointing at the last session's folder.
+        void ipc.setActiveRepo(null).then(
+          () => refreshChanges(),
+          () => {},
+        );
+        void setTreeRoot(null);
+        void followProof(project.root);
       });
-  }, [project, activeWorktreePath, refreshChanges]);
+  }, [project, activeCheckout, refreshChanges, setTreeRoot, followProof]);
 
   const copyProjectPath = () => {
     if (!project) return;

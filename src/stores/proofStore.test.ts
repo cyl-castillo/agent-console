@@ -8,6 +8,7 @@ vi.mock("../ipc/tauri", () => ({
     testigoList: vi.fn().mockResolvedValue([]),
     testigoVerify: vi.fn().mockResolvedValue(null),
     testigoGetSettings: vi.fn().mockResolvedValue(null),
+    ledgerRootFor: vi.fn(),
   },
 }));
 const refresh = vi.fn().mockResolvedValue(undefined);
@@ -492,5 +493,55 @@ describe("rewindToTurn", () => {
     await useProofStore.getState().rewindToTurn(turn({ postSha: undefined }));
     await useProofStore.getState().rewindToTurn(turn({ sessionId: undefined }));
     expect(mockRewind).not.toHaveBeenCalled();
+  });
+});
+
+describe("following the active session's ledger", () => {
+  beforeEach(() => {
+    useProofStore.getState().clear();
+    vi.mocked(ipc.testigoList).mockReset().mockResolvedValue([]);
+    vi.mocked(ipc.ledgerRootFor).mockReset();
+  });
+
+  it("loads the ledger the backend resolves for the session's folder", async () => {
+    vi.mocked(ipc.ledgerRootFor).mockResolvedValue("/work/backend");
+    await useProofStore.getState().followCheckout("/work/backend/sub");
+    expect(ipc.ledgerRootFor).toHaveBeenCalledWith("/work/backend/sub");
+    expect(useProofStore.getState().projectRoot).toBe("/work/backend");
+    expect(ipc.testigoList).toHaveBeenLastCalledWith("/work/backend");
+  });
+
+  it("a slow read of the previous ledger never overwrites the new one", async () => {
+    let releaseOld: (v: ProofEvent[]) => void = () => {};
+    vi.mocked(ipc.testigoList)
+      .mockImplementationOnce(() => new Promise((r) => (releaseOld = r)))
+      .mockResolvedValueOnce([ev({ seq: 7, caseId: "term:new" })]);
+    const old = useProofStore.getState().load("/work/central");
+    await useProofStore.getState().load("/work/backend");
+    releaseOld([ev({ seq: 1, caseId: "term:old" })]);
+    await old;
+    expect(useProofStore.getState().projectRoot).toBe("/work/backend");
+    expect(useProofStore.getState().events.map((e) => e.caseId)).toEqual(["term:new"]);
+  });
+
+  it("switching ledgers drops the open case; reloading the same one keeps it", async () => {
+    await useProofStore.getState().load("/work/central");
+    useProofStore.getState().selectCase("term:a");
+    await useProofStore.getState().load("/work/central");
+    expect(useProofStore.getState().selectedCase).toBe("term:a");
+    await useProofStore.getState().load("/work/backend");
+    expect(useProofStore.getState().selectedCase).toBeNull();
+  });
+
+  it("only the latest follow wins when resolutions arrive out of order", async () => {
+    let releaseFirst: (v: string) => void = () => {};
+    vi.mocked(ipc.ledgerRootFor)
+      .mockImplementationOnce(() => new Promise((r) => (releaseFirst = r)))
+      .mockResolvedValueOnce("/work/second");
+    const first = useProofStore.getState().followCheckout("/work/first");
+    await useProofStore.getState().followCheckout("/work/second");
+    releaseFirst("/work/first");
+    await first;
+    expect(useProofStore.getState().projectRoot).toBe("/work/second");
   });
 });

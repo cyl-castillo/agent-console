@@ -19,6 +19,7 @@ pub mod rewind;
 pub mod roundtable;
 pub mod scheduler;
 pub mod semantic;
+pub mod session_folder;
 pub mod sessions;
 pub mod skills;
 pub mod snapshot;

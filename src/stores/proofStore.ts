@@ -123,6 +123,10 @@ interface ProofState {
   settings: TestigoSettings | null;
 
   load: (projectRoot: string) => Promise<void>;
+  /// Show the ledger the session running in `cwd` writes to (its worktree or
+  /// linked folder may file evidence apart from the project root). Same rule
+  /// as the hook events, resolved by the backend.
+  followCheckout: (cwd: string) => Promise<void>;
   clear: () => void;
   /// Step 1: open the pre-sign review for a case (or the full ledger).
   startExport: (caseId?: string) => Promise<void>;
@@ -280,6 +284,9 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
   return turns;
 }
 
+/// Latest followCheckout call; an older resolution arriving late is dropped.
+let followSeq = 0;
+
 export const useProofStore = create<ProofState>((set, get) => ({
   projectRoot: null,
   events: [],
@@ -292,17 +299,36 @@ export const useProofStore = create<ProofState>((set, get) => ({
   settings: null,
 
   load: async (projectRoot) => {
-    set({ projectRoot, error: null });
+    // Another ledger: drop what belongs to the previous one instead of showing
+    // it under the new name while the read is in flight.
+    const switched = projectRoot !== get().projectRoot;
+    set({
+      projectRoot,
+      error: null,
+      ...(switched
+        ? { events: [], report: null, settings: null, selectedCase: null, review: null }
+        : {}),
+    });
     try {
       const [events, report, settings] = await Promise.all([
         ipc.testigoList(projectRoot),
         ipc.testigoVerify(projectRoot),
         ipc.testigoGetSettings(projectRoot),
       ]);
+      // A session switch while this was in flight wins.
+      if (get().projectRoot !== projectRoot) return;
       set({ events, report, settings });
     } catch (e) {
+      if (get().projectRoot !== projectRoot) return;
       set({ error: String(e) });
     }
+  },
+
+  followCheckout: async (cwd) => {
+    const seq = ++followSeq;
+    const root = await ipc.ledgerRootFor(cwd).catch(() => cwd);
+    if (seq !== followSeq) return;
+    await get().load(root);
   },
 
   clear: () =>

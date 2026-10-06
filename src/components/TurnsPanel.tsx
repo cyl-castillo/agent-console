@@ -60,7 +60,9 @@ export function TurnsPanel() {
   const [, tick] = useState(0);
 
   useEffect(() => {
-    if (project && proofRoot !== project.root) void load(project.root);
+    // The App follows the active session's ledger; only seed it when nothing
+    // has been loaded yet.
+    if (project && !proofRoot) void load(project.root);
   }, [project, proofRoot, load]);
 
   const turns = useMemo(() => {
@@ -149,7 +151,7 @@ export function TurnsPanel() {
         )}
         <button
           className="workbench-action"
-          onClick={() => void load(project.root)}
+          onClick={() => void load(proofRoot ?? project.root)}
           title="Reload from the ledger"
         >
           ↻
