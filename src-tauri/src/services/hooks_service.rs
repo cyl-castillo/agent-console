@@ -1835,20 +1835,24 @@ fn event_root(v: &Value, state: &AppState) -> Option<String> {
             .and_then(|t| t.cwd)
     });
     match cwd {
-        Some(cwd) => {
-            let mut roots: Vec<String> = crate::services::projects_service::load()
-                .into_iter()
-                .map(|p| p.path)
-                .collect();
-            if let Some(o) = &open {
-                roots.push(o.clone());
-            }
-            Some(crate::services::inject_service::resolve_project_root(
-                &cwd, &roots,
-            ))
-        }
+        Some(cwd) => Some(ledger_root_for_cwd(&cwd, open.as_deref())),
         None => open,
     }
+}
+
+/// The ledger a run in `cwd` is filed under: the longest known project root
+/// containing it (recents plus the open project), else `cwd` itself. The Proof
+/// panel asks the same question for a session's folder, so the evidence a
+/// session writes and the timeline that shows it can never disagree.
+pub fn ledger_root_for_cwd(cwd: &str, open: Option<&str>) -> String {
+    let mut roots: Vec<String> = crate::services::projects_service::load()
+        .into_iter()
+        .map(|p| p.path)
+        .collect();
+    if let Some(o) = open {
+        roots.push(o.to_string());
+    }
+    crate::services::inject_service::resolve_project_root(cwd, &roots)
 }
 
 /// Cap on the turn summary stored in the ledger. Mirrors the hook script's own

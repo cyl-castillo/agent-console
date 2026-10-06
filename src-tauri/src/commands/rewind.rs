@@ -87,8 +87,14 @@ pub fn turn_rewind(
 
     // 4. Ledger: a rewind rewrites the checkout — that is evidence. Same
     // best-effort contract as the hook call sites: witness-off projects err
-    // by design, only real failures get logged.
-    if let Some(root) = project_root {
+    // by design, only real failures get logged. Filed by the same rule as the
+    // turn it rewinds (`ledger_root_for_cwd` on the checkout), so the event
+    // lands next to that turn even for worktree and linked-folder sessions.
+    if project_root.is_some() {
+        let root = crate::services::hooks_service::ledger_root_for_cwd(
+            &repo_path.to_string_lossy(),
+            project_root.as_deref(),
+        );
         if let Err(e) = state.testigo.on_rewind(
             &root,
             now_ms(),

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { profileFor } from "../agents/profiles";
 import { useProofStore, summarizeCases, buildTimeline } from "../stores/proofStore";
+import { samePath } from "../lib/sessionCheckout";
 import type { TimelineTurn } from "../stores/proofStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
@@ -82,9 +83,16 @@ export function ProofPanel() {
   // action that rewrites the working tree is not acceptable.
   const [rewindTarget, setRewindTarget] = useState<TimelineTurn | null>(null);
 
+  const proofRoot = useProofStore((s) => s.projectRoot);
+  // Re-verify on open — the ledger the App is following (the active session's
+  // folder), not necessarily the project root.
   useEffect(() => {
-    if (project) void load(project.root);
+    if (project) void load(useProofStore.getState().projectRoot ?? project.root);
   }, [project, load]);
+  const ledgerName =
+    project && proofRoot && !samePath(proofRoot, project.root)
+      ? (proofRoot.split(/[\\/]/).filter(Boolean).pop() ?? proofRoot)
+      : null;
 
   const cases = summarizeCases(events);
   const timeline = selectedCase
@@ -114,6 +122,14 @@ export function ProofPanel() {
         ) : (
           <span className="workbench-title">proof</span>
         )}
+        {!review && ledgerName && (
+          <span
+            className="session-folder"
+            title={`Evidence filed under ${proofRoot} — the active session runs there`}
+          >
+            {ledgerName}
+          </span>
+        )}
         {!review && report && (
           <span
             className={`wb-status ${report.ok ? "ok" : "off"}`}
@@ -140,7 +156,7 @@ export function ProofPanel() {
         {!review && (
           <button
             className="workbench-action"
-            onClick={() => project && void load(project.root)}
+            onClick={() => project && void load(proofRoot ?? project.root)}
             title="Re-verify the ledger"
           >
             ↻

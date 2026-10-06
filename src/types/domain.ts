@@ -126,6 +126,16 @@ export interface Skill {
 
 /// Isolated worktree a session runs in: its checkout path, the `agent/<name>`
 /// branch, and the base branch it merges back into.
+/// A folder linked to the open project through the native picker; sessions can
+/// run in it instead of the project checkout.
+export interface LinkedFolder {
+  /// Canonical absolute path.
+  path: string;
+  /// Last path component.
+  name: string;
+  lastUsedMs: number;
+}
+
 export interface WorktreeRef {
   path: string;
   branch: string;

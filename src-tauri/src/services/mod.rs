@@ -17,6 +17,7 @@ pub mod hooks_service;
 pub mod inject_service;
 pub mod jira_service;
 pub mod learning_service;
+pub mod linked_folders_service;
 pub mod mcp_service;
 pub mod memory_service;
 pub mod notes_service;

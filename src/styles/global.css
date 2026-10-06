@@ -3267,6 +3267,50 @@ select:focus-visible,
   color: var(--text-faint);
 }
 
+/* Per-session folder badge: the session runs in a linked folder, not the
+   project checkout. Truncated so a long repo name never pushes the row. */
+.session-folder {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  line-height: 14px;
+}
+.session-row.active .session-folder {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+/* "Folder" picker at the top of the agent/model chooser. */
+.folder-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px 6px;
+}
+.folder-opt-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.folder-opt-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-elev-1);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
 /* "Isolated worktree" opt-in inside the agent/model chooser. */
 .wt-opt {
   border-top: 1px solid var(--border);

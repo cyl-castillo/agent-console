@@ -72,8 +72,9 @@ fn now_unix() -> i64 {
 }
 
 /// Roots a file-reading command may look under: the open project, the
-/// active session's checkout and the project's registered worktrees. Nothing
-/// else — a path from the webview is data, not authority.
+/// active session's checkout, the project's registered worktrees and the
+/// folders linked to it through the native picker. Nothing else — a path from
+/// the webview is data, not authority.
 fn readable_roots(state: &AppState) -> AppResult<Vec<PathBuf>> {
     let (root, active) = {
         let s = state.inner.lock();
@@ -88,6 +89,11 @@ fn readable_roots(state: &AppState) -> AppResult<Vec<PathBuf>> {
     roots.extend(active);
     if let Ok(list) = crate::services::worktree_service::list(&root) {
         roots.extend(list.into_iter().map(|e| PathBuf::from(e.path)));
+    }
+    // Folders the user picked for sessions of this project (native picker
+    // only — see linked_folders_service).
+    if let Ok(list) = crate::services::linked_folders_service::list(&root.to_string_lossy()) {
+        roots.extend(list.into_iter().map(|f| PathBuf::from(f.path)));
     }
     Ok(roots)
 }
