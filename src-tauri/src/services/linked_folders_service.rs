@@ -137,6 +137,27 @@ pub fn link(project_root: &str, folder: &Path) -> AppResult<LinkedFolder> {
     Ok(entry)
 }
 
+/// Remove a folder from the project's list. Only takes authority away, so the
+/// path may come from the UI. Matches the stored spelling or the same
+/// directory under another spelling; a folder that no longer exists is still
+/// removable by its stored path. Returns whether anything was removed.
+pub fn unlink(project_root: &str, folder: &Path) -> AppResult<bool> {
+    let canon = canonical(folder);
+    let path = file_path(project_root)?;
+    let _g = LOCK.lock();
+    let mut file = load_file(&path);
+    let before = file.folders.len();
+    file.folders.retain(|f| {
+        let stored = Path::new(&f.path);
+        stored != folder && canonical(stored) != canon
+    });
+    if file.folders.len() == before {
+        return Ok(false);
+    }
+    write_file(&path, &file)?;
+    Ok(true)
+}
+
 /// Whether `folder` is an existing directory the user linked to this project.
 pub fn is_linked(project_root: &str, folder: &Path) -> bool {
     if !folder.is_dir() {
@@ -231,6 +252,23 @@ mod tests {
         fs::remove_dir_all(&stranger).unwrap();
         link(&root, &backend).unwrap();
         assert!(!is_linked(&root, &stranger));
+
+        // Unlinking takes the folder off this project's list only, by any
+        // spelling of it; a second unlink is a no-op.
+        link(&other_root, &backend).unwrap();
+        let extra = temp_dir("extra");
+        link(&root, &extra).unwrap();
+        assert!(unlink(&root, &dotted).unwrap());
+        assert!(!is_linked(&root, &backend), "unlinked");
+        assert!(is_linked(&root, &extra), "the rest of the list stays");
+        assert!(is_linked(&other_root, &backend), "other projects untouched");
+        assert!(!unlink(&root, &backend).unwrap(), "already gone");
+
+        // A folder deleted from disk is still removable by its stored path.
+        let extra_stored = canonical(&extra);
+        fs::remove_dir_all(&extra).unwrap();
+        assert!(unlink(&root, &extra_stored).unwrap());
+        assert!(load_file(&file_path(&root).unwrap()).folders.is_empty());
 
         for d in [&xdg, &project, &other_project, &backend] {
             let _ = fs::remove_dir_all(d);

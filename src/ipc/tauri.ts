@@ -226,6 +226,8 @@ export const ipc = {
   // are accepted by setActiveRepo.
   folderPick: () => invoke<LinkedFolder | null>("folder_pick"),
   linkedFoldersList: () => invoke<LinkedFolder[]>("linked_folders_list"),
+  // Take a folder off the list (only removes authority). true = it was there.
+  linkedFolderUnlink: (path: string) => invoke<boolean>("linked_folder_unlink", { path }),
   // The ledger a session running in `cwd` writes its Testigo evidence to.
   ledgerRootFor: (cwd: string) => invoke<string>("ledger_root_for", { cwd }),
 

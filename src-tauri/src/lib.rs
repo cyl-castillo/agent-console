@@ -161,6 +161,7 @@ pub fn run() {
             commands::worktree::set_active_repo,
             commands::session_folder::folder_pick,
             commands::session_folder::linked_folders_list,
+            commands::session_folder::linked_folder_unlink,
             commands::session_folder::ledger_root_for,
             commands::worktree::worktree_prune_orphans,
             commands::preflight::preflight_check,

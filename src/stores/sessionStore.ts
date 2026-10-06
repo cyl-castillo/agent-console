@@ -8,6 +8,9 @@ interface SessionState {
   /// Folder the file tree shows: the active session's checkout (worktree or
   /// linked folder). Null = the project root.
   treeRoot: string | null;
+  /// Bumped when what a session may point at changes (a folder was unlinked),
+  /// so the App re-checks the active session's checkout with the backend.
+  checkoutEpoch: number;
   loading: boolean;
   error: string | null;
 
@@ -16,12 +19,14 @@ interface SessionState {
   refreshTree: () => Promise<void>;
   /// Point the file tree at `root` (null = back to the project root).
   setTreeRoot: (root: string | null) => Promise<void>;
+  bumpCheckout: () => void;
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   project: null,
   tree: null,
   treeRoot: null,
+  checkoutEpoch: 0,
   loading: false,
   error: null,
 
@@ -59,4 +64,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ treeRoot: next });
     await get().refreshTree();
   },
+
+  bumpCheckout: () => set((s) => ({ checkoutEpoch: s.checkoutEpoch + 1 })),
 }));

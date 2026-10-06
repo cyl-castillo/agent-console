@@ -104,6 +104,7 @@ function clampW(v: number, min: number, max: number): number {
 export default function App() {
   const { project, closeProject } = useSessionStore();
   const setTreeRoot = useSessionStore((s) => s.setTreeRoot);
+  const checkoutEpoch = useSessionStore((s) => s.checkoutEpoch);
   const followProof = useProofStore((s) => s.followCheckout);
   const tab = useUIStore((s) => s.tab);
   const setTab = useUIStore((s) => s.setTab);
@@ -217,7 +218,8 @@ export default function App() {
         void setTreeRoot(null);
         void followProof(project.root);
       });
-  }, [project, activeCheckout, refreshChanges, setTreeRoot, followProof]);
+    // checkoutEpoch: re-check when a folder is unlinked under the active session.
+  }, [project, activeCheckout, checkoutEpoch, refreshChanges, setTreeRoot, followProof]);
 
   const copyProjectPath = () => {
     if (!project) return;

@@ -56,6 +56,16 @@ pub fn linked_folders_list(state: State<'_, AppState>) -> AppResult<Vec<LinkedFo
     linked_folders_service::list(&root.to_string_lossy())
 }
 
+/// Take a folder off the open project's list. Sessions already running there
+/// keep their terminal; git, files and Proof fall back to the project root
+/// for them, since the folder is no longer authorized. Returns whether the
+/// folder was on the list.
+#[tauri::command(async)]
+pub fn linked_folder_unlink(path: String, state: State<'_, AppState>) -> AppResult<bool> {
+    let root = project_root(&state)?;
+    linked_folders_service::unlink(&root.to_string_lossy(), &PathBuf::from(path))
+}
+
 /// The ledger a session running in `cwd` writes its evidence to — the same
 /// rule the hook events are filed by, so the Proof panel shows exactly what
 /// the session recorded.
