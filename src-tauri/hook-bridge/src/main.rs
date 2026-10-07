@@ -1112,6 +1112,27 @@ fn mcp_tools() -> Vec<Value> {
             }),
             &["verdict", "body"],
         ),
+        mcp_tool(
+            "send_message",
+            "Consult or discuss with another AI participant; the response returns to your session after you end the turn.",
+            json!({
+                "recipient": { "type": "string", "description": "Recipient participant ID obtained from list_participants" },
+                "body": { "type": "string" },
+                "request_key": { "type": "string" },
+                "kind": { "type": "string", "enum": ["consult", "discussion"] },
+            }),
+            &["recipient", "body", "request_key"],
+        ),
+        mcp_tool(
+            "create_task",
+            "Record work to split off or postpone as a new job awaiting the user's approval. \
+             Only available while working in a job. Reuse request_key when repeating exactly the same request.",
+            json!({
+                "instructions": { "type": "string", "minLength": 1, "maxLength": 16000 },
+                "request_key": { "type": "string", "minLength": 1, "maxLength": 160 },
+            }),
+            &["instructions", "request_key"],
+        ),
     ]
 }
 
@@ -1900,7 +1921,9 @@ mod tests {
                 "delegate_task",
                 "task_status",
                 "ask_user",
-                "submit_review"
+                "submit_review",
+                "send_message",
+                "create_task"
             ]
         );
         let unknown = reply(

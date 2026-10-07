@@ -41,6 +41,9 @@ const MAX_OPTION_DESCRIPTION: usize = 300;
 const KEEP_TASKS: usize = 300;
 const KEEP_QUESTIONS: usize = 200;
 const KEEP_REVIEWS: usize = 200;
+const KEEP_PENDING_JOBS: usize = 100;
+/// Tasks one room may leave waiting for approval (ai-connector's limit).
+const MAX_PENDING_JOBS: usize = 10;
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -245,6 +248,33 @@ pub struct Review {
     pub created_ms: u64,
 }
 
+/// `create_task`: work an agent split off or postponed, waiting for the human
+/// to approve it as a new job (room) with the same team. Port of
+/// ai-connector's pending-approval jobs, minus the kanban column.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingStatus {
+    PendingApproval,
+    Approved,
+    Discarded,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingJob {
+    pub id: String,
+    /// The room whose agent recorded it.
+    pub source_job_id: String,
+    pub creator: String,
+    pub instructions: String,
+    pub request_key: String,
+    pub status: PendingStatus,
+    /// The room the approval started, once approved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_job_id: Option<String>,
+    pub created_ms: u64,
+}
+
 /// Normalize `ask_user.options` to `[{id,label,description}]`. Port of
 /// `normalize_question_options`, messages included — agents read them back.
 pub fn normalize_question_options(options: Option<&Value>) -> Result<Vec<QuestionOption>, String> {
@@ -336,6 +366,8 @@ pub struct ProjectConnector {
     pub questions: Vec<Question>,
     #[serde(default)]
     pub reviews: Vec<Review>,
+    #[serde(default)]
+    pub pending_jobs: Vec<PendingJob>,
 }
 
 impl ProjectConnector {
@@ -344,6 +376,7 @@ impl ProjectConnector {
             && self.tasks.is_empty()
             && self.questions.is_empty()
             && self.reviews.is_empty()
+            && self.pending_jobs.is_empty()
     }
 
     /// Drop the oldest FINISHED records past the caps. Pending work is never
@@ -373,6 +406,18 @@ impl ProjectConnector {
         if self.reviews.len() > KEEP_REVIEWS {
             let drop = self.reviews.len() - KEEP_REVIEWS;
             self.reviews.drain(..drop);
+        }
+        while self.pending_jobs.len() > KEEP_PENDING_JOBS {
+            match self
+                .pending_jobs
+                .iter()
+                .position(|j| j.status != PendingStatus::PendingApproval)
+            {
+                Some(i) => {
+                    self.pending_jobs.remove(i);
+                }
+                None => break,
+            }
         }
     }
 }
@@ -558,7 +603,112 @@ impl ConnectorService {
             p.tasks.retain(|t| t.job_id != job_id);
             p.questions.retain(|q| q.job_id != job_id);
             p.reviews.retain(|r| r.job_id != job_id);
+            p.pending_jobs.retain(|j| j.source_job_id != job_id);
             Ok(())
+        })
+        .map_err(CallError::into_app)
+    }
+
+    // ----- pending jobs (create_task) ------------------------------------
+
+    /// `create_task`: record work to split off or postpone. Idempotent on
+    /// `(source job, request_key)`; at most ten waiting per room.
+    pub fn create_task(
+        &self,
+        project: &str,
+        job_id: &str,
+        caller: &str,
+        instructions: &str,
+        request_key: &str,
+    ) -> Result<PendingJob, CallError> {
+        if !(1..=MAX_INSTRUCTIONS).contains(&instructions.trim().chars().count()) {
+            return Err(CallError::Tool("Invalid instructions".into()));
+        }
+        if !(1..=MAX_REQUEST_KEY).contains(&request_key.chars().count()) {
+            return Err(CallError::Tool("Invalid request_key".into()));
+        }
+        let (caller, instructions, request_key) = (
+            caller.to_string(),
+            instructions.to_string(),
+            request_key.to_string(),
+        );
+        self.mutate(project, |p| {
+            let team = p
+                .teams
+                .get(job_id)
+                .ok_or("Create tasks only from a job in progress")?;
+            if team.member(&caller).is_none() {
+                return Err("The AI does not participate in this job".into());
+            }
+            if let Some(old) = p
+                .pending_jobs
+                .iter()
+                .find(|j| j.source_job_id == job_id && j.request_key == request_key)
+            {
+                if old.instructions != instructions {
+                    return Err(
+                        "The same request_key already belongs to another instruction".into(),
+                    );
+                }
+                return Ok(old.clone());
+            }
+            let waiting = p
+                .pending_jobs
+                .iter()
+                .filter(|j| j.source_job_id == job_id && j.status == PendingStatus::PendingApproval)
+                .count();
+            if waiting >= MAX_PENDING_JOBS {
+                return Err("Each job may have at most 10 tasks waiting for approval".into());
+            }
+            let job = PendingJob {
+                id: uuid::Uuid::new_v4().to_string(),
+                source_job_id: job_id.to_string(),
+                creator: caller,
+                instructions,
+                request_key,
+                status: PendingStatus::PendingApproval,
+                approved_job_id: None,
+                created_ms: now_ms(),
+            };
+            p.pending_jobs.push(job.clone());
+            Ok(job)
+        })
+    }
+
+    pub fn pending_jobs(&self, project: &str, job_id: &str) -> AppResult<Vec<PendingJob>> {
+        self.read(project, |p| {
+            p.pending_jobs
+                .iter()
+                .filter(|j| j.source_job_id == job_id)
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// The human approved (with the room it started) or discarded a pending task.
+    pub fn resolve_pending(
+        &self,
+        project: &str,
+        pending_id: &str,
+        approved_job_id: Option<&str>,
+    ) -> AppResult<PendingJob> {
+        let approved = approved_job_id.map(str::to_string);
+        self.mutate(project, |p| {
+            let job = p
+                .pending_jobs
+                .iter_mut()
+                .find(|j| j.id == pending_id)
+                .ok_or("Unknown pending task")?;
+            if job.status != PendingStatus::PendingApproval {
+                return Err("This task was already resolved".into());
+            }
+            job.status = if approved.is_some() {
+                PendingStatus::Approved
+            } else {
+                PendingStatus::Discarded
+            };
+            job.approved_job_id = approved;
+            Ok(job.clone())
         })
         .map_err(CallError::into_app)
     }
@@ -919,6 +1069,8 @@ pub const TOOL_NAMES: &[&str] = &[
     "task_status",
     "ask_user",
     "submit_review",
+    "send_message",
+    "create_task",
 ];
 
 /// One relayed `tools/call`, as the bridge posts it to `/mcp`.
@@ -991,6 +1143,40 @@ impl ConnectorService {
                     TaskKind::Task,
                 )?;
                 Ok(json!({ "id": task.id, "stage": task.stage, "request_key": task.request_key }))
+            }
+            "send_message" => {
+                let recipient = arg_str(args, "recipient")?;
+                if team.member(recipient).is_none() {
+                    return Err(CallError::Tool(
+                        "Use the participant ID returned by list_participants".into(),
+                    ));
+                }
+                let kind = match args.get("kind") {
+                    None | Some(Value::Null) => TaskKind::Consult,
+                    Some(Value::String(k)) if k == "consult" => TaskKind::Consult,
+                    Some(Value::String(k)) if k == "discussion" => TaskKind::Discussion,
+                    Some(_) => return Err(CallError::Tool("Invalid communication type".into())),
+                };
+                let task = self.delegate(
+                    &req.project,
+                    &req.job,
+                    &req.caller,
+                    recipient,
+                    arg_str(args, "body")?,
+                    arg_str(args, "request_key")?,
+                    kind,
+                )?;
+                Ok(json!({ "id": task.id, "stage": task.stage, "kind": task.kind }))
+            }
+            "create_task" => {
+                let job = self.create_task(
+                    &req.project,
+                    &req.job,
+                    &req.caller,
+                    arg_str(args, "instructions")?,
+                    arg_str(args, "request_key")?,
+                )?;
+                Ok(json!({ "job_id": job.id, "status": job.status }))
             }
             "task_status" => {
                 let task = self.task_for(&req.project, arg_str(args, "task_id")?, &req.caller)?;
@@ -1353,6 +1539,112 @@ mod tests {
                 .delivered
         );
 
+        // send_message: a consultation rides the same queue with its kind. Free
+        // two slots first: the queue is still at the ten-pending limit.
+        for key in ["fill-0", "fill-1"] {
+            let id = svc
+                .tasks(proj, "room-1")
+                .unwrap()
+                .into_iter()
+                .find(|t| t.request_key == key)
+                .map(|t| t.id)
+                .unwrap();
+            svc.complete_return(proj, &id, "ok").unwrap();
+        }
+        let c = svc
+            .call(&call(
+                "send_message",
+                "p2",
+                json!({ "recipient": "p1", "body": "Which branch do we target?", "request_key": "c1" }),
+            ))
+            .unwrap();
+        assert_eq!(c["kind"], "consult");
+        assert_eq!(c["stage"], "queued");
+        let d = svc
+            .call(&call(
+                "send_message",
+                "p2",
+                json!({ "recipient": "p1", "body": "Let's argue scope", "request_key": "c2", "kind": "discussion" }),
+            ))
+            .unwrap();
+        assert_eq!(d["kind"], "discussion");
+        assert_eq!(
+            tool_err(svc.call(&call(
+                "send_message",
+                "p2",
+                json!({ "recipient": "p1", "body": "x", "request_key": "c3", "kind": "review" })
+            ))),
+            "Invalid communication type"
+        );
+        let consult_tasks: Vec<_> = svc
+            .tasks(proj, "room-1")
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.kind == TaskKind::Consult)
+            .collect();
+        assert_eq!(consult_tasks.len(), 1);
+        assert_eq!(consult_tasks[0].instructions, "Which branch do we target?");
+
+        // create_task: a split-off job waits for the human; idempotent per key.
+        let pj = svc
+            .call(&call(
+                "create_task",
+                "p1",
+                json!({ "instructions": "Later: add tests for the parser", "request_key": "later-1" }),
+            ))
+            .unwrap();
+        assert_eq!(pj["status"], "pending_approval");
+        let again = svc
+            .call(&call(
+                "create_task",
+                "p1",
+                json!({ "instructions": "Later: add tests for the parser", "request_key": "later-1" }),
+            ))
+            .unwrap();
+        assert_eq!(again["job_id"], pj["job_id"]);
+        assert_eq!(
+            tool_err(svc.call(&call(
+                "create_task",
+                "p1",
+                json!({ "instructions": "Something else", "request_key": "later-1" })
+            ))),
+            "The same request_key already belongs to another instruction"
+        );
+        for i in 0..9 {
+            svc.call(&call(
+                "create_task",
+                "p1",
+                json!({ "instructions": format!("later {i}"), "request_key": format!("fill-later-{i}") }),
+            ))
+            .unwrap();
+        }
+        assert_eq!(
+            tool_err(svc.call(&call(
+                "create_task",
+                "p1",
+                json!({ "instructions": "one too many", "request_key": "later-overflow" })
+            ))),
+            "Each job may have at most 10 tasks waiting for approval"
+        );
+        let pending_id = pj["job_id"].as_str().unwrap();
+        let resolved = svc
+            .resolve_pending(proj, pending_id, Some("r-new"))
+            .unwrap();
+        assert_eq!(resolved.status, PendingStatus::Approved);
+        assert_eq!(resolved.approved_job_id.as_deref(), Some("r-new"));
+        assert!(
+            svc.resolve_pending(proj, pending_id, None).is_err(),
+            "already resolved"
+        );
+        assert_eq!(svc.pending_jobs(proj, "room-1").unwrap().len(), 10);
+        // An approval frees a slot.
+        svc.call(&call(
+            "create_task",
+            "p1",
+            json!({ "instructions": "one too many", "request_key": "later-overflow" }),
+        ))
+        .unwrap();
+
         // submit_review: reviewer only, verdict vocabulary, revision label.
         assert_eq!(
             tool_err(svc.call(&call(
@@ -1406,7 +1698,7 @@ mod tests {
         svc.register_team("/proj/b", team("room-9")).unwrap();
         assert_eq!(
             svc.tasks(proj, "room-1").unwrap().len(),
-            11,
+            13,
             "proj a untouched by proj b"
         );
         let good = std::fs::read_to_string(&path).unwrap();
@@ -1414,7 +1706,7 @@ mod tests {
         std::fs::write(&bak, &good).unwrap();
         assert_eq!(
             svc.tasks(proj, "room-1").unwrap().len(),
-            11,
+            13,
             "recovered from .bak"
         );
         std::fs::write(&path, &good).unwrap();
@@ -1422,6 +1714,7 @@ mod tests {
         assert!(svc.team(proj, "room-1").unwrap().is_none());
         assert!(svc.tasks(proj, "room-1").unwrap().is_empty());
         assert!(svc.questions(proj, "room-1").unwrap().is_empty());
+        assert!(svc.pending_jobs(proj, "room-1").unwrap().is_empty());
         assert!(svc.team("/proj/b", "room-9").unwrap().is_some());
 
         std::env::remove_var("XDG_DATA_HOME");

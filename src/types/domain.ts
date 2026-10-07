@@ -747,6 +747,32 @@ export interface RoundtableConfig {
   /// (AcceptEdits), each turn auto-committed on a room/<id> branch for the human
   /// to review and merge. Off = conversation-only, read-only.
   allowEdits: boolean;
+  /// Job mode: the organizer gets the objective and drives the work through the
+  /// connector; the room runs only the turns the queue asks for and, once it
+  /// drains, reviews (if required) and closes. Omitted = conversation.
+  jobMode?: boolean;
+  /// Job mode: a reviewer must approve before the job closes.
+  reviewRequired?: boolean;
+  /// Job mode: how many "changes" verdicts the job absorbs before stopping.
+  maxCorrections?: number;
+}
+
+/// Job-mode state persisted with a room.
+export interface PersistedJob {
+  reviewRequired: boolean;
+  maxCorrections: number;
+  kickedOff: boolean;
+  done?: boolean;
+}
+
+/// Job-mode phase change, emitted over `roundtable://job`.
+export interface RoundtableJobEvent {
+  id: string;
+  /// "kick-off" | "implementing" | "correcting" | "consulting" | "reviewing" |
+  /// "settling" | "completed" | "blocked"
+  phase: string;
+  corrections: number;
+  maxCorrections: number;
 }
 
 /// One message (agent turn or human injection), emitted over `roundtable://turn`.
@@ -763,7 +789,8 @@ export interface RoundtableTurn {
   totalTokens: number;
   costUsd: number;
   /// Why the connector ran this turn: "delegated" | "return" | "question" |
-  /// "answer"; "" for an ordinary turn or human message.
+  /// "answer" | "kickoff" | "review" | "consult" | "correction"; "" for an
+  /// ordinary turn or human message.
   kind: string;
 }
 
@@ -822,6 +849,10 @@ export interface PersistedRoom {
   allowEdits: boolean;
   totalTokens: number;
   updatedAtMs: number;
+  /// Job-mode state; absent for conversation rooms and rooms saved before it.
+  job?: PersistedJob | null;
+  /// Follow-up job: the room it was approved from.
+  originRoomId?: string;
 }
 
 // ----- Connector: what agents did through the agent_console MCP server -----
@@ -892,11 +923,24 @@ export interface ConnectorReview {
   createdMs: number;
 }
 
+/// Work an agent split off with `create_task`, waiting for the human.
+export interface ConnectorPendingJob {
+  id: string;
+  sourceJobId: string;
+  creator: string;
+  instructions: string;
+  requestKey: string;
+  status: "pending_approval" | "approved" | "discarded";
+  approvedJobId?: string;
+  createdMs: number;
+}
+
 export interface ConnectorView {
   team: ConnectorTeam | null;
   tasks: ConnectorTask[];
   questions: ConnectorQuestion[];
   reviews: ConnectorReview[];
+  pendingJobs: ConnectorPendingJob[];
 }
 
 /// Lightweight sidebar entry for a saved room (no transcript).
@@ -908,6 +952,12 @@ export interface RoomSummary {
   lastTurn: number;
   totalTokens: number;
   updatedAtMs: number;
+  /// Job-mode room (the organizer drives it).
+  jobMode: boolean;
+  /// Job-mode room that reached its approved end.
+  jobDone: boolean;
+  /// Follow-up job: the room it was approved from.
+  originRoomId?: string;
 }
 
 /// Local voice input (push-to-talk → Whisper → composer).

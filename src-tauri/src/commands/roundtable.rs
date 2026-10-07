@@ -157,3 +157,30 @@ pub fn roundtable_answer_question(
         .roundtable
         .answer_question(&app, &id, &question_id, &body, choice_id.as_deref())
 }
+
+/// Resolve a task an agent left waiting for approval (`create_task`).
+/// Discarding closes it; approving starts it as a new job room with the same
+/// team (see `spawn_followup`) and returns the record carrying that room's id.
+#[tauri::command(async)]
+pub fn roundtable_resolve_pending(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    pending_id: String,
+    approve: bool,
+) -> AppResult<crate::services::connector_service::PendingJob> {
+    let root = project_root(&state)?;
+    // Guard: the pending task must belong to this room.
+    let belongs = state
+        .connector
+        .pending_jobs(&root, &id)?
+        .iter()
+        .any(|j| j.id == pending_id);
+    if !belongs {
+        return Err(AppError::NotFound(format!("pending task {pending_id}")));
+    }
+    if approve {
+        return state.roundtable.spawn_followup(&app, &id, &pending_id);
+    }
+    state.connector.resolve_pending(&root, &pending_id, None)
+}
