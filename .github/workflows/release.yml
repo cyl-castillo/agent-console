@@ -252,7 +252,12 @@ jobs:
 
       - name: Submit winget manifest PR
         if: env.WINGET_TOKEN != ''
-        uses: vedantmgoyal9/winget-releaser@v2
+        # Pinned by SHA (v2 as of 2026-09-20): upstream moved the v2 tag on
+        # 2026-10-07 to a commit whose action.yml fails to load (missing
+        # `shell`, vedantmgoyal9/winget-releaser#345), which broke the v0.83.1
+        # winget publish. A third-party action that ships with a write token
+        # should never move under us; bump this SHA deliberately.
+        uses: vedantmgoyal9/winget-releaser@a8fff44b123f115ce4c21543edf8b677376fc7e0 # v2 (2026-09-20)
         with:
           identifier: CylCastillo.AgentConsole
           version: ${{ steps.ver.outputs.version }}
