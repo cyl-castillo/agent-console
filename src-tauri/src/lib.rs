@@ -272,6 +272,8 @@ pub fn run() {
             commands::roundtable::roundtable_get_room,
             commands::roundtable::roundtable_delete_room,
             commands::roundtable::roundtable_resume_room,
+            commands::roundtable::roundtable_connector_state,
+            commands::roundtable::roundtable_answer_question,
             commands::scheduler::scheduler_list,
             commands::scheduler::scheduler_create,
             commands::scheduler::scheduler_update,

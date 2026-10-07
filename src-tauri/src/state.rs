@@ -26,6 +26,9 @@ pub struct AppState {
     pub roundtable: RoundtableService,
     pub scheduler: SchedulerService,
     pub voice: VoiceService,
+    /// Connector: agent-facing delegation/question/review queue behind the
+    /// `agent_console` MCP server each room turn is given.
+    pub connector: crate::services::connector_service::ConnectorService,
 }
 
 impl AppState {
@@ -43,6 +46,7 @@ impl AppState {
             roundtable: RoundtableService::new(),
             scheduler: SchedulerService::new(),
             voice: VoiceService::default(),
+            connector: crate::services::connector_service::ConnectorService::new(),
         }
     }
 }

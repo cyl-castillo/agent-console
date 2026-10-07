@@ -19,7 +19,7 @@
 //! Outside Agent Console (env vars unset) every mode is a silent no-op, so a
 //! user's regular `claude` / `codex` sessions are unaffected.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -450,6 +450,18 @@ fn inject_target() -> Option<(u16, String)> {
 /// whole exchange lives inside INJECT_TIMEOUT_MS; any failure returns None
 /// (inject nothing — the prompt must never wait on us).
 fn fetch_injection(port: u16, token: &str, body: &str, budget: Duration) -> Option<Value> {
+    post_loopback("/inject", port, token, body, budget)
+}
+
+/// The one HTTP client in the bridge: authenticated JSON POST to `path` on
+/// the app's loopback listener, bounded by `budget` end to end.
+fn post_loopback(
+    path: &str,
+    port: u16,
+    token: &str,
+    body: &str,
+    budget: Duration,
+) -> Option<Value> {
     let start = Instant::now();
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = std::net::TcpStream::connect_timeout(&addr, budget).ok()?;
@@ -458,7 +470,7 @@ fn fetch_injection(port: u16, token: &str, body: &str, budget: Duration) -> Opti
     }
     stream.set_write_timeout(remaining(start, budget)).ok()?;
     let req = format!(
-        "POST /inject HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nX-Agent-Console-Token: {token}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nX-Agent-Console-Token: {token}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream.write_all(req.as_bytes()).ok()?;
@@ -1004,6 +1016,313 @@ fn run_statusline() {
     chain_statusline(&raw);
 }
 
+// --- mcp: the connector's MCP server --------------------------------------
+//
+// `hook-bridge mcp --project <root> --job <room id> --caller <participant id>`
+// is the MCP stdio server each room turn is given (`claude --mcp-config`,
+// `codex -c mcp_servers…`). It speaks newline-delimited JSON-RPC on
+// stdin/stdout and relays every `tools/call` to the app's loopback `/mcp`
+// route, which owns all state; the bridge itself keeps nothing. Port of
+// ai-connector's `mcp/server.py` (Marcos Macías, with permission): tool
+// definitions, argument checks and the error texts are his — agents read
+// them back and act on them.
+
+/// Budget for one relayed tool call. Generous next to the inject path:
+/// the agent is waiting on this answer, not the user's keystroke.
+const MCP_CALL_TIMEOUT_MS: u64 = 10_000;
+
+/// Protocol versions we answer with as-is; anything else negotiates down.
+const MCP_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+const MCP_PROTOCOL_DEFAULT: &str = "2025-06-18";
+
+fn mcp_tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+    json!({
+        "name": name,
+        "description": description,
+        "inputSchema": {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": false,
+        },
+    })
+}
+
+/// The tools an agent sees. Must stay in lockstep with the app's dispatcher
+/// (`connector_service::TOOL_NAMES`): a name listed here but refused there
+/// would be a tool that always errors.
+fn mcp_tools() -> Vec<Value> {
+    vec![
+        mcp_tool(
+            "list_participants",
+            "List opaque IDs and roles of authorized assistants; use these IDs as recipients.",
+            json!({}),
+            &[],
+        ),
+        mcp_tool(
+            "delegate_task",
+            "Delegate a task to another assistant. Return a task_id immediately. \
+             The result will arrive later in this same session. End the turn to receive it. \
+             Reuse request_key when repeating exactly the same request.",
+            json!({
+                "recipient": { "type": "string", "description": "Recipient participant ID obtained from list_participants" },
+                "instructions": { "type": "string", "description": "Task and necessary context" },
+                "request_key": { "type": "string", "description": "Stable identifier for this request" },
+            }),
+            &["recipient", "instructions", "request_key"],
+        ),
+        mcp_tool(
+            "task_status",
+            "Query the status, result or blocker of one of your own tasks.",
+            json!({ "task_id": { "type": "string" } }),
+            &["task_id"],
+        ),
+        mcp_tool(
+            "ask_user",
+            "Save a question for the user and end the turn to wait for their response. \
+             Accept optional options: a list of up to 6 selectable alternatives; each alternative may be text \
+             or an object {label required, id optional, description optional}. \
+             Example: {\"question\": \"What scope?\", \"options\": [{\"id\": \"docs\", \"label\": \"Documentation only\", \
+             \"description\": \"Without code changes\"}]}. The user can select an option or write another response.",
+            json!({
+                "question": { "type": "string" },
+                "options": {
+                    "type": "array",
+                    "description": "Up to 6 selectable alternatives; each is a string or {id,label,description}",
+                    "maxItems": 6,
+                    "items": { "anyOf": [
+                        { "type": "string" },
+                        { "type": "object",
+                          "properties": {
+                              "id": { "type": "string", "maxLength": 80 },
+                              "label": { "type": "string", "maxLength": 120 },
+                              "description": { "type": "string", "maxLength": 300 } },
+                          "required": ["label"], "additionalProperties": false }
+                    ] },
+                },
+            }),
+            &["question"],
+        ),
+        mcp_tool(
+            "submit_review",
+            "Record an independent review; changes requests corrections and another review.",
+            json!({
+                "verdict": { "type": "string", "enum": ["approved", "changes"] },
+                "body": { "type": "string" },
+            }),
+            &["verdict", "body"],
+        ),
+    ]
+}
+
+/// Who this server speaks for. Fixed for the life of the process: the app
+/// spawned us for exactly one participant of one room.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct McpIdentity {
+    project: String,
+    job: String,
+    caller: String,
+}
+
+impl McpIdentity {
+    /// `--project P --job J --caller C` in any order; all three required.
+    fn from_args(args: &[String]) -> Option<Self> {
+        let mut project = None;
+        let mut job = None;
+        let mut caller = None;
+        let mut it = args.iter();
+        while let Some(flag) = it.next() {
+            let value = it.next()?;
+            match flag.as_str() {
+                "--project" => project = Some(value.clone()),
+                "--job" => job = Some(value.clone()),
+                "--caller" => caller = Some(value.clone()),
+                _ => return None,
+            }
+        }
+        Some(Self {
+            project: project?,
+            job: job?,
+            caller: caller?,
+        })
+    }
+}
+
+/// Shape check against the tool's declared schema before anything leaves the
+/// process: unknown or missing keys and wrong primitive types are refused
+/// here, exactly as ai-connector's `call` does. `ask_user.options: null`
+/// counts as omitted. Returns the (possibly trimmed) arguments.
+fn mcp_check_arguments(name: &str, arguments: &Value) -> Result<Value, String> {
+    let tools = mcp_tools();
+    let Some(tool) = tools.iter().find(|t| t["name"] == name) else {
+        return Err("Unknown tool".into());
+    };
+    let mut arguments = arguments.clone();
+    if arguments.is_null() {
+        arguments = json!({});
+    }
+    let Some(map) = arguments.as_object_mut() else {
+        return Err("Invalid arguments".into());
+    };
+    if name == "ask_user" && map.get("options").is_some_and(Value::is_null) {
+        map.remove("options");
+    }
+    let schema = &tool["inputSchema"];
+    let properties = schema["properties"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    let required: Vec<&str> = schema["required"]
+        .as_array()
+        .map(|r| r.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if map.keys().any(|k| !properties.contains_key(k))
+        || required.iter().any(|r| !map.contains_key(*r))
+    {
+        return Err("Unknown or incomplete arguments".into());
+    }
+    for (key, value) in map.iter() {
+        let expected = properties[key]["type"].as_str().unwrap_or("");
+        let ok = match expected {
+            "string" => value.is_string(),
+            "array" => value.is_array(),
+            "object" => value.is_object(),
+            "boolean" => value.is_boolean(),
+            _ => true,
+        };
+        if !ok {
+            return Err(format!("Invalid argument type: {key}"));
+        }
+    }
+    Ok(arguments)
+}
+
+/// How the relay reaches the app. Resolved per call: the app may (re)start
+/// while an agent's turn is running, and the port file is where it says so.
+trait McpRelay {
+    fn relay(&self, body: &str) -> Option<Value>;
+}
+
+struct LoopbackRelay;
+
+impl McpRelay for LoopbackRelay {
+    fn relay(&self, body: &str) -> Option<Value> {
+        let (port, token) = inject_target()?;
+        post_loopback(
+            "/mcp",
+            port,
+            &token,
+            body,
+            Duration::from_millis(MCP_CALL_TIMEOUT_MS),
+        )
+    }
+}
+
+fn mcp_text_result(text: String, is_error: bool) -> Value {
+    json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
+}
+
+/// Run one `tools/call`: check the shape, relay, translate the app's
+/// `{ok, result|error}` into an MCP result. Every refusal is an `isError`
+/// result (the agent can read it), never a JSON-RPC error (which the CLI
+/// would surface as a broken server).
+fn mcp_call(identity: &McpIdentity, relay: &dyn McpRelay, params: &Value) -> Value {
+    let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+    let arguments = match mcp_check_arguments(name, params.get("arguments").unwrap_or(&Value::Null))
+    {
+        Ok(a) => a,
+        Err(e) => return mcp_text_result(e, true),
+    };
+    let body = json!({
+        "project": identity.project,
+        "job": identity.job,
+        "caller": identity.caller,
+        "name": name,
+        "arguments": arguments,
+    })
+    .to_string();
+    match relay.relay(&body) {
+        None => mcp_text_result(
+            "Agent Console is not reachable; the connector cannot record this call. Retry later or end the turn.".into(),
+            true,
+        ),
+        Some(answer) => {
+            if answer.get("ok").and_then(Value::as_bool) == Some(true) {
+                mcp_text_result(answer.get("result").cloned().unwrap_or(Value::Null).to_string(), false)
+            } else {
+                let error = answer
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Connector refused the call")
+                    .to_string();
+                mcp_text_result(error, true)
+            }
+        }
+    }
+}
+
+/// One JSON-RPC line in, at most one line out (notifications get none).
+fn mcp_handle_line(identity: &McpIdentity, relay: &dyn McpRelay, line: &str) -> Option<String> {
+    let request: Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => {
+            return Some(
+                json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "Invalid JSON" } })
+                    .to_string(),
+            )
+        }
+    };
+    let id = request.get("id")?.clone();
+    let method = request.get("method").and_then(Value::as_str).unwrap_or("");
+    let params = request.get("params").cloned().unwrap_or(Value::Null);
+    let mut response = json!({ "jsonrpc": "2.0", "id": id });
+    match method {
+        "initialize" => {
+            let requested = params.get("protocolVersion").and_then(Value::as_str);
+            let version = requested
+                .filter(|v| MCP_PROTOCOL_VERSIONS.contains(v))
+                .unwrap_or(MCP_PROTOCOL_DEFAULT);
+            response["result"] = json!({
+                "protocolVersion": version,
+                "capabilities": { "tools": {} },
+                "serverInfo": { "name": "Agent Console", "version": env!("CARGO_PKG_VERSION") },
+            });
+        }
+        "ping" => response["result"] = json!({}),
+        "tools/list" => response["result"] = json!({ "tools": mcp_tools() }),
+        "tools/call" => response["result"] = mcp_call(identity, relay, &params),
+        _ => {
+            response["error"] = json!({ "code": -32601, "message": "Method not implemented" });
+        }
+    }
+    Some(response.to_string())
+}
+
+fn run_mcp(args: &[String]) {
+    let Some(identity) = McpIdentity::from_args(args) else {
+        eprintln!("hook-bridge mcp: usage: mcp --project <root> --job <room id> --caller <participant id>");
+        std::process::exit(2);
+    };
+    let stdin = std::io::stdin();
+    let mut out = std::io::stdout().lock();
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(reply) = mcp_handle_line(&identity, &LoopbackRelay, line.trim_end()) {
+            if writeln!(out, "{reply}").and_then(|_| out.flush()).is_err() {
+                break;
+            }
+        }
+    }
+}
+
 // --- main ------------------------------------------------------------------
 
 fn main() {
@@ -1012,6 +1331,13 @@ fn main() {
     // it stands in for the user's own status line command and chains to it.
     if mode == "statusline" {
         run_statusline();
+        return;
+    }
+    // The MCP server is addressed by argv, not by a session dir: the app
+    // spawns the CLI that spawns us, and names the room and participant.
+    if mode == "mcp" {
+        let rest: Vec<String> = std::env::args().skip(2).collect();
+        run_mcp(&rest);
         return;
     }
     // Every other mode is a silent no-op outside Agent Console.
@@ -1480,6 +1806,240 @@ mod tests {
             v["hookSpecificOutput"]["permissionDecisionReason"],
             "agent-console approval modal: deny"
         );
+    }
+
+    // --- mcp mode -----------------------------------------------------------
+
+    struct FakeRelay {
+        answer: Option<Value>,
+        seen: std::cell::RefCell<Vec<Value>>,
+    }
+
+    impl McpRelay for FakeRelay {
+        fn relay(&self, body: &str) -> Option<Value> {
+            self.seen
+                .borrow_mut()
+                .push(serde_json::from_str(body).unwrap());
+            self.answer.clone()
+        }
+    }
+
+    fn identity() -> McpIdentity {
+        McpIdentity {
+            project: "/proj".into(),
+            job: "room-1".into(),
+            caller: "p1".into(),
+        }
+    }
+
+    fn reply(relay: &dyn McpRelay, line: &str) -> Value {
+        serde_json::from_str(&mcp_handle_line(&identity(), relay, line).expect("a reply")).unwrap()
+    }
+
+    #[test]
+    fn mcp_identity_requires_all_three_flags_in_any_order() {
+        let ok = ["--caller", "p1", "--project", "/proj", "--job", "room-1"].map(String::from);
+        assert_eq!(McpIdentity::from_args(&ok), Some(identity()));
+        let missing = ["--project", "/proj", "--job", "room-1"].map(String::from);
+        assert_eq!(McpIdentity::from_args(&missing), None);
+        let unknown = [
+            "--project",
+            "/proj",
+            "--job",
+            "r",
+            "--caller",
+            "c",
+            "--x",
+            "1",
+        ]
+        .map(String::from);
+        assert_eq!(McpIdentity::from_args(&unknown), None);
+        let dangling = ["--project", "/proj", "--job"].map(String::from);
+        assert_eq!(McpIdentity::from_args(&dangling), None);
+    }
+
+    #[test]
+    fn mcp_handshake_lists_the_connector_tools() {
+        let relay = FakeRelay {
+            answer: None,
+            seen: Default::default(),
+        };
+        let init = reply(
+            &relay,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
+        );
+        assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
+        assert_eq!(init["result"]["serverInfo"]["name"], "Agent Console");
+        let odd = reply(
+            &relay,
+            r#"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#,
+        );
+        assert_eq!(odd["result"]["protocolVersion"], MCP_PROTOCOL_DEFAULT);
+        // Notifications carry no id and get no reply.
+        assert!(mcp_handle_line(
+            &identity(),
+            &relay,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
+        )
+        .is_none());
+        assert_eq!(
+            reply(&relay, r#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#)["result"],
+            json!({})
+        );
+        let list = reply(&relay, r#"{"jsonrpc":"2.0","id":4,"method":"tools/list"}"#);
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "list_participants",
+                "delegate_task",
+                "task_status",
+                "ask_user",
+                "submit_review"
+            ]
+        );
+        let unknown = reply(
+            &relay,
+            r#"{"jsonrpc":"2.0","id":5,"method":"resources/list"}"#,
+        );
+        assert_eq!(unknown["error"]["code"], -32601);
+        let garbage = reply(&relay, "{ nope");
+        assert_eq!(garbage["error"]["code"], -32700);
+        assert!(
+            relay.seen.borrow().is_empty(),
+            "nothing above reaches the app"
+        );
+    }
+
+    #[test]
+    fn mcp_call_checks_the_shape_locally_then_relays_with_the_identity() {
+        let relay = FakeRelay {
+            answer: Some(
+                json!({ "ok": true, "result": { "id": "t1", "stage": "queued", "request_key": "k" } }),
+            ),
+            seen: Default::default(),
+        };
+        let call = |params: &str| {
+            reply(
+                &relay,
+                &format!(r#"{{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{params}}}"#),
+            )["result"]
+                .clone()
+        };
+        let text = |r: &Value| r["content"][0]["text"].as_str().unwrap().to_string();
+
+        // Refused before any relay: unknown tool, unknown key, missing key, wrong type.
+        let bad = [
+            (r#"{"name":"nope","arguments":{}}"#, "Unknown tool"),
+            (
+                r#"{"name":"delegate_task","arguments":{"recipient":"p2","instructions":"x","request_key":"k","extra":1}}"#,
+                "Unknown or incomplete arguments",
+            ),
+            (
+                r#"{"name":"delegate_task","arguments":{"recipient":"p2"}}"#,
+                "Unknown or incomplete arguments",
+            ),
+            (
+                r#"{"name":"ask_user","arguments":{"question":"q","options":"no"}}"#,
+                "Invalid argument type: options",
+            ),
+            (
+                r#"{"name":"task_status","arguments":"t1"}"#,
+                "Invalid arguments",
+            ),
+        ];
+        for (params, expected) in bad {
+            let r = call(params);
+            assert_eq!(r["isError"], true, "{params}");
+            assert_eq!(text(&r), expected, "{params}");
+        }
+        assert!(relay.seen.borrow().is_empty());
+
+        // A well-formed call travels with the process identity attached.
+        let r = call(
+            r#"{"name":"delegate_task","arguments":{"recipient":"p2","instructions":"Read it","request_key":"k"}}"#,
+        );
+        assert_eq!(r["isError"], false);
+        assert_eq!(
+            serde_json::from_str::<Value>(&text(&r)).unwrap(),
+            json!({ "id": "t1", "stage": "queued", "request_key": "k" })
+        );
+        let sent = relay.seen.borrow()[0].clone();
+        assert_eq!(sent["project"], "/proj");
+        assert_eq!(sent["job"], "room-1");
+        assert_eq!(sent["caller"], "p1");
+        assert_eq!(sent["name"], "delegate_task");
+        assert_eq!(sent["arguments"]["request_key"], "k");
+
+        // `options: null` is "no options", and reaches the app without the key.
+        call(r#"{"name":"ask_user","arguments":{"question":"q","options":null}}"#);
+        let sent = relay.seen.borrow()[1].clone();
+        assert_eq!(sent["arguments"], json!({ "question": "q" }));
+        // list_participants takes no arguments; omitting them is fine.
+        call(r#"{"name":"list_participants"}"#);
+        assert_eq!(relay.seen.borrow()[2]["arguments"], json!({}));
+    }
+
+    #[test]
+    fn mcp_call_turns_app_refusals_and_outages_into_readable_tool_errors() {
+        let refused = FakeRelay {
+            answer: Some(json!({ "ok": false, "error": "Prototype limit: ten pending tasks" })),
+            seen: Default::default(),
+        };
+        let r = reply(
+            &refused,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_participants","arguments":{}}}"#,
+        )["result"]
+            .clone();
+        assert_eq!(r["isError"], true);
+        assert_eq!(
+            r["content"][0]["text"],
+            "Prototype limit: ten pending tasks"
+        );
+
+        let down = FakeRelay {
+            answer: None,
+            seen: Default::default(),
+        };
+        let r = reply(
+            &down,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_participants","arguments":{}}}"#,
+        )["result"]
+            .clone();
+        assert_eq!(r["isError"], true);
+        assert!(r["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("not reachable"));
+    }
+
+    #[test]
+    fn post_loopback_targets_the_given_path() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            assert!(req.starts_with("POST /mcp HTTP/1.1\r\n"), "{req}");
+            assert!(req.contains("X-Agent-Console-Token: sekrit\r\n"));
+            let body = r#"{"ok":true,"result":{"participants":[]}}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            s.write_all(resp.as_bytes()).unwrap();
+        });
+        let answer =
+            post_loopback("/mcp", port, "sekrit", "{}", Duration::from_millis(2000)).unwrap();
+        assert_eq!(answer["ok"], true);
+        server.join().unwrap();
     }
 
     #[test]

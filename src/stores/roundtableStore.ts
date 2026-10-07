@@ -5,6 +5,7 @@ import { ipc } from "../ipc/tauri";
 import { useChangesStore } from "./changesStore";
 import { profileFor } from "../agents/profiles";
 import type {
+  ConnectorView,
   RoomSummary,
   RoundtableActivity,
   RoundtableConfig,
@@ -22,7 +23,19 @@ export interface RtParticipantDraft {
   engine: "claude" | "codex";
   model: string;
   role: string;
+  /// Connector roles (see CONNECTOR_ROLES). Empty = plain assistant.
+  roles: string[];
 }
+
+/// The connector roles a participant can hold. `assistant` is the implicit
+/// default and is never listed.
+export const CONNECTOR_ROLES = [
+  "organizer",
+  "implementer",
+  "reviewer",
+  "planner",
+  "consultant",
+] as const;
 
 /// Draft of the room setup, edited in the config form before launch.
 export interface RtDraft {
@@ -37,8 +50,8 @@ export interface RtDraft {
 const DEFAULT_DRAFT: RtDraft = {
   problem: "",
   participants: [
-    { id: "p1", name: "Opus", engine: "claude", model: "opus", role: "" },
-    { id: "p2", name: "Codex", engine: "codex", model: "medium", role: "" },
+    { id: "p1", name: "Opus", engine: "claude", model: "opus", role: "", roles: ["organizer"] },
+    { id: "p2", name: "Codex", engine: "codex", model: "medium", role: "", roles: ["implementer"] },
   ],
   maxTurns: 6,
   // A soft checkpoint, not a wall — when reached the room pauses and you can
@@ -90,6 +103,13 @@ interface RoundtableState {
   liveStartedAt: number | null;
   /// Wall-clock (ms) of the most recent activity event — the staleness signal.
   lastActivityAt: number | null;
+  /// What the agents did through the connector (delegations, questions,
+  /// reviews) for the displayed room. Refreshed on every turn and every MCP call.
+  connector: ConnectorView | null;
+  /// Free-text draft for the pending question's answer.
+  answerDraft: string;
+  /// True while an answer is being submitted.
+  answering: boolean;
 
   draft: RtDraft;
   /// The participants actually launched (ids reindexed p1..pN). Display uses
@@ -120,6 +140,10 @@ interface RoundtableState {
   openRoom: (id: string) => Promise<void>;
   deleteSavedRoom: (id: string) => Promise<void>;
   resumeRoom: () => Promise<void>;
+  loadConnector: () => Promise<void>;
+  setAnswerDraft: (v: string) => void;
+  /// Answer the pending question: by option id, or with the free-text draft.
+  answerQuestion: (questionId: string, choiceId: string | null) => Promise<void>;
 }
 
 // Promise-singleton so concurrent initListeners() calls (panel mount + start)
@@ -128,6 +152,7 @@ let bindPromise: Promise<void> | null = null;
 let unlistenTurn: UnlistenFn | null = null;
 let unlistenStatus: UnlistenFn | null = null;
 let unlistenActivity: UnlistenFn | null = null;
+let unlistenConnector: UnlistenFn | null = null;
 let pidCounter = 2;
 
 export const useRoundtableStore = create<RoundtableState>((set, get) => ({
@@ -150,8 +175,14 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   coworkResult: null,
   liveStartedAt: null,
   lastActivityAt: null,
+  connector: null,
+  answerDraft: "",
+  answering: false,
 
-  draft: { ...DEFAULT_DRAFT, participants: DEFAULT_DRAFT.participants.map((p) => ({ ...p })) },
+  draft: {
+    ...DEFAULT_DRAFT,
+    participants: DEFAULT_DRAFT.participants.map((p) => ({ ...p, roles: [...p.roles] })),
+  },
   roster: [],
 
   initListeners: () => {
@@ -171,6 +202,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
         engine: "claude",
         model: "sonnet",
         role: "",
+        roles: [],
       };
       return { draft: { ...s.draft, participants: [...s.draft.participants, next] } };
     }),
@@ -206,6 +238,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       engine: p.engine,
       model: p.model,
       role: p.role,
+      roles: p.roles,
     }));
     // Honest working-room flag: editing needs a git repo to branch + review
     // against. Match the config toggle's own `!noRepo` guard (RoundtablePanel)
@@ -234,6 +267,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       phase: "running",
       liveStartedAt: Date.now(),
       lastActivityAt: null,
+      connector: null,
+      answerDraft: "",
     });
     try {
       const id = await ipc.roundtableStart(config);
@@ -372,6 +407,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       liveStartedAt: null,
       lastActivityAt: null,
       roster: [],
+      connector: null,
+      answerDraft: "",
+      answering: false,
     });
   },
 
@@ -405,6 +443,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
         isHuman: m.authorId === "human",
         totalTokens: 0,
         costUsd: 0,
+        kind: m.kind ?? "",
       }));
       const lastTurn = room.transcript.reduce((mx, m) => Math.max(mx, m.turn), 0);
       set({
@@ -424,7 +463,10 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
         injectDraft: "",
         liveStartedAt: null,
         lastActivityAt: null,
+        connector: null,
+        answerDraft: "",
       });
+      void get().loadConnector();
     } catch (err) {
       set({ message: err instanceof Error ? err.message : String(err) });
     }
@@ -462,6 +504,38 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       });
     } catch (err) {
       set({ readOnly: true, message: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  /// Refresh the connector view for the displayed room. Best-effort: a read
+  /// error leaves the last known view in place.
+  loadConnector: async () => {
+    const id = get().runId;
+    if (!id) return;
+    try {
+      const view = await ipc.roundtableConnectorState(id);
+      if (get().runId === id) set({ connector: view });
+    } catch {
+      /* keep the last view */
+    }
+  },
+
+  setAnswerDraft: (v) => set({ answerDraft: v }),
+
+  answerQuestion: async (questionId, choiceId) => {
+    const id = get().runId;
+    if (!id || get().answering) return;
+    const body = choiceId ? "" : get().answerDraft.trim();
+    if (!choiceId && !body) return;
+    set({ answering: true });
+    try {
+      await ipc.roundtableAnswerQuestion(id, questionId, body, choiceId);
+      set({ answerDraft: "", phase: "running", liveStartedAt: Date.now(), lastActivityAt: null });
+      await get().loadConnector();
+    } catch (err) {
+      set({ message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      set({ answering: false });
     }
   },
 }));
@@ -516,6 +590,14 @@ async function bindListeners(
         lastActivityAt: null,
       };
     });
+    // A finished turn may have settled a delegation or asked a question.
+    void get().loadConnector();
+  });
+  // Every MCP call an agent makes mid-turn (delegate_task, ask_user, …) lands
+  // here, so the delegations list grows while the turn is still running.
+  unlistenConnector = await listen<{ job: string }>("connector://call", (e) => {
+    if (e.payload.job !== get().runId) return;
+    void get().loadConnector();
   });
   unlistenStatus = await listen<RoundtableStatus>("roundtable://status", (e) => {
     const st = e.payload;
@@ -528,6 +610,7 @@ async function bindListeners(
       totalTokens: st.totalTokens || get().totalTokens,
       message: st.message ?? get().message,
     });
+    if (phase === "awaiting") void get().loadConnector();
   });
 }
 
@@ -539,7 +622,9 @@ export async function teardownRoundtableListeners() {
   unlistenTurn?.();
   unlistenStatus?.();
   unlistenActivity?.();
+  unlistenConnector?.();
   unlistenTurn = null;
   unlistenStatus = null;
   unlistenActivity = null;
+  unlistenConnector = null;
 }

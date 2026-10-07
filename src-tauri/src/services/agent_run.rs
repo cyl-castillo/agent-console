@@ -152,6 +152,7 @@ fn attempt(spec: &RunSpec, runner: &dyn EngineRunner, model: &str) -> AppResult<
         prompt: spec.prompt,
         resume: spec.resume,
         child_slot: Some(&slot),
+        mcp: None,
     };
     let result = runner.run(&ctx, &sink);
     done.store(true, Ordering::SeqCst);

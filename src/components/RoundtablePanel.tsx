@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 
-import { useRoundtableStore, modelsFor, type RtParticipantDraft } from "../stores/roundtableStore";
+import {
+  useRoundtableStore,
+  modelsFor,
+  CONNECTOR_ROLES,
+  type RtParticipantDraft,
+} from "../stores/roundtableStore";
 import { useChangesStore } from "../stores/changesStore";
 import { AGENT_PROFILES } from "../agents/profiles";
 import { MarkdownText } from "./MarkdownText";
-import type { RoundtableActivity, RoundtableTurn } from "../types/domain";
+import type {
+  ConnectorQuestion,
+  ConnectorTask,
+  RoundtableActivity,
+  RoundtableTurn,
+} from "../types/domain";
 
 // Stable accent per participant, so each voice is recognizable in the feed.
 const PALETTE = ["#6aa9ff", "#ff9e64", "#9ece6a", "#bb9af7", "#f7768e", "#7dcfff"];
@@ -238,6 +248,26 @@ function ParticipantRow({ p, canRemove }: { p: RtParticipantDraft; canRemove: bo
           onChange={(e) => update(p.id, { role: e.target.value })}
         />
       </label>
+      <div
+        className="rt-roles"
+        title="Connector roles: what this agent can be delegated by its peers, and whether it may record a review. None = plain assistant."
+      >
+        {CONNECTOR_ROLES.map((r) => {
+          const on = p.roles.includes(r);
+          return (
+            <button
+              key={r}
+              type="button"
+              className={`rt-role-chip ${on ? "rt-role-chip-on" : ""}`}
+              onClick={() =>
+                update(p.id, { roles: on ? p.roles.filter((x) => x !== r) : [...p.roles, r] })
+              }
+            >
+              {r}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -375,6 +405,8 @@ function RoomView() {
           </div>
         )}
       </div>
+
+      <ConnectorBlock />
 
       {!readOnly && workingRoom && <CoworkBar />}
 
@@ -605,6 +637,11 @@ function MessageBubble({
         <span className="rt-turn-model">
           {turn.engine === "codex" ? "◆" : "✶"} {turn.model}
         </span>
+        {turn.kind && (
+          <span className="rt-turn-kind" title={KIND_HINT[turn.kind] ?? turn.kind}>
+            {KIND_LABEL[turn.kind] ?? turn.kind}
+          </span>
+        )}
         <span className="spacer" />
         <span className="rt-turn-round">t{turn.turn}</span>
       </div>
@@ -618,6 +655,128 @@ function MessageBubble({
       )}
       <div className="rt-turn-body">
         <MarkdownText content={turn.text} />
+      </div>
+    </div>
+  );
+}
+
+const KIND_LABEL: Record<string, string> = {
+  delegated: "⇢ delegated task",
+  return: "⇠ result returned",
+  answer: "↳ answer",
+  question: "? question",
+};
+const KIND_HINT: Record<string, string> = {
+  delegated: "This turn ran a task a peer delegated through the connector",
+  return: "The connector handed this agent the result of a task it delegated",
+  answer: "Your answer to the agent's question",
+  question: "The agent asked you a question and ended its turn",
+};
+
+/// What the agents did through the connector: a pending question (answer it
+/// here — the room is waiting), the delegations with their stage, and any
+/// recorded reviews. Hidden while there is nothing to show.
+function ConnectorBlock() {
+  const connector = useRoundtableStore((s) => s.connector);
+  const roster = useRoundtableStore((s) => s.roster);
+  const readOnly = useRoundtableStore((s) => s.readOnly);
+  if (!connector) return null;
+  const { tasks, questions, reviews } = connector;
+  const pending = questions.find((q) => q.status === "waiting");
+  if (tasks.length === 0 && questions.length === 0 && reviews.length === 0) return null;
+  const name = (id: string) => roster.find((p) => p.id === id)?.name ?? id;
+
+  return (
+    <div className="rt-connector">
+      <div className="rt-connector-head">
+        <span>connector</span>
+        <span className="rt-meta-sep">·</span>
+        <span>
+          {tasks.length} delegation{tasks.length === 1 ? "" : "s"}
+          {reviews.length > 0 && ` · ${reviews.length} review${reviews.length === 1 ? "" : "s"}`}
+        </span>
+      </div>
+      {pending && !readOnly && <QuestionCard q={pending} askerName={name(pending.sender)} />}
+      {tasks.map((t) => (
+        <DelegationRow key={t.id} t={t} name={name} />
+      ))}
+      {reviews.map((r) => (
+        <div key={r.id} className="rt-review">
+          <span className="rt-delegation-who">{name(r.participant)} reviewed</span>{" "}
+          <span className={`rt-stage rt-stage-${r.verdict}`}>{r.verdict}</span>{" "}
+          <span className="rt-delegation-who">@{r.revision}</span>
+          <div className="rt-review-body">{r.body}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DelegationRow({ t, name }: { t: ConnectorTask; name: (id: string) => string }) {
+  const outcome = t.outcome === "failed" ? "failed" : t.stage;
+  const detail =
+    t.stage === "delivered" || t.stage === "ready"
+      ? (t.error ?? t.result ?? "")
+      : t.stage === "delivery_failed"
+        ? (t.error ?? "")
+        : "";
+  return (
+    <div className="rt-delegation" title={detail || t.instructions}>
+      <span className="rt-delegation-who">
+        {name(t.sender)} → {name(t.recipient)}
+      </span>
+      <span className="rt-delegation-what">{t.instructions}</span>
+      <span className={`rt-stage rt-stage-${outcome}`}>
+        {t.outcome === "failed" ? "failed" : t.stage.replace("_", " ")}
+      </span>
+    </div>
+  );
+}
+
+/// The agent's `ask_user` question. Picking an option answers with its label;
+/// free text is the alternative. Either way the room resumes with the asker.
+function QuestionCard({ q, askerName }: { q: ConnectorQuestion; askerName: string }) {
+  const answerDraft = useRoundtableStore((s) => s.answerDraft);
+  const setAnswerDraft = useRoundtableStore((s) => s.setAnswerDraft);
+  const answerQuestion = useRoundtableStore((s) => s.answerQuestion);
+  const answering = useRoundtableStore((s) => s.answering);
+  return (
+    <div className="rt-question">
+      <div className="rt-delegation-who">{askerName} asks you</div>
+      <div className="rt-question-body">{q.body}</div>
+      {q.options.length > 0 && (
+        <div className="rt-question-options">
+          {q.options.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              className="rt-question-option"
+              disabled={answering}
+              onClick={() => void answerQuestion(q.id, o.id)}
+            >
+              {o.label}
+              {o.description && <span className="rt-question-option-desc">{o.description}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="rt-question-free">
+        <input
+          placeholder={q.options.length ? "…or write another answer" : "Your answer…"}
+          value={answerDraft}
+          disabled={answering}
+          onChange={(e) => setAnswerDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && answerDraft.trim()) void answerQuestion(q.id, null);
+          }}
+        />
+        <button
+          className="wb-cta wb-cta-sm"
+          disabled={answering || !answerDraft.trim()}
+          onClick={() => void answerQuestion(q.id, null)}
+        >
+          {answering ? "Sending…" : "Answer"}
+        </button>
       </div>
     </div>
   );
