@@ -312,6 +312,20 @@ testigo/
   `packages/core/test.mjs` sin tocar asserts. Agregar `ci.yml` acá (hoy no existe).
   *Gate:* `cli/test.mjs` + `test-concurrency.mjs` + conformance 20+7 verdes; un export con la
   misma seed de test produce el mismo packet que antes salvo `exportedAtMs`.
+  **M1 MERGEADO 2026-10-07 (testigo PR #29, dos commits: `git mv` puro + recableado).**
+  Corrección al plan: el vendoring NO puede esperar a M3 — con el núcleo fuera de `cli/`, toda
+  instalación del plugin desde el marketplace en main HEAD se rompería (Claude Code copia solo el
+  subdir). Así que ya en M1: `packages/core` es la fuente de verdad, `cli/vendor/core/` es la
+  copia byte-idéntica que viaja con el plugin (`scripts/vendor.mjs sync|check`, gate en
+  `cli npm test` y en CI); lo que se testea es lo que se instala; conformance importa
+  `packages/core` directo. `export.mjs` resolvía el verificador relativo a su propio archivo →
+  `defaultVerifierCandidates()` (dos y tres niveles arriba) + opción `verifierCandidates`.
+  **Primer CI del repo** (`.github/workflows/ci.yml`): ubuntu+windows × node 20/22 + job
+  Playwright con Chrome real; acciones pinneadas por SHA. Hallazgo: `test-portability.mjs` de
+  Fredy falla en los runners de GitHub también en main sin M1 (baseline verificado con un PR
+  borrador, run 37621736545; sospecha: temp en forma 8.3 `RUNNER~1` + code page) → issue
+  testigo#31; el job de Windows corre el resto de la suite. Suite al mergear: CLI 10+8 + e2e +
+  review + concurrencia, 69+47 vectores, 68 negativos, browser-script 116, Playwright 15/15.
 - **M2 — Adaptador de hooks neutro.** `hook.mjs` → `packages/hooks-adapter/` con
   `createHookHandler({ engine, events, evidence })`: `engine` deja de ser constante; la
   evidencia externa es estrategia inyectada (Claude: `transcript_path`; Codex: el rollout
