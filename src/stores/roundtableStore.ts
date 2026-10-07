@@ -8,6 +8,7 @@ import type {
   ConnectorView,
   RoomSummary,
   RoundtableActivity,
+  RoundtableJobEvent,
   RoundtableConfig,
   RoundtableParticipant,
   RoundtableStatus,
@@ -45,6 +46,12 @@ export interface RtDraft {
   tokenBudget: number;
   /// Working room: let agents edit the code in an isolated worktree.
   allowEdits: boolean;
+  /// Job mode: the organizer drives the work through the connector.
+  jobMode: boolean;
+  /// Job mode: a reviewer must approve before the job closes.
+  reviewRequired: boolean;
+  /// Job mode: "changes" verdicts absorbed before the job stops for you.
+  maxCorrections: number;
 }
 
 const DEFAULT_DRAFT: RtDraft = {
@@ -59,6 +66,9 @@ const DEFAULT_DRAFT: RtDraft = {
   // fast, so start generous; cache reads are excluded from the count.
   tokenBudget: 1_000_000,
   allowEdits: false,
+  jobMode: false,
+  reviewRequired: false,
+  maxCorrections: 2,
 };
 
 interface RoundtableState {
@@ -110,6 +120,13 @@ interface RoundtableState {
   answerDraft: string;
   /// True while an answer is being submitted.
   answering: boolean;
+  /// True when the displayed room runs in job mode (live config or saved flag).
+  jobMode: boolean;
+  /// Latest job phase reported by the backend (`roundtable://job`); null until
+  /// the first event, then the panel prefers it over its derived guess.
+  jobPhase: RoundtableJobEvent | null;
+  /// Follow-up job: the room this one was approved from.
+  originRoomId: string | null;
 
   draft: RtDraft;
   /// The participants actually launched (ids reindexed p1..pN). Display uses
@@ -144,6 +161,8 @@ interface RoundtableState {
   setAnswerDraft: (v: string) => void;
   /// Answer the pending question: by option id, or with the free-text draft.
   answerQuestion: (questionId: string, choiceId: string | null) => Promise<void>;
+  /// Approve or discard a task an agent left waiting (`create_task`).
+  resolvePending: (pendingId: string, approve: boolean) => Promise<void>;
 }
 
 // Promise-singleton so concurrent initListeners() calls (panel mount + start)
@@ -153,6 +172,7 @@ let unlistenTurn: UnlistenFn | null = null;
 let unlistenStatus: UnlistenFn | null = null;
 let unlistenActivity: UnlistenFn | null = null;
 let unlistenConnector: UnlistenFn | null = null;
+let unlistenJob: UnlistenFn | null = null;
 let pidCounter = 2;
 
 export const useRoundtableStore = create<RoundtableState>((set, get) => ({
@@ -178,6 +198,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   connector: null,
   answerDraft: "",
   answering: false,
+  jobMode: false,
+  jobPhase: null,
+  originRoomId: null,
 
   draft: {
     ...DEFAULT_DRAFT,
@@ -251,6 +274,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       maxTurns: Math.max(1, Math.min(60, d.maxTurns)),
       tokenBudget: Math.max(0, d.tokenBudget),
       allowEdits,
+      jobMode: d.jobMode,
+      reviewRequired: d.jobMode && d.reviewRequired,
+      maxCorrections: Math.max(0, Math.min(10, d.maxCorrections)),
     };
     set({
       turns: [],
@@ -269,6 +295,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       lastActivityAt: null,
       connector: null,
       answerDraft: "",
+      jobMode: d.jobMode,
+      jobPhase: null,
+      originRoomId: null,
     });
     try {
       const id = await ipc.roundtableStart(config);
@@ -410,6 +439,9 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       connector: null,
       answerDraft: "",
       answering: false,
+      jobMode: false,
+      jobPhase: null,
+      originRoomId: null,
     });
   },
 
@@ -465,6 +497,16 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
         lastActivityAt: null,
         connector: null,
         answerDraft: "",
+        jobMode: !!room.job,
+        jobPhase: room.job?.done
+          ? {
+              id: room.id,
+              phase: "completed",
+              corrections: 0,
+              maxCorrections: room.job.maxCorrections,
+            }
+          : null,
+        originRoomId: room.originRoomId ?? null,
       });
       void get().loadConnector();
     } catch (err) {
@@ -538,6 +580,47 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       set({ answering: false });
     }
   },
+
+  /// Approve starts the follow-up as its own job room with the same team and
+  /// switches the panel to it live (the source keeps running or stays saved);
+  /// discard just drops the proposal.
+  resolvePending: async (pendingId, approve) => {
+    const id = get().runId;
+    if (!id) return;
+    try {
+      const resolved = await ipc.roundtableResolvePending(id, pendingId, approve);
+      if (approve && resolved.approvedJobId) {
+        await get().initListeners();
+        const s = get();
+        set({
+          runId: resolved.approvedJobId,
+          readOnly: false,
+          phase: "running",
+          problem: resolved.instructions,
+          roster: s.roster,
+          turns: [],
+          activities: [],
+          message: `Follow-up job started from this room's proposal.`,
+          injectDraft: "",
+          totalTokens: 0,
+          approxCostUsd: 0,
+          turn: 0,
+          targetTurns: s.targetTurns || s.draft.maxTurns,
+          liveStartedAt: Date.now(),
+          lastActivityAt: null,
+          connector: null,
+          answerDraft: "",
+          jobMode: true,
+          jobPhase: null,
+          originRoomId: id,
+        });
+        void get().loadRooms();
+      }
+      await get().loadConnector();
+    } catch (err) {
+      set({ message: err instanceof Error ? err.message : String(err) });
+    }
+  },
 }));
 
 /// Models for an engine — used by the config form's model picker.
@@ -599,6 +682,10 @@ async function bindListeners(
     if (e.payload.job !== get().runId) return;
     void get().loadConnector();
   });
+  unlistenJob = await listen<RoundtableJobEvent>("roundtable://job", (e) => {
+    if (e.payload.id !== get().runId) return;
+    set({ jobPhase: e.payload });
+  });
   unlistenStatus = await listen<RoundtableStatus>("roundtable://status", (e) => {
     const st = e.payload;
     if (st.id !== get().runId) return;
@@ -623,8 +710,10 @@ export async function teardownRoundtableListeners() {
   unlistenStatus?.();
   unlistenActivity?.();
   unlistenConnector?.();
+  unlistenJob?.();
   unlistenTurn = null;
   unlistenStatus = null;
   unlistenActivity = null;
   unlistenConnector = null;
+  unlistenJob = null;
 }

@@ -10,8 +10,10 @@ import { useChangesStore } from "../stores/changesStore";
 import { AGENT_PROFILES } from "../agents/profiles";
 import { MarkdownText } from "./MarkdownText";
 import type {
+  ConnectorPendingJob,
   ConnectorQuestion,
   ConnectorTask,
+  ConnectorView,
   RoundtableActivity,
   RoundtableTurn,
 } from "../types/domain";
@@ -107,6 +109,19 @@ function ConfigForm() {
     if (isRepo === undefined) void refreshGit();
   }, [isRepo, refreshGit]);
   const noRepo = isRepo === false;
+  const updateParticipant = useRoundtableStore((s) => s.updateParticipant);
+
+  // Turning job mode on needs an organizer. If nobody holds connector roles
+  // yet, seed the classic trio (organizer, implementer, reviewer…) in roster
+  // order so the form starts valid; existing choices are left alone.
+  const setJobMode = (on: boolean) => {
+    setDraft({ jobMode: on });
+    if (!on || draft.participants.some((p) => p.roles.length > 0)) return;
+    const seed = ["organizer", "implementer", "reviewer"];
+    draft.participants.forEach((p, i) => {
+      updateParticipant(p.id, { roles: [seed[i] ?? "implementer"] });
+    });
+  };
 
   return (
     <section className="wb-section">
@@ -179,6 +194,51 @@ function ConfigForm() {
         </span>
       </label>
 
+      <label className="rt-toggle">
+        <input
+          type="checkbox"
+          checked={draft.jobMode}
+          onChange={(e) => setJobMode(e.target.checked)}
+        />
+        <span className="rt-toggle-text">
+          <span className="rt-toggle-title">Run as a job (the organizer drives it)</span>
+          <span className="rt-toggle-hint">
+            {draft.jobMode
+              ? "On — the organizer gets the objective and delegates through the connector; the room runs only the turns the queue asks for, then reviews (if required) and closes. Exactly one participant needs the organizer role."
+              : "Off — a round-robin conversation; agents may still delegate or ask you questions."}
+          </span>
+        </span>
+      </label>
+
+      {draft.jobMode && (
+        <div className="rt-knobs">
+          <label className="rt-toggle rt-toggle-inline">
+            <input
+              type="checkbox"
+              checked={draft.reviewRequired}
+              onChange={(e) => setDraft({ reviewRequired: e.target.checked })}
+            />
+            <span className="rt-toggle-text">
+              <span className="rt-toggle-title">Require a review</span>
+              <span className="rt-toggle-hint">
+                A participant with the reviewer role approves the result before the job closes;
+                "changes" sends a correction back.
+              </span>
+            </span>
+          </label>
+          <label className="rt-field rt-field-sm">
+            <span>max corrections</span>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={draft.maxCorrections}
+              onChange={(e) => setDraft({ maxCorrections: Number(e.target.value) })}
+            />
+          </label>
+        </div>
+      )}
+
       {message && (
         <p className="wb-hint" style={{ color: "#ff8585" }}>
           {message}
@@ -186,7 +246,7 @@ function ConfigForm() {
       )}
 
       <button className="wb-cta" onClick={start} disabled={!draft.problem.trim()}>
-        Start conversation
+        {draft.jobMode ? "Start job" : "Start conversation"}
       </button>
     </section>
   );
@@ -286,6 +346,8 @@ function RoomView() {
   const message = useRoundtableStore((s) => s.message);
   const draft = useRoundtableStore((s) => s.draft);
   const roster = useRoundtableStore((s) => s.roster);
+  const jobMode = useRoundtableStore((s) => s.jobMode);
+  const originRoomId = useRoundtableStore((s) => s.originRoomId);
   // Streamed text is coalesced into the SAME activity object, so activities.length
   // doesn't change mid-message — lastActivityAt does (every chunk), so it's the
   // signal that keeps the feed pinned to the bottom while an answer streams in.
@@ -333,6 +395,23 @@ function RoomView() {
             >
               ✎ editing
             </span>
+          </>
+        )}
+        {jobMode && (
+          <>
+            <span className="rt-meta-sep">·</span>
+            <span
+              className="rt-editing"
+              title="Job mode: the organizer drives the work through the connector; the room closes when nothing is pending"
+            >
+              ⚙ job
+            </span>
+          </>
+        )}
+        {originRoomId && (
+          <>
+            <span className="rt-meta-sep">·</span>
+            <span title={`Approved from room ${originRoomId}`}>↳ follow-up</span>
           </>
         )}
         <span className="rt-meta-sep">·</span>
@@ -665,13 +744,33 @@ const KIND_LABEL: Record<string, string> = {
   return: "⇠ result returned",
   answer: "↳ answer",
   question: "? question",
+  kickoff: "▶ kick-off",
+  review: "✓ review",
+  consult: "💬 consultation",
+  correction: "↻ correction",
 };
 const KIND_HINT: Record<string, string> = {
   delegated: "This turn ran a task a peer delegated through the connector",
   return: "The connector handed this agent the result of a task it delegated",
   answer: "Your answer to the agent's question",
   question: "The agent asked you a question and ended its turn",
+  kickoff: "The organizer received the job's objective",
+  review: "The reviewer judged the current result",
+  consult: "A peer's consultation, answered without changing files",
+  correction: "Addressing the reviewer's findings",
 };
+
+/// Where a job stands, derived from the connector view and the room phase.
+function jobStatus(view: ConnectorView, turns: RoundtableTurn[], phase: string): string {
+  if (phase === "done") return "completed";
+  const active = view.tasks.find((t) => t.stage !== "delivered" && t.stage !== "cancelled");
+  if (active?.kind === "correction") return "correcting";
+  if (active) return "implementing";
+  const last = turns[turns.length - 1];
+  if (last?.kind === "review") return "reviewing";
+  if (!turns.some((t) => t.kind === "kickoff")) return "kick-off";
+  return "settling";
+}
 
 /// What the agents did through the connector: a pending question (answer it
 /// here — the room is waiting), the delegations with their stage, and any
@@ -680,23 +779,55 @@ function ConnectorBlock() {
   const connector = useRoundtableStore((s) => s.connector);
   const roster = useRoundtableStore((s) => s.roster);
   const readOnly = useRoundtableStore((s) => s.readOnly);
+  const jobMode = useRoundtableStore((s) => s.jobMode);
+  const turns = useRoundtableStore((s) => s.turns);
+  const phase = useRoundtableStore((s) => s.phase);
+  const reported = useRoundtableStore((s) => s.jobPhase);
   if (!connector) return null;
-  const { tasks, questions, reviews } = connector;
+  const status = reported?.phase ?? jobStatus(connector, turns, phase);
+  const { tasks, questions, reviews, pendingJobs } = connector;
   const pending = questions.find((q) => q.status === "waiting");
-  if (tasks.length === 0 && questions.length === 0 && reviews.length === 0) return null;
+  const waitingJobs = pendingJobs.filter((j) => j.status === "pending_approval");
+  if (
+    tasks.length === 0 &&
+    questions.length === 0 &&
+    reviews.length === 0 &&
+    pendingJobs.length === 0 &&
+    !jobMode
+  )
+    return null;
   const name = (id: string) => roster.find((p) => p.id === id)?.name ?? id;
+  const corrections = reviews.filter((r) => r.verdict === "changes").length;
 
   return (
     <div className="rt-connector">
       <div className="rt-connector-head">
-        <span>connector</span>
+        <span>{jobMode ? "job" : "connector"}</span>
         <span className="rt-meta-sep">·</span>
+        {jobMode && (
+          <>
+            <span className={`rt-stage rt-stage-${status}`}>{status}</span>
+            {reported && reported.maxCorrections > 0 && (
+              <span title="changes verdicts absorbed so far / limit">
+                {reported.corrections}/{reported.maxCorrections} corrections
+              </span>
+            )}
+            <span className="rt-meta-sep">·</span>
+          </>
+        )}
         <span>
           {tasks.length} delegation{tasks.length === 1 ? "" : "s"}
-          {reviews.length > 0 && ` · ${reviews.length} review${reviews.length === 1 ? "" : "s"}`}
+          {reviews.length > 0 &&
+            ` · ${reviews.length} review${reviews.length === 1 ? "" : "s"}${
+              corrections ? ` (${corrections} changes)` : ""
+            }`}
+          {waitingJobs.length > 0 && ` · ${waitingJobs.length} awaiting your approval`}
         </span>
       </div>
       {pending && !readOnly && <QuestionCard q={pending} askerName={name(pending.sender)} />}
+      {waitingJobs.map((j) => (
+        <PendingJobCard key={j.id} job={j} creatorName={name(j.creator)} readOnly={readOnly} />
+      ))}
       {tasks.map((t) => (
         <DelegationRow key={t.id} t={t} name={name} />
       ))}
@@ -708,6 +839,45 @@ function ConnectorBlock() {
           <div className="rt-review-body">{r.body}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/// Work an agent split off with `create_task`: nothing runs until you decide.
+/// Approve starts it as a new job room with the same team (and the panel
+/// follows it); Discard drops it.
+function PendingJobCard({
+  job,
+  creatorName,
+  readOnly,
+}: {
+  job: ConnectorPendingJob;
+  creatorName: string;
+  readOnly: boolean;
+}) {
+  const resolvePending = useRoundtableStore((s) => s.resolvePending);
+  return (
+    <div className="rt-pending">
+      <div className="rt-delegation-who">{creatorName} proposes a follow-up job</div>
+      <div className="rt-question-body">{job.instructions}</div>
+      {!readOnly && (
+        <div className="rt-pending-actions">
+          <button
+            className="wb-cta wb-cta-sm"
+            onClick={() => void resolvePending(job.id, true)}
+            title="Start it now as its own job room with the same team; the panel switches to it"
+          >
+            Approve & start
+          </button>
+          <button
+            className="rt-question-option"
+            onClick={() => void resolvePending(job.id, false)}
+            title="Drop this proposal"
+          >
+            Discard
+          </button>
+        </div>
+      )}
     </div>
   );
 }

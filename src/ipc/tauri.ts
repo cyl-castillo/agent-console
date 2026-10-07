@@ -59,6 +59,7 @@ import type {
   RoomSummary,
   RoundtableConfig,
   ConnectorView,
+  ConnectorPendingJob,
   RunRecord,
   ShareResult,
   SyncResult,
@@ -445,6 +446,8 @@ export const ipc = {
     body: string,
     choiceId: string | null,
   ) => invoke<void>("roundtable_answer_question", { id, questionId, body, choiceId }),
+  roundtableResolvePending: (id: string, pendingId: string, approve: boolean) =>
+    invoke<ConnectorPendingJob>("roundtable_resolve_pending", { id, pendingId, approve }),
 
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   voiceEnable: () => invoke<VoiceStatus>("voice_enable"),

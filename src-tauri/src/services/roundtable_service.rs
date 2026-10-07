@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::services::connector_service::{
-    ConnectorService, Question, Review, Task, TaskPatch, TaskStage, Team, TeamMember, ROLES,
+    ConnectorService, PendingJob, Question, Review, Task, TaskKind, TaskPatch, TaskStage, Team,
+    TeamMember, Verdict, ROLES,
 };
 use crate::services::engine_runner::McpAttach;
 use crate::state::AppState;
@@ -77,6 +78,74 @@ pub struct RoundtableConfig {
     /// read-only. Defaulted so existing/persisted configs still deserialize.
     #[serde(default)]
     pub allow_edits: bool,
+    /// Job mode: the organizer gets the objective and drives the work through
+    /// the connector; the room runs only the turns the queue asks for and, once
+    /// it drains, reviews (if required) and closes. Off = round-robin
+    /// conversation. Port of ai-connector's managed jobs.
+    #[serde(default)]
+    pub job_mode: bool,
+    /// Job mode: a participant with the `reviewer` role must approve the
+    /// result before the job closes; `changes` sends a correction back.
+    #[serde(default)]
+    pub review_required: bool,
+    /// Job mode: how many `changes` verdicts the job absorbs before it stops
+    /// and waits for the human (ai-connector's `max_corrections`).
+    #[serde(default = "default_max_corrections")]
+    pub max_corrections: u32,
+    /// The room whose agent proposed this one with `create_task` (a follow-up
+    /// job approved by the human). Set by the approval, never by the form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_room_id: Option<String>,
+}
+
+fn default_max_corrections() -> u32 {
+    2
+}
+
+/// Live state of a room in job mode.
+struct JobControl {
+    review_required: bool,
+    max_corrections: u32,
+    /// Whether the organizer already received the objective.
+    kicked_off: AtomicBool,
+    /// Whether the job reached its approved end.
+    done: AtomicBool,
+}
+
+/// On-disk form of [`JobControl`]; `None` = an ordinary conversation room.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedJob {
+    pub review_required: bool,
+    pub max_corrections: u32,
+    pub kicked_off: bool,
+    #[serde(default)]
+    pub done: bool,
+}
+
+/// Emitted over `roundtable://job` whenever a job-mode room changes phase.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundtableJobEvent {
+    pub id: String,
+    /// "kick-off" | "implementing" | "correcting" | "consulting" | "reviewing"
+    /// | "settling" | "completed" | "blocked"
+    pub phase: String,
+    /// `changes` verdicts recorded so far, against the room's limit.
+    pub corrections: u32,
+    pub max_corrections: u32,
+}
+
+fn emit_job(app: &AppHandle, id: &str, phase: &str, corrections: u32, max_corrections: u32) {
+    let _ = app.emit(
+        "roundtable://job",
+        RoundtableJobEvent {
+            id: id.to_string(),
+            phase: phase.to_string(),
+            corrections,
+            max_corrections,
+        },
+    );
 }
 
 /// One message in the shared transcript — from an agent or the human.
@@ -216,6 +285,10 @@ struct RunControl {
     /// downgraded to read-only because the project isn't a git repo. `None` for
     /// the normal case.
     notice: Option<String>,
+    /// `Some` for a room in job mode.
+    job: Option<JobControl>,
+    /// The room this one was approved from (follow-up job), if any.
+    origin_room_id: Option<String>,
 }
 
 impl RunControl {
@@ -237,6 +310,13 @@ impl RunControl {
             allow_edits: self.allow_edits,
             total_tokens: self.total_tokens.load(Ordering::SeqCst),
             updated_at_ms: now_ms(),
+            job: self.job.as_ref().map(|j| PersistedJob {
+                review_required: j.review_required,
+                max_corrections: j.max_corrections,
+                kicked_off: j.kicked_off.load(Ordering::SeqCst),
+                done: j.done.load(Ordering::SeqCst),
+            }),
+            origin_room_id: self.origin_room_id.clone(),
         }
     }
 }
@@ -287,6 +367,12 @@ pub struct PersistedRoom {
     pub total_tokens: u64,
     /// millis since epoch of the last write — drives sidebar ordering and retention.
     pub updated_at_ms: u64,
+    /// Job-mode state; `None` (and for rooms saved before it existed) = conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<PersistedJob>,
+    /// The room this one was approved from (`create_task` follow-up), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_room_id: Option<String>,
 }
 
 /// Lightweight sidebar entry — everything the room list shows without paying to
@@ -303,6 +389,13 @@ pub struct RoomSummary {
     pub last_turn: u32,
     pub total_tokens: u64,
     pub updated_at_ms: u64,
+    /// Job-mode room (the organizer drives it).
+    pub job_mode: bool,
+    /// Job-mode room that reached its approved end.
+    pub job_done: bool,
+    /// Follow-up job: the room it was approved from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin_room_id: Option<String>,
 }
 
 impl RoomSummary {
@@ -315,6 +408,9 @@ impl RoomSummary {
             last_turn: room.transcript.iter().map(|m| m.turn).max().unwrap_or(0),
             total_tokens: room.total_tokens,
             updated_at_ms: room.updated_at_ms,
+            job_mode: room.job.is_some(),
+            job_done: room.job.as_ref().is_some_and(|j| j.done),
+            origin_room_id: room.origin_room_id.clone(),
         }
     }
 }
@@ -588,6 +684,11 @@ impl RoundtableService {
                 )));
             }
         }
+        validate_job_config(
+            &config.participants,
+            config.job_mode,
+            config.review_required,
+        )?;
 
         // Stable room id: a millis timestamp (survives restarts and sorts the
         // sidebar chronologically) plus a uuid suffix for collision-freedom. The
@@ -654,6 +755,13 @@ impl RoundtableService {
             notice,
             child: ChildSlot::default(),
             last_activity_ms: AtomicU64::new(0),
+            job: config.job_mode.then(|| JobControl {
+                review_required: config.review_required,
+                max_corrections: config.max_corrections,
+                kicked_off: AtomicBool::new(false),
+                done: AtomicBool::new(false),
+            }),
+            origin_room_id: config.origin_room_id,
         });
         self.runs.lock().insert(id.clone(), control.clone());
 
@@ -748,6 +856,13 @@ impl RoundtableService {
             notice,
             child: ChildSlot::default(),
             last_activity_ms: AtomicU64::new(0),
+            job: room.job.map(|j| JobControl {
+                review_required: j.review_required,
+                max_corrections: j.max_corrections,
+                kicked_off: AtomicBool::new(j.kicked_off),
+                done: AtomicBool::new(j.done),
+            }),
+            origin_room_id: room.origin_room_id,
         });
         self.runs.lock().insert(id.clone(), control);
         Ok(id)
@@ -995,6 +1110,12 @@ enum DriveEnd {
     /// An agent called `ask_user`: the room waits for the human's answer, which
     /// `answer_question` delivers and then restarts the driver.
     WaitingUser(Question),
+    /// Job mode: the queue drained and the result is approved (or needs no
+    /// review). The message says what to do next (merge the branch, …).
+    JobDone(String),
+    /// Job mode: the job cannot continue on its own (correction limit, no
+    /// verdict recorded, no reviewer). The human steers and continues.
+    Blocked(String),
 }
 
 /// The orchestration loop: round-robin over participants until the turn target,
@@ -1067,15 +1188,111 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             control.turn_no.store(turn - 1, Ordering::SeqCst);
             break DriveEnd::WaitingUser(q.clone());
         }
-        let plan = plan_turn(&tasks, &questions);
+        let mut plan = plan_turn(&tasks, &questions);
+        if let Some(job) = &control.job {
+            if !job.kicked_off.load(Ordering::SeqCst) {
+                // The objective reaches the organizer first, whatever the queue
+                // (a restored room may carry old tasks).
+                plan = TurnPlan::Kickoff;
+            } else if plan == TurnPlan::RoundRobin {
+                // The queue drained: review and close instead of chatting on.
+                let (team, reviews) = {
+                    let state = app.state::<AppState>();
+                    (
+                        state.connector.team(&project, &id).ok().flatten(),
+                        state.connector.reviews(&project, &id).unwrap_or_default(),
+                    )
+                };
+                let revision = team
+                    .as_ref()
+                    .map(|t| t.revision.clone())
+                    .unwrap_or_else(|| "initial".into());
+                let transcript = control.transcript.lock().clone();
+                match settle_job(
+                    job,
+                    &revision,
+                    &control.participants,
+                    &reviews,
+                    &tasks,
+                    &transcript,
+                ) {
+                    Settle::Done => {
+                        job.done.store(true, Ordering::SeqCst);
+                        let msg = if control.allow_edits {
+                            format!(
+                                "Job completed — review and merge the room/{id} branch when ready."
+                            )
+                        } else {
+                            "Job completed.".to_string()
+                        };
+                        break DriveEnd::JobDone(msg);
+                    }
+                    Settle::Blocked(msg) => break DriveEnd::Blocked(msg),
+                    Settle::Review { reviewer, result } => {
+                        plan = TurnPlan::Review { reviewer, result };
+                    }
+                    Settle::Correction {
+                        reviewer,
+                        implementer,
+                        review_id,
+                        body,
+                    } => {
+                        // The reviewer hands the findings to the implementer as a
+                        // correction task; the next pass runs it, then returns to
+                        // the reviewer, then re-reviews the new revision.
+                        let created = app.state::<AppState>().connector.delegate(
+                            &project,
+                            &id,
+                            &reviewer,
+                            &implementer,
+                            &format!(
+                                "Address the review findings while respecting the original objective:\n{body}"
+                            ),
+                            &format!("correction-{review_id}"),
+                            TaskKind::Correction,
+                        );
+                        if let Err(e) = created {
+                            break DriveEnd::Blocked(format!(
+                                "Could not queue the correction: {}",
+                                e.message()
+                            ));
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
         control.turn_no.store(turn, Ordering::SeqCst);
         emit_status(&app, &id, "running", turn, total_tokens, None);
+        if let Some(job) = &control.job {
+            let phase = match &plan {
+                TurnPlan::Kickoff => "kick-off",
+                TurnPlan::Review { .. } => "reviewing",
+                TurnPlan::Delegated(t) => match t.kind {
+                    TaskKind::Correction => "correcting",
+                    TaskKind::Consult | TaskKind::Discussion => "consulting",
+                    _ => "implementing",
+                },
+                _ => "settling",
+            };
+            let corrections = app
+                .state::<AppState>()
+                .connector
+                .reviews(&project, &id)
+                .unwrap_or_default()
+                .iter()
+                .filter(|r| r.verdict == Verdict::Changes)
+                .count() as u32;
+            emit_job(&app, &id, phase, corrections, job.max_corrections);
+        }
 
         let round_robin = control.participants[((turn - 1) as usize) % n].clone();
         let participant = match &plan {
             TurnPlan::Answer(q) => by_id(&control.participants, &q.sender),
             TurnPlan::Return(t) => by_id(&control.participants, &t.sender),
             TurnPlan::Delegated(t) => by_id(&control.participants, &t.recipient),
+            TurnPlan::Kickoff => organizer_of(&control.participants),
+            TurnPlan::Review { reviewer, .. } => by_id(&control.participants, reviewer),
             TurnPlan::RoundRobin => None,
         }
         .unwrap_or(round_robin);
@@ -1107,6 +1324,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             turn,
             target,
             control.worktree.is_some(),
+            control.job.is_some(),
             brief.as_ref(),
             &mandate,
         );
@@ -1134,7 +1352,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         // Working room runs the turn in the isolated worktree with edits allowed;
         // a conversation room runs read-only in the project root.
         let cwd = control.workspace.clone();
-        let tools = control.tools;
+        let tools = turn_tools(control.tools, &plan, &participant);
         let model = participant.model.clone();
         let engine = participant.engine;
         let resume_id = control.resume.lock().get(&participant.id).cloned();
@@ -1293,9 +1511,16 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                 TurnPlan::Answer(q) => {
                     let _ = state.connector.mark_answer_delivered(&project, &q.id);
                 }
-                TurnPlan::RoundRobin => {}
+                TurnPlan::Kickoff => {
+                    if let Some(job) = &control.job {
+                        job.kicked_off.store(true, Ordering::SeqCst);
+                    }
+                }
+                TurnPlan::Review { .. } | TurnPlan::RoundRobin => {}
             }
-            if control.worktree.is_some() {
+            // A new revision after any turn that may have changed the work: an
+            // implementation turn in a job, or any turn of a working room.
+            if control.worktree.is_some() || (control.job.is_some() && plan.is_implementation()) {
                 let _ = state
                     .connector
                     .set_revision(&project, &id, &format!("t{turn}"));
@@ -1330,6 +1555,31 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             commit_worktree(wt, &format!("room {id} · t{turn} {}", participant.name));
         }
         emit_turn(&app, &id, &msg, false, total_tokens, outcome.cost_usd);
+
+        if let TurnPlan::Review { .. } = &plan {
+            // A review turn that recorded nothing cannot be settled: stop and
+            // let the human instruct the reviewer (ai-connector's waiting_user).
+            let state = app.state::<AppState>();
+            let revision = state
+                .connector
+                .team(&project, &id)
+                .ok()
+                .flatten()
+                .map(|t| t.revision)
+                .unwrap_or_default();
+            let recorded = state
+                .connector
+                .reviews(&project, &id)
+                .unwrap_or_default()
+                .iter()
+                .any(|r| r.revision == revision);
+            if !recorded {
+                break DriveEnd::Blocked(
+                    "The reviewer did not record a verdict. Send an instruction to complete it."
+                        .into(),
+                );
+            }
+        }
 
         let budget = control.token_budget.load(Ordering::SeqCst);
         if budget > 0 && total_tokens >= budget {
@@ -1380,6 +1630,21 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         DriveEnd::Stopped => emit_status(&app, &id, "stopped", turn, total_tokens, None),
         // Error status already emitted inside the loop.
         DriveEnd::Errored => {}
+        DriveEnd::JobDone(msg) => {
+            autosave(&control, &id);
+            if let Some(job) = &control.job {
+                emit_job(&app, &id, "completed", 0, job.max_corrections);
+            }
+            emit_status(&app, &id, "done", turn, total_tokens, Some(msg));
+        }
+        DriveEnd::Blocked(msg) => {
+            if !control.driving.load(Ordering::SeqCst) {
+                if let Some(job) = &control.job {
+                    emit_job(&app, &id, "blocked", 0, job.max_corrections);
+                }
+                emit_status(&app, &id, "awaiting", turn, total_tokens, Some(msg));
+            }
+        }
         DriveEnd::WaitingUser(q) => {
             if !control.driving.load(Ordering::SeqCst) {
                 let asker = by_id(&control.participants, &q.sender)
@@ -1438,6 +1703,163 @@ fn by_id(participants: &[Participant], id: &str) -> Option<Participant> {
     participants.iter().find(|p| p.id == id).cloned()
 }
 
+fn organizer_of(participants: &[Participant]) -> Option<Participant> {
+    participants
+        .iter()
+        .find(|p| connector_roles(p).iter().any(|r| r == "organizer"))
+        .cloned()
+}
+
+/// Port of `workflow.can_implement`: any role that is not purely advisory.
+fn can_implement(p: &Participant) -> bool {
+    connector_roles(p)
+        .iter()
+        .any(|r| !matches!(r.as_str(), "reviewer" | "planner" | "consultant"))
+}
+
+/// Job-mode roster rules (port of `workflow.options`): exactly one organizer,
+/// and a reviewer whenever a review is required.
+fn validate_job_config(
+    participants: &[Participant],
+    job_mode: bool,
+    review_required: bool,
+) -> AppResult<()> {
+    if !job_mode {
+        return Ok(());
+    }
+    let organizers = participants
+        .iter()
+        .filter(|p| connector_roles(p).iter().any(|r| r == "organizer"))
+        .count();
+    if organizers != 1 {
+        return Err(AppError::InvalidArgument(
+            "a job needs exactly one participant with the organizer role".into(),
+        ));
+    }
+    if review_required
+        && !participants
+            .iter()
+            .any(|p| connector_roles(p).iter().any(|r| r == "reviewer"))
+    {
+        return Err(AppError::InvalidArgument(
+            "a reviewed job needs a participant with the reviewer role".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Permissions for one turn (port of the `readonly` rule): a working room's
+/// `AcceptEdits` is kept only for implementation turns by a participant who
+/// may implement. Reviews, consultations and advisory roles run read-only.
+fn turn_tools(room: ToolPolicy, plan: &TurnPlan, participant: &Participant) -> ToolPolicy {
+    if room != ToolPolicy::AcceptEdits {
+        return room;
+    }
+    let advisory_turn = match plan {
+        TurnPlan::Review { .. } => true,
+        TurnPlan::Delegated(t) => matches!(t.kind, TaskKind::Consult | TaskKind::Discussion),
+        _ => false,
+    };
+    if advisory_turn || !can_implement(participant) {
+        ToolPolicy::ReadOnly
+    } else {
+        room
+    }
+}
+
+/// What a drained job queue leads to. Port of `review.settle_result`.
+#[derive(Debug, Clone, PartialEq)]
+enum Settle {
+    /// Approved, or no review required: close the job.
+    Done,
+    /// No verdict for the current revision yet: run the reviewer.
+    Review { reviewer: String, result: String },
+    /// Latest verdict is `changes`: queue a correction to the implementer.
+    Correction {
+        reviewer: String,
+        implementer: String,
+        review_id: String,
+        body: String,
+    },
+    /// Cannot proceed without the human.
+    Blocked(String),
+}
+
+fn settle_job(
+    job: &JobControl,
+    revision: &str,
+    participants: &[Participant],
+    reviews: &[Review],
+    tasks: &[Task],
+    transcript: &[Message],
+) -> Settle {
+    if !job.review_required {
+        return Settle::Done;
+    }
+    let for_revision: Vec<&Review> = reviews.iter().filter(|r| r.revision == revision).collect();
+    let Some(last) = for_revision.last() else {
+        let Some(reviewer) = participants
+            .iter()
+            .find(|p| connector_roles(p).iter().any(|r| r == "reviewer"))
+        else {
+            return Settle::Blocked(
+                "The review is pending but no participant holds the reviewer role.".into(),
+            );
+        };
+        // The result under review: the last implementation-ish agent message.
+        let result = transcript
+            .iter()
+            .rev()
+            .find(|m| {
+                m.author_id != "human"
+                    && !matches!(m.kind.as_str(), "review" | "return" | "question")
+            })
+            .map(|m| m.text.clone())
+            .unwrap_or_default();
+        return Settle::Review {
+            reviewer: reviewer.id.clone(),
+            result,
+        };
+    };
+    if last.verdict == Verdict::Approved {
+        return Settle::Done;
+    }
+    let corrections = reviews
+        .iter()
+        .filter(|r| r.verdict == Verdict::Changes)
+        .count() as u32;
+    if corrections > job.max_corrections {
+        return Settle::Blocked(
+            "The overall correction limit was reached. Review the findings.".into(),
+        );
+    }
+    let key = format!("correction-{}", last.id);
+    if tasks.iter().any(|t| t.request_key == key) {
+        // The correction for this verdict already ran and produced no new
+        // revision (its turn failed, or changed nothing): do not loop on it.
+        return Settle::Blocked(
+            "The correction did not produce a new revision. Review the findings and send an instruction to continue.".into(),
+        );
+    }
+    let implementer = transcript
+        .iter()
+        .rev()
+        .filter(|m| matches!(m.kind.as_str(), "delegated" | "kickoff"))
+        .filter_map(|m| by_id(participants, &m.author_id))
+        .find(can_implement)
+        .or_else(|| organizer_of(participants))
+        .map(|p| p.id);
+    let Some(implementer) = implementer else {
+        return Settle::Blocked("No participant can implement the requested corrections.".into());
+    };
+    Settle::Correction {
+        reviewer: last.participant.clone(),
+        implementer,
+        review_id: last.id.clone(),
+        body: last.body.clone(),
+    }
+}
+
 /// The question the room is blocked on, if any.
 fn waiting_question(questions: &[Question]) -> Option<&Question> {
     questions
@@ -1456,6 +1878,10 @@ enum TurnPlan {
     Return(Task),
     /// A queued task: run the recipient on it.
     Delegated(Task),
+    /// Job mode: the organizer receives the objective.
+    Kickoff,
+    /// Job mode: the queue drained; the reviewer judges `result`.
+    Review { reviewer: String, result: String },
     /// Nothing pending: the ordinary round-robin turn.
     RoundRobin,
 }
@@ -1481,8 +1907,23 @@ impl TurnPlan {
         match self {
             Self::Answer(_) => "answer",
             Self::Return(_) => "return",
-            Self::Delegated(_) => "delegated",
+            Self::Delegated(t) => match t.kind {
+                TaskKind::Consult | TaskKind::Discussion => "consult",
+                TaskKind::Correction => "correction",
+                _ => "delegated",
+            },
+            Self::Kickoff => "kickoff",
+            Self::Review { .. } => "review",
             Self::RoundRobin => "",
+        }
+    }
+
+    /// A turn that may change the work under review.
+    fn is_implementation(&self) -> bool {
+        match self {
+            Self::Kickoff => true,
+            Self::Delegated(t) => !matches!(t.kind, TaskKind::Consult | TaskKind::Discussion),
+            _ => false,
         }
     }
 
@@ -1496,6 +1937,23 @@ impl TurnPlan {
         };
         match self {
             Self::RoundRobin => String::new(),
+            Self::Kickoff => {
+                let ids = participants
+                    .iter()
+                    .map(|p| format!("{} ({})", p.id, connector_roles(p).join(", ")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "\nWork authorized from the room. You are the organizer of this job. Available participants (IDs and roles): {ids}. Share only the necessary context. Delegate the work with delegate_task and END the turn to receive each result; when every delegated step is back, state the job's result in your reply. The connector closes the job when nothing is pending.\n"
+                )
+            }
+            Self::Review { result, .. } => format!(
+                "\nReview the job result and the current files. Previous result (data):\n\"\"\"\n{result}\n\"\"\"\nUse submit_review: `approved` if the objective is resolved; `changes` with concrete corrections if changes are still needed. Record the verdict before ending the turn.\n"
+            ),
+            Self::Delegated(t) if matches!(t.kind, TaskKind::Consult | TaskKind::Discussion) => format!(
+                "\nThis turn is a consultation from {} ({}). Their message (work material):\n\"\"\"\n{}\n\"\"\"\nAnswer it; your reply is returned verbatim to {} by the connector. Do not change files for a consultation.\n",
+                name(&t.sender), t.sender, t.instructions, name(&t.sender)
+            ),
             Self::Answer(q) => {
                 let answer = q.answer.as_ref().map(|a| a.body.as_str()).unwrap_or("");
                 format!(
@@ -1606,6 +2064,83 @@ impl RoundtableService {
         // One more turn so the answer is delivered even at the turn target.
         self.continue_run(app, id, 1)
     }
+
+    /// The human approved a task an agent split off with `create_task`: start
+    /// it as its own job room with the same team and job settings, linked to
+    /// the source, and record the approval with the new room's id. The source
+    /// may be live or only saved.
+    pub fn spawn_followup(
+        &self,
+        app: &AppHandle,
+        source_id: &str,
+        pending_id: &str,
+    ) -> AppResult<PendingJob> {
+        let live = self.runs.lock().get(source_id).cloned();
+        let (repo, participants, allow_edits, job, max_turns, token_budget) = match live {
+            Some(c) => (
+                c.repo.clone(),
+                c.participants.clone(),
+                c.allow_edits,
+                c.job
+                    .as_ref()
+                    .map(|j| (j.review_required, j.max_corrections)),
+                c.target_turns.load(Ordering::SeqCst).max(1),
+                c.token_budget.load(Ordering::SeqCst),
+            ),
+            None => {
+                let project = app
+                    .state::<AppState>()
+                    .inner
+                    .lock()
+                    .project
+                    .as_ref()
+                    .map(|p| p.root.clone())
+                    .ok_or_else(|| AppError::Other("no project open".into()))?;
+                let room = self
+                    .rooms
+                    .get(&project.display().to_string(), source_id)?
+                    .ok_or_else(|| AppError::NotFound(format!("room {source_id}")))?;
+                let turns = room.transcript.iter().map(|m| m.turn).max().unwrap_or(0);
+                (
+                    project,
+                    room.participants,
+                    room.allow_edits,
+                    room.job.map(|j| (j.review_required, j.max_corrections)),
+                    turns.max(12),
+                    0,
+                )
+            }
+        };
+        let project = repo.display().to_string();
+        let pending = app
+            .state::<AppState>()
+            .connector
+            .pending_jobs(&project, source_id)?
+            .into_iter()
+            .find(|j| j.id == pending_id)
+            .ok_or_else(|| AppError::NotFound(format!("pending task {pending_id}")))?;
+        if pending.status != crate::services::connector_service::PendingStatus::PendingApproval {
+            return Err(AppError::InvalidArgument(
+                "This task was already resolved".into(),
+            ));
+        }
+        let (review_required, max_corrections) = job.unwrap_or((false, 2));
+        let config = RoundtableConfig {
+            problem: pending.instructions.clone(),
+            participants,
+            max_turns,
+            token_budget,
+            allow_edits,
+            job_mode: true,
+            review_required,
+            max_corrections,
+            origin_room_id: Some(source_id.to_string()),
+        };
+        let new_id = self.start(app.clone(), repo, config)?;
+        app.state::<AppState>()
+            .connector
+            .resolve_pending(&project, pending_id, Some(&new_id))
+    }
 }
 
 /// Everything the panel shows about a room's connector activity.
@@ -1616,6 +2151,8 @@ pub struct ConnectorView {
     pub tasks: Vec<Task>,
     pub questions: Vec<Question>,
     pub reviews: Vec<Review>,
+    #[serde(default)]
+    pub pending_jobs: Vec<PendingJob>,
 }
 
 pub fn connector_view(
@@ -1628,6 +2165,7 @@ pub fn connector_view(
         tasks: connector.tasks(project, room_id)?,
         questions: connector.questions(project, room_id)?,
         reviews: connector.reviews(project, room_id)?,
+        pending_jobs: connector.pending_jobs(project, room_id)?,
     })
 }
 
@@ -1710,6 +2248,7 @@ fn build_room_prompt(
     turn: u32,
     max_turns: u32,
     can_edit: bool,
+    job_mode: bool,
     connector: Option<&ConnectorBrief>,
     mandate: &str,
 ) -> String {
@@ -1748,7 +2287,11 @@ fn build_room_prompt(
     // (changes land on a branch the human reviews before merging), so the prompt
     // tells them to actually implement — otherwise, even with edit permission,
     // they default to merely discussing.
-    let mandate_text = if can_edit {
+    let mandate_text = if job_mode && can_edit {
+        "a member of a team ({others}) running a job for a human, organized through the connector: the organizer delegates, each delegated turn does its part **by editing the code** in an isolated worktree (committed to a branch the human reviews), and the job closes when nothing is pending."
+    } else if job_mode {
+        "a member of a team ({others}) running a job for a human, organized through the connector: the organizer delegates, each delegated turn does its part (reading the project as needed), and the job closes when nothing is pending."
+    } else if can_edit {
         "one of several collaborators ({others}) plus a human, working together to solve a real problem **by editing the code**. You're in an isolated worktree: your file changes are committed to a separate branch and reviewed by the human before anything merges — so make concrete edits, don't just describe them."
     } else {
         "one of several collaborators ({others}) plus a human, working together in a shared conversation to solve a real problem. You may READ the open project to ground your reasoning, but you cannot edit files — this is a discussion, not an implementation task."
@@ -2488,6 +3031,204 @@ mod tests {
         assert_eq!(TurnPlan::RoundRobin.kind(), "");
     }
 
+    fn with_roles(id: &str, roles: &[&str]) -> Participant {
+        let mut p = participant(id);
+        p.roles = roles.iter().map(|r| r.to_string()).collect();
+        p
+    }
+
+    fn review(id: &str, participant: &str, revision: &str, verdict: Verdict) -> Review {
+        Review {
+            id: id.into(),
+            job_id: "r".into(),
+            participant: participant.into(),
+            revision: revision.into(),
+            verdict,
+            body: format!("findings of {id}"),
+            created_ms: 1,
+        }
+    }
+
+    fn kinded(author: &str, turn: u32, kind: &str) -> Message {
+        let mut m = message(author, turn);
+        m.kind = kind.into();
+        m
+    }
+
+    #[test]
+    fn job_config_needs_one_organizer_and_a_reviewer_when_reviewed() {
+        let org = with_roles("p1", &["organizer"]);
+        let imp = with_roles("p2", &["implementer"]);
+        let rev = with_roles("p3", &["reviewer"]);
+        // Conversation rooms are never constrained.
+        assert!(validate_job_config(&[participant("p1"), participant("p2")], false, true).is_ok());
+        assert!(validate_job_config(&[org.clone(), imp.clone()], true, false).is_ok());
+        assert!(validate_job_config(&[imp.clone(), rev.clone()], true, false).is_err());
+        assert!(validate_job_config(&[org.clone(), org.clone()], true, false).is_err());
+        assert!(validate_job_config(&[org.clone(), imp.clone()], true, true).is_err());
+        assert!(validate_job_config(&[org, imp, rev], true, true).is_ok());
+    }
+
+    #[test]
+    fn turn_tools_keep_edits_only_for_implementation_turns_by_implementers() {
+        let imp = with_roles("p2", &["implementer"]);
+        let rev = with_roles("p3", &["reviewer"]);
+        let dele = TurnPlan::Delegated(task("t1", "p1", "p2", TaskStage::Executing));
+        let mut consult = task("t2", "p1", "p2", TaskStage::Executing);
+        consult.kind = TaskKind::Consult;
+        let consult = TurnPlan::Delegated(consult);
+        let review = TurnPlan::Review {
+            reviewer: "p3".into(),
+            result: String::new(),
+        };
+        // Read-only rooms stay read-only whoever runs.
+        assert_eq!(
+            turn_tools(ToolPolicy::ReadOnly, &dele, &imp),
+            ToolPolicy::ReadOnly
+        );
+        // Working room: the implementer edits on a task or the kickoff…
+        assert_eq!(
+            turn_tools(ToolPolicy::AcceptEdits, &dele, &imp),
+            ToolPolicy::AcceptEdits
+        );
+        assert_eq!(
+            turn_tools(
+                ToolPolicy::AcceptEdits,
+                &TurnPlan::Kickoff,
+                &with_roles("p1", &["organizer"])
+            ),
+            ToolPolicy::AcceptEdits
+        );
+        // …but not on a consultation, and advisory roles never edit.
+        assert_eq!(
+            turn_tools(ToolPolicy::AcceptEdits, &consult, &imp),
+            ToolPolicy::ReadOnly
+        );
+        assert_eq!(
+            turn_tools(ToolPolicy::AcceptEdits, &review, &rev),
+            ToolPolicy::ReadOnly
+        );
+        assert_eq!(
+            turn_tools(ToolPolicy::AcceptEdits, &dele, &rev),
+            ToolPolicy::ReadOnly
+        );
+        assert_eq!(dele.kind(), "delegated");
+        assert_eq!(consult.kind(), "consult");
+        assert!(dele.is_implementation() && !consult.is_implementation());
+        assert!(TurnPlan::Kickoff.is_implementation() && !review.is_implementation());
+    }
+
+    #[test]
+    fn settle_job_runs_review_then_corrections_then_closes() {
+        let team = vec![
+            with_roles("p1", &["organizer"]),
+            with_roles("p2", &["implementer"]),
+            with_roles("p3", &["reviewer"]),
+        ];
+        let job = |review_required: bool, max: u32| JobControl {
+            review_required,
+            max_corrections: max,
+            kicked_off: AtomicBool::new(true),
+            done: AtomicBool::new(false),
+        };
+        let transcript = vec![
+            kinded("p1", 1, "kickoff"),
+            kinded("p2", 2, "delegated"),
+            kinded("p1", 3, "return"),
+        ];
+
+        // No review required: the drained queue closes the job.
+        assert_eq!(
+            settle_job(&job(false, 2), "t2", &team, &[], &[], &transcript),
+            Settle::Done
+        );
+        // Review required, none yet: the reviewer judges the last implementation-ish result.
+        assert_eq!(
+            settle_job(&job(true, 2), "t2", &team, &[], &[], &transcript),
+            Settle::Review {
+                reviewer: "p3".into(),
+                result: "msg from p2 on turn 2".to_string()
+            }
+        );
+        // No reviewer on the team: blocked, not a crash.
+        let no_rev = vec![
+            with_roles("p1", &["organizer"]),
+            with_roles("p2", &["implementer"]),
+        ];
+        assert!(matches!(
+            settle_job(&job(true, 2), "t2", &no_rev, &[], &[], &transcript),
+            Settle::Blocked(_)
+        ));
+        // Approved for this revision: done. A stale approval of an older revision does not count.
+        let approved = review("rv1", "p3", "t2", Verdict::Approved);
+        assert_eq!(
+            settle_job(
+                &job(true, 2),
+                "t2",
+                &team,
+                &[approved.clone()],
+                &[],
+                &transcript
+            ),
+            Settle::Done
+        );
+        assert!(matches!(
+            settle_job(&job(true, 2), "t5", &team, &[approved], &[], &transcript),
+            Settle::Review { .. }
+        ));
+        // Changes: a correction goes from the reviewer to the last implementer.
+        let changes = review("rv2", "p3", "t2", Verdict::Changes);
+        assert_eq!(
+            settle_job(
+                &job(true, 2),
+                "t2",
+                &team,
+                &[changes.clone()],
+                &[],
+                &transcript
+            ),
+            Settle::Correction {
+                reviewer: "p3".into(),
+                implementer: "p2".into(),
+                review_id: "rv2".into(),
+                body: "findings of rv2".into(),
+            }
+        );
+        // The correction already ran without a new revision: do not loop.
+        let ran = task("c", "p3", "p2", TaskStage::Delivered);
+        let ran = Task {
+            request_key: "correction-rv2".into(),
+            ..ran
+        };
+        assert!(matches!(
+            settle_job(
+                &job(true, 2),
+                "t2",
+                &team,
+                &[changes.clone()],
+                &[ran],
+                &transcript
+            ),
+            Settle::Blocked(_)
+        ));
+        // Over the correction limit: blocked with Marcos' message.
+        let many = vec![
+            review("a", "p3", "t1", Verdict::Changes),
+            review("b", "p3", "t2", Verdict::Changes),
+            review("c", "p3", "t3", Verdict::Changes),
+        ];
+        match settle_job(&job(true, 2), "t3", &team, &many, &[], &transcript) {
+            Settle::Blocked(m) => assert!(m.contains("correction limit")),
+            other => panic!("expected Blocked, got {other:?}"),
+        }
+        // With no implementation turn on record the organizer takes the correction.
+        let bare = vec![kinded("p1", 1, "return")];
+        assert!(matches!(
+            settle_job(&job(true, 2), "t2", &team, &[changes], &[], &bare),
+            Settle::Correction { implementer, .. } if implementer == "p1"
+        ));
+    }
+
     #[test]
     fn room_prompt_names_connector_tools_ids_and_the_turn_mandate() {
         let mut me = participant("p1");
@@ -2507,6 +3248,7 @@ mod tests {
             3,
             6,
             false,
+            false,
             Some(&brief),
             &plan.mandate(&all),
         );
@@ -2518,7 +3260,7 @@ mod tests {
         assert!(prompt.contains("delegated to you by P-p2 (p2)"));
         assert!(prompt.contains("Read docs/x.md and report the title"));
         // Without a bridge the connector block is absent and the prompt is the old one.
-        let plain = build_room_prompt("Ship it", &me, &all, &[], 3, 6, false, None, "");
+        let plain = build_room_prompt("Ship it", &me, &all, &[], 3, 6, false, false, None, "");
         assert!(!plain.contains("agent_console"));
         assert!(plain.contains("This is turn 3 of 6."));
         // The return mandate carries the result as data.
@@ -2567,6 +3309,8 @@ mod tests {
             allow_edits: false,
             total_tokens: 4242,
             updated_at_ms,
+            job: None,
+            origin_room_id: None,
         }
     }
 

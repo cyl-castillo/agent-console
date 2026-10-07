@@ -10278,3 +10278,37 @@ select:focus-visible,
   color: var(--text);
   margin-top: 2px;
 }
+
+/* --- room job mode: pending follow-up jobs, job status --- */
+.rt-toggle-inline {
+  flex: 1;
+  min-width: 220px;
+}
+.rt-pending {
+  border-left: 3px solid var(--warn, #e0af68);
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warn, #e0af68) 8%, transparent);
+}
+.rt-pending-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.rt-stage-kick-off,
+.rt-stage-implementing,
+.rt-stage-reviewing,
+.rt-stage-correcting,
+.rt-stage-settling {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.rt-stage-completed {
+  border-color: var(--ok, #9ece6a);
+  color: var(--ok, #9ece6a);
+}
+
+.rt-stage-rooms {
+  margin-right: 6px;
+  flex-shrink: 0;
+}

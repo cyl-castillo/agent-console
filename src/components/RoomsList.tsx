@@ -94,7 +94,18 @@ function RoomRow({
       title={`${room.problem || "(untitled room)"}\n${roster} · ${room.messageCount} messages`}
     >
       <span className="session-dot stopped" />
-      <span className="session-name">{room.problem || "(untitled room)"}</span>
+      <span className="session-name">
+        {room.originRoomId ? "↳ " : ""}
+        {room.problem || "(untitled room)"}
+      </span>
+      {room.jobMode && (
+        <span
+          className="rt-stage rt-stage-rooms"
+          title={room.jobDone ? "Job completed" : "Job room (the organizer drives it)"}
+        >
+          {room.jobDone ? "✓ job" : "⚙ job"}
+        </span>
+      )}
       <span className="session-meta">{meta}</span>
       <button
         className="session-close"
