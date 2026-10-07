@@ -10,7 +10,7 @@ import { AGENT_PROFILES, profileFor, DEFAULT_AGENT, type AgentKind } from "../ag
 import { ipc } from "../ipc/tauri";
 import type { BranchInfo, LinkedFolder } from "../types/domain";
 import { confirmDialog } from "../stores/confirmStore";
-import { sessionFolderName } from "../lib/sessionCheckout";
+import { samePath, sessionFolderName } from "../lib/sessionCheckout";
 
 /// The worktree opt-in from the chooser: branch-name component + base branch.
 export interface WorktreePick {
@@ -254,6 +254,31 @@ function AgentModelChooser({
       useToastStore.getState().show(`Couldn't use that folder: ${e}`, "error");
     }
   };
+  const forgetFolder = async (f: LinkedFolder) => {
+    const using = useTerminalsStore
+      .getState()
+      .sessions.filter((t) => !t.worktree && samePath(t.cwd, f.path)).length;
+    const ok = await confirmDialog({
+      title: "Forget folder",
+      message:
+        `Remove ${f.name} from this project's folders?\n${f.path}\n\n` +
+        (using > 0
+          ? `${using} session${using === 1 ? " runs" : "s run"} there: ${using === 1 ? "it keeps" : "they keep"} opening in that folder, but Changes, Files and Proof will show the project instead. `
+          : "") +
+        "Nothing on disk is touched; you can pick it again anytime.",
+      confirmLabel: "Forget",
+    });
+    if (!ok) return;
+    try {
+      await ipc.linkedFolderUnlink(f.path);
+      setLinked((prev) => prev.filter((x) => x.path !== f.path));
+      setFolder(null);
+      // A session pointing at it must fall back to the project root now.
+      useSessionStore.getState().bumpCheckout();
+    } catch (e) {
+      useToastStore.getState().show(`Couldn't forget that folder: ${e}`, "error");
+    }
+  };
   const [agent, setAgent] = useState<AgentKind>(lastAgent);
   const [showCustom, setShowCustom] = useState(false);
   const [custom, setCustom] = useState("");
@@ -334,6 +359,15 @@ function AgentModelChooser({
           ))}
           <option value="__pick__">Other folder…</option>
         </select>
+        {folder && (
+          <button
+            className="folder-opt-forget btn btn-ghost"
+            onClick={() => void forgetFolder(folder)}
+            title={`Remove ${folder.name} from this project's folders`}
+          >
+            Forget
+          </button>
+        )}
       </div>
 
       {profile.models.map((p) => (
