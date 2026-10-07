@@ -58,6 +58,7 @@ import type {
   RecentProject,
   RoomSummary,
   RoundtableConfig,
+  ConnectorView,
   RunRecord,
   ShareResult,
   SyncResult,
@@ -436,6 +437,14 @@ export const ipc = {
   roundtableGetRoom: (id: string) => invoke<PersistedRoom | null>("roundtable_get_room", { id }),
   roundtableDeleteRoom: (id: string) => invoke<void>("roundtable_delete_room", { id }),
   roundtableResumeRoom: (id: string) => invoke<string>("roundtable_resume_room", { id }),
+  roundtableConnectorState: (id: string) =>
+    invoke<ConnectorView>("roundtable_connector_state", { id }),
+  roundtableAnswerQuestion: (
+    id: string,
+    questionId: string,
+    body: string,
+    choiceId: string | null,
+  ) => invoke<void>("roundtable_answer_question", { id, questionId, body, choiceId }),
 
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   voiceEnable: () => invoke<VoiceStatus>("voice_enable"),

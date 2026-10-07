@@ -728,6 +728,10 @@ export interface RoundtableParticipant {
   model: string;
   /// Optional role/lens framing ("the skeptic", "the implementer", …).
   role: string;
+  /// Connector roles ("organizer" | "implementer" | "reviewer" | "planner" |
+  /// "consultant"): what this participant can be delegated and whether it may
+  /// record a review. Empty/omitted = plain assistant.
+  roles?: string[];
 }
 
 export interface RoundtableConfig {
@@ -758,6 +762,9 @@ export interface RoundtableTurn {
   isHuman: boolean;
   totalTokens: number;
   costUsd: number;
+  /// Why the connector ran this turn: "delegated" | "return" | "question" |
+  /// "answer"; "" for an ordinary turn or human message.
+  kind: string;
 }
 
 /// A live activity line within a turn, emitted over `roundtable://activity`
@@ -795,6 +802,8 @@ export interface PersistedMessage {
   model: string;
   text: string;
   turn: number;
+  /// See RoundtableTurn.kind. Omitted for rooms saved before the connector.
+  kind?: string;
 }
 
 /// Full saved state of a room — fetched only when one is opened, for read-only
@@ -813,6 +822,81 @@ export interface PersistedRoom {
   allowEdits: boolean;
   totalTokens: number;
   updatedAtMs: number;
+}
+
+// ----- Connector: what agents did through the agent_console MCP server -----
+
+export interface ConnectorTeamMember {
+  id: string;
+  roles: string[];
+}
+
+export interface ConnectorTeam {
+  jobId: string;
+  members: ConnectorTeamMember[];
+  revision: string;
+}
+
+/// A task one agent delegated to another. Stage follows the queue:
+/// queued → executing → ready → delivering → delivered (or delivery_failed / cancelled).
+export interface ConnectorTask {
+  id: string;
+  jobId: string;
+  sender: string;
+  recipient: string;
+  requestKey: string;
+  instructions: string;
+  kind: "task" | "consult" | "discussion" | "review" | "correction";
+  stage:
+    "queued" | "executing" | "ready" | "delivering" | "delivered" | "delivery_failed" | "cancelled";
+  outcome?: "succeeded" | "failed";
+  result?: string;
+  deliveryResult?: string;
+  error?: string;
+  createdMs: number;
+  updatedMs: number;
+}
+
+export interface ConnectorQuestionOption {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface ConnectorAnswer {
+  body: string;
+  choiceId?: string;
+  answeredMs: number;
+  delivered: boolean;
+}
+
+/// An `ask_user` question: the room waits while `status` is "waiting".
+export interface ConnectorQuestion {
+  id: string;
+  jobId: string;
+  sender: string;
+  body: string;
+  options: ConnectorQuestionOption[];
+  status: "waiting" | "answered";
+  answer?: ConnectorAnswer;
+  createdMs: number;
+}
+
+export interface ConnectorReview {
+  id: string;
+  jobId: string;
+  participant: string;
+  revision: string;
+  verdict: "approved" | "changes";
+  body: string;
+  createdMs: number;
+}
+
+export interface ConnectorView {
+  team: ConnectorTeam | null;
+  tasks: ConnectorTask[];
+  questions: ConnectorQuestion[];
+  reviews: ConnectorReview[];
 }
 
 /// Lightweight sidebar entry for a saved room (no transcript).

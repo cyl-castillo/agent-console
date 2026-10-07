@@ -451,20 +451,35 @@ fn write_port_file(port: u16) -> AppResult<()> {
     Ok(())
 }
 
+/// The two things the loopback listener serves. Both are POSTed by our own
+/// bridge binary with the same token; nothing else is routed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    /// UserPromptSubmit memory injection.
+    Inject,
+    /// One relayed MCP `tools/call` from `hook-bridge mcp` (connector).
+    Mcp,
+}
+
 /// Read one request: request line + headers, then exactly the body. Returns
-/// the body for an authenticated `POST /inject` (token header matches
-/// `expected`, JSON content type); anything else is a 404-worth of None.
-/// The content-type gate is the CSRF belt: a browser can fire a cross-origin
-/// POST at loopback, but only as a "simple" request (text/plain, no custom
-/// headers) — which never gets past either check.
-fn read_request(stream: &mut TcpStream, expected_token: &str) -> Option<String> {
+/// the route and body for an authenticated `POST /inject` or `POST /mcp`
+/// (token header matches `expected`, JSON content type); anything else is a
+/// 404-worth of None. The content-type gate is the CSRF belt: a browser can
+/// fire a cross-origin POST at loopback, but only as a "simple" request
+/// (text/plain, no custom headers) — which never gets past either check.
+fn read_request(stream: &mut TcpStream, expected_token: &str) -> Option<(Route, String)> {
     stream.set_read_timeout(Some(READ_TIMEOUT)).ok()?;
     let mut reader = BufReader::new(stream);
     let mut request_line = String::new();
     reader.read_line(&mut request_line).ok()?;
-    let is_inject_post = {
+    let route = {
         let mut parts = request_line.split_whitespace();
-        parts.next() == Some("POST") && parts.next().is_some_and(|p| p.starts_with("/inject"))
+        let is_post = parts.next() == Some("POST");
+        match parts.next() {
+            Some(p) if is_post && p.starts_with("/inject") => Some(Route::Inject),
+            Some(p) if is_post && (p == "/mcp" || p.starts_with("/mcp?")) => Some(Route::Mcp),
+            _ => None,
+        }
     };
     let mut content_length: usize = 0;
     let mut json_body = false;
@@ -493,17 +508,13 @@ fn read_request(stream: &mut TcpStream, expected_token: &str) -> Option<String> 
             authed = token_matches(v, expected_token);
         }
     }
-    if !is_inject_post
-        || !authed
-        || !json_body
-        || content_length == 0
-        || content_length > MAX_BODY_BYTES
-    {
+    let route = route?;
+    if !authed || !json_body || content_length == 0 || content_length > MAX_BODY_BYTES {
         return None;
     }
     let mut body = vec![0u8; content_length];
     reader.read_exact(&mut body).ok()?;
-    String::from_utf8(body).ok()
+    String::from_utf8(body).ok().map(|b| (route, b))
 }
 
 /// Returns whether the body reached the socket — a hook that already gave up
@@ -519,11 +530,44 @@ fn respond_json(stream: &mut TcpStream, body: &str) -> bool {
 /// The empty answer — what every gate and every error collapses to.
 const NOTHING: &str = "{\"context\":null}";
 
+/// Answer one relayed MCP tool call. The shape is the bridge's contract:
+/// `{ok: true, result}` becomes the tool's text content, `{ok: false, error}`
+/// an `isError` result the agent reads — never a transport failure, so a
+/// refused call ("Prototype limit: ten pending tasks") stays actionable.
+fn serve_mcp(stream: &mut TcpStream, app: &tauri::AppHandle, body: &str) {
+    use crate::services::connector_service::{CallError, McpCall};
+    let answer = match serde_json::from_str::<McpCall>(body) {
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("Invalid arguments: {e}") }),
+        Ok(req) => match app.state::<AppState>().connector.call(&req) {
+            Ok(result) => {
+                let _ = app.emit(
+                    "connector://call",
+                    serde_json::json!({
+                        "project": req.project, "job": req.job,
+                        "caller": req.caller, "tool": req.name,
+                    }),
+                );
+                serde_json::json!({ "ok": true, "result": result })
+            }
+            Err(CallError::Tool(m)) => serde_json::json!({ "ok": false, "error": m }),
+            Err(CallError::Io(e)) => {
+                tracing::warn!("connector: {} failed: {e}", req.name);
+                serde_json::json!({ "ok": false, "error": format!("Connector unavailable: {e}") })
+            }
+        },
+    };
+    respond_json(stream, &answer.to_string());
+}
+
 fn serve_connection(stream: &mut TcpStream, app: &tauri::AppHandle) {
-    let Some(body) = read_request(stream, token()) else {
+    let Some((route, body)) = read_request(stream, token()) else {
         respond_json(stream, NOTHING);
         return;
     };
+    if route == Route::Mcp {
+        serve_mcp(stream, app, &body);
+        return;
+    }
     let Ok(req) = serde_json::from_str::<InjectRequest>(&body) else {
         respond_json(stream, NOTHING);
         return;
@@ -1046,7 +1090,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let send = |raw: &str| -> Option<String> {
+        let send = |raw: &str| -> Option<(Route, String)> {
             let raw = raw.to_string();
             let t = std::thread::spawn(move || {
                 let mut c = TcpStream::connect(addr).unwrap();
@@ -1069,13 +1113,24 @@ mod tests {
             "POST /inject HTTP/1.1\r\nHost: l\r\n{auth}Content-Length: {}\r\n\r\n{body}",
             body.len()
         );
-        assert_eq!(send(&good).as_deref(), Some(body));
+        assert_eq!(send(&good), Some((Route::Inject, body.to_string())));
         // Header names are case-insensitive; a charset suffix is still JSON.
         let odd_case = format!(
             "POST /inject HTTP/1.1\r\nx-agent-console-token: sekrit\r\ncontent-type: application/json; charset=utf-8\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         );
-        assert_eq!(send(&odd_case).as_deref(), Some(body));
+        assert_eq!(send(&odd_case), Some((Route::Inject, body.to_string())));
+        // The connector relay shares the listener, token and gates.
+        let mcp = format!(
+            "POST /mcp HTTP/1.1\r\nHost: l\r\n{auth}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        assert_eq!(send(&mcp), Some((Route::Mcp, body.to_string())));
+        let mcp_prefix_only = format!(
+            "POST /mcpx HTTP/1.1\r\nHost: l\r\n{auth}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        assert_eq!(send(&mcp_prefix_only), None);
 
         // Wrong path, wrong method, missing length: all read as None.
         assert_eq!(

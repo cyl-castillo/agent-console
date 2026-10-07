@@ -90,6 +90,78 @@ pub struct RunCtx<'a> {
     /// Where to park the child so the caller can kill it mid-turn. `None`
     /// keeps it private to the runner (nothing can interrupt the turn).
     pub child_slot: Option<&'a ChildSlot>,
+    /// Give the turn the connector's MCP server (`delegate_task`, `ask_user`,
+    /// …) speaking for this participant. `None` = a plain turn, exactly as
+    /// before the connector existed.
+    pub mcp: Option<McpAttach<'a>>,
+}
+
+/// The `agent_console` MCP server a room turn is given: the hook-bridge
+/// binary in `mcp` mode, addressed to one participant of one room. Both CLIs
+/// get the same command line; only the config syntax differs.
+#[derive(Debug, Clone, Copy)]
+pub struct McpAttach<'a> {
+    /// Stable path of the hook-bridge sidecar (`HooksRuntime::bridge_binary`).
+    pub bridge: &'a Path,
+    /// Project root the room belongs to.
+    pub project: &'a str,
+    /// Room id.
+    pub job: &'a str,
+    /// Participant id this server speaks for.
+    pub caller: &'a str,
+}
+
+/// Name both CLIs register the server under; tool names become
+/// `mcp__agent_console__<tool>` on the Claude side.
+pub const MCP_SERVER_NAME: &str = "agent_console";
+
+impl McpAttach<'_> {
+    fn bridge_args(&self) -> [String; 7] {
+        [
+            "mcp".into(),
+            "--project".into(),
+            self.project.into(),
+            "--job".into(),
+            self.job.into(),
+            "--caller".into(),
+            self.caller.into(),
+        ]
+    }
+
+    /// `--mcp-config` takes a path OR an inline JSON document; inline keeps
+    /// the per-turn identity out of the filesystem. The user's own servers
+    /// stay loaded (no `--strict-mcp-config`): a room must not silently lose
+    /// the MCPs the user configured.
+    fn claude_config_json(&self) -> String {
+        serde_json::json!({
+            "mcpServers": {
+                MCP_SERVER_NAME: {
+                    "command": self.bridge.to_string_lossy(),
+                    "args": self.bridge_args(),
+                }
+            }
+        })
+        .to_string()
+    }
+
+    /// Codex `-c` override as a TOML inline table. Strings are emitted with
+    /// JSON escaping, which TOML basic strings accept verbatim — so a Windows
+    /// path with backslashes survives. `default_tools_approval_mode="approve"`
+    /// pre-approves our tools: `exec` is non-interactive and would otherwise
+    /// auto-deny the first `delegate_task`.
+    fn codex_config_override(&self) -> String {
+        let quoted = |s: &str| serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into());
+        let args = self
+            .bridge_args()
+            .iter()
+            .map(|a| quoted(a))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "mcp_servers.{MCP_SERVER_NAME}={{command={},args=[{args}],required=true,default_tools_approval_mode=\"approve\"}}",
+            quoted(&self.bridge.to_string_lossy())
+        )
+    }
 }
 
 /// Normalized result of one turn, regardless of engine.
@@ -164,6 +236,14 @@ fn claude_args(ctx: &RunCtx) -> Vec<String> {
     if let Some(r) = ctx.resume {
         args.push("--resume".into());
         args.push(r.into());
+    }
+    if let Some(mcp) = &ctx.mcp {
+        args.push("--mcp-config".into());
+        args.push(mcp.claude_config_json());
+        // Headless `-p` auto-denies any tool that would need a prompt; the
+        // allow-list is what lets a read-only room turn call `delegate_task`.
+        args.push("--allowedTools".into());
+        args.push(format!("mcp__{MCP_SERVER_NAME}__*"));
     }
     args
 }
@@ -432,6 +512,10 @@ fn codex_exec_args(ctx: &RunCtx) -> Vec<String> {
         }
         _ => {}
     }
+    if let Some(mcp) = &ctx.mcp {
+        args.push("-c".into());
+        args.push(mcp.codex_config_override());
+    }
     // Keep the large, multiline room prompt out of argv. On Windows npm shims
     // are .cmd files, and Rust rejects some batch-file arguments that cannot be
     // escaped safely. `-` asks Codex to read the prompt from stdin instead.
@@ -612,6 +696,7 @@ mod tests {
             prompt: "p",
             resume: None,
             child_slot: None,
+            mcp: None,
         };
         let args = claude_args(&ctx);
         assert!(args.windows(2).any(|w| w == ["--permission-mode", "plan"]));
@@ -636,6 +721,7 @@ mod tests {
             prompt,
             resume: Some("sess-1"),
             child_slot: None,
+            mcp: None,
         };
         let args = claude_args(&ctx);
         assert_eq!(args.first().map(String::as_str), Some("-p"));
@@ -687,6 +773,95 @@ mod tests {
         assert!(unpark(slot).is_ok());
     }
 
+    fn attach<'a>() -> McpAttach<'a> {
+        McpAttach {
+            bridge: Path::new(r"C:\Users\Melissa Ortiz\AppData\bin\hook-bridge.exe"),
+            project: "/home/u/proj",
+            job: "room-42",
+            caller: "p2",
+        }
+    }
+
+    #[test]
+    fn claude_turn_with_connector_registers_the_mcp_server_and_allows_its_tools() {
+        let ctx = RunCtx {
+            cwd: Path::new("."),
+            model: "",
+            tools: ToolPolicy::ReadOnly,
+            prompt: "p",
+            resume: None,
+            child_slot: None,
+            mcp: Some(attach()),
+        };
+        let args = claude_args(&ctx);
+        let i = args.iter().position(|a| a == "--mcp-config").unwrap();
+        let cfg: Value = serde_json::from_str(&args[i + 1]).unwrap();
+        let server = &cfg["mcpServers"]["agent_console"];
+        assert_eq!(
+            server["command"],
+            r"C:\Users\Melissa Ortiz\AppData\bin\hook-bridge.exe"
+        );
+        assert_eq!(
+            server["args"],
+            serde_json::json!([
+                "mcp",
+                "--project",
+                "/home/u/proj",
+                "--job",
+                "room-42",
+                "--caller",
+                "p2"
+            ])
+        );
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--allowedTools", "mcp__agent_console__*"]));
+        // Deliberately NOT strict: the user's own MCP servers stay loaded.
+        assert!(!args.iter().any(|a| a == "--strict-mcp-config"));
+    }
+
+    #[test]
+    fn a_plain_turn_has_no_mcp_flags() {
+        let ctx = RunCtx {
+            cwd: Path::new("."),
+            model: "",
+            tools: ToolPolicy::ReadOnly,
+            prompt: "p",
+            resume: None,
+            child_slot: None,
+            mcp: None,
+        };
+        assert!(!claude_args(&ctx).iter().any(|a| a.contains("mcp")));
+        assert!(!codex_exec_args(&ctx)
+            .iter()
+            .any(|a| a.contains("mcp_servers")));
+    }
+
+    #[test]
+    fn codex_turn_with_connector_passes_a_toml_override_with_escaped_strings() {
+        let ctx = RunCtx {
+            cwd: Path::new("."),
+            model: "",
+            tools: ToolPolicy::ReadOnly,
+            prompt: "p",
+            resume: Some("thread-1"),
+            child_slot: None,
+            mcp: Some(attach()),
+        };
+        let args = codex_exec_args(&ctx);
+        let i = args.iter().position(|a| a == "-c").unwrap();
+        let over = &args[i + 1];
+        assert!(over.starts_with("mcp_servers.agent_console={command="));
+        // Backslashes doubled, space preserved — valid TOML basic string.
+        assert!(over.contains(r#""C:\\Users\\Melissa Ortiz\\AppData\\bin\\hook-bridge.exe""#));
+        assert!(over.contains(
+            r#"args=["mcp","--project","/home/u/proj","--job","room-42","--caller","p2"]"#
+        ));
+        assert!(over.ends_with(r#"required=true,default_tools_approval_mode="approve"}"#));
+        // Still reads the prompt from stdin.
+        assert_eq!(args.last().map(String::as_str), Some("-"));
+    }
+
     #[test]
     fn codex_exec_reads_prompt_from_stdin_for_fresh_turn() {
         let prompt = "Investigate this room turn\nwith symbols like & | < >";
@@ -697,6 +872,7 @@ mod tests {
             prompt,
             resume: None,
             child_slot: None,
+            mcp: None,
         };
         let args = codex_exec_args(&ctx);
 
@@ -715,6 +891,7 @@ mod tests {
             prompt,
             resume: Some("thread-123"),
             child_slot: None,
+            mcp: None,
         };
         let args = codex_exec_args(&ctx);
 
@@ -741,6 +918,7 @@ mod tests {
             prompt: "Reply with exactly: PONG. Nothing else.",
             resume: None,
             child_slot: None,
+            mcp: None,
         };
         let activity_kinds = std::cell::RefCell::new(Vec::<String>::new());
         let sink = |kind: &str, _label: &str, _text: &str| {

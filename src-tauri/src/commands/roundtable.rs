@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::roundtable_service::{
-    PersistedRoom, RoomSummary, RoundtableConfig, ShareResult, SyncResult,
+    self, ConnectorView, PersistedRoom, RoomSummary, RoundtableConfig, ShareResult, SyncResult,
 };
 use crate::state::AppState;
 
@@ -112,7 +112,9 @@ pub fn roundtable_get_room(
 #[tauri::command(async)]
 pub fn roundtable_delete_room(state: State<'_, AppState>, id: String) -> AppResult<()> {
     let root = project_root(&state)?;
-    state.roundtable.rooms().delete_room(&root, &id)
+    state.roundtable.rooms().delete_room(&root, &id)?;
+    // The room's connector records (team, tasks, questions, reviews) go with it.
+    state.connector.forget_job(&root, &id)
 }
 
 /// Rebuild a live run from a saved room so it can be continued (Fase B). Returns
@@ -126,4 +128,32 @@ pub fn roundtable_resume_room(state: State<'_, AppState>, id: String) -> AppResu
         .get(&root, &id)?
         .ok_or_else(|| AppError::NotFound(format!("saved room {id}")))?;
     state.roundtable.restore(PathBuf::from(&root), room)
+}
+
+/// The connector's view of a room: team, delegated tasks, questions to the
+/// human and recorded reviews. Works for live and saved rooms alike (the
+/// connector keys by project root + room id, not by live run).
+#[tauri::command(async)]
+pub fn roundtable_connector_state(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<ConnectorView> {
+    let root = project_root(&state)?;
+    roundtable_service::connector_view(&state.connector, &root, &id)
+}
+
+/// Answer an agent's `ask_user` question: by option id (`choice_id`) or with
+/// free text (`body`). The room resumes with the asker's turn.
+#[tauri::command(async)]
+pub fn roundtable_answer_question(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    question_id: String,
+    body: String,
+    choice_id: Option<String>,
+) -> AppResult<()> {
+    state
+        .roundtable
+        .answer_question(&app, &id, &question_id, &body, choice_id.as_deref())
 }
