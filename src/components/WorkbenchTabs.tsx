@@ -236,6 +236,8 @@ export function WorkbenchSubTabs({
   const meta: Partial<Record<WorkbenchTab, { label: string; count?: number; flagged?: number }>> = {
     jira: { label: "Queue", count: jiraCount },
     agenda: { label: "Agenda" },
+    roundtable: { label: "Room" },
+    jobs: { label: "Jobs" },
     turns: { label: "Turns" },
     proof: { label: "Ledger" },
     skills: { label: "Skills", count: skillsCount },

@@ -37,6 +37,7 @@ import { PermissionsPanel } from "./components/PermissionsPanel";
 import { AdvisorPanel } from "./components/AdvisorPanel";
 import { LearningPanel } from "./components/LearningPanel";
 import { RoundtablePanel } from "./components/RoundtablePanel";
+import { JobsPanel } from "./components/JobsPanel";
 import { SchedulerPanel } from "./components/SchedulerPanel";
 import { VaultPanel } from "./components/VaultPanel";
 import { ContextPanel } from "./components/ContextPanel";
@@ -829,6 +830,7 @@ export default function App() {
                 {workbenchTab === "advisor" && <AdvisorPanel />}
                 {workbenchTab === "learning" && <LearningPanel />}
                 {workbenchTab === "roundtable" && <RoundtablePanel />}
+                {workbenchTab === "jobs" && <JobsPanel />}
                 {workbenchTab === "schedule" && <SchedulerPanel />}
                 {workbenchTab === "vault" && <VaultPanel />}
                 {workbenchTab === "context" && <ContextPanel />}

@@ -574,6 +574,13 @@ impl ConnectorService {
         }
         let job = team.job_id.clone();
         self.mutate(project, |p| {
+            // Re-registering (every driver start) refreshes the roster but must
+            // not reset the revision reviews are recorded against — that made a
+            // continued job re-review work it had already approved.
+            let mut team = team;
+            if let Some(existing) = p.teams.get(&job) {
+                team.revision = existing.revision.clone();
+            }
             p.teams.insert(job, team);
             Ok(())
         })
@@ -1688,6 +1695,12 @@ mod tests {
             .unwrap();
         assert_eq!(r["revision"], "turn-7");
         assert_eq!(svc.reviews(proj, "room-1").unwrap().len(), 2);
+        // Re-registering the team (every driver start) keeps the revision.
+        svc.register_team(proj, team("room-1")).unwrap();
+        assert_eq!(
+            svc.team(proj, "room-1").unwrap().unwrap().revision,
+            "turn-7"
+        );
 
         // Persistence: atomic write, backup, per-project isolation, corrupt
         // main file recovers from .bak, forget_job clears the job.

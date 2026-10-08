@@ -4,7 +4,8 @@ use tauri::{AppHandle, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::roundtable_service::{
-    self, ConnectorView, PersistedRoom, RoomSummary, RoundtableConfig, ShareResult, SyncResult,
+    self, ConnectorView, JobSettings, JobsBoard, PersistedRoom, RoomSummary, RoundtableConfig,
+    ShareResult, SyncResult,
 };
 use crate::state::AppState;
 
@@ -183,4 +184,67 @@ pub fn roundtable_resolve_pending(
         return state.roundtable.spawn_followup(&app, &id, &pending_id);
     }
     state.connector.resolve_pending(&root, &pending_id, None)
+}
+
+// ----- Jobs board (port of ai-connector's job manager) -----
+
+/// The project's jobs board: every job room with its column, plus the
+/// `create_task` proposals awaiting approval.
+#[tauri::command(async)]
+pub fn jobs_board(state: State<'_, AppState>) -> AppResult<JobsBoard> {
+    let root = project_root(&state)?;
+    state.roundtable.jobs_board(&state.connector, &root)
+}
+
+/// Run a queued job now, ahead of the slot limit.
+#[tauri::command(async)]
+pub fn job_start_now(app: AppHandle, state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let root = project_root(&state)?;
+    state.roundtable.start_queued(&app, &root, &id)
+}
+
+/// Continue a job that needs attention (or start it if queued).
+#[tauri::command(async)]
+pub fn job_continue(app: AppHandle, state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let root = project_root(&state)?;
+    state.roundtable.continue_job(&app, &root, &id)
+}
+
+/// Close a job: stop it, free its slot, start the next queued one.
+#[tauri::command(async)]
+pub fn job_close(app: AppHandle, state: State<'_, AppState>, id: String) -> AppResult<()> {
+    let root = project_root(&state)?;
+    state.roundtable.close_job(&app, &root, &id)
+}
+
+/// Reorder the queue: move a queued job one place up (earlier) or down.
+#[tauri::command(async)]
+pub fn job_move(app: AppHandle, state: State<'_, AppState>, id: String, up: bool) -> AppResult<()> {
+    let root = project_root(&state)?;
+    state.roundtable.move_job(&app, &root, &id, up)
+}
+
+/// Jobs of this project that may run at once (1..=8).
+#[tauri::command(async)]
+pub fn jobs_set_parallel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    parallel_jobs: u32,
+) -> AppResult<()> {
+    let root = project_root(&state)?;
+    state
+        .roundtable
+        .set_job_settings(&app, &root, JobSettings { parallel_jobs })
+}
+
+/// Land a job waiting in `awaiting_confirmation`: fast-forward its base branch
+/// to the merged, reviewed job branch and clean up the worktree.
+#[tauri::command(async)]
+pub fn job_confirm_landing(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    let root = project_root(&state)?;
+    state.roundtable.confirm_landing(&app, &root, &id)
 }

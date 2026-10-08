@@ -704,6 +704,7 @@ mod tests {
             updated_at_ms: 7,
             job: None,
             origin_room_id: None,
+            base_branch: None,
         };
         let r = scrub_room(room);
         assert!(r.resume.is_empty(), "engine resume refs must not travel");
@@ -934,6 +935,7 @@ mod tests {
             updated_at_ms: 10,
             job: None,
             origin_room_id: None,
+            base_branch: None,
         };
         state.roundtable.rooms().save_room(&room, &src).unwrap();
 

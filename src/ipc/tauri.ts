@@ -60,6 +60,7 @@ import type {
   RoundtableConfig,
   ConnectorView,
   ConnectorPendingJob,
+  JobsBoard,
   RunRecord,
   ShareResult,
   SyncResult,
@@ -448,6 +449,13 @@ export const ipc = {
   ) => invoke<void>("roundtable_answer_question", { id, questionId, body, choiceId }),
   roundtableResolvePending: (id: string, pendingId: string, approve: boolean) =>
     invoke<ConnectorPendingJob>("roundtable_resolve_pending", { id, pendingId, approve }),
+  jobsBoard: () => invoke<JobsBoard>("jobs_board"),
+  jobStartNow: (id: string) => invoke<void>("job_start_now", { id }),
+  jobContinue: (id: string) => invoke<void>("job_continue", { id }),
+  jobClose: (id: string) => invoke<void>("job_close", { id }),
+  jobMove: (id: string, up: boolean) => invoke<void>("job_move", { id, up }),
+  jobsSetParallel: (parallelJobs: number) => invoke<void>("jobs_set_parallel", { parallelJobs }),
+  jobConfirmLanding: (id: string) => invoke<void>("job_confirm_landing", { id }),
 
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   voiceEnable: () => invoke<VoiceStatus>("voice_enable"),

@@ -755,6 +755,9 @@ export interface RoundtableConfig {
   reviewRequired?: boolean;
   /// Job mode: how many "changes" verdicts the job absorbs before stopping.
   maxCorrections?: number;
+  /// Working-room jobs: "confirm" (default) waits for you to land the merged,
+  /// reviewed branch; "auto" lands by itself.
+  closure?: "confirm" | "auto";
 }
 
 /// Job-mode state persisted with a room.
@@ -933,6 +936,58 @@ export interface ConnectorPendingJob {
   status: "pending_approval" | "approved" | "discarded";
   approvedJobId?: string;
   createdMs: number;
+}
+
+// ----- Jobs board: the project's job queue (port of ai-connector's job manager) -----
+
+export type JobStatus =
+  | "queued"
+  | "running"
+  | "paused"
+  | "needs_attention"
+  | "awaiting_confirmation"
+  | "completed"
+  | "closed";
+
+export type JobColumn = "queued" | "running" | "needs_attention" | "completed" | "closed";
+
+export interface JobCard {
+  id: string;
+  problem: string;
+  participantNames: string[];
+  status: JobStatus;
+  column: JobColumn;
+  reason?: string;
+  phase: string;
+  rank: number;
+  allowEdits: boolean;
+  originRoomId?: string;
+  lastTurn: number;
+  updatedAtMs: number;
+  /// Live in this app session (vs. saved only).
+  live: boolean;
+}
+
+export interface JobPendingCard {
+  pending: ConnectorPendingJob;
+  sourceProblem: string;
+}
+
+export interface JobSettings {
+  parallelJobs: number;
+}
+
+export interface JobsBoard {
+  project: string;
+  settings: JobSettings;
+  cards: JobCard[];
+  pending: JobPendingCard[];
+  busy: number;
+}
+
+/// Emitted over `roundtable://jobs` when a project's board changes.
+export interface JobsChanged {
+  project: string;
 }
 
 export interface ConnectorView {

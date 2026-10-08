@@ -52,6 +52,8 @@ export interface RtDraft {
   reviewRequired: boolean;
   /// Job mode: "changes" verdicts absorbed before the job stops for you.
   maxCorrections: number;
+  /// Working-room jobs: wait for your confirmation before landing (default).
+  confirmLanding: boolean;
 }
 
 const DEFAULT_DRAFT: RtDraft = {
@@ -69,6 +71,7 @@ const DEFAULT_DRAFT: RtDraft = {
   jobMode: false,
   reviewRequired: false,
   maxCorrections: 2,
+  confirmLanding: true,
 };
 
 interface RoundtableState {
@@ -163,6 +166,9 @@ interface RoundtableState {
   answerQuestion: (questionId: string, choiceId: string | null) => Promise<void>;
   /// Approve or discard a task an agent left waiting (`create_task`).
   resolvePending: (pendingId: string, approve: boolean) => Promise<void>;
+  /// Show a job from the board LIVE: load its saved transcript and keep
+  /// listening to its events (unlike openRoom, which freezes read-only).
+  attachRoom: (id: string, status: string) => Promise<void>;
 }
 
 // Promise-singleton so concurrent initListeners() calls (panel mount + start)
@@ -277,6 +283,7 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       jobMode: d.jobMode,
       reviewRequired: d.jobMode && d.reviewRequired,
       maxCorrections: Math.max(0, Math.min(10, d.maxCorrections)),
+      closure: d.confirmLanding ? "confirm" : "auto",
     };
     set({
       turns: [],
@@ -407,10 +414,13 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   },
 
   reset: async () => {
-    const { runId, readOnly } = get();
+    const { runId, readOnly, jobMode } = get();
     // A saved room being viewed lives only on disk — closing it must NOT discard
-    // it. Only a live run's in-memory record is dropped via the backend.
-    if (runId && !readOnly) {
+    // it. Only a live conversation run's in-memory record is dropped via the
+    // backend. A JOB keeps running in the background: the panel merely detaches
+    // (it stays reachable from the Jobs board; Close there ends it). Discarding
+    // here is what closed a running job the moment "+ New job" was pressed.
+    if (runId && !readOnly && !jobMode) {
       try {
         await ipc.roundtableDiscard(runId);
       } catch {
@@ -563,6 +573,28 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
   },
 
   setAnswerDraft: (v) => set({ answerDraft: v }),
+
+  attachRoom: async (id, status) => {
+    await get().openRoom(id);
+    if (get().runId !== id) return;
+    await get().initListeners();
+    const phase: RtPhase =
+      status === "running"
+        ? "running"
+        : status === "paused"
+          ? "paused"
+          : status === "completed"
+            ? "done"
+            : status === "closed"
+              ? "stopped"
+              : "awaiting";
+    set({
+      readOnly: false,
+      phase,
+      liveStartedAt: phase === "running" ? Date.now() : null,
+      lastActivityAt: null,
+    });
+  },
 
   answerQuestion: async (questionId, choiceId) => {
     const id = get().runId;

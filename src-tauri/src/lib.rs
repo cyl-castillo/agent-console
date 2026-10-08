@@ -116,6 +116,9 @@ pub fn run() {
             // hooks the memories relevant to what's being typed. Best-effort —
             // the app works fine without it.
             services::inject_service::start(app.handle().clone());
+            // Jobs left running by a previous session need attention; queued
+            // ones are picked up again. The connector must be up first.
+            state.roundtable.recover_jobs(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -275,6 +278,13 @@ pub fn run() {
             commands::roundtable::roundtable_connector_state,
             commands::roundtable::roundtable_answer_question,
             commands::roundtable::roundtable_resolve_pending,
+            commands::roundtable::jobs_board,
+            commands::roundtable::job_start_now,
+            commands::roundtable::job_continue,
+            commands::roundtable::job_close,
+            commands::roundtable::job_move,
+            commands::roundtable::jobs_set_parallel,
+            commands::roundtable::job_confirm_landing,
             commands::scheduler::scheduler_list,
             commands::scheduler::scheduler_create,
             commands::scheduler::scheduler_update,
