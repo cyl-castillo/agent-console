@@ -187,6 +187,13 @@ const ACTIONS: PaletteAction[] = [
     run: () => emit("ac:open-workbench-tab", "roundtable"),
   },
   {
+    id: "nav.jobs",
+    label: "Open Jobs",
+    hint: "Workbench → Jobs (the project's job board: queue, running, needs attention)",
+    keywords: ["kanban", "board", "queue", "connector", "landing"],
+    run: () => emit("ac:open-workbench-tab", "jobs"),
+  },
+  {
     id: "nav.schedule",
     label: "Open Schedule",
     hint: "Workbench → Schedule (suggest-only agentic jobs)",

@@ -27,6 +27,8 @@ use crate::services::connector_service::{
     TeamMember, Verdict, ROLES,
 };
 use crate::services::engine_runner::McpAttach;
+use crate::services::landing::{self, LandingState, Prepared};
+use crate::services::worktree_service;
 use crate::state::AppState;
 
 use crate::error::{AppError, AppResult};
@@ -96,10 +98,67 @@ pub struct RoundtableConfig {
     /// job approved by the human). Set by the approval, never by the form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_room_id: Option<String>,
+    /// Working-room jobs: how the landing closes. `Confirm` (default) merges
+    /// and reviews, then waits for the human to land; `Auto` lands by itself.
+    #[serde(default)]
+    pub closure: Closure,
 }
 
 fn default_max_corrections() -> u32 {
     2
+}
+
+/// ai-connector's `closure` option.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Closure {
+    #[default]
+    Confirm,
+    Auto,
+}
+
+/// Where a job stands in the project's queue. Port of ai-connector's
+/// `domain/jobs.py` statuses, reduced to the ones a room can be in. A job
+/// holds its project slot while [`JobStatus::is_busy`]; `Queued` waits for one.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStatus {
+    /// Waiting for a project slot (`parallel_jobs` limit).
+    Queued,
+    #[default]
+    Running,
+    Paused,
+    /// Waiting for the human: a question, a blocked review, the turn limit,
+    /// or an interruption. Keeps its slot, like ai-connector's INTERVENTION set.
+    NeedsAttention,
+    /// Work merged and reviewed; waiting for the human to land it (phase 2).
+    AwaitingConfirmation,
+    Completed,
+    /// Stopped or discarded by the human.
+    Closed,
+}
+
+impl JobStatus {
+    /// Holds a project slot. Mirrors `domain/jobs.py::BUSY`.
+    pub fn is_busy(self) -> bool {
+        matches!(
+            self,
+            Self::Running | Self::Paused | Self::NeedsAttention | Self::AwaitingConfirmation
+        )
+    }
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Closed)
+    }
+    /// Kanban column, in ai-connector's grouping.
+    pub fn column(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Paused | Self::NeedsAttention | Self::AwaitingConfirmation => "needs_attention",
+            Self::Completed => "completed",
+            Self::Closed => "closed",
+        }
+    }
 }
 
 /// Live state of a room in job mode.
@@ -110,6 +169,40 @@ struct JobControl {
     kicked_off: AtomicBool,
     /// Whether the job reached its approved end.
     done: AtomicBool,
+    status: Mutex<JobStatus>,
+    /// Why the job needs attention / was closed, for the board card.
+    reason: Mutex<Option<String>>,
+    /// Latest `roundtable://job` phase, for the board card.
+    phase: Mutex<String>,
+    /// Queue order: lower runs first. Defaults to creation time.
+    rank: AtomicU64,
+    closure: Closure,
+    /// Landing progress of a working-room job (`None` until the queue drains).
+    landing: Mutex<Option<LandingState>>,
+    /// The human confirmed the landing (`Closure::Confirm`).
+    land_confirmed: AtomicBool,
+}
+
+impl JobControl {
+    fn from_persisted(j: &PersistedJob) -> Self {
+        Self {
+            closure: j.closure,
+            landing: Mutex::new(j.landing.clone()),
+            land_confirmed: AtomicBool::new(false),
+            review_required: j.review_required,
+            max_corrections: j.max_corrections,
+            kicked_off: AtomicBool::new(j.kicked_off),
+            done: AtomicBool::new(j.done),
+            status: Mutex::new(j.status.unwrap_or(if j.done {
+                JobStatus::Completed
+            } else {
+                JobStatus::Running
+            })),
+            reason: Mutex::new(j.reason.clone()),
+            phase: Mutex::new(j.phase.clone()),
+            rank: AtomicU64::new(j.rank),
+        }
+    }
 }
 
 /// On-disk form of [`JobControl`]; `None` = an ordinary conversation room.
@@ -121,6 +214,50 @@ pub struct PersistedJob {
     pub kicked_off: bool,
     #[serde(default)]
     pub done: bool,
+    /// `None` for rooms saved before the queue existed: derived on load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<JobStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub rank: u64,
+    #[serde(default)]
+    pub closure: Closure,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landing: Option<LandingState>,
+}
+
+/// Per-project queue settings (ai-connector's `parallel_jobs_per_project`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct JobSettings {
+    /// Jobs of one project that may be in progress at once (1..=8).
+    pub parallel_jobs: u32,
+}
+
+impl Default for JobSettings {
+    fn default() -> Self {
+        Self { parallel_jobs: 1 }
+    }
+}
+
+/// Emitted over `roundtable://jobs` whenever a project's board changes
+/// (status, order, settings). Carries only the project: the board refetches.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobsChanged {
+    pub project: String,
+}
+
+fn emit_jobs_changed(app: &AppHandle, project: &str) {
+    let _ = app.emit(
+        "roundtable://jobs",
+        JobsChanged {
+            project: project.to_string(),
+        },
+    );
 }
 
 /// Emitted over `roundtable://job` whenever a job-mode room changes phase.
@@ -289,6 +426,9 @@ struct RunControl {
     job: Option<JobControl>,
     /// The room this one was approved from (follow-up job), if any.
     origin_room_id: Option<String>,
+    /// Working room: the branch the worktree branched off, which a job lands
+    /// back onto. `None` for conversation rooms and rooms saved before it.
+    base_branch: Option<String>,
 }
 
 impl RunControl {
@@ -315,8 +455,15 @@ impl RunControl {
                 max_corrections: j.max_corrections,
                 kicked_off: j.kicked_off.load(Ordering::SeqCst),
                 done: j.done.load(Ordering::SeqCst),
+                status: Some(*j.status.lock()),
+                reason: j.reason.lock().clone(),
+                phase: j.phase.lock().clone(),
+                rank: j.rank.load(Ordering::SeqCst),
+                closure: j.closure,
+                landing: j.landing.lock().clone(),
             }),
             origin_room_id: self.origin_room_id.clone(),
+            base_branch: self.base_branch.clone(),
         }
     }
 }
@@ -373,6 +520,9 @@ pub struct PersistedRoom {
     /// The room this one was approved from (`create_task` follow-up), if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_room_id: Option<String>,
+    /// Working room: the base branch its worktree branched off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
 }
 
 /// Lightweight sidebar entry — everything the room list shows without paying to
@@ -457,6 +607,9 @@ pub struct SyncResult {
 struct RoomsFile {
     #[serde(default)]
     by_project: HashMap<String, Vec<PersistedRoom>>,
+    /// Per-project job queue settings; absent = defaults.
+    #[serde(default)]
+    job_settings: HashMap<String, JobSettings>,
 }
 
 /// Crash-safe, per-project JSON store for rooms — the same atomic write + `.bak`
@@ -579,6 +732,44 @@ impl RoomsStore {
         Ok(())
     }
 
+    pub fn job_settings(&self, project_root: &str) -> AppResult<JobSettings> {
+        let _g = self.lock.lock();
+        Ok(Self::load_file()?
+            .job_settings
+            .get(project_root)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    pub fn set_job_settings(&self, project_root: &str, settings: JobSettings) -> AppResult<()> {
+        if !(1..=8).contains(&settings.parallel_jobs) {
+            return Err(AppError::InvalidArgument(
+                "parallel jobs per project must be between 1 and 8".into(),
+            ));
+        }
+        let _g = self.lock.lock();
+        let mut file = Self::load_file()?;
+        file.job_settings.insert(project_root.to_string(), settings);
+        Self::write_file(&file)
+    }
+
+    /// Every persisted job-mode room, with its project root (for recovery and
+    /// the board). Conversation rooms are skipped.
+    pub fn all_jobs(&self) -> AppResult<Vec<(String, PersistedRoom)>> {
+        let _g = self.lock.lock();
+        let file = Self::load_file()?;
+        Ok(file
+            .by_project
+            .iter()
+            .flat_map(|(project, rooms)| {
+                rooms
+                    .iter()
+                    .filter(|r| r.job.is_some())
+                    .map(move |r| (project.clone(), r.clone()))
+            })
+            .collect())
+    }
+
     /// All persisted rooms for a project, most-recently-updated first.
     fn load_sorted(project_root: &str) -> AppResult<Vec<PersistedRoom>> {
         let file = Self::load_file()?;
@@ -589,6 +780,13 @@ impl RoomsStore {
             .unwrap_or_default();
         rooms.sort_by_key(|r| std::cmp::Reverse(r.updated_at_ms));
         Ok(rooms)
+    }
+
+    /// Full persisted rooms of a project, most-recently-updated first (the
+    /// jobs board needs job state and the last turn, not just the summary).
+    pub fn summaries_full(&self, project_root: &str) -> AppResult<Vec<PersistedRoom>> {
+        let _g = self.lock.lock();
+        Self::load_sorted(project_root)
     }
 
     /// Lightweight summaries for the sidebar, most-recently-updated first.
@@ -709,6 +907,11 @@ impl RoundtableService {
         // turn committed onto `room/<id>` for the human to review and merge. A
         // conversation room runs read-only in the project root itself.
         let mut notice: Option<String> = None;
+        // Remembered BEFORE the worktree exists: it is what a job lands onto.
+        let base_branch = config
+            .allow_edits
+            .then(|| worktree_service::current_branch(&repo).ok())
+            .flatten();
         let (workspace, worktree, branch, tools) = if config.allow_edits {
             let branch = format!("room/{id}");
             let wt = room_worktree_path(&id);
@@ -730,10 +933,14 @@ impl RoundtableService {
             (repo.clone(), None, None, ToolPolicy::ReadOnly)
         };
 
+        // A job takes a project slot or waits in the queue; a conversation room
+        // always runs now (it holds no slot).
+        let run_now = !config.job_mode || self.slot_free(&repo.display().to_string());
+        let has_branch = branch.is_some();
         let control = Arc::new(RunControl {
             paused: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
-            driving: AtomicBool::new(true),
+            driving: AtomicBool::new(run_now),
             turn_no: AtomicU32::new(0),
             target_turns: AtomicU32::new(config.max_turns),
             total_tokens: AtomicU64::new(0),
@@ -760,10 +967,40 @@ impl RoundtableService {
                 max_corrections: config.max_corrections,
                 kicked_off: AtomicBool::new(false),
                 done: AtomicBool::new(false),
+                status: Mutex::new(if run_now {
+                    JobStatus::Running
+                } else {
+                    JobStatus::Queued
+                }),
+                reason: Mutex::new(None),
+                phase: Mutex::new(String::new()),
+                rank: AtomicU64::new(ts),
+                closure: config.closure,
+                landing: Mutex::new(None),
+                land_confirmed: AtomicBool::new(false),
             }),
             origin_room_id: config.origin_room_id,
+            base_branch: if has_branch { base_branch } else { None },
         });
         self.runs.lock().insert(id.clone(), control.clone());
+
+        if control.job.is_some() {
+            // A queued job must survive a restart as queued; a running one is
+            // saved by its first turn anyway, but the board wants it now.
+            autosave(&control, &id);
+            emit_jobs_changed(&app, &control.repo.display().to_string());
+        }
+        if !run_now {
+            emit_status(
+                &app,
+                &id,
+                "awaiting",
+                0,
+                0,
+                Some("Queued — waiting for a free job slot in this project".into()),
+            );
+            return Ok(id);
+        }
 
         let driver_id = id.clone();
         tauri::async_runtime::spawn(async move {
@@ -856,13 +1093,9 @@ impl RoundtableService {
             notice,
             child: ChildSlot::default(),
             last_activity_ms: AtomicU64::new(0),
-            job: room.job.map(|j| JobControl {
-                review_required: j.review_required,
-                max_corrections: j.max_corrections,
-                kicked_off: AtomicBool::new(j.kicked_off),
-                done: AtomicBool::new(j.done),
-            }),
+            job: room.job.as_ref().map(JobControl::from_persisted),
             origin_room_id: room.origin_room_id,
+            base_branch: room.base_branch,
         });
         self.runs.lock().insert(id.clone(), control);
         Ok(id)
@@ -920,6 +1153,19 @@ impl RoundtableService {
         self.with_run(id, |c| c.paused.store(false, Ordering::SeqCst))
     }
 
+    /// The job's status changed: record it on the live run, persist, and tell
+    /// the board. No-op for conversation rooms.
+    fn set_job_status(
+        &self,
+        app: &AppHandle,
+        id: &str,
+        control: &RunControl,
+        status: JobStatus,
+        reason: Option<String>,
+    ) {
+        set_job_status(app, id, control, status, reason);
+    }
+
     /// Post a human message into the shared transcript. It appears in the feed
     /// immediately and every agent sees it on its next turn.
     pub fn inject(&self, app: &AppHandle, id: &str, message: String) -> AppResult<()> {
@@ -963,6 +1209,41 @@ impl RoundtableService {
             // Stop means now: the turn in flight dies with its process.
             engine_runner::kill_parked(&c.child);
         }
+        Ok(())
+    }
+
+    /// Close a job from the board: stop it if live, mark it `Closed` (persisted),
+    /// free its slot and start the next queued job. A saved-only job is marked
+    /// closed on disk.
+    pub fn close_job(&self, app: &AppHandle, project: &str, id: &str) -> AppResult<()> {
+        let live = self.runs.lock().get(id).cloned();
+        match live {
+            Some(c) => {
+                c.stopped.store(true, Ordering::SeqCst);
+                engine_runner::kill_parked(&c.child);
+                self.set_job_status(
+                    app,
+                    id,
+                    &c,
+                    JobStatus::Closed,
+                    Some("Closed by the user".into()),
+                );
+            }
+            None => {
+                let mut room = self
+                    .rooms
+                    .get(project, id)?
+                    .ok_or_else(|| AppError::NotFound(format!("room {id}")))?;
+                if let Some(j) = room.job.as_mut() {
+                    j.status = Some(JobStatus::Closed);
+                    j.reason = Some("Closed by the user".into());
+                    room.updated_at_ms = now_ms();
+                    self.rooms.save_room(&room, Path::new(project))?;
+                }
+                emit_jobs_changed(app, project);
+            }
+        }
+        self.dispatch_next(app, project);
         Ok(())
     }
 
@@ -1116,6 +1397,9 @@ enum DriveEnd {
     /// Job mode: the job cannot continue on its own (correction limit, no
     /// verdict recorded, no reviewer). The human steers and continues.
     Blocked(String),
+    /// Job mode, working room with `Closure::Confirm`: merged and reviewed,
+    /// waiting for the human to land it.
+    AwaitingLanding(String),
 }
 
 /// The orchestration loop: round-robin over participants until the turn target,
@@ -1138,6 +1422,9 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         }
         state.hooks.bridge_binary().map(Path::to_path_buf)
     };
+    if control.job.is_some() {
+        set_job_status(&app, &id, &control, JobStatus::Running, None);
+    }
     // Carry the one-time room notice (e.g. "running read-only") on the first status
     // so it surfaces as the feed banner; later running emits pass None and the
     // frontend keeps the last message.
@@ -1166,12 +1453,20 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         if control.stopped.load(Ordering::SeqCst) {
             break DriveEnd::Stopped;
         }
+        if control.paused.load(Ordering::SeqCst) && control.job.is_some() {
+            set_job_status(&app, &id, &control, JobStatus::Paused, None);
+        }
         while control.paused.load(Ordering::SeqCst) && !control.stopped.load(Ordering::SeqCst) {
             emit_status(&app, &id, "paused", turn, total_tokens, None);
             tokio::time::sleep(Duration::from_millis(400)).await;
         }
         if control.stopped.load(Ordering::SeqCst) {
             break DriveEnd::Stopped;
+        }
+        if control.job.is_some()
+            && *control.job.as_ref().unwrap().status.lock() != JobStatus::Running
+        {
+            set_job_status(&app, &id, &control, JobStatus::Running, None);
         }
         // What the connector wants to happen before the round-robin resumes: a
         // pending question stops the room for the human; an answered one, a
@@ -1196,51 +1491,203 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                 plan = TurnPlan::Kickoff;
             } else if plan == TurnPlan::RoundRobin {
                 // The queue drained: review and close instead of chatting on.
-                let (team, reviews) = {
+                let (team, mut reviews) = {
                     let state = app.state::<AppState>();
                     (
                         state.connector.team(&project, &id).ok().flatten(),
                         state.connector.reviews(&project, &id).unwrap_or_default(),
                     )
                 };
-                let revision = team
+                let mut revision = team
                     .as_ref()
                     .map(|t| t.revision.clone())
                     .unwrap_or_else(|| "initial".into());
                 let transcript = control.transcript.lock().clone();
-                match settle_job(
-                    job,
-                    &revision,
-                    &control.participants,
-                    &reviews,
-                    &tasks,
-                    &transcript,
-                ) {
-                    Settle::Done => {
-                        job.done.store(true, Ordering::SeqCst);
-                        let msg = if control.allow_edits {
-                            format!(
+                // Working room with a known base: bring the base in BEFORE the
+                // review, so the reviewer judges the merged tree (ai-connector
+                // runs `landing.prepare` ahead of `settle_result`'s review).
+                let lands = control.worktree.is_some() && control.base_branch.is_some();
+                if lands {
+                    let project_lock = landing::lock(&project);
+                    let _g = project_lock.lock();
+                    let mut state = job.landing.lock().clone().unwrap_or_else(|| {
+                        LandingState::new(
+                            control.base_branch.as_deref().unwrap_or_default(),
+                            control.branch.as_deref().unwrap_or_default(),
+                            control.worktree.as_deref().unwrap_or(Path::new("")),
+                        )
+                    });
+                    let needs_prepare = !state.landed
+                        && (state.synced.is_none()
+                            || state.phase_revision != revision
+                            || !state.conflicts.is_empty());
+                    if needs_prepare {
+                        let prepared = landing::prepare(
+                            &control.repo,
+                            &mut state,
+                            &format!("room {id} · landing checkpoint"),
+                        );
+                        match prepared {
+                            Err(e) => {
+                                *job.landing.lock() = Some(state);
+                                break DriveEnd::Blocked(e.0);
+                            }
+                            Ok(Prepared::Conflicts(files)) => {
+                                if state.resolutions >= job.max_corrections {
+                                    *job.landing.lock() = Some(state.clone());
+                                    break DriveEnd::Blocked(format!(
+                                        "Conflicts remain in: {}. Resolve them in {}, then continue",
+                                        files.join(", "),
+                                        state.path
+                                    ));
+                                }
+                                state.resolutions += 1;
+                                let implementer = transcript
+                                    .iter()
+                                    .rev()
+                                    .filter(|m| {
+                                        matches!(
+                                            m.kind.as_str(),
+                                            "delegated" | "kickoff" | "correction" | "conflicts"
+                                        )
+                                    })
+                                    .filter_map(|m| by_id(&control.participants, &m.author_id))
+                                    .find(can_implement)
+                                    .or_else(|| organizer_of(&control.participants))
+                                    .map(|p| p.id);
+                                let Some(implementer) = implementer else {
+                                    *job.landing.lock() = Some(state.clone());
+                                    break DriveEnd::Blocked(format!(
+                                        "No participant able to implement is available to resolve the conflicts. Resolve them in {}, then continue",
+                                        state.path
+                                    ));
+                                };
+                                *job.landing.lock() = Some(state.clone());
+                                autosave(&control, &id);
+                                plan = TurnPlan::ResolveConflicts {
+                                    files,
+                                    implementer,
+                                    path: state.path.clone(),
+                                    base_branch: state.base_branch.clone(),
+                                };
+                            }
+                            Ok(Prepared::Ready { new_commit }) => {
+                                if new_commit {
+                                    // The merge changed the tree: whatever was
+                                    // reviewed before is stale.
+                                    revision = format!("land-t{turn}");
+                                    let _ = app
+                                        .state::<AppState>()
+                                        .connector
+                                        .set_revision(&project, &id, &revision);
+                                    reviews = app
+                                        .state::<AppState>()
+                                        .connector
+                                        .reviews(&project, &id)
+                                        .unwrap_or_default();
+                                }
+                                state.phase_revision = revision.clone();
+                                *job.landing.lock() = Some(state);
+                                autosave(&control, &id);
+                            }
+                        }
+                    }
+                }
+                if !matches!(plan, TurnPlan::ResolveConflicts { .. }) {
+                    match settle_job(
+                        job,
+                        &revision,
+                        &control.participants,
+                        &reviews,
+                        &tasks,
+                        &transcript,
+                    ) {
+                        Settle::Done if lands => {
+                            // Finalize: land now (auto / confirmed) or wait for the human.
+                            let project_lock = landing::lock(&project);
+                            let _g = project_lock.lock();
+                            let mut state = job.landing.lock().clone().unwrap_or_else(|| {
+                                LandingState::new(
+                                    control.base_branch.as_deref().unwrap_or_default(),
+                                    control.branch.as_deref().unwrap_or_default(),
+                                    control.worktree.as_deref().unwrap_or(Path::new("")),
+                                )
+                            });
+                            let base = state.base_branch.clone();
+                            if state.landed {
+                                job.done.store(true, Ordering::SeqCst);
+                                break DriveEnd::JobDone(format!(
+                                    "Job completed — landed on {base}."
+                                ));
+                            }
+                            if job.closure == Closure::Auto
+                                || job.land_confirmed.load(Ordering::SeqCst)
+                            {
+                                match landing::land(&control.repo, &state) {
+                                    Ok(true) => {
+                                        if let Err(e) =
+                                            landing::cleanup_landed(&control.repo, &state)
+                                        {
+                                            tracing::warn!(
+                                                "jobs: landed but cleanup failed for {id}: {e}"
+                                            );
+                                        }
+                                        state.landed = true;
+                                        *job.landing.lock() = Some(state);
+                                        job.done.store(true, Ordering::SeqCst);
+                                        break DriveEnd::JobDone(format!(
+                                        "Job completed — landed on {base}; worktree and branch cleaned up."
+                                    ));
+                                    }
+                                    Ok(false) => {
+                                        state.rounds += 1;
+                                        if state.rounds > landing::MAX_ROUNDS {
+                                            *job.landing.lock() = Some(state);
+                                            break DriveEnd::Blocked(
+                                            "The base branch changed too many times while landing; continue to try again".into(),
+                                        );
+                                        }
+                                        state.synced = None;
+                                        *job.landing.lock() = Some(state);
+                                        autosave(&control, &id);
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        *job.landing.lock() = Some(state);
+                                        break DriveEnd::Blocked(e.0);
+                                    }
+                                }
+                            }
+                            *job.landing.lock() = Some(state);
+                            break DriveEnd::AwaitingLanding(format!(
+                            "Merged with {base} and reviewed — confirm to land it, or add a message to keep working."
+                        ));
+                        }
+                        Settle::Done => {
+                            job.done.store(true, Ordering::SeqCst);
+                            let msg = if control.allow_edits {
+                                format!(
                                 "Job completed — review and merge the room/{id} branch when ready."
                             )
-                        } else {
-                            "Job completed.".to_string()
-                        };
-                        break DriveEnd::JobDone(msg);
-                    }
-                    Settle::Blocked(msg) => break DriveEnd::Blocked(msg),
-                    Settle::Review { reviewer, result } => {
-                        plan = TurnPlan::Review { reviewer, result };
-                    }
-                    Settle::Correction {
-                        reviewer,
-                        implementer,
-                        review_id,
-                        body,
-                    } => {
-                        // The reviewer hands the findings to the implementer as a
-                        // correction task; the next pass runs it, then returns to
-                        // the reviewer, then re-reviews the new revision.
-                        let created = app.state::<AppState>().connector.delegate(
+                            } else {
+                                "Job completed.".to_string()
+                            };
+                            break DriveEnd::JobDone(msg);
+                        }
+                        Settle::Blocked(msg) => break DriveEnd::Blocked(msg),
+                        Settle::Review { reviewer, result } => {
+                            plan = TurnPlan::Review { reviewer, result };
+                        }
+                        Settle::Correction {
+                            reviewer,
+                            implementer,
+                            review_id,
+                            body,
+                        } => {
+                            // The reviewer hands the findings to the implementer as a
+                            // correction task; the next pass runs it, then returns to
+                            // the reviewer, then re-reviews the new revision.
+                            let created = app.state::<AppState>().connector.delegate(
                             &project,
                             &id,
                             &reviewer,
@@ -1251,13 +1698,14 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                             &format!("correction-{review_id}"),
                             TaskKind::Correction,
                         );
-                        if let Err(e) = created {
-                            break DriveEnd::Blocked(format!(
-                                "Could not queue the correction: {}",
-                                e.message()
-                            ));
+                            if let Err(e) = created {
+                                break DriveEnd::Blocked(format!(
+                                    "Could not queue the correction: {}",
+                                    e.message()
+                                ));
+                            }
+                            continue;
                         }
-                        continue;
                     }
                 }
             }
@@ -1267,6 +1715,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
         if let Some(job) = &control.job {
             let phase = match &plan {
                 TurnPlan::Kickoff => "kick-off",
+                TurnPlan::ResolveConflicts { .. } => "resolving conflicts",
                 TurnPlan::Review { .. } => "reviewing",
                 TurnPlan::Delegated(t) => match t.kind {
                     TaskKind::Correction => "correcting",
@@ -1284,6 +1733,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                 .filter(|r| r.verdict == Verdict::Changes)
                 .count() as u32;
             emit_job(&app, &id, phase, corrections, job.max_corrections);
+            *job.phase.lock() = phase.to_string();
         }
 
         let round_robin = control.participants[((turn - 1) as usize) % n].clone();
@@ -1293,6 +1743,9 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             TurnPlan::Delegated(t) => by_id(&control.participants, &t.recipient),
             TurnPlan::Kickoff => organizer_of(&control.participants),
             TurnPlan::Review { reviewer, .. } => by_id(&control.participants, reviewer),
+            TurnPlan::ResolveConflicts { implementer, .. } => {
+                by_id(&control.participants, implementer)
+            }
             TurnPlan::RoundRobin => None,
         }
         .unwrap_or(round_robin);
@@ -1516,11 +1969,19 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                         job.kicked_off.store(true, Ordering::SeqCst);
                     }
                 }
-                TurnPlan::Review { .. } | TurnPlan::RoundRobin => {}
+                TurnPlan::Review { .. }
+                | TurnPlan::ResolveConflicts { .. }
+                | TurnPlan::RoundRobin => {}
             }
-            // A new revision after any turn that may have changed the work: an
-            // implementation turn in a job, or any turn of a working room.
-            if control.worktree.is_some() || (control.job.is_some() && plan.is_implementation()) {
+            // A new revision after any turn that may have changed the work: in a
+            // job only implementation turns count (a review or return turn must
+            // NOT invalidate the verdict it just recorded); in a conversation
+            // working room, every turn.
+            let bump = match &control.job {
+                Some(_) => plan.is_implementation(),
+                None => control.worktree.is_some(),
+            };
+            if bump {
                 let _ = state
                     .connector
                     .set_revision(&project, &id, &format!("t{turn}"));
@@ -1591,6 +2052,42 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
     // racing the status can re-acquire and respawn cleanly.
     control.driving.store(false, Ordering::SeqCst);
     let turn = control.turn_no.load(Ordering::SeqCst);
+    if control.job.is_some() {
+        let (status, reason) = match &end {
+            DriveEnd::Awaiting => (
+                JobStatus::NeedsAttention,
+                Some("Reached the turn limit — add a message or continue".to_string()),
+            ),
+            DriveEnd::DoneBudget => (
+                JobStatus::NeedsAttention,
+                Some("Hit the token budget — continue to grant another window".to_string()),
+            ),
+            DriveEnd::Stopped => (JobStatus::Closed, Some("Stopped by the user".to_string())),
+            DriveEnd::Errored => (
+                JobStatus::NeedsAttention,
+                Some("A turn failed — see the room banner".to_string()),
+            ),
+            DriveEnd::WaitingUser(q) => (
+                JobStatus::NeedsAttention,
+                Some(format!(
+                    "Waiting for your answer: {}",
+                    engine_runner::truncate(&q.body, 120)
+                )),
+            ),
+            DriveEnd::JobDone(_) => (JobStatus::Completed, None),
+            DriveEnd::Blocked(msg) => (JobStatus::NeedsAttention, Some(msg.clone())),
+            DriveEnd::AwaitingLanding(msg) => (JobStatus::AwaitingConfirmation, Some(msg.clone())),
+        };
+        // A continue that re-acquired the driver in the release window keeps running.
+        if !control.driving.load(Ordering::SeqCst) || status.is_terminal() {
+            set_job_status(&app, &id, &control, status, reason);
+        }
+        if status.is_terminal() {
+            app.state::<AppState>()
+                .roundtable
+                .dispatch_next(&app, &project);
+        }
+    }
     match end {
         DriveEnd::Awaiting => {
             // If a `continue_run` re-acquired the driver (driving flipped back to
@@ -1641,6 +2138,15 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             if !control.driving.load(Ordering::SeqCst) {
                 if let Some(job) = &control.job {
                     emit_job(&app, &id, "blocked", 0, job.max_corrections);
+                }
+                emit_status(&app, &id, "awaiting", turn, total_tokens, Some(msg));
+            }
+        }
+        DriveEnd::AwaitingLanding(msg) => {
+            autosave(&control, &id);
+            if !control.driving.load(Ordering::SeqCst) {
+                if let Some(job) = &control.job {
+                    emit_job(&app, &id, "awaiting_confirmation", 0, job.max_corrections);
                 }
                 emit_status(&app, &id, "awaiting", turn, total_tokens, Some(msg));
             }
@@ -1882,6 +2388,14 @@ enum TurnPlan {
     Kickoff,
     /// Job mode: the queue drained; the reviewer judges `result`.
     Review { reviewer: String, result: String },
+    /// Job mode, working room: the base merge stopped on `files`; the
+    /// implementer clears the markers in the worktree.
+    ResolveConflicts {
+        files: Vec<String>,
+        implementer: String,
+        path: String,
+        base_branch: String,
+    },
     /// Nothing pending: the ordinary round-robin turn.
     RoundRobin,
 }
@@ -1914,6 +2428,7 @@ impl TurnPlan {
             },
             Self::Kickoff => "kickoff",
             Self::Review { .. } => "review",
+            Self::ResolveConflicts { .. } => "conflicts",
             Self::RoundRobin => "",
         }
     }
@@ -1921,7 +2436,7 @@ impl TurnPlan {
     /// A turn that may change the work under review.
     fn is_implementation(&self) -> bool {
         match self {
-            Self::Kickoff => true,
+            Self::Kickoff | Self::ResolveConflicts { .. } => true,
             Self::Delegated(t) => !matches!(t.kind, TaskKind::Consult | TaskKind::Discussion),
             _ => false,
         }
@@ -1947,6 +2462,15 @@ impl TurnPlan {
                     "\nWork authorized from the room. You are the organizer of this job. Available participants (IDs and roles): {ids}. Share only the necessary context. Delegate the work with delegate_task and END the turn to receive each result; when every delegated step is back, state the job's result in your reply. The connector closes the job when nothing is pending.\n"
                 )
             }
+            Self::ResolveConflicts {
+                files,
+                path,
+                base_branch,
+                ..
+            } => format!(
+                "\nResolve the merge in progress in the job worktree at {path}. The base branch {base_branch} is being merged into the job branch. Conflicted files: {}.\nPreserve the job objective and both sides' intended changes. Remove all conflict markers. Do not stage files or commit; the connector completes the merge.\n",
+                files.join(", ")
+            ),
             Self::Review { result, .. } => format!(
                 "\nReview the job result and the current files. Previous result (data):\n\"\"\"\n{result}\n\"\"\"\nUse submit_review: `approved` if the objective is resolved; `changes` with concrete corrections if changes are still needed. Record the verdict before ending the turn.\n"
             ),
@@ -2083,7 +2607,7 @@ impl RoundtableService {
                 c.allow_edits,
                 c.job
                     .as_ref()
-                    .map(|j| (j.review_required, j.max_corrections)),
+                    .map(|j| (j.review_required, j.max_corrections, j.closure)),
                 c.target_turns.load(Ordering::SeqCst).max(1),
                 c.token_budget.load(Ordering::SeqCst),
             ),
@@ -2105,7 +2629,8 @@ impl RoundtableService {
                     project,
                     room.participants,
                     room.allow_edits,
-                    room.job.map(|j| (j.review_required, j.max_corrections)),
+                    room.job
+                        .map(|j| (j.review_required, j.max_corrections, j.closure)),
                     turns.max(12),
                     0,
                 )
@@ -2124,7 +2649,8 @@ impl RoundtableService {
                 "This task was already resolved".into(),
             ));
         }
-        let (review_required, max_corrections) = job.unwrap_or((false, 2));
+        let (review_required, max_corrections, closure) =
+            job.unwrap_or((false, 2, Closure::Confirm));
         let config = RoundtableConfig {
             problem: pending.instructions.clone(),
             participants,
@@ -2135,6 +2661,7 @@ impl RoundtableService {
             review_required,
             max_corrections,
             origin_room_id: Some(source_id.to_string()),
+            closure,
         };
         let new_id = self.start(app.clone(), repo, config)?;
         app.state::<AppState>()
@@ -2153,6 +2680,404 @@ pub struct ConnectorView {
     pub reviews: Vec<Review>,
     #[serde(default)]
     pub pending_jobs: Vec<PendingJob>,
+}
+
+/// Record a job's status on its live run, persist it and notify the board.
+fn set_job_status(
+    app: &AppHandle,
+    id: &str,
+    control: &RunControl,
+    status: JobStatus,
+    reason: Option<String>,
+) {
+    let Some(job) = &control.job else { return };
+    {
+        let mut current = job.status.lock();
+        let mut current_reason = job.reason.lock();
+        if *current == status && *current_reason == reason {
+            return;
+        }
+        *current = status;
+        *current_reason = reason;
+    }
+    autosave(control, id);
+    emit_jobs_changed(app, &control.repo.display().to_string());
+}
+
+// ---------------------------------------------------------------------------
+// Job queue and board — port of ai-connector's job manager, on rooms
+// ---------------------------------------------------------------------------
+
+/// One card on the jobs board.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobCard {
+    pub id: String,
+    pub problem: String,
+    pub participant_names: Vec<String>,
+    pub status: JobStatus,
+    /// Kanban column: queued | running | needs_attention | completed | closed.
+    pub column: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub phase: String,
+    pub rank: u64,
+    pub allow_edits: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin_room_id: Option<String>,
+    pub last_turn: u32,
+    pub updated_at_ms: u64,
+    /// Whether the job is live in this app session (vs. saved only).
+    pub live: bool,
+}
+
+/// A `create_task` proposal shown in the board's first column.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingCard {
+    pub pending: PendingJob,
+    pub source_problem: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobsBoard {
+    pub project: String,
+    pub settings: JobSettings,
+    pub cards: Vec<JobCard>,
+    pub pending: Vec<PendingCard>,
+    /// Busy jobs vs. the slot limit, for the board header.
+    pub busy: u32,
+}
+
+/// Pick the next job to start: the lowest rank among the queued ones.
+fn next_queued(cards: &[JobCard]) -> Option<String> {
+    cards
+        .iter()
+        .filter(|c| c.status == JobStatus::Queued)
+        .min_by_key(|c| (c.rank, c.updated_at_ms))
+        .map(|c| c.id.clone())
+}
+
+impl RoundtableService {
+    /// Jobs of `project` holding a slot right now (live runs only — a saved
+    /// job without a driver holds nothing).
+    fn busy_jobs(&self, project: &str) -> u32 {
+        self.runs
+            .lock()
+            .values()
+            .filter(|c| c.repo.display().to_string() == project)
+            .filter(|c| c.job.as_ref().is_some_and(|j| j.status.lock().is_busy()))
+            .count() as u32
+    }
+
+    fn slot_free(&self, project: &str) -> bool {
+        let limit = self
+            .rooms
+            .job_settings(project)
+            .map(|s| s.parallel_jobs)
+            .unwrap_or(1);
+        self.busy_jobs(project) < limit
+    }
+
+    /// The board for one project: persisted jobs overlaid with live state,
+    /// plus every `create_task` proposal still awaiting approval.
+    pub fn jobs_board(&self, connector: &ConnectorService, project: &str) -> AppResult<JobsBoard> {
+        let runs = self.runs.lock().clone();
+        let mut cards: Vec<JobCard> = Vec::new();
+        let mut pending: Vec<PendingCard> = Vec::new();
+        for room in self.rooms.summaries_full(project)? {
+            let Some(job) = &room.job else { continue };
+            let live = runs.get(&room.id);
+            let (status, reason, phase, rank) = match live.and_then(|c| c.job.as_ref()) {
+                Some(j) => (
+                    *j.status.lock(),
+                    j.reason.lock().clone(),
+                    j.phase.lock().clone(),
+                    j.rank.load(Ordering::SeqCst),
+                ),
+                None => {
+                    // Saved only: a "running" record with no driver was interrupted.
+                    let saved = job.status.unwrap_or(if job.done {
+                        JobStatus::Completed
+                    } else {
+                        JobStatus::Running
+                    });
+                    let status = if saved == JobStatus::Running {
+                        JobStatus::NeedsAttention
+                    } else {
+                        saved
+                    };
+                    let reason = if saved == JobStatus::Running {
+                        Some(
+                            "Interrupted — the app was closed while it ran; continue to resume"
+                                .into(),
+                        )
+                    } else {
+                        job.reason.clone()
+                    };
+                    (status, reason, job.phase.clone(), job.rank)
+                }
+            };
+            cards.push(JobCard {
+                id: room.id.clone(),
+                problem: room.problem.clone(),
+                participant_names: room.participants.iter().map(|p| p.name.clone()).collect(),
+                status,
+                column: status.column().into(),
+                reason,
+                phase,
+                rank: if rank == 0 { room.updated_at_ms } else { rank },
+                allow_edits: room.allow_edits,
+                origin_room_id: room.origin_room_id.clone(),
+                last_turn: room.transcript.iter().map(|m| m.turn).max().unwrap_or(0),
+                updated_at_ms: room.updated_at_ms,
+                live: live.is_some(),
+            });
+            for pj in connector.pending_jobs(project, &room.id)? {
+                if pj.status == crate::services::connector_service::PendingStatus::PendingApproval {
+                    pending.push(PendingCard {
+                        pending: pj,
+                        source_problem: room.problem.clone(),
+                    });
+                }
+            }
+        }
+        cards.sort_by_key(|c| (c.rank, c.updated_at_ms));
+        Ok(JobsBoard {
+            project: project.to_string(),
+            settings: self.rooms.job_settings(project)?,
+            busy: self.busy_jobs(project),
+            cards,
+            pending,
+        })
+    }
+
+    /// Start the next queued job of `project` if a slot is free. Called when a
+    /// job completes or closes, when the limit is raised, and at startup.
+    pub fn dispatch_next(&self, app: &AppHandle, project: &str) {
+        let Ok(board) = self.jobs_board(&app.state::<AppState>().connector, project) else {
+            return;
+        };
+        if !self.slot_free(project) {
+            return;
+        }
+        let Some(id) = next_queued(&board.cards) else {
+            return;
+        };
+        if let Err(e) = self.start_queued(app, project, &id) {
+            tracing::warn!("jobs: could not start queued job {id}: {e}");
+        }
+    }
+
+    /// Run a queued job now (the board's "start now", or the dispatcher).
+    /// Restores a saved-only queued job first. Ignores the slot limit on an
+    /// explicit start — the human asked.
+    pub fn start_queued(&self, app: &AppHandle, project: &str, id: &str) -> AppResult<()> {
+        if self.runs.lock().get(id).is_none() {
+            let room = self
+                .rooms
+                .get(project, id)?
+                .ok_or_else(|| AppError::NotFound(format!("room {id}")))?;
+            self.restore(PathBuf::from(project), room)?;
+        }
+        let control = self
+            .runs
+            .lock()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
+        let Some(job) = &control.job else {
+            return Err(AppError::InvalidArgument("not a job room".into()));
+        };
+        if *job.status.lock() != JobStatus::Queued {
+            return Err(AppError::InvalidArgument("the job is not queued".into()));
+        }
+        // A queued job created in this session has target_turns = max_turns and
+        // turn_no 0; a restored one has target == last turn. Give it room.
+        let base = control.turn_no.load(Ordering::SeqCst);
+        if control.target_turns.load(Ordering::SeqCst) <= base {
+            control.target_turns.store(base + 12, Ordering::SeqCst);
+        }
+        control.paused.store(false, Ordering::SeqCst);
+        if control
+            .driving
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            self.set_job_status(app, id, &control, JobStatus::Running, None);
+            let app = app.clone();
+            let id = id.to_string();
+            tauri::async_runtime::spawn(async move {
+                drive(app, id, control).await;
+            });
+        }
+        Ok(())
+    }
+
+    /// Continue a job that needs attention from the board: restore it if saved
+    /// only, then run more turns (the room's own Continue).
+    pub fn continue_job(&self, app: &AppHandle, project: &str, id: &str) -> AppResult<()> {
+        if self.runs.lock().get(id).is_none() {
+            let room = self
+                .rooms
+                .get(project, id)?
+                .ok_or_else(|| AppError::NotFound(format!("room {id}")))?;
+            self.restore(PathBuf::from(project), room)?;
+        }
+        let is_queued = self
+            .runs
+            .lock()
+            .get(id)
+            .and_then(|c| {
+                c.job
+                    .as_ref()
+                    .map(|j| *j.status.lock() == JobStatus::Queued)
+            })
+            .unwrap_or(false);
+        if is_queued {
+            return self.start_queued(app, project, id);
+        }
+        self.continue_run(app, id, 6)
+    }
+
+    /// The human confirms a `Closure::Confirm` landing: the driver lands on
+    /// its next pass (re-merging first if the base moved).
+    pub fn confirm_landing(&self, app: &AppHandle, project: &str, id: &str) -> AppResult<()> {
+        if self.runs.lock().get(id).is_none() {
+            let room = self
+                .rooms
+                .get(project, id)?
+                .ok_or_else(|| AppError::NotFound(format!("room {id}")))?;
+            self.restore(PathBuf::from(project), room)?;
+        }
+        let control = self
+            .runs
+            .lock()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("roundtable {id}")))?;
+        let Some(job) = &control.job else {
+            return Err(AppError::InvalidArgument("not a job room".into()));
+        };
+        if *job.status.lock() != JobStatus::AwaitingConfirmation {
+            return Err(AppError::InvalidArgument(
+                "the job is not waiting for a landing confirmation".into(),
+            ));
+        }
+        job.land_confirmed.store(true, Ordering::SeqCst);
+        // One turn of headroom: the landing pass itself consumes none, but the
+        // loop's target check runs first.
+        self.continue_run(app, id, 1)
+    }
+
+    /// Move a queued job one place up (earlier) or down in the queue by
+    /// swapping ranks with its neighbour. Persisted through autosave / save_room.
+    pub fn move_job(&self, app: &AppHandle, project: &str, id: &str, up: bool) -> AppResult<()> {
+        let board = self.jobs_board(&app.state::<AppState>().connector, project)?;
+        let queued: Vec<&JobCard> = board
+            .cards
+            .iter()
+            .filter(|c| c.status == JobStatus::Queued)
+            .collect();
+        let Some(pos) = queued.iter().position(|c| c.id == id) else {
+            return Err(AppError::InvalidArgument(
+                "only queued jobs can be reordered".into(),
+            ));
+        };
+        let other = if up {
+            pos.checked_sub(1)
+        } else {
+            (pos + 1 < queued.len()).then_some(pos + 1)
+        };
+        let Some(other) = other else { return Ok(()) };
+        let (a, b) = (queued[pos], queued[other]);
+        // Equal ranks would not swap: break the tie by nudging.
+        let (ra, rb) = if a.rank == b.rank {
+            (b.rank, a.rank.saturating_add(1))
+        } else {
+            (b.rank, a.rank)
+        };
+        self.set_rank(project, &a.id, ra)?;
+        self.set_rank(project, &b.id, rb)?;
+        emit_jobs_changed(app, project);
+        Ok(())
+    }
+
+    fn set_rank(&self, project: &str, id: &str, rank: u64) -> AppResult<()> {
+        if let Some(c) = self.runs.lock().get(id).cloned() {
+            if let Some(j) = &c.job {
+                j.rank.store(rank, Ordering::SeqCst);
+                autosave(&c, id);
+                return Ok(());
+            }
+        }
+        let mut room = self
+            .rooms
+            .get(project, id)?
+            .ok_or_else(|| AppError::NotFound(format!("room {id}")))?;
+        if let Some(j) = room.job.as_mut() {
+            j.rank = rank;
+        }
+        self.rooms.save_room(&room, Path::new(project))
+    }
+
+    pub fn set_job_settings(
+        &self,
+        app: &AppHandle,
+        project: &str,
+        settings: JobSettings,
+    ) -> AppResult<()> {
+        self.rooms.set_job_settings(project, settings)?;
+        emit_jobs_changed(app, project);
+        // A raised limit may free slots right away.
+        self.dispatch_next(app, project);
+        Ok(())
+    }
+
+    /// Startup recovery (port of ai-connector's recovery pass, simplified): a
+    /// job saved as running has no driver anymore — it needs attention; a
+    /// queued one is restored and dispatched if a slot is free.
+    pub fn recover_jobs(&self, app: &AppHandle) {
+        let Ok(jobs) = self.rooms.all_jobs() else {
+            return;
+        };
+        let mut projects: Vec<String> = Vec::new();
+        for (project, mut room) in jobs {
+            let Some(job) = room.job.as_mut() else {
+                continue;
+            };
+            let saved = job.status.unwrap_or(if job.done {
+                JobStatus::Completed
+            } else {
+                JobStatus::Running
+            });
+            match saved {
+                JobStatus::Running | JobStatus::Paused => {
+                    job.status = Some(JobStatus::NeedsAttention);
+                    job.reason = Some(
+                        "Interrupted — the app was closed while it ran; continue to resume".into(),
+                    );
+                    if let Err(e) = self.rooms.save_room(&room, Path::new(&project)) {
+                        tracing::warn!("jobs: recovery could not mark {}: {e}", room.id);
+                    }
+                }
+                JobStatus::Queued => {
+                    if let Err(e) = self.restore(PathBuf::from(&project), room.clone()) {
+                        tracing::warn!("jobs: recovery could not restore {}: {e}", room.id);
+                    }
+                }
+                _ => {}
+            }
+            if !projects.contains(&project) {
+                projects.push(project);
+            }
+        }
+        for project in projects {
+            self.dispatch_next(app, &project);
+            emit_jobs_changed(app, &project);
+        }
+    }
 }
 
 pub fn connector_view(
@@ -2299,7 +3224,7 @@ fn build_room_prompt(
     .replace("{others}", &others);
 
     let edit_bullet = if can_edit {
-        "\n- Actually make the edits in the files — implement your part directly; the next collaborator builds on your committed changes. Keep each turn's change focused and coherent."
+        "\n- Actually make the edits in the files — implement your part directly; the next collaborator builds on your committed changes. Keep each turn's change focused and coherent.\n- The connector makes the commits after your turn: do not commit, switch branches or merge yourself (a sandboxed `git commit` from the worktree fails anyway — that is expected, not an error to work around)."
     } else {
         ""
     };
@@ -3055,6 +3980,76 @@ mod tests {
         m
     }
 
+    fn card(id: &str, status: JobStatus, rank: u64) -> JobCard {
+        JobCard {
+            id: id.into(),
+            problem: id.into(),
+            participant_names: vec![],
+            status,
+            column: status.column().into(),
+            reason: None,
+            phase: String::new(),
+            rank,
+            allow_edits: false,
+            origin_room_id: None,
+            last_turn: 0,
+            updated_at_ms: rank,
+            live: false,
+        }
+    }
+
+    #[test]
+    fn job_statuses_map_to_columns_and_slots() {
+        use JobStatus::*;
+        for s in [Running, Paused, NeedsAttention, AwaitingConfirmation] {
+            assert!(s.is_busy() && !s.is_terminal(), "{s:?}");
+        }
+        assert!(!Queued.is_busy() && !Queued.is_terminal());
+        assert!(Completed.is_terminal() && Closed.is_terminal());
+        assert!(!Completed.is_busy() && !Closed.is_busy());
+        assert_eq!(Paused.column(), "needs_attention");
+        assert_eq!(AwaitingConfirmation.column(), "needs_attention");
+        assert_eq!(Queued.column(), "queued");
+        assert_eq!(Closed.column(), "closed");
+        // Rooms saved before the queue existed derive their status.
+        let legacy = PersistedJob {
+            review_required: false,
+            max_corrections: 2,
+            kicked_off: true,
+            done: true,
+            status: None,
+            reason: None,
+            phase: String::new(),
+            rank: 0,
+            closure: Closure::default(),
+            landing: None,
+        };
+        assert_eq!(
+            *JobControl::from_persisted(&legacy).status.lock(),
+            Completed
+        );
+        let open = PersistedJob {
+            done: false,
+            ..legacy
+        };
+        assert_eq!(*JobControl::from_persisted(&open).status.lock(), Running);
+    }
+
+    #[test]
+    fn next_queued_picks_the_lowest_rank_among_queued_jobs() {
+        let cards = vec![
+            card("running", JobStatus::Running, 1),
+            card("late", JobStatus::Queued, 30),
+            card("early", JobStatus::Queued, 20),
+            card("done", JobStatus::Completed, 5),
+        ];
+        assert_eq!(next_queued(&cards).as_deref(), Some("early"));
+        assert_eq!(next_queued(&cards[..1]), None);
+        let settings: JobSettings = serde_json::from_str("{}").unwrap_or_default();
+        assert_eq!(settings.parallel_jobs, 1);
+        assert_eq!(Closure::default(), Closure::Confirm);
+    }
+
     #[test]
     fn job_config_needs_one_organizer_and_a_reviewer_when_reviewed() {
         let org = with_roles("p1", &["organizer"]);
@@ -3112,6 +4107,21 @@ mod tests {
             turn_tools(ToolPolicy::AcceptEdits, &dele, &rev),
             ToolPolicy::ReadOnly
         );
+        let conflicts = TurnPlan::ResolveConflicts {
+            files: vec!["a.txt".into()],
+            implementer: "p2".into(),
+            path: "/wt".into(),
+            base_branch: "main".into(),
+        };
+        assert_eq!(
+            turn_tools(ToolPolicy::AcceptEdits, &conflicts, &imp),
+            ToolPolicy::AcceptEdits
+        );
+        assert!(conflicts.is_implementation());
+        assert_eq!(conflicts.kind(), "conflicts");
+        assert!(conflicts
+            .mandate(&[imp.clone()])
+            .contains("Conflicted files: a.txt"));
         assert_eq!(dele.kind(), "delegated");
         assert_eq!(consult.kind(), "consult");
         assert!(dele.is_implementation() && !consult.is_implementation());
@@ -3130,6 +4140,13 @@ mod tests {
             max_corrections: max,
             kicked_off: AtomicBool::new(true),
             done: AtomicBool::new(false),
+            status: Mutex::new(JobStatus::Running),
+            reason: Mutex::new(None),
+            phase: Mutex::new(String::new()),
+            rank: AtomicU64::new(0),
+            closure: Closure::Confirm,
+            landing: Mutex::new(None),
+            land_confirmed: AtomicBool::new(false),
         };
         let transcript = vec![
             kinded("p1", 1, "kickoff"),
@@ -3311,6 +4328,7 @@ mod tests {
             updated_at_ms,
             job: None,
             origin_room_id: None,
+            base_branch: None,
         }
     }
 
@@ -3427,6 +4445,51 @@ mod tests {
             MAX_ROOMS_PER_PROJECT,
             "must recover p2 from .bak"
         );
+        fs::write(
+            &main,
+            fs::read(base.join("agent-console").join("rooms.json.bak")).unwrap(),
+        )
+        .unwrap();
+
+        // Job queue settings live in the same file, per project, with defaults.
+        assert_eq!(store.job_settings("/proj/two").unwrap().parallel_jobs, 1);
+        store
+            .set_job_settings("/proj/two", JobSettings { parallel_jobs: 3 })
+            .unwrap();
+        assert_eq!(store.job_settings("/proj/two").unwrap().parallel_jobs, 3);
+        assert_eq!(store.job_settings("/proj/one").unwrap().parallel_jobs, 1);
+        assert!(store
+            .set_job_settings("/proj/two", JobSettings { parallel_jobs: 0 })
+            .is_err());
+        // all_jobs lists only job-mode rooms, with their project.
+        let mut jobroom = room("job-1", "a job", 999);
+        jobroom.job = Some(PersistedJob {
+            review_required: false,
+            max_corrections: 2,
+            kicked_off: false,
+            done: false,
+            status: Some(JobStatus::Queued),
+            reason: None,
+            phase: String::new(),
+            rank: 999,
+            closure: Closure::Auto,
+            landing: Some(LandingState::new(
+                "main",
+                "room/job-1",
+                Path::new("/tmp/wt"),
+            )),
+        });
+        store.save_room(&jobroom, Path::new("/proj/two")).unwrap();
+        let jobs = store.all_jobs().unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].0, "/proj/two");
+        assert_eq!(
+            jobs[0].1.job.as_ref().unwrap().status,
+            Some(JobStatus::Queued)
+        );
+        let saved_job = jobs[0].1.job.as_ref().unwrap();
+        assert_eq!(saved_job.closure, Closure::Auto);
+        assert_eq!(saved_job.landing.as_ref().unwrap().base_branch, "main");
 
         let _ = fs::remove_dir_all(&base);
     }

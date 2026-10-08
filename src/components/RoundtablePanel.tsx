@@ -236,6 +236,23 @@ function ConfigForm() {
               onChange={(e) => setDraft({ maxCorrections: Number(e.target.value) })}
             />
           </label>
+          {draft.allowEdits && (
+            <label className="rt-toggle rt-toggle-inline">
+              <input
+                type="checkbox"
+                checked={draft.confirmLanding}
+                onChange={(e) => setDraft({ confirmLanding: e.target.checked })}
+              />
+              <span className="rt-toggle-text">
+                <span className="rt-toggle-title">Confirm before landing</span>
+                <span className="rt-toggle-hint">
+                  {draft.confirmLanding
+                    ? "On — the job merges the base and gets reviewed, then waits for you to land it on the base branch."
+                    : "Off — the job lands on the base branch by itself once approved."}
+                </span>
+              </span>
+            </label>
+          )}
         </div>
       )}
 
