@@ -106,6 +106,12 @@ jobs:
           # set -mmacosx-version-min; without it the default (10.13) fails to
           # compile ggml-backend-reg.cpp. Harmless on Linux/Windows.
           MACOSX_DEPLOYMENT_TARGET: '10.15'
+          # whisper.cpp defaults to -march=native, so the binary inherited the
+          # runner's AVX-512 and crashed with SIGILL on CPUs without it (most
+          # desktops) the moment Whisper loaded. The cmake crate hands this
+          # toolchain file to every cmake build; it pins ggml to the x86-64-v3
+          # baseline (AVX2/FMA/F16C) and turns native off. See the file.
+          CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/src-tauri/cmake/portable-cpu.cmake
         with:
           # Upload into the pre-created draft. The updater feed (latest.json) is
           # deliberately NOT touched here: each job merging its platforms into

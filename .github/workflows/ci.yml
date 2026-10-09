@@ -38,6 +38,10 @@ jobs:
 
   backend:
     runs-on: ubuntu-22.04
+    env:
+      # Same portable CPU baseline the release builds with (see the file), so
+      # CI compiles whisper.cpp the way users receive it.
+      CMAKE_TOOLCHAIN_FILE: ${{ github.workspace }}/src-tauri/cmake/portable-cpu.cmake
     steps:
       - uses: actions/checkout@v4
 
