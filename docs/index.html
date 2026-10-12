@@ -9,12 +9,13 @@
   <!-- OG / Twitter -->
   <meta property="og:title" content="Agent Console" />
   <meta property="og:description" content="A minimalist, terminal-first desktop app for directing AI agents inside any repository." />
-  <meta property="og:image" content="https://cyl-castillo.github.io/agent-console/shots/og-cover.png" />
+  <meta property="og:image" content="https://agent-console.dev/shots/og-cover.png" />
   <meta property="og:image:alt" content="Agent Console — terminal-first desktop app for directing AI agents inside your repo" />
-  <meta property="og:url" content="https://cyl-castillo.github.io/agent-console/" />
+  <meta property="og:url" content="https://agent-console.dev/" />
+  <link rel="canonical" href="https://agent-console.dev/" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:image" content="https://cyl-castillo.github.io/agent-console/shots/og-cover.png" />
+  <meta name="twitter:image" content="https://agent-console.dev/shots/og-cover.png" />
   <meta name="twitter:image:alt" content="Agent Console — terminal-first desktop app for directing AI agents inside your repo" />
 
   <link rel="icon" href="logo.png" type="image/png" />
@@ -438,6 +439,20 @@
     }
     @media (max-width: 720px) { .support-cards { grid-template-columns: 1fr; } }
   </style>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Agent Console",
+    "url": "https://agent-console.dev/",
+    "logo": "https://agent-console.dev/logo.png",
+    "email": "carlos@agent-console.dev",
+    "foundingDate": "2026-05",
+    "founder": { "@type": "Person", "name": "Carlos Castillo" },
+    "address": { "@type": "PostalAddress", "addressLocality": "Montevideo", "addressCountry": "UY" },
+    "sameAs": ["https://github.com/cyl-castillo/agent-console"]
+  }
+  </script>
 </head>
 <body>
   <nav>
@@ -453,6 +468,7 @@
         <a href="manual/">Manual</a>
         <a href="#arch">Architecture</a>
         <a href="#support">Support</a>
+        <a href="#about">About</a>
         <a href="https://github.com/cyl-castillo/agent-console" target="_blank" rel="noopener">GitHub ↗</a>
       </div>
     </div>
@@ -762,14 +778,38 @@ agent-console</pre>
     </div>
   </section>
 
+  <section id="about">
+    <div class="container">
+      <h2>About</h2>
+      <p style="max-width: 640px;">
+        Agent Console is an independent, bootstrapped software project founded in May 2026 by
+        <strong>Carlos Castillo</strong> in Montevideo, Uruguay. It ships as a desktop app for Linux, macOS and
+        Windows, is developed in the open under the AGPLv3, and is built together with
+        <a href="https://github.com/cyl-castillo/testigo" target="_blank" rel="noopener">Testigo</a>, the open
+        intent-to-proof protocol that gives every session its verifiable record.
+      </p>
+      <p style="max-width: 640px; margin-top: 16px;">
+        The company has no investors, no accounts and no telemetry: the only thing that leaves your machine is
+        what your agent CLI sends. Since the first commit in May 2026 the project has shipped more than a hundred
+        releases, almost all of them written by the agents it supervises and reviewed turn by turn in the console.
+      </p>
+      <p style="margin-top: 24px; font-size: 14px;">
+        Contact: <a href="mailto:carlos@agent-console.dev">carlos@agent-console.dev</a> ·
+        Source: <a href="https://github.com/cyl-castillo/agent-console" target="_blank" rel="noopener">github.com/cyl-castillo/agent-console</a> ·
+        Licensing and work use: <a href="https://github.com/cyl-castillo/agent-console#using-agent-console-at-work" target="_blank" rel="noopener">README</a>
+      </p>
+    </div>
+  </section>
+
   <footer>
     <div class="container">
-      <div>Agent Console · AGPLv3 · built with Tauri</div>
+      <div>Agent Console · Montevideo, Uruguay · AGPLv3 · built with Tauri</div>
       <div style="display: flex; gap: 18px;">
         <a href="https://github.com/cyl-castillo/agent-console">repo</a>
         <a href="https://github.com/cyl-castillo/agent-console/discussions">discuss</a>
         <a href="https://github.com/cyl-castillo/agent-console#code-signing-policy">code signing policy</a>
         <a href="#support">support</a>
+        <a href="mailto:carlos@agent-console.dev">contact</a>
       </div>
     </div>
   </footer>
