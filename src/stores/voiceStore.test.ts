@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest } from "../types/domain";
 
 // The store touches the backend and sibling stores at import time — isolate.
+// The command executor pulls the palette (and with it DOM-touching stores);
+// its grammar has its own tests under src/voice.
+vi.mock("../voice/execute", () => ({ runVoiceCommand: vi.fn() }));
 vi.mock("../ipc/tauri", () => ({
   ipc: {
     voiceEnable: vi.fn(),
@@ -10,6 +13,8 @@ vi.mock("../ipc/tauri", () => ({
     voicePttStart: vi.fn(),
     voicePttStop: vi.fn(),
     voiceSpeak: vi.fn(),
+    voiceStopSpeaking: vi.fn(() => Promise.resolve()),
+    voiceEarcon: vi.fn(() => Promise.resolve()),
     voiceListen: vi.fn(),
   },
 }));
@@ -33,6 +38,7 @@ vi.mock("../permissions/rules", () => ({
 }));
 
 import { ipc } from "../ipc/tauri";
+import { runVoiceCommand } from "../voice/execute";
 import { parseYesNo, speechFor, useVoiceStore } from "./voiceStore";
 
 const mocked = vi.mocked(ipc);
@@ -143,22 +149,20 @@ describe("voiceStore state machine", () => {
     expect(useVoiceStore.getState().phase).toBe("listening");
   });
 
-  it("pttStop types the transcript into the active session with a trailing space", async () => {
+  it("pttStop hands the trimmed transcript to the voice command router", async () => {
     useVoiceStore.setState({ phase: "listening" });
     mocked.voicePttStop.mockResolvedValue("  hola mundo  " as never);
     await useVoiceStore.getState().pttStop();
 
     expect(useVoiceStore.getState().phase).toBe("ready");
-    const dispatched = vi.mocked(window.dispatchEvent).mock.calls[0][0] as CustomEvent;
-    expect(dispatched.type).toBe("ac:term-input");
-    expect(dispatched.detail).toEqual({ sessionId: "term-1", data: "hola mundo " });
+    expect(runVoiceCommand).toHaveBeenCalledWith("hola mundo");
   });
 
-  it("pttStop with an empty transcript types nothing", async () => {
+  it("pttStop with an empty transcript routes nothing", async () => {
     useVoiceStore.setState({ phase: "listening" });
     mocked.voicePttStop.mockResolvedValue("   " as never);
     await useVoiceStore.getState().pttStop();
-    expect(window.dispatchEvent).not.toHaveBeenCalled();
+    expect(runVoiceCommand).not.toHaveBeenCalled();
     expect(useVoiceStore.getState().phase).toBe("ready");
   });
 

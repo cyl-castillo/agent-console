@@ -80,8 +80,13 @@ suggest-only, none of them able to block the core:
 - **Schedule** — agentic jobs on a clock, physically restricted to plan mode.
 - **Trust** — permissions + secrets vault: what the agent can touch.
 - **Add-ons** — plugins + MCP servers.
-- **Notes** and **Context** (CLAUDE.md & memories); export/import and voice
-  input (push-to-talk + spoken approvals) live in the command palette.
+- **Notes** and **Context** (CLAUDE.md & memories); export/import lives in
+  the command palette.
+- **Voice**: push-to-talk (Ctrl+Space) runs spoken commands — "mandá", "sí"
+  / "no" to whatever the agent is asking on screen, "abrí changes", "sesión
+  fixy", any palette action — or dictates into the composer; the console
+  talks back (Piper, local) with end-of-turn summaries and spoken approvals.
+  Say "qué puedo decir" for the list.
 
 ## Rooms & cowork
 

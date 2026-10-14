@@ -14,6 +14,18 @@ import { useToastStore } from "../stores/toastStore";
 /// writes into its own PTY. Calling `ipc.termWrite` directly from here is a
 /// bug: the registry keys PTYs by their spawn UUID, not by the session id this
 /// module has access to.
+/// Write raw bytes (Enter, Esc, arrows…) into the active session's PTY, as
+/// the keyboard would. No trimming, no tab switch. False when there is no
+/// live session to receive them.
+export function sendKeysToActiveSession(data: string): boolean {
+  const { activeId, sessions } = useTerminalsStore.getState();
+  const active = sessions.find((s) => s.id === activeId);
+  if (!active || active.status !== "live") return false;
+  const detail: TermInputDetail = { sessionId: active.id, data };
+  window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
+  return true;
+}
+
 export async function typeIntoActiveSession(
   text: string,
   opts: { submit?: boolean } = {},

@@ -44,6 +44,7 @@ pub mod terminal_runner;
 pub mod testigo_export;
 pub mod testigo_service;
 pub mod testigo_timestamp;
+pub mod tts_service;
 pub mod usage_service;
 pub mod vault_service;
 pub mod voice_service;

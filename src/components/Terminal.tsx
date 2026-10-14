@@ -1,3 +1,4 @@
+import { registerScreenReader, unregisterScreenReader } from "../lib/termScreen";
 import { useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -110,6 +111,17 @@ export function Terminal({ session, visible }: Props) {
       }),
     });
     termRef.current = term;
+    // Voice commands read the last lines to know what the agent is asking
+    // before sending keys ("sí" → Enter on a Claude menu, "y" on a y/N).
+    registerScreenReader(session.id, (n) => {
+      const buf = term.buffer.active;
+      const end = buf.length;
+      const out: string[] = [];
+      for (let i = Math.max(0, end - n); i < end; i++) {
+        out.push(buf.getLine(i)?.translateToString(true) ?? "");
+      }
+      return out;
+    });
 
     // Copy/paste: xterm's selection is internal (no native DOM selection), so
     // without this the app has NO copy path at all — Ctrl+C goes to the PTY as
@@ -507,6 +519,7 @@ export function Terminal({ session, visible }: Props) {
       if (termId) ipc.termKill(termId).catch(() => {});
       window.removeEventListener("ac:clear-terminal", onClear);
       window.removeEventListener("ac:term-input", onTermInput as EventListener);
+      unregisterScreenReader(session.id);
       window.removeEventListener("ac:focus-terminal", onFocusTerminal);
       host.removeEventListener("paste", onPaste, true);
       host.removeEventListener("pointerdown", onRightDown, true);

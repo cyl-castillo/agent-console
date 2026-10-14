@@ -31,7 +31,11 @@ const GROUPS = [
       ["Ctrl+L", "Clear terminal"],
       ["Ctrl+V", "Paste clipboard image into the agent"],
       ["Ctrl+Shift+V", "Toggle voice input on/off"],
-      ["Ctrl+Space (hold)", "Push-to-talk: dictate into the composer"],
+      [
+        "Ctrl+Space (hold)",
+        "Push-to-talk: say a command (“mandá”, “sí”, “abrí changes”) or dictate",
+      ],
+      ["🎙 “qué puedo decir”", "Voice: list the spoken commands"],
       ["Ctrl+R", "Refresh git changes"],
       ["Ctrl+W", "Close active session"],
       ["Esc", "Deny pending agent action or close modal"],
