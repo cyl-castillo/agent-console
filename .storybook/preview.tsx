@@ -17,7 +17,7 @@ const preview: Preview = {
     backgrounds: { disable: true },
     // The panel runs axe on demand only: an automatic run collides with the
     // Playwright sweep's own axe pass ("Axe is already running").
-    a11y: { test: "todo", manual: true },
+    a11y: { test: "off", manual: true },
   },
   decorators: [(Story) => <div style={frame}>{Story()}</div>],
 };

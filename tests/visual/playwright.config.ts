@@ -18,6 +18,9 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     ...devices["Desktop Chrome"],
+    // Argos' recommended flags: no subpixel AA or hinting differences between
+    // machines, so screenshots compare across runners.
+    launchOptions: { args: ["--disable-lcd-text", "--font-render-hinting=none"] },
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 1,
     colorScheme: "dark",

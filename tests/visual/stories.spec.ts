@@ -84,7 +84,18 @@ test.describe("stories", () => {
         stabilize: { waitForAriaBusy: false },
       });
       if (SNAPSHOTS) await expect(page).toHaveScreenshot(`${e.id}.png`);
-      const axe = await new AxeBuilder({ page }).analyze();
+      // The Storybook a11y addon may still be mid-run inside the preview on
+      // slow CI runners ("Axe is already running"); wait it out, don't fail.
+      const axe = await (async () => {
+        for (let attempt = 0; ; attempt++) {
+          try {
+            return await new AxeBuilder({ page }).analyze();
+          } catch (err) {
+            if (attempt >= 4 || !String(err).includes("already running")) throw err;
+            await page.waitForTimeout(400);
+          }
+        }
+      })();
       const violations = axe.violations.map((v) => ({
         id: v.id,
         impact: v.impact,
