@@ -42,6 +42,12 @@ export function ShellV2({
 
   useEffect(() => attachShellListeners(), []);
   useBudgetWatch();
+  // Ctrl+` toggles the terminal drawer; the shortcut hook dispatches it.
+  useEffect(() => {
+    const h = () => useShellStore.getState().toggleDrawer();
+    window.addEventListener("ac:toggle-terminal-drawer", h);
+    return () => window.removeEventListener("ac:toggle-terminal-drawer", h);
+  }, []);
   // The top bar's Workspace button and the palette's "toggle sidebar" still
   // flip uiStore.leftOpen; in this shell that gesture means the list pane.
   useEffect(

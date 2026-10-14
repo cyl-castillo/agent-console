@@ -2,7 +2,7 @@ import type { Project } from "../../types/domain";
 import type { TerminalSession } from "../../stores/terminalsStore";
 import { useShellStore } from "../../stores/shellStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
-import { CenterPane } from "../CenterPane";
+import { SessionsCenter } from "./SessionsCenter";
 import { WorkbenchPanel } from "../panels";
 import { InboxView } from "./InboxView";
 import { TAB_LABELS } from "./destinations";
@@ -23,7 +23,7 @@ export function CenterV2(props: Props) {
   const tab = useWorkbenchStore((s) => s.tab);
 
   if (destination === "inbox") return <InboxView />;
-  if (destination === "sessions") return <CenterPane {...props} />;
+  if (destination === "sessions") return <SessionsCenter {...props} />;
   return (
     <section
       className="flex h-full min-h-0 flex-col"

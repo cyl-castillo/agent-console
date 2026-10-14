@@ -114,3 +114,36 @@ test("v2 inbox: tiers gate the decision, deny removes the card", async ({ page }
   await expect(cards).toHaveCount(2);
   await expect(page.getByTestId("budget-sess-auth")).toBeVisible();
 });
+
+test("v2 sessions: the conversation is the stage, the terminal a drawer", async ({ page }) => {
+  await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
+  await page.goto("/iframe.html?id=app-v2--sessions&viewMode=story");
+  await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
+  await expect(page.getByTestId("conversation")).toBeVisible();
+  await expect(page.getByTestId("turn")).toHaveCount(3);
+  await expect(page.getByTestId("turn").last()).toHaveAttribute("data-live", "true");
+
+  // The drawer is closed but the PTY stays mounted.
+  const drawer = page.getByTestId("terminal-drawer");
+  await expect(drawer).not.toHaveAttribute("data-open", "true");
+  await expect(drawer.locator(".terminals-stack > *")).toHaveCount(1);
+  await page.keyboard.press("Control+`");
+  await expect(drawer).toHaveAttribute("data-open", "true");
+
+  // Sending from the composer types into the active session's PTY.
+  const received = page.evaluate(
+    () =>
+      new Promise<string>((resolve) =>
+        window.addEventListener("ac:term-input", (e) =>
+          resolve((e as CustomEvent<{ sessionId: string; data: string }>).detail.sessionId),
+        ),
+      ),
+  );
+  await page.getByLabel("Prompt for the agent").fill("Add a changelog entry");
+  await page.keyboard.press("Control+Enter");
+  expect(await received).toBe("sess-auth");
+
+  // A file chip opens Changes at that file.
+  await page.getByTestId("diff-block").first().getByRole("button").first().click();
+  await expect(page.getByRole("tab", { name: /Changes/ })).toHaveAttribute("aria-selected", "true");
+});
