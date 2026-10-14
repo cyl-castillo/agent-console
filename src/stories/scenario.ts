@@ -6,6 +6,7 @@ import { resetEventBus } from "../dev/tauri-shim/event";
 import { useThemeStore } from "../stores/themeStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { toastManager } from "../ui/Toast";
+import { installAgentBridge } from "../lib/agentBridge";
 
 export const READY_ATTR = "data-story-ready";
 
@@ -30,6 +31,7 @@ export function beginScenario(fixtures: FixtureMap = {}, theme: "dark" | "light"
   }
   resetEventBus();
   toastManager.close();
+  installAgentBridge();
   applyFixtures(fixtures);
   useThemeStore.getState().setTheme(theme);
   // Stories render the working app, not first-run flows, unless they opt in.

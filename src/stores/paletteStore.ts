@@ -686,6 +686,12 @@ export const usePaletteStore = create<PaletteState>((set, get) => ({
 /// Actions a voice command may name right now (id + label; `available`
 /// already applied). Read by the voice grammar, which maps spoken aliases
 /// onto these ids.
+/// Every registered action id, available or not — the contract the agent
+/// bridge and the MCP server publish (see src/actions/ids.ts).
+export function allPaletteActionIds(): string[] {
+  return ACTIONS.map((a) => a.id);
+}
+
 export function availablePaletteActions(): { id: string; label: string }[] {
   return ACTIONS.filter((a) => (a.available ? a.available() : true)).map((a) => ({
     id: a.id,
