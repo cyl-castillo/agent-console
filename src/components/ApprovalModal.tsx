@@ -1,8 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { useApprovalStore } from "../stores/approvalStore";
-import { usePermissionsStore } from "../stores/permissionsStore";
-import { useToastStore } from "../stores/toastStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import {
@@ -17,6 +15,9 @@ import {
 import type { RuleSuggestion, Scope } from "../permissions/types";
 import type { ApprovalRequest } from "../types/domain";
 import { describe, editPreview, type DiffLine } from "../lib/approvalPreview";
+import { commitAlways } from "../lib/approvalActions";
+import { useDecisionStatsStore } from "../stores/decisionStatsStore";
+import { tierFor } from "../lib/decisions";
 
 function DiffPreview({ lines }: { lines: DiffLine[] }) {
   const LIMIT = 50;
@@ -90,7 +91,6 @@ export function ApprovalModal() {
   const queue = useApprovalStore((s) => s.queue);
   const req = queue[0] ?? null;
   const decide = useApprovalStore((s) => s.decide);
-  const addRule = usePermissionsStore((s) => s.add);
   const sessions = useTerminalsStore((s) => s.sessions);
   const voiceStage = useVoiceStore((s) => s.approvalStage);
 
@@ -124,6 +124,9 @@ export function ApprovalModal() {
   const decideAndRefocus = (id: string, decision: "allow" | "deny" | "ask", reason: string) => {
     const wasLast = queue.length <= 1;
     void decide(id, decision, reason).then((delivered) => {
+      if (delivered && req && decision !== "ask") {
+        useDecisionStatsStore.getState().record(tierFor(req).tier, decision);
+      }
       if (!delivered) {
         // Delivery failed; the request stays queued (the store toasted). Unlock
         // the buttons so the user can retry — busy used to stick forever here.
@@ -265,30 +268,8 @@ export function ApprovalModal() {
             onCancel={() => setShowAlways(false)}
             onCommit={async (suggestion, effect) => {
               setBusy(true);
-              // Codex approval + translatable rule → Codex's store. When the
-              // rule has no Codex equivalent it still lands in Claude's
-              // settings.json (the panel already warned it won't bind here).
-              const ruleEngine =
-                engine === "codex" && codexEquivalent(suggestion.rule.raw) ? "codex" : "claude";
-              const r = await addRule(
-                suggestion.rule.scope,
-                effect,
-                suggestion.rule.raw,
-                ruleEngine,
-              );
-              if (r) {
-                await decide(
-                  req.id,
-                  effect === "deny" ? "deny" : "allow",
-                  `rule saved: ${suggestion.rule.raw}`,
-                );
-              } else {
-                // Surface WHY the rule didn't save — a silent stay-open modal
-                // reads as "nothing happened" and the approval quietly expires.
-                const err = usePermissionsStore.getState().error;
-                useToastStore.getState().show(`Rule not saved${err ? `: ${err}` : ""}`, "error");
-                setBusy(false);
-              }
+              const ok = await commitAlways(req, engine, suggestion, effect);
+              if (!ok) setBusy(false);
             }}
           />
         )}
@@ -307,7 +288,7 @@ interface AlwaysProps {
   onCommit: (s: RuleSuggestion, effect: "allow" | "deny") => void;
 }
 
-function AlwaysPanel({
+export function AlwaysPanel({
   req,
   engine,
   suggestions,

@@ -14,6 +14,7 @@ import { ListPane } from "./ListPane";
 import { Rail } from "./Rail";
 import { StatusBarV2 } from "./StatusBarV2";
 import { useInbox } from "./useInbox";
+import { useBudgetWatch } from "./useBudgetWatch";
 
 interface Props extends ProjectBootstrap {
   project: Project;
@@ -40,6 +41,7 @@ export function ShellV2({
   const initJobListeners = useJobsStore((s) => s.initListeners);
 
   useEffect(() => attachShellListeners(), []);
+  useBudgetWatch();
   // The top bar's Workspace button and the palette's "toggle sidebar" still
   // flip uiStore.leftOpen; in this shell that gesture means the list pane.
   useEffect(

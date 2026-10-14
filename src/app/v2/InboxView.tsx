@@ -4,6 +4,10 @@ import { useTerminalsStore } from "../../stores/terminalsStore";
 import { useUIStore } from "../../stores/uiStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { useInbox } from "./useInbox";
+import { ApprovalDecision } from "./ApprovalDecision";
+import { BudgetDecision } from "./BudgetDecision";
+import { tierRates, useDecisionStatsStore } from "../../stores/decisionStatsStore";
+import { Tooltip } from "../../ui/Tooltip";
 import { Button } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
 import { EmptyState } from "../../ui/EmptyState";
@@ -34,8 +38,11 @@ export function InboxView() {
     byState,
     sessions,
     activeId,
+    breaches,
     decisions,
   } = useInbox();
+  const records = useDecisionStatsStore((s) => s.records);
+  const rates = tierRates(records, now).filter((r) => r.total > 0);
   const setActive = useTerminalsStore((s) => s.setActive);
   const goTo = useShellStore((s) => s.goTo);
   const setWorkbenchTab = useWorkbenchStore((s) => s.setTab);
@@ -81,6 +88,22 @@ export function InboxView() {
         <Chip tone={decisions > 0 ? "warn" : "neutral"} mono>
           {decisions} to decide
         </Chip>
+        {rates.map((r) => (
+          <Tooltip
+            key={r.tier}
+            content={
+              r.decayed
+                ? `You approved ${Math.round((r.rate ?? 0) * 100)}% of ${r.total} ${r.tier}-tier decisions in 14 days — this gate has decayed into a reflex. Consider an Always rule, or look closer.`
+                : `${r.total} ${r.tier}-tier decisions in 14 days, ${Math.round((r.rate ?? 0) * 100)}% approved`
+            }
+          >
+            <span>
+              <Chip tone={r.decayed ? "warn" : "neutral"} mono>
+                {r.tier} {Math.round((r.rate ?? 0) * 100)}%
+              </Chip>
+            </span>
+          </Tooltip>
+        ))}
         <span className="ml-auto" />
         <Button size="sm" onClick={newSession}>
           New session
@@ -90,21 +113,18 @@ export function InboxView() {
       {queue.length > 0 && (
         <section>
           <SectionHeader title="Approvals" count={queue.length} />
-          {queue.map((r) => {
-            const sess = sessions.find((s) => s.id === r.termId);
-            const cmd = typeof r.input?.command === "string" ? r.input.command : "";
-            return (
-              <Row
-                key={r.id}
-                leading={<StatusGlyph state="needs-you" />}
-                title={`${r.tool}${cmd ? ` · ${cmd}` : ""}`}
-                subtitle={sess ? sess.name : r.cwd}
-                trailing={relative(r.ts, now)}
-                onClick={() => r.termId && openSession(r.termId)}
-                data-testid={`inbox-approval-${r.id}`}
-              />
-            );
-          })}
+          {queue.map((r, i) => (
+            <ApprovalDecision key={r.id} req={r} index={i} total={queue.length} />
+          ))}
+        </section>
+      )}
+
+      {breaches.length > 0 && (
+        <section>
+          <SectionHeader title="Budget" count={breaches.length} />
+          {breaches.map((b) => (
+            <BudgetDecision key={b.session.id} session={b.session} spent={b.spent} cap={b.cap} />
+          ))}
         </section>
       )}
 
@@ -138,7 +158,11 @@ export function InboxView() {
       )}
 
       {groups.map(({ state, title }) => {
-        const list = byState.get(state) ?? [];
+        // A session with a pending approval is already on screen as a card.
+        const carded = new Set(queue.map((r) => r.termId));
+        const list = (byState.get(state) ?? []).filter(
+          (s) => !(state === "needs-you" && carded.has(s.id)),
+        );
         if (list.length === 0) return null;
         return (
           <section key={state}>

@@ -19,6 +19,10 @@ import { IconButton } from "../../ui/IconButton";
 import { Popover } from "../../ui/Popover";
 import { Tooltip } from "../../ui/Tooltip";
 import { useInbox } from "./useInbox";
+import { capFor, useBudgetStore } from "../../stores/budgetStore";
+import { useLiveStatusStore } from "../../stores/liveStatusStore";
+import { BudgetRing } from "../../ui/BudgetRing";
+import { Input } from "../../ui/Field";
 
 declare const __APP_VERSION__: string;
 
@@ -31,6 +35,8 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
   const branches = useChangesStore((s) => s.branches);
   const loadBranches = useChangesStore((s) => s.loadBranches);
   const { decisions: pending } = useInbox();
+  const budgets = useBudgetStore();
+  const byTerm = useLiveStatusStore((s) => s.byTerm);
   const sessions = useTerminalsStore((s) => s.sessions);
   const activeId = useTerminalsStore((s) => s.activeId);
   const setCenterTab = useUIStore((s) => s.setTab);
@@ -112,6 +118,27 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
             />
           )}
           {active && <MemoryPill termId={active.id} />}
+          {active && (
+            <div className="mt-1 flex items-center gap-2 text-caption" data-testid="budget-row">
+              <BudgetRing
+                spent={byTerm[active.id]?.costUsd ?? 0}
+                cap={capFor(budgets, active.id)}
+              />
+              <label className="ml-auto flex items-center gap-1 text-faint-foreground">
+                cap $
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  aria-label="Session budget in USD (0 = none)"
+                  className="h-5 w-16 px-1 text-caption"
+                  value={budgets.caps[active.id] ?? ""}
+                  placeholder={budgets.defaultCap ? String(budgets.defaultCap) : "none"}
+                  onChange={(e) => budgets.setCap(active.id, Number(e.target.value) || 0)}
+                />
+              </label>
+            </div>
+          )}
           <VoicePill />
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-caption text-faint-foreground">
             <span>{live} live</span>

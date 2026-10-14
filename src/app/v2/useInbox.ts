@@ -3,6 +3,8 @@ import { useAgentStatusStore } from "../../stores/agentStatusStore";
 import { useApprovalStore } from "../../stores/approvalStore";
 import { useJobsStore } from "../../stores/jobsStore";
 import { useTerminalsStore, type TerminalSession } from "../../stores/terminalsStore";
+import { capFor, useBudgetStore } from "../../stores/budgetStore";
+import { useLiveStatusStore } from "../../stores/liveStatusStore";
 import { sessionAttention } from "../../lib/attention";
 import type { AgentState } from "../../ui/StatusGlyph";
 import type { ApprovalRequest, JobCard, JobPendingCard } from "../../types/domain";
@@ -15,6 +17,8 @@ export interface InboxData {
   byState: Map<AgentState, TerminalSession[]>;
   sessions: TerminalSession[];
   activeId: string | null;
+  /// Sessions whose cost crossed their cap (the turn was interrupted).
+  breaches: { session: TerminalSession; spent: number; cap: number }[];
   /// Everything that waits for a human decision — the number on the rail
   /// and in the Inbox header are this same count.
   decisions: number;
@@ -29,6 +33,8 @@ export function useInbox(): InboxData {
   const sessions = useTerminalsStore((s) => s.sessions);
   const activeId = useTerminalsStore((s) => s.activeId);
   const board = useJobsStore((s) => s.board);
+  const budgets = useBudgetStore();
+  const byTerm = useLiveStatusStore((s) => s.byTerm);
   // A clock so relative ages move without a store write; the working window
   // needs it too.
   const [now, setNow] = useState(() => Date.now());
@@ -60,8 +66,19 @@ export function useInbox(): InboxData {
   const needsYouWithoutApproval = (byState.get("needs-you") ?? []).filter(
     (s) => !approvalTermIds.includes(s.id),
   ).length;
+  const breaches = visible
+    .filter((s) => budgets.breached[s.id] !== undefined)
+    .map((session) => ({
+      session,
+      spent: byTerm[session.id]?.costUsd ?? budgets.breached[session.id],
+      cap: capFor(budgets, session.id),
+    }));
   const decisions =
-    queue.length + jobsNeedingYou.length + pendingJobs.length + needsYouWithoutApproval;
+    queue.length +
+    jobsNeedingYou.length +
+    pendingJobs.length +
+    needsYouWithoutApproval +
+    breaches.length;
 
   return {
     now,
@@ -71,6 +88,7 @@ export function useInbox(): InboxData {
     byState,
     sessions: visible,
     activeId,
+    breaches,
     decisions,
   };
 }

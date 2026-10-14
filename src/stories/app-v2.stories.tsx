@@ -3,7 +3,9 @@
 // baseline; the v1 stories stay untouched.
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import App from "../App";
-import { pendingApproval, ROOT } from "../dev/fixtures/defaults";
+import { approvalEdit, approvalHigh, pendingApproval, ROOT } from "../dev/fixtures/defaults";
+import { useBudgetStore } from "../stores/budgetStore";
+import { useLiveStatusStore } from "../stores/liveStatusStore";
 import type { FixtureMap } from "../dev/fixtures/registry";
 import { useApprovalStore } from "../stores/approvalStore";
 import { useFlagsStore } from "../stores/flagsStore";
@@ -68,6 +70,18 @@ export default meta;
 export const Inbox = scenario({
   fixtures: { approvals_pending: [pendingApproval] },
   after: () => useApprovalStore.setState({ queue: [pendingApproval] }),
+});
+export const InboxDecisions = scenario({
+  fixtures: { approvals_pending: [pendingApproval, approvalHigh, approvalEdit] },
+  after: () => {
+    useApprovalStore.setState({ queue: [pendingApproval, approvalHigh, approvalEdit] });
+    const b = useBudgetStore.getState();
+    b.setCap("sess-auth", 5);
+    b.markBreached("sess-auth", 5.12);
+    useLiveStatusStore
+      .getState()
+      .note({ ts: Date.now(), termId: "sess-auth", costUsd: 5.12, usedPct: 31 });
+  },
 });
 export const InboxEmpty = scenario({
   fixtures: {

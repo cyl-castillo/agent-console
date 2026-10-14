@@ -373,6 +373,30 @@ export const pendingApproval: ApprovalRequest = {
   sessionId: sessions[0].agentSessionId,
 };
 
+/// A high-tier request (irreversible) and a medium one with a diff preview.
+export const approvalHigh: ApprovalRequest = {
+  ...pendingApproval,
+  id: "apr-0043",
+  ts: NOW - 4_000,
+  input: {
+    command: "rm -rf dist && git push --force origin main",
+    description: "Clean and republish",
+  },
+  termId: "sess-retry",
+};
+export const approvalEdit: ApprovalRequest = {
+  ...pendingApproval,
+  id: "apr-0044",
+  ts: NOW - 20_000,
+  tool: "Edit",
+  input: {
+    file_path: `${ROOT}/src/retry.ts`,
+    old_string: "const MAX_BACKOFF_MS = 8000;\nexport function retry(fn) {",
+    new_string:
+      "export interface RetryOptions {\n  maxBackoffMs?: number;\n}\nconst MAX_BACKOFF_MS = 8000;\nexport function retry(fn, opts: RetryOptions = {}) {",
+  },
+};
+
 export const permissions: PermissionsSnapshot = {
   rules: [
     {
