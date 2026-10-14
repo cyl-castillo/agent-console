@@ -939,6 +939,44 @@ impl TestigoService {
         )
     }
 
+    /// Record an act of an agent that drives the console through its MCP
+    /// server (D9): the tool, a short summary of its arguments, whether it
+    /// succeeded, and — when the act concerns a session — that session, so
+    /// the ledger map shows the agent's hand on its lane. The actor is the
+    /// agent's identity (`agent:<caller>`), never the human.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_agent_action(
+        &self,
+        project_root: &str,
+        ts: i64,
+        caller: &str,
+        tool: &str,
+        summary: &str,
+        ok: bool,
+        error: Option<&str>,
+        term_id: Option<&str>,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        let mut payload = json!({ "tool": tool, "summary": summary, "ok": ok });
+        if let Some(e) = error {
+            payload["error"] = json!(e);
+        }
+        let actor = format!("agent:{caller}");
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            format!("agent:{caller}"),
+            None,
+            "agent_action",
+            term_id.map(String::from),
+            None,
+            &actor,
+            payload,
+        )
+    }
+
     /// Record a turn rewind: the working tree was restored to a snapshot and
     /// (when the fork succeeded) the conversation transcript was forked to a
     /// new session id. A rewind rewrites what the checkout contains, so it is
@@ -1337,6 +1375,55 @@ fn bounded_input(input: Value) -> Value {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// D9: what an agent does through the console's MCP server is witnessed
+    /// under the agent's identity, on the session's lane when it names one.
+    #[test]
+    fn agent_actions_are_witnessed_as_the_agent() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-testigo-d9-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let svc = TestigoService::new();
+        let ev = svc
+            .on_agent_action(
+                "/proj/a",
+                5,
+                "claude-desktop",
+                "new_session",
+                "docs",
+                true,
+                None,
+                Some("sess-9"),
+            )
+            .unwrap();
+        assert_eq!(ev.kind, "agent_action");
+        assert_eq!(ev.actor, "agent:claude-desktop");
+        assert_eq!(ev.case_id, "agent:claude-desktop");
+        assert_eq!(ev.term_id.as_deref(), Some("sess-9"));
+        assert_eq!(ev.payload["tool"], "new_session");
+        assert_eq!(ev.payload["ok"], true);
+        let refused = svc
+            .on_agent_action(
+                "/proj/a",
+                6,
+                "claude-desktop",
+                "invoke_action",
+                "git.push",
+                false,
+                Some("stays a human gesture"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(refused.payload["ok"], false);
+        assert_eq!(refused.payload["error"], "stays a human gesture");
+        assert_eq!(svc.list("/proj/a", None, None).unwrap().len(), 2);
+    }
 
     /// T4a: the pieces that make a packet say WHICH model ran, WHICH memory
     /// shaped a turn, which result belongs to which request — and that a

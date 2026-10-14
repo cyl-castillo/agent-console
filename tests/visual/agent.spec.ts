@@ -72,3 +72,42 @@ test("an agent drives the console by roles, names and the bridge", async ({ page
   await expect(page.getByText(/review before signing/i)).toBeHidden();
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
+
+test("the console answers an agent's MCP call and names it as the actor", async ({ page }) => {
+  await open(page, "app-v2--settings-mcp");
+  // The panel tells the user how to point an agent at this console.
+  await expect(page.getByTestId("console-mcp-section")).toContainText(
+    "claude mcp add agent-console",
+  );
+  await page.getByLabel("Agent name").fill("claude-desktop");
+  await expect(page.getByTestId("console-mcp-section")).toContainText("--caller claude-desktop");
+
+  // The Rust side emits console://call; the webview answers via console_reply.
+  const before = (await state(page)).sessions.length;
+  await page.evaluate(() =>
+    (
+      window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+    ).__fixtures.emit("console://call", {
+      id: 42,
+      caller: "claude-desktop",
+      tool: "new_session",
+      arguments: { name: "docs", agent: "claude" },
+    }),
+  );
+  await expect.poll(async () => (await state(page)).sessions.length).toBe(before + 1);
+  const reply = await page.evaluate(() => {
+    const log = (
+      window as unknown as {
+        __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+      }
+    ).__fixtures.invokeLog;
+    return log.find((l) => l.cmd === "console_reply")?.args;
+  });
+  expect(reply).toMatchObject({
+    id: 42,
+    result: { ok: true, result: { name: "docs", agent: "claude" } },
+  });
+  expect((await state(page)).sessions.some((s) => (s as { name: string }).name === "docs")).toBe(
+    true,
+  );
+});

@@ -459,6 +459,9 @@ enum Route {
     Inject,
     /// One relayed MCP `tools/call` from `hook-bridge mcp` (connector).
     Mcp,
+    /// One relayed `tools/call` from `hook-bridge console-mcp` (the console
+    /// as a server an agent drives).
+    Console,
 }
 
 /// Read one request: request line + headers, then exactly the body. Returns
@@ -478,6 +481,9 @@ fn read_request(stream: &mut TcpStream, expected_token: &str) -> Option<(Route, 
         match parts.next() {
             Some(p) if is_post && p.starts_with("/inject") => Some(Route::Inject),
             Some(p) if is_post && (p == "/mcp" || p.starts_with("/mcp?")) => Some(Route::Mcp),
+            Some(p) if is_post && (p == "/console" || p.starts_with("/console?")) => {
+                Some(Route::Console)
+            }
             _ => None,
         }
     };
@@ -559,6 +565,18 @@ fn serve_mcp(stream: &mut TcpStream, app: &tauri::AppHandle, body: &str) {
     respond_json(stream, &answer.to_string());
 }
 
+fn serve_console(stream: &mut TcpStream, app: &tauri::AppHandle, body: &str) {
+    use crate::services::console_mcp::ConsoleCall;
+    let answer = match serde_json::from_str::<ConsoleCall>(body) {
+        Err(e) => serde_json::json!({ "ok": false, "error": format!("Invalid arguments: {e}") }),
+        Ok(req) => match app.state::<AppState>().console_mcp.call(app, &req) {
+            Ok(result) => serde_json::json!({ "ok": true, "result": result }),
+            Err(m) => serde_json::json!({ "ok": false, "error": m }),
+        },
+    };
+    respond_json(stream, &answer.to_string());
+}
+
 fn serve_connection(stream: &mut TcpStream, app: &tauri::AppHandle) {
     let Some((route, body)) = read_request(stream, token()) else {
         respond_json(stream, NOTHING);
@@ -566,6 +584,10 @@ fn serve_connection(stream: &mut TcpStream, app: &tauri::AppHandle) {
     };
     if route == Route::Mcp {
         serve_mcp(stream, app, &body);
+        return;
+    }
+    if route == Route::Console {
+        serve_console(stream, app, &body);
         return;
     }
     let Ok(req) = serde_json::from_str::<InjectRequest>(&body) else {

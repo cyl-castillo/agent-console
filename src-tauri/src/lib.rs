@@ -295,6 +295,8 @@ pub fn run() {
             commands::scheduler::scheduler_set_paused,
             commands::scheduler::scheduler_fire_event,
             commands::scheduler::scheduler_run_now,
+            commands::console_mcp::console_reply,
+            commands::console_mcp::console_mcp_config,
             commands::voice::voice_enable,
             commands::voice::voice_disable,
             commands::voice::voice_status,

@@ -11,6 +11,7 @@ import { attachLiveStatusListener } from "../stores/liveStatusStore";
 import { attachProofListeners } from "../stores/proofStore";
 import { attachWorkbenchListeners } from "../stores/workbenchStore";
 import { attachOverlayListeners } from "../stores/overlaysStore";
+import { attachConsoleMcpHost } from "../lib/consoleMcpHost";
 import { useToastStore } from "../stores/toastStore";
 import { useUpdaterStore } from "../stores/updaterStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
@@ -59,6 +60,8 @@ export function useAppLifecycle(): void {
     adopt(attachHooksHealthListeners());
     adopt(attachLiveStatusListener());
     adopt(attachProofListeners());
+    // The console as an MCP server: answer the Rust side's roundtrips.
+    adopt(attachConsoleMcpHost());
     offs.push(attachVoiceApprovalWatcher());
     offs.push(attachWorkbenchListeners());
     offs.push(attachOverlayListeners());
