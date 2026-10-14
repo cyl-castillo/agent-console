@@ -1,0 +1,94 @@
+// Screenshot + accessibility sweep over every Storybook story. Baselines for
+// `toHaveScreenshot` live beside this file (git-ignored: Chromium and system
+// fonts differ per machine); Argos does the cross-machine comparison in CI.
+import { test, expect, type Page } from "@playwright/test";
+import { argosScreenshot } from "@argos-ci/playwright";
+import AxeBuilder from "@axe-core/playwright";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+interface IndexEntry {
+  id: string;
+  title: string;
+  name: string;
+  type: "story" | "docs";
+}
+
+const SNAPSHOTS = process.env.VISUAL_SNAPSHOTS === "1";
+const OUT = join(HERE, "out");
+const A11Y_DIR = join(OUT, "a11y");
+
+async function loadIndex(baseURL: string): Promise<IndexEntry[]> {
+  const res = await fetch(`${baseURL}/index.json`);
+  const json = (await res.json()) as { entries: Record<string, IndexEntry> };
+  return Object.values(json.entries).filter((e) => e.type === "story");
+}
+
+/// Fixture timestamps are relative to this instant (src/dev/fixtures/defaults):
+/// freezing the page clock keeps "4m ago" and countdowns identical run to run.
+const FIXED_NOW = 1792245600000;
+
+async function openStory(page: Page, id: string) {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
+  page.on("console", (m) => {
+    // Aborted external requests surface as resource-load errors; those are
+    // listed in out/external-requests.txt instead of failing the story.
+    if (m.type() === "error" && !m.text().startsWith("Failed to load resource"))
+      errors.push(`console.error: ${m.text()}`);
+    if (m.type() === "warning") warnings.push(m.text());
+  });
+  await page.clock.setFixedTime(new Date(FIXED_NOW));
+  // Offline by construction: nothing but the static Storybook is reachable
+  // (the updater's GitHub check would otherwise 403 under rate limiting).
+  await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => {
+    appendFileSync(join(OUT, "external-requests.txt"), `${id}: ${route.request().url()}\n`);
+    void route.abort();
+  });
+  await page.goto(`/iframe.html?id=${id}&viewMode=story`);
+  await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
+  await page.evaluate(() => document.fonts.ready);
+  return { errors, warnings };
+}
+
+test.describe("stories", () => {
+  test("index is reachable", async ({ baseURL }) => {
+    const live = await loadIndex(baseURL!);
+    expect(live.map((e) => e.id).sort()).toEqual(entries.map((e) => e.id).sort());
+  });
+
+  // Enumerate at collection time from the static build on disk, so each
+  // story is its own test (parallel, individually retryable, named in CI).
+  const indexPath = join(HERE, "..", "..", "storybook-static", "index.json");
+  const entries = Object.values(
+    (JSON.parse(readFileSync(indexPath, "utf8")) as { entries: Record<string, IndexEntry> })
+      .entries,
+  ).filter((e) => e.type === "story");
+
+  for (const e of entries) {
+    test(e.id, async ({ page }) => {
+      const { errors, warnings } = await openStory(page, e.id);
+      expect(errors, `story ${e.id} logged errors`).toEqual([]);
+      const missing = warnings
+        .filter((w) => w.startsWith("[fixture] no fixture"))
+        .map((w) => w.replace(/^\[fixture\] no fixture for "([^"]+)".*$/, "$1"));
+      if (missing.length)
+        appendFileSync(join(OUT, "missing-fixtures.txt"), `${e.id}: ${missing.join(", ")}\n`);
+      await argosScreenshot(page, e.id, { fullPage: false });
+      if (SNAPSHOTS) await expect(page).toHaveScreenshot(`${e.id}.png`);
+      const axe = await new AxeBuilder({ page }).analyze();
+      writeFileSync(
+        join(A11Y_DIR, `${e.id}.json`),
+        JSON.stringify(
+          axe.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length })),
+          null,
+          2,
+        ),
+      );
+    });
+  }
+});

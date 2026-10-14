@@ -1,0 +1,19 @@
+{
+  "extends": "stylelint-config-recommended",
+  "rules": {
+    "no-descending-specificity": null,
+    "no-duplicate-selectors": [
+      true,
+      {
+        "severity": "warning"
+      }
+    ],
+    "declaration-block-no-redundant-longhand-properties": null,
+    "font-family-no-missing-generic-family-keyword": null,
+    "selector-class-pattern": null,
+    "declaration-property-value-keyword-no-deprecated": null
+  },
+  "ignoreFiles": [
+    "src/styles/tokens.css"
+  ]
+}
