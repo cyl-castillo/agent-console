@@ -223,7 +223,7 @@ export function SessionList() {
 /// agent, then a model/tuning preset for that agent; picking creates the session
 /// right away. There is no silent default — both choices are explicit. The model
 /// per-project default is remembered separately for each agent.
-function AgentModelChooser({
+export function AgentModelChooser({
   projectRoot,
   lastAgent,
   onPick,

@@ -105,6 +105,11 @@ export const SessionsChanges = scenario({ destination: "sessions", centerTab: "c
 export const WorkJobs = scenario({ destination: "work", tab: "jobs" });
 export const WorkRoom = scenario({ destination: "work", tab: "roundtable" });
 export const ProofLedger = scenario({ destination: "proof", tab: "proof" });
+export const ProofTurnSelected = scenario({
+  destination: "proof",
+  tab: "proof",
+  after: () => useShellStore.getState().selectTurn("turn-001"),
+});
 export const SettingsPermissions = scenario({ destination: "settings", tab: "permissions" });
 export const SettingsSkills = scenario({ destination: "settings", tab: "skills" });
 export const LightInbox = scenario({ theme: "light" });

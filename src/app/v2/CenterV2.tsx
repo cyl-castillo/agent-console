@@ -3,6 +3,7 @@ import type { TerminalSession } from "../../stores/terminalsStore";
 import { useShellStore } from "../../stores/shellStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { SessionsCenter } from "./SessionsCenter";
+import { ProofCenter } from "./proof/ProofCenter";
 import { WorkbenchPanel } from "../panels";
 import { InboxView } from "./InboxView";
 import { TAB_LABELS } from "./destinations";
@@ -24,6 +25,7 @@ export function CenterV2(props: Props) {
 
   if (destination === "inbox") return <InboxView />;
   if (destination === "sessions") return <SessionsCenter {...props} />;
+  if (destination === "proof") return <ProofCenter />;
   return (
     <section
       className="flex h-full min-h-0 flex-col"

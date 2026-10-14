@@ -5,6 +5,7 @@ import { useJobsStore } from "../../stores/jobsStore";
 import { useTerminalsStore, type TerminalSession } from "../../stores/terminalsStore";
 import { capFor, useBudgetStore } from "../../stores/budgetStore";
 import { useLiveStatusStore } from "../../stores/liveStatusStore";
+import { useProofStore } from "../../stores/proofStore";
 import { sessionAttention } from "../../lib/attention";
 import type { AgentState } from "../../ui/StatusGlyph";
 import type { ApprovalRequest, JobCard, JobPendingCard } from "../../types/domain";
@@ -35,6 +36,7 @@ export function useInbox(): InboxData {
   const board = useJobsStore((s) => s.board);
   const budgets = useBudgetStore();
   const byTerm = useLiveStatusStore((s) => s.byTerm);
+  const events = useProofStore((s) => s.events);
   // A clock so relative ages move without a store write; the working window
   // needs it too.
   const [now, setNow] = useState(() => Date.now());
@@ -44,6 +46,25 @@ export function useInbox(): InboxData {
   }, []);
 
   const visible = sessions.filter((s) => !s.archived);
+  // Sessions whose latest ledger turn is still open and recent.
+  const OPEN_TURN_FRESH_MS = 15 * 60_000;
+  const lastTurn = new Map<string, { ended: boolean; ts: number }>();
+  for (const e of events) {
+    if (!e.termId || !e.turnId) continue;
+    if (e.kind === "prompt") lastTurn.set(e.termId, { ended: false, ts: e.ts });
+    else {
+      const t = lastTurn.get(e.termId);
+      if (t) {
+        t.ts = e.ts;
+        if (e.kind === "turn_end") t.ended = true;
+      }
+    }
+  }
+  const openTurnIds = new Set(
+    [...lastTurn.entries()]
+      .filter(([, t]) => !t.ended && now - t.ts < OPEN_TURN_FRESH_MS)
+      .map(([id]) => id),
+  );
   const approvalTermIds = queue.map((r) => r.termId).filter((t): t is string => Boolean(t));
   const byState = new Map<AgentState, TerminalSession[]>();
   for (const s of visible) {
@@ -55,6 +76,7 @@ export function useInbox(): InboxData {
       workingTermId: null,
       activeId,
       now,
+      openTurn: openTurnIds.has(s.id),
     });
     byState.set(st, [...(byState.get(st) ?? []), s]);
   }

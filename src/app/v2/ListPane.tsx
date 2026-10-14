@@ -1,11 +1,10 @@
-import { LeftSidebar } from "../../components/LeftSidebar";
 import { isTabEnabled } from "../../stores/modulesStore";
-import { useRoundtableStore } from "../../stores/roundtableStore";
 import { useShellStore } from "../../stores/shellStore";
 import { useWorkbenchStore } from "../../stores/workbenchStore";
 import { Row } from "../../ui/Row";
 import { SectionHeader } from "../../ui/SectionHeader";
 import { destinationDef, TAB_LABELS } from "./destinations";
+import { SessionsList } from "./SessionsList";
 
 /// The second column: what the destination offers. Sessions reuse the
 /// existing workspace sidebar (sessions, rooms, changes, files); the other
@@ -14,20 +13,7 @@ export function ListPane() {
   const destination = useShellStore((s) => s.destination);
   const tab = useWorkbenchStore((s) => s.tab);
   const setTab = useWorkbenchStore((s) => s.setTab);
-  const openRoom = useRoundtableStore((s) => s.openRoom);
-
-  if (destination === "sessions") {
-    return (
-      <div className="flex h-full min-h-0 flex-col [&>.panel.left]:h-full [&>.panel.left]:w-full">
-        <LeftSidebar
-          onOpenRoom={(id) => {
-            void openRoom(id);
-            setTab("roundtable");
-          }}
-        />
-      </div>
-    );
-  }
+  if (destination === "sessions") return <SessionsList />;
   const def = destinationDef(destination);
   return (
     <div className="flex h-full min-h-0 flex-col overflow-auto py-1" data-testid="list-pane">

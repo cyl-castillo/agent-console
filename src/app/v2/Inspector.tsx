@@ -2,12 +2,18 @@ import { FileInspector } from "../../components/FileInspector";
 import { TurnsPanel } from "../../components/TurnsPanel";
 import { useShellStore } from "../../stores/shellStore";
 import { useUIStore } from "../../stores/uiStore";
+import { TurnInspector } from "./proof/TurnInspector";
 
 /// The right column, always rotulated: what it shows never changes without a
 /// visible title (UX_REVIEW P2.2). Sessions get the turn timeline, or the
 /// file inspector while Changes is up; other destinations show nothing here
 /// in F2 (the shell collapses the column).
-export function inspectorFor(destination: string, centerTab: string): { title: string } | null {
+export function inspectorFor(
+  destination: string,
+  centerTab: string,
+  selectedTurn: string | null = null,
+): { title: string } | null {
+  if (destination === "proof") return selectedTurn ? { title: "Turn" } : null;
   if (destination !== "sessions") return null;
   return centerTab === "changes" ? { title: "File" } : { title: "Turns" };
 }
@@ -15,7 +21,8 @@ export function inspectorFor(destination: string, centerTab: string): { title: s
 export function Inspector() {
   const destination = useShellStore((s) => s.destination);
   const centerTab = useUIStore((s) => s.tab);
-  const meta = inspectorFor(destination, centerTab);
+  const selectedTurn = useShellStore((s) => s.selectedTurnId);
+  const meta = inspectorFor(destination, centerTab, selectedTurn);
   if (!meta) return null;
   return (
     <aside
@@ -31,7 +38,13 @@ export function Inspector() {
       </div>
       <div className="workbench-layout min-h-0 flex-1">
         <div className="workbench-content">
-          {centerTab === "changes" ? <FileInspector /> : <TurnsPanel />}
+          {destination === "proof" ? (
+            <TurnInspector />
+          ) : centerTab === "changes" ? (
+            <FileInspector />
+          ) : (
+            <TurnsPanel />
+          )}
         </div>
       </div>
     </aside>
