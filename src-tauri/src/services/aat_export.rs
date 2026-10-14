@@ -213,9 +213,9 @@ fn build_session(term: &str, events: &[&ProofEvent], app_version: &str) -> AppRe
     let mut last_ts = first_ts;
     let mut model: Option<String> = None;
     let push = |mut rec: Map<String, Value>,
-                    records: &mut Vec<Value>,
-                    prev_hash: &mut Option<String>,
-                    prev_id: &mut Option<String>|
+                records: &mut Vec<Value>,
+                prev_hash: &mut Option<String>,
+                prev_id: &mut Option<String>|
      -> AppResult<()> {
         let seq = records.len() as u64;
         let id = uuid_from(&format!("record:{term}:{seq}"));
@@ -763,14 +763,20 @@ mod tests {
         // (skipped where node is not on PATH; CI has it).
         let verifier = dir.join("aat-verify.mjs");
         fs::write(&verifier, VERIFIER_MJS).unwrap();
-        let run = |expect_ok: bool| {
-            match std::process::Command::new("node").arg(&verifier).arg(&path).output() {
-                Ok(out) => {
-                    let text = String::from_utf8_lossy(&out.stdout).to_string();
-                    assert_eq!(out.status.success(), expect_ok, "node verifier said: {text}");
-                }
-                Err(_) => eprintln!("node not on PATH: skipping the cross-check"),
+        let run = |expect_ok: bool| match std::process::Command::new("node")
+            .arg(&verifier)
+            .arg(&path)
+            .output()
+        {
+            Ok(out) => {
+                let text = String::from_utf8_lossy(&out.stdout).to_string();
+                assert_eq!(
+                    out.status.success(),
+                    expect_ok,
+                    "node verifier said: {text}"
+                );
             }
+            Err(_) => eprintln!("node not on PATH: skipping the cross-check"),
         };
         run(false);
         fs::write(&path, &body).unwrap();
