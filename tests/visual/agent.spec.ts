@@ -111,3 +111,110 @@ test("the console answers an agent's MCP call and names it as the actor", async 
     true,
   );
 });
+
+test("an agent's decline lands in the Inbox as a decision and is never retried", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox");
+  const before = await page.locator("[data-testid^='decline-']").count();
+  // The Rust side emits console://declined after witnessing the `decline` tool call.
+  await page.evaluate(() =>
+    (
+      window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+    ).__fixtures.emit("console://declined", {
+      seq: 501,
+      ts: Date.now(),
+      caller: "codex-cli",
+      kind: "decline",
+      reason: "This would force-push over a branch other people share.",
+      suggestion: "Open a PR instead.",
+      session: "sess-auth",
+      project: "/home/demo/code/demo-playground",
+    }),
+  );
+  const card = page.locator("[data-testid^='decline-']").last();
+  await expect(page.locator("[data-testid^='decline-']")).toHaveCount(before + 1);
+  await expect(card).toContainText("Declined");
+  await expect(card).toContainText("agent:codex-cli");
+  await expect(card).toContainText("Open a PR instead.");
+  // No retry affordance exists: only acknowledge or open the session.
+  await expect(card.getByRole("button")).toHaveCount(2);
+  await expect(card.getByRole("button", { name: /retry/i })).toHaveCount(0);
+  await card.getByRole("button", { name: "Acknowledge" }).click();
+  await expect(page.locator("[data-testid^='decline-']")).toHaveCount(before);
+});
+
+test("closing a session can ask the agent for a handoff note saved as memory", async ({ page }) => {
+  await open(page, "app-v2--sessions");
+  const typed = page.evaluate(
+    () =>
+      new Promise<string>((resolve) =>
+        window.addEventListener("ac:term-input", (e) =>
+          resolve((e as CustomEvent<{ sessionId: string; data: string }>).detail.data),
+        ),
+      ),
+  );
+  const row = page.getByTestId("session-sess-auth");
+  await row.hover();
+  await row.getByRole("button", { name: /handoff note/ }).click();
+  expect(await typed).toContain("handoff note");
+
+  // The agent's next turn_end for that session carries the note; the console
+  // saves it as a memory (learning_save_memory) — advisory, no merge power.
+  // Build the new ledger from the fixture module's data through the story's own stores.
+  await page.evaluate(() => {
+    const fx = (
+      window as unknown as { __fixtures: { setFixture: (c: string, v: unknown) => void } }
+    ).__fixtures;
+    const anyWin = window as unknown as { __proofEvents?: unknown[] };
+    void anyWin;
+    fx.setFixture("testigo_list", [
+      {
+        seq: 900,
+        ts: Date.now(),
+        caseId: "case-2026-10-13",
+        turnId: "turn-900",
+        kind: "prompt",
+        termId: "sess-auth",
+        actor: "human",
+        payload: { prompt: "handoff" },
+        prevHash: "0",
+        hash: "1",
+      },
+      {
+        seq: 901,
+        ts: Date.now() + 1000,
+        caseId: "case-2026-10-13",
+        turnId: "turn-900",
+        kind: "turn_end",
+        termId: "sess-auth",
+        actor: "agent",
+        payload: {
+          summary: "Done: fixed the token fixture. Pending: retry.ts refactor. Watch the 429 path.",
+        },
+        prevHash: "1",
+        hash: "2",
+      },
+    ]);
+  });
+  await page.evaluate(() =>
+    (
+      window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+    ).__fixtures.emit("hook://turn_end", {
+      termId: "sess-auth",
+      summary: "Done: fixed the token fixture.",
+    }),
+  );
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const log = (
+          window as unknown as {
+            __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+          }
+        ).__fixtures.invokeLog;
+        return log.find((l) => l.cmd === "learning_save_memory")?.args ?? null;
+      }),
+    )
+    .toMatchObject({ name: expect.stringMatching(/^handoff-fix auth test-/) });
+});

@@ -6,6 +6,7 @@ import App from "../App";
 import { approvalEdit, approvalHigh, pendingApproval, ROOT } from "../dev/fixtures/defaults";
 import { useBudgetStore } from "../stores/budgetStore";
 import { useLiveStatusStore } from "../stores/liveStatusStore";
+import { useDeclinesStore } from "../stores/declinesStore";
 import type { FixtureMap } from "../dev/fixtures/registry";
 import { useApprovalStore } from "../stores/approvalStore";
 import { useFlagsStore } from "../stores/flagsStore";
@@ -81,6 +82,16 @@ export const InboxDecisions = scenario({
     useLiveStatusStore
       .getState()
       .note({ ts: Date.now(), termId: "sess-auth", costUsd: 5.12, usedPct: 31 });
+    useDeclinesStore.getState().add({
+      seq: 99,
+      ts: Date.now() - 60_000,
+      caller: "claude-desktop",
+      kind: "escalate",
+      reason: "The fix needs the production database URL, which I will not guess.",
+      suggestion: "Put it in the vault as DATABASE_URL, or run the migration yourself.",
+      session: "sess-auth",
+      project: ROOT,
+    });
   },
 });
 export const InboxEmpty = scenario({

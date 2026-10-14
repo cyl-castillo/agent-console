@@ -99,6 +99,7 @@ the call names one — never as the human.
 | `session_events` | a session's witnessed ledger events, oldest first |
 | `memory_search` | semantic search over memories and skills |
 | `ledger_verify` | verify the ledger's hash chain |
+| `decline` | decline (won't / shouldn't) or escalate (can't without a human) a task, with the reason and a suggestion; witnessed as `agent_declined`, shown in the Inbox as a decision, never retried by the console |
 
 The allowlist for `invoke_action` is enforced on both sides
 (`console_mcp::action_allowed` in Rust, `actionAllowed` in the webview host).

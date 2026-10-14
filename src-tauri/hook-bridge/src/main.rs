@@ -1140,6 +1140,17 @@ fn console_tools() -> Vec<Value> {
             json!({}),
             &[],
         ),
+        mcp_tool(
+            "decline",
+            "Decline a task you should not do, or escalate one you cannot finish, with the reason. It is recorded under your name and shown to the human as a decision; the console never retries it on its own. Use it instead of guessing, faking, or looping.",
+            json!({
+                "kind": { "type": "string", "description": "decline (won't / shouldn't) or escalate (can't without a human)" },
+                "reason": { "type": "string" },
+                "suggestion": { "type": "string", "description": "What you would do instead, or what the human should decide" },
+                "session": { "type": "string", "description": "The session this concerns, if any" }
+            }),
+            &["kind", "reason"],
+        ),
     ]
 }
 
