@@ -15,7 +15,9 @@ const preview: Preview = {
   parameters: {
     layout: "fullscreen",
     backgrounds: { disable: true },
-    a11y: { test: "todo" },
+    // The panel runs axe on demand only: an automatic run collides with the
+    // Playwright sweep's own axe pass ("Axe is already running").
+    a11y: { test: "todo", manual: true },
   },
   decorators: [(Story) => <div style={frame}>{Story()}</div>],
 };

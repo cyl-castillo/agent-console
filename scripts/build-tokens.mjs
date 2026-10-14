@@ -5,6 +5,7 @@
 // global.css. Keep this tiny and deterministic: CI checks the output is
 // committed (`npm run tokens && git diff --exit-code src/styles/tokens.css`).
 import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const [, , inPath = "tokens/console.tokens.json", outPath = "src/styles/tokens.css"] = process.argv;
 const themePath = outPath.replace(/tokens\.css$/, "theme.css");
@@ -123,6 +124,11 @@ ${themeLines.join("\n")}
 }
 `;
 writeFileSync(themePath, theme);
+// Generated files go through the same formatter as the rest of src, so the
+// committed output is both what this script emits and what prettier wants.
+execFileSync("npx", ["prettier", "--write", "--log-level", "warn", outPath, themePath], {
+  stdio: "inherit",
+});
 console.log(
   `${outPath}: ${dark.length} dark, ${light.length} light · ${themePath}: ${themeLines.length} entries`,
 );
