@@ -1,0 +1,30 @@
+# Agent Console
+
+> Terminal-first, Linux-first desktop app (Tauri + Rust + React) for directing AI coding agents inside a repository. It runs the real agent CLIs (Claude Code, Codex) in PTYs, keeps per-turn snapshots with diff review and rewind, and witnesses every prompt, human approval, tool result and diff into a hash-chained evidence ledger (Testigo) that exports as a signed proof packet or as an IETF Agent Audit Trail verifiable offline. Agents can drive the console themselves through its MCP server and a stable action contract. AGPL-3.0.
+
+Not to be confused with `buhuipao/agent-console`, a Rust TUI that finds and resumes Codex and Claude Code sessions. This project lives at `cyl-castillo/agent-console` and `agent-console.dev`.
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/cyl-castillo/agent-console/main/README.md): vision, features, installing, requirements, development, safety model, architecture, roadmap, license.
+- [User manual](https://agent-console.dev/manual/): getting started, interface, directing agents, terminal, changes, safety, approvals, snapshots, shortcuts, workbench, proof, memory, troubleshooting, FAQ.
+- [Actions contract for agents](https://raw.githubusercontent.com/cyl-castillo/agent-console/main/docs/ACTIONS.md): the stable action ids, the `window.__agentConsole` bridge and the console MCP server tools (`console_state`, `list_actions`, `invoke_action`, `list_sessions`, `new_session`, `send_prompt`, `session_events`, `memory_search`, `ledger_verify`, `decline`).
+- [Testigo protocol](https://github.com/cyl-castillo/testigo): the open intent-to-proof protocol the console implements; spec, verifier and plugins.
+- [Testigo in this app](https://raw.githubusercontent.com/cyl-castillo/agent-console/main/TESTIGO.md): ledger design, proof packets, the IETF audit-trail export (draft-sharif-agent-audit-trail-08) and the monorepo plan.
+
+## Install
+
+- [Releases](https://github.com/cyl-castillo/agent-console/releases): AppImage, .deb, .rpm, .dmg, .msi and .exe, with an in-app updater.
+- [Landing page](https://agent-console.dev/): screenshots and the short pitch.
+- [winget / AUR / npx launcher](https://raw.githubusercontent.com/cyl-castillo/agent-console/main/README.md#installing): the other channels.
+
+## For agents
+
+- [MCP server setup](https://raw.githubusercontent.com/cyl-castillo/agent-console/main/docs/ACTIONS.md#the-console-as-an-mcp-server): `hook-bridge console-mcp --project <root> --caller <name>`; every call is recorded in the ledger under `agent:<caller>`, and an agent may decline or escalate instead of acting.
+- [Proof packets and audit trails](https://raw.githubusercontent.com/cyl-castillo/agent-console/main/TESTIGO.md): how to verify what an agent did without trusting the console.
+
+## Optional
+
+- [Code signing policy](https://raw.githubusercontent.com/cyl-castillo/agent-console/main/README.md#code-signing-policy)
+- [Privacy policy](https://raw.githubusercontent.com/cyl-castillo/agent-console/main/README.md#privacy-policy)
+- [Source](https://github.com/cyl-castillo/agent-console)
