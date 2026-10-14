@@ -977,6 +977,41 @@ impl TestigoService {
         )
     }
 
+    /// D13: an agent declined or escalated a task through the console's MCP
+    /// server. First-class evidence (not a generic action): the reason and
+    /// the suggestion travel with it, under the agent's identity.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_agent_declined(
+        &self,
+        project_root: &str,
+        ts: i64,
+        caller: &str,
+        kind: &str,
+        reason: &str,
+        suggestion: Option<&str>,
+        term_id: Option<&str>,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        let mut payload = json!({ "kind": kind, "reason": reason });
+        if let Some(s) = suggestion {
+            payload["suggestion"] = json!(s);
+        }
+        let actor = format!("agent:{caller}");
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            format!("agent:{caller}"),
+            None,
+            "agent_declined",
+            term_id.map(String::from),
+            None,
+            &actor,
+            payload,
+        )
+    }
+
     /// Record a turn rewind: the working tree was restored to a snapshot and
     /// (when the fork succeeded) the conversation transcript was forked to a
     /// new session id. A rewind rewrites what the checkout contains, so it is
@@ -1423,6 +1458,22 @@ mod tests {
         assert_eq!(refused.payload["ok"], false);
         assert_eq!(refused.payload["error"], "stays a human gesture");
         assert_eq!(svc.list("/proj/a", None, None).unwrap().len(), 2);
+        let declined = svc
+            .on_agent_declined(
+                "/proj/a",
+                7,
+                "claude-desktop",
+                "escalate",
+                "needs prod access",
+                Some("ask ops"),
+                Some("sess-9"),
+            )
+            .unwrap();
+        assert_eq!(declined.kind, "agent_declined");
+        assert_eq!(declined.actor, "agent:claude-desktop");
+        assert_eq!(declined.payload["kind"], "escalate");
+        assert_eq!(declined.payload["suggestion"], "ask ops");
+        assert_eq!(declined.term_id.as_deref(), Some("sess-9"));
     }
 
     /// T4a: the pieces that make a packet say WHICH model ran, WHICH memory

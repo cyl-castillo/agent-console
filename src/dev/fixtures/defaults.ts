@@ -946,6 +946,7 @@ export const defaultFixtures: FixtureMap = {
   plugins_list_available: availablePlugins,
   mcp_list: mcpServers,
   console_reply: undefined,
+  learning_save_memory: "/home/demo/.claude/projects/demo-playground/memory/handoff.md",
   console_mcp_config: (args: Record<string, unknown>) => {
     const caller = typeof args.caller === "string" && args.caller ? args.caller : "agent";
     const bridge = "/home/demo/.local/share/agent-console/bin/hook-bridge";

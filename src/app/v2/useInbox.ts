@@ -3,9 +3,11 @@ import { useAgentStatusStore } from "../../stores/agentStatusStore";
 import { useApprovalStore } from "../../stores/approvalStore";
 import { useJobsStore } from "../../stores/jobsStore";
 import { useTerminalsStore, type TerminalSession } from "../../stores/terminalsStore";
+import { useSessionStore } from "../../stores/sessionStore";
 import { capFor, useBudgetStore } from "../../stores/budgetStore";
 import { useLiveStatusStore } from "../../stores/liveStatusStore";
 import { useProofStore } from "../../stores/proofStore";
+import { useDeclinesStore, type Decline } from "../../stores/declinesStore";
 import { sessionAttention } from "../../lib/attention";
 import type { AgentState } from "../../ui/StatusGlyph";
 import type { ApprovalRequest, JobCard, JobPendingCard } from "../../types/domain";
@@ -20,6 +22,8 @@ export interface InboxData {
   activeId: string | null;
   /// Sessions whose cost crossed their cap (the turn was interrupted).
   breaches: { session: TerminalSession; spent: number; cap: number }[];
+  /// Agents that declined or escalated, unacknowledged (D13).
+  declines: Decline[];
   /// Everything that waits for a human decision — the number on the rail
   /// and in the Inbox header are this same count.
   decisions: number;
@@ -37,6 +41,8 @@ export function useInbox(): InboxData {
   const budgets = useBudgetStore();
   const byTerm = useLiveStatusStore((s) => s.byTerm);
   const events = useProofStore((s) => s.events);
+  const project = useSessionStore((s) => s.project);
+  const allDeclines = useDeclinesStore((s) => s.items);
   // A clock so relative ages move without a store write; the working window
   // needs it too.
   const [now, setNow] = useState(() => Date.now());
@@ -95,12 +101,16 @@ export function useInbox(): InboxData {
       spent: byTerm[session.id]?.costUsd ?? budgets.breached[session.id],
       cap: capFor(budgets, session.id),
     }));
+  const declines = allDeclines.filter(
+    (d) => !d.resolved && (!project || d.project === project.root),
+  );
   const decisions =
     queue.length +
     jobsNeedingYou.length +
     pendingJobs.length +
     needsYouWithoutApproval +
-    breaches.length;
+    breaches.length +
+    declines.length;
 
   return {
     now,
@@ -111,6 +121,7 @@ export function useInbox(): InboxData {
     sessions: visible,
     activeId,
     breaches,
+    declines,
     decisions,
   };
 }

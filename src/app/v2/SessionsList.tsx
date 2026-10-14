@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
-import { Archive, ChevronRight, FolderTree, Plus, X } from "lucide-react";
+import { Archive, ChevronRight, FileText, FolderTree, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { AgentModelChooser } from "../../components/SessionList";
 import { FileTree } from "../../components/FileTree";
 import { createSession } from "../../lib/createSession";
 import { confirmDialog } from "../../stores/confirmStore";
 import { useLiveStatusStore } from "../../stores/liveStatusStore";
+import { useHandoffStore } from "../../stores/handoffStore";
 import { useModelStore } from "../../stores/modelStore";
 import { DEFAULT_AGENT } from "../../agents/profiles";
 import { useProofStore } from "../../stores/proofStore";
@@ -64,6 +65,7 @@ function SessionRow({
   onActivate,
   onArchive,
   onClose,
+  onHandoff,
 }: {
   session: TerminalSession;
   state: AgentState;
@@ -74,6 +76,7 @@ function SessionRow({
   onActivate: () => void;
   onArchive: () => void;
   onClose: () => void;
+  onHandoff?: () => void;
 }) {
   return (
     <div
@@ -109,6 +112,16 @@ function SessionRow({
         </span>
       </button>
       <span className="flex shrink-0 items-center opacity-0 transition-opacity dur-1 focus-within:opacity-100 group-hover:opacity-100">
+        {onHandoff && (
+          <Tooltip content="Ask the agent for a handoff note — saved as a memory when its turn ends">
+            <IconButton
+              size="sm"
+              label={`Ask ${session.name} for a handoff note`}
+              icon={<FileText size={14} />}
+              onClick={onHandoff}
+            />
+          </Tooltip>
+        )}
         <Tooltip content="Archive — hide in History, resumable anytime">
           <IconButton
             size="sm"
@@ -144,6 +157,7 @@ export function SessionsList() {
   const archive = useTerminalsStore((s) => s.archive);
   const resume = useTerminalsStore((s) => s.resume);
   const close = useTerminalsStore((s) => s.close);
+  const requestHandoff = useHandoffStore((s) => s.request);
   const defaultAgentFor = useModelStore((s) => s.defaultAgentFor);
   const [choosing, setChoosing] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -232,6 +246,9 @@ export function SessionsList() {
                   onActivate={() => (s.status === "stopped" ? resume(s.id) : setActive(s.id))}
                   onArchive={() => archive(s.id)}
                   onClose={() => void closeSession(s)}
+                  onHandoff={
+                    s.status === "live" && s.agent ? () => requestHandoff(s.id) : undefined
+                  }
                 />
               ))}
             </section>

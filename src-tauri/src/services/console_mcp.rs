@@ -36,6 +36,7 @@ pub const TOOL_NAMES: &[&str] = &[
     "session_events",
     "memory_search",
     "ledger_verify",
+    "decline",
 ];
 
 /// Tools the webview answers (stores are the truth); the rest are local.
@@ -134,6 +135,10 @@ impl ConsoleMcp {
                     "Action {id} is not available to agents; it stays a human gesture"
                 ));
             }
+        }
+        if req.name == "decline" {
+            // Its own first-class ledger event (D13), not a generic action.
+            return self.decline(app, req);
         }
         let outcome = if WEBVIEW_TOOLS.contains(&req.name.as_str()) {
             self.ask_webview(app, req)
@@ -234,6 +239,49 @@ impl ConsoleMcp {
             }
             other => Err(format!("Unknown tool {other}")),
         }
+    }
+
+    /// D13: the agent declines or escalates. Witnessed as `agent_declined`
+    /// under its identity, surfaced to the human as a decision in the Inbox,
+    /// and never retried by the console: the reason travels, the task waits.
+    fn decline(&self, app: &AppHandle, req: &ConsoleCall) -> Result<Value, String> {
+        let kind = arg_str(&req.arguments, "kind").unwrap_or("decline");
+        if kind != "decline" && kind != "escalate" {
+            return Err("kind must be decline or escalate".into());
+        }
+        let reason = arg_str(&req.arguments, "reason").ok_or("A reason is required")?;
+        let suggestion = arg_str(&req.arguments, "suggestion");
+        let session = arg_str(&req.arguments, "session");
+        let ts = now_ms();
+        let state = app.state::<AppState>();
+        let ev = state
+            .testigo
+            .on_agent_declined(
+                &req.project,
+                ts,
+                &req.caller,
+                kind,
+                reason,
+                suggestion,
+                session,
+            )
+            .map_err(|e| e.to_string())?;
+        let payload = json!({
+            "seq": ev.seq,
+            "ts": ts,
+            "caller": req.caller,
+            "kind": kind,
+            "reason": reason,
+            "suggestion": suggestion,
+            "session": session,
+            "project": req.project,
+        });
+        let _ = app.emit("console://declined", &payload);
+        Ok(json!({
+            "recorded": true,
+            "seq": ev.seq,
+            "note": "The human will see this in the Inbox. The console will not retry the task on its own.",
+        }))
     }
 
     /// Record the call in the ledger as the agent's act. A failure to witness

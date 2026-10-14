@@ -3,11 +3,12 @@
 // settled (stores hydrate asynchronously after mount).
 import { applyFixtures, type FixtureMap } from "../dev/fixtures/registry";
 import { emit, resetEventBus } from "../dev/tauri-shim/event";
-import { invokeLog } from "../dev/fixtures/registry";
+import { invokeLog, setFixture } from "../dev/fixtures/registry";
 import { useThemeStore } from "../stores/themeStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { toastManager } from "../ui/Toast";
 import { installAgentBridge } from "../lib/agentBridge";
+import { useDeclinesStore } from "../stores/declinesStore";
 
 export const READY_ATTR = "data-story-ready";
 
@@ -32,10 +33,11 @@ export function beginScenario(fixtures: FixtureMap = {}, theme: "dark" | "light"
   }
   resetEventBus();
   toastManager.close();
+  useDeclinesStore.setState({ items: [] });
   installAgentBridge();
   // Specs drive the backend side: push events the Rust side would emit and
   // read which commands the webview invoked in return.
-  (window as unknown as { __fixtures: unknown }).__fixtures = { emit, invokeLog };
+  (window as unknown as { __fixtures: unknown }).__fixtures = { emit, invokeLog, setFixture };
   applyFixtures(fixtures);
   useThemeStore.getState().setTheme(theme);
   // Stories render the working app, not first-run flows, unless they opt in.
