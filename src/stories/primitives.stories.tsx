@@ -32,6 +32,8 @@ import {
   Tooltip,
   TooltipProvider,
   type AgentState,
+  BudgetRing,
+  DecisionCard,
 } from "../ui";
 import { useThemeStore } from "../stores/themeStore";
 
@@ -381,5 +383,85 @@ export const ToastsShown: StoryObj = {
 export const CommandPalette: StoryObj = {
   render: () => <Palette />,
   loaders: theme("dark"),
+  play: ready,
+};
+
+function Decisions() {
+  const started = Date.now() - 20_000;
+  const noop = () => {};
+  return (
+    <div className="flex max-w-2xl flex-col gap-3">
+      <DecisionCard
+        tier="low"
+        tierLabel="Read-only"
+        tierReason="inspects, builds or tests"
+        intent="Bash · npm test -- --run tests/retry.test.ts"
+        context="fix auth test · ~/code/demo-playground"
+        preview={
+          <pre className="m-0 p-2 font-code text-small">npm test -- --run tests/retry.test.ts</pre>
+        }
+        deadline={started + 90_000}
+        startedAt={started}
+        queuePosition={{ index: 0, total: 3 }}
+        actions={[
+          { label: "Deny", variant: "danger", onClick: noop },
+          { label: "Always…", variant: "secondary", onClick: noop },
+          { label: "Approve once", variant: "primary", onClick: noop },
+        ]}
+      />
+      <DecisionCard
+        tier="medium"
+        tierLabel="Edits a file"
+        tierReason="src/retry.ts"
+        intent="Edit · src/retry.ts"
+        preview={
+          <pre className="m-0 p-2 font-code text-small leading-snug">
+            <div className="text-danger">-const MAX_BACKOFF_MS = 8000;</div>
+            <div className="text-ok">
+              +export interface RetryOptions {"{"} maxBackoffMs?: number {"}"}
+            </div>
+            <div className="text-ok">+const MAX_BACKOFF_MS = 8000;</div>
+          </pre>
+        }
+        actions={[
+          { label: "Deny", variant: "danger", onClick: noop },
+          { label: "Approve once", variant: "primary", onClick: noop },
+        ]}
+      />
+      <DecisionCard
+        tier="high"
+        tierLabel="Irreversible or external"
+        tierReason="force-push rewrites remote history"
+        intent="Bash · git push --force origin main"
+        preview={
+          <pre className="m-0 p-2 font-code text-small">
+            rm -rf dist && git push --force origin main
+          </pre>
+        }
+        deadline={started + 90_000}
+        startedAt={started}
+        typedConfirm
+        actions={[
+          { label: "Deny", variant: "danger", onClick: noop },
+          { label: "Approve once", variant: "primary", onClick: noop },
+        ]}
+      />
+      <div className="flex flex-wrap gap-4">
+        <BudgetRing spent={1.2} cap={5} />
+        <BudgetRing spent={4.3} cap={5} />
+        <BudgetRing spent={5.12} cap={5} />
+        <BudgetRing spent={0.4} cap={0} />
+      </div>
+    </div>
+  );
+}
+export const DecisionCards: StoryObj = {
+  render: () => <Decisions />,
+  loaders: theme("dark"),
+  play: ready,
+};
+export const DecisionCardsLight: StoryObj = {
+  render: () => <Decisions />,
+  loaders: theme("light"),
   play: ready,
 };
