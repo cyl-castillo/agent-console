@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { showToast, toastManager } from "../ui/Toast";
+import { reportProblem } from "../lib/reportProblem";
 
 export type ToastTone = "info" | "success" | "error";
 
@@ -18,16 +20,25 @@ export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
 
   show: (message, tone = "info") => {
-    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Rendered by the Base UI toast manager (ui/Toast → ToastHost). Info and
+    // success are transient; errors persist until dismissed so a real
+    // failure can't vanish before it's read — and carry a one-click field
+    // report, the moment it is worth the most.
+    const id = showToast(
+      message,
+      tone,
+      tone === "error"
+        ? { action: { label: "Report", onClick: () => void reportProblem(message) } }
+        : undefined,
+    );
     set((s) => ({ toasts: [...s.toasts, { id, message, tone }].slice(-4) }));
-    // Info/success are transient; errors persist until the user dismisses them
-    // so a real failure can't vanish before it's read or acted on.
     if (tone !== "error") {
       window.setTimeout(() => get().dismiss(id), 2600);
     }
   },
 
   dismiss: (id) => {
+    toastManager.close(id);
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   },
 }));
