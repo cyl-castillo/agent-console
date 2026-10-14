@@ -78,17 +78,28 @@ test.describe("stories", () => {
         .map((w) => w.replace(/^\[fixture\] no fixture for "([^"]+)".*$/, "$1"));
       if (missing.length)
         appendFileSync(join(OUT, "missing-fixtures.txt"), `${e.id}: ${missing.join(", ")}\n`);
-      await argosScreenshot(page, e.id, { fullPage: false });
+      await argosScreenshot(page, e.id, {
+        fullPage: false,
+        // A loading Button is legitimately aria-busy; the story is settled by data-story-ready.
+        stabilize: { waitForAriaBusy: false },
+      });
       if (SNAPSHOTS) await expect(page).toHaveScreenshot(`${e.id}.png`);
       const axe = await new AxeBuilder({ page }).analyze();
-      writeFileSync(
-        join(A11Y_DIR, `${e.id}.json`),
-        JSON.stringify(
-          axe.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length })),
-          null,
-          2,
-        ),
-      );
+      const violations = axe.violations.map((v) => ({
+        id: v.id,
+        impact: v.impact,
+        nodes: v.nodes.length,
+        samples: v.nodes.slice(0, 3).map((n) => ({ target: n.target, summary: n.failureSummary })),
+      }));
+      writeFileSync(join(A11Y_DIR, `${e.id}.json`), JSON.stringify(violations, null, 2));
+      // The primitives are the a11y contract: nothing serious or critical,
+      // ever. App stories only report (their debt is tracked by the audit).
+      if (e.id.startsWith("primitives--")) {
+        const blocking = violations.filter(
+          (v) => v.impact === "serious" || v.impact === "critical",
+        );
+        expect(blocking, `a11y violations in ${e.id}`).toEqual([]);
+      }
     });
   }
 });

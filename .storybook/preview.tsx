@@ -5,8 +5,7 @@ import "@fontsource-variable/inter/opsz.css";
 import "@fontsource-variable/jetbrains-mono";
 import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
-import "../src/styles/global.css";
-import "../src/styles/tailwind.css";
+import "../src/styles/index.css";
 
 // The app sizes itself from #root (height: 100%); Storybook's root is not
 // sized, so give every story the same box Tauri gives the window.

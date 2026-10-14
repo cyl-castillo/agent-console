@@ -4,7 +4,6 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import "@xterm/xterm/css/xterm.css";
 
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useHooksHealthStore } from "../stores/hooksHealthStore";

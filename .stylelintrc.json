@@ -16,6 +16,7 @@
   "ignoreFiles": [
     "src/styles/tokens.css",
     "src/styles/theme.css",
-    "src/styles/tailwind.css"
+    "src/styles/tailwind.css",
+    "src/styles/index.css"
   ]
 }

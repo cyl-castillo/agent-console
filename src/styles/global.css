@@ -37,6 +37,15 @@
   /* Keyboard focus ring — outline-offset keeps the gap on any background. */
   --focus-color: var(--accent);
 
+  /* Ink variants of the status hues for text on their own 12% tints: full
+     strength in dark, darkened in light where the pastel tint would drop
+     the ratio under AA (see src/ui/Chip). */
+  --accent-ink: var(--accent);
+  --ok-ink: var(--ok);
+  --warn-ink: var(--warn);
+  --danger-ink: var(--danger);
+  --purple-ink: var(--purple);
+
   /* Spacing scale */
 
   /* Radius scale */
@@ -75,6 +84,12 @@
   /* Light-theme surfaces, hues and a softer, cooler shadow ramp so
      elevated chrome doesn't smudge dark on the white canvas. */
   --edge-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
+  --accent-ink: color-mix(in srgb, var(--accent) 82%, var(--text));
+  --ok-ink: color-mix(in srgb, var(--ok) 82%, var(--text));
+  --warn-ink: color-mix(in srgb, var(--warn) 82%, var(--text));
+  --danger-ink: color-mix(in srgb, var(--danger) 82%, var(--text));
+  --purple-ink: color-mix(in srgb, var(--purple) 82%, var(--text));
 
   color-scheme: light;
 }

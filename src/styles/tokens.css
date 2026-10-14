@@ -38,6 +38,12 @@
   --dur-1: 90ms;
   --dur-2: 160ms;
   --dur-3: 240ms;
+  --fs-caption: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-lead: 14px;
+  --fs-title: 16px;
+  --fs-display: 20px;
 }
 
 :root[data-theme="light"] {
