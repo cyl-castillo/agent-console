@@ -4,6 +4,7 @@ pub mod agent_run;
 pub mod agent_sessions;
 pub mod claude_cli;
 pub mod connector_service;
+pub mod console_mcp;
 pub mod context_service;
 pub mod corpus_feedback;
 pub mod diagnostics;

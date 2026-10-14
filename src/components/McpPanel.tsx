@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { useMcpStore } from "../stores/mcpStore";
 import { PanelError } from "./PanelError";
+import { ConsoleMcpSection } from "./ConsoleMcpSection";
 import type { McpServer } from "../types/domain";
 import { confirmDialog } from "../stores/confirmStore";
 
@@ -48,6 +49,8 @@ export function McpPanel() {
         {adding && <AddForm onDone={() => setAdding(false)} />}
 
         {error && <PanelError message={error} onRetry={refresh} />}
+
+        <ConsoleMcpSection />
 
         <section className="wb-section">
           <p className="wb-hint wb-trust">

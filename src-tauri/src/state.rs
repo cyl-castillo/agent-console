@@ -31,6 +31,8 @@ pub struct AppState {
     /// Connector: agent-facing delegation/question/review queue behind the
     /// `agent_console` MCP server each room turn is given.
     pub connector: crate::services::connector_service::ConnectorService,
+    /// The console's own MCP server (D9): pending webview roundtrips.
+    pub console_mcp: crate::services::console_mcp::ConsoleMcp,
 }
 
 impl AppState {
@@ -50,6 +52,7 @@ impl AppState {
             voice: VoiceService::default(),
             tts: TtsService::default(),
             connector: crate::services::connector_service::ConnectorService::new(),
+            console_mcp: crate::services::console_mcp::ConsoleMcp::new(),
         }
     }
 }

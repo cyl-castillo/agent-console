@@ -1189,3 +1189,12 @@ export interface AgentSessionBinding {
   termKey: string;
   sessionId: string;
 }
+
+/// What an agent needs to drive this console over MCP (`console_mcp_config`).
+export interface ConsoleMcpConfig {
+  command: string;
+  args: string[];
+  claudeAdd: string;
+  codexToml: string;
+  tools: string[];
+}

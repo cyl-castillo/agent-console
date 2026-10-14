@@ -2,7 +2,8 @@
 // a fixture scenario and give Playwright a readiness signal once the app has
 // settled (stores hydrate asynchronously after mount).
 import { applyFixtures, type FixtureMap } from "../dev/fixtures/registry";
-import { resetEventBus } from "../dev/tauri-shim/event";
+import { emit, resetEventBus } from "../dev/tauri-shim/event";
+import { invokeLog } from "../dev/fixtures/registry";
 import { useThemeStore } from "../stores/themeStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { toastManager } from "../ui/Toast";
@@ -32,6 +33,9 @@ export function beginScenario(fixtures: FixtureMap = {}, theme: "dark" | "light"
   resetEventBus();
   toastManager.close();
   installAgentBridge();
+  // Specs drive the backend side: push events the Rust side would emit and
+  // read which commands the webview invoked in return.
+  (window as unknown as { __fixtures: unknown }).__fixtures = { emit, invokeLog };
   applyFixtures(fixtures);
   useThemeStore.getState().setTheme(theme);
   // Stories render the working app, not first-run flows, unless they opt in.

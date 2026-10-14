@@ -112,5 +112,6 @@ export const ProofTurnSelected = scenario({
 });
 export const SettingsPermissions = scenario({ destination: "settings", tab: "permissions" });
 export const SettingsSkills = scenario({ destination: "settings", tab: "skills" });
+export const SettingsMcp = scenario({ destination: "settings", tab: "mcp" });
 export const LightInbox = scenario({ theme: "light" });
 export const LightSessions = scenario({ theme: "light", destination: "sessions" });

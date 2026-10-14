@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  ConsoleMcpConfig,
   LinkedFolder,
   DocFeedback,
   FlywheelMetrics,
@@ -466,6 +467,13 @@ export const ipc = {
   // or a newer announcement), so a caller meaning to listen next knows.
   voiceSpeak: (text: string) => invoke<boolean>("voice_speak", { text }),
   voiceStopSpeaking: () => invoke<void>("voice_stop_speaking"),
+  // The console as an MCP server (D9): the webview answers roundtrips and
+  // the panel shows how to point an agent at it.
+  consoleReply: (id: number, result: { ok: boolean; result?: unknown; error?: string }) =>
+    invoke<void>("console_reply", { id, result }),
+  consoleMcpConfig: (caller?: string) =>
+    invoke<ConsoleMcpConfig>("console_mcp_config", { caller: caller ?? null }),
+
   voiceEarcon: (kind: "listen" | "done" | "ack" | "error") =>
     invoke<void>("voice_earcon", { kind }),
   voiceListen: (seconds: number) => invoke<string>("voice_listen", { seconds }),

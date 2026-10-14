@@ -77,3 +77,28 @@ palette registry and to this document.
 the stores; every write goes through an action. In the app it is reachable
 from the console's own code and tests; the MCP server relays the same calls
 from the loopback listener.
+
+## The console as an MCP server
+
+`hook-bridge console-mcp --project <root> --caller <name>` is an MCP stdio
+server any agent can be pointed at (Add-ons → MCP servers shows the exact
+`claude mcp add` command and the Codex snippet). It relays every call to the
+console over the loopback listener, with the same token as the hooks. The
+`--caller` name is the agent's identity: every call is witnessed in the
+ledger as `agent:<name>` (kind `agent_action`), on the session's lane when
+the call names one — never as the human.
+
+| tool | does |
+| --- | --- |
+| `console_state` | project, sessions, pending decisions, destination |
+| `list_actions` | the action contract above, with availability |
+| `invoke_action` | run an allowed action (`nav.*`, `ui.*`, a few harmless app actions, `session.new`); kill/delete/push/spend are refused |
+| `list_sessions` | sessions with attention state, agent, model, worktree, age |
+| `new_session` | start a session (name, agent, model optional); returns its id |
+| `send_prompt` | type into a live session's terminal; `submit: false` leaves it for the human |
+| `session_events` | a session's witnessed ledger events, oldest first |
+| `memory_search` | semantic search over memories and skills |
+| `ledger_verify` | verify the ledger's hash chain |
+
+The allowlist for `invoke_action` is enforced on both sides
+(`console_mcp::action_allowed` in Rust, `actionAllowed` in the webview host).

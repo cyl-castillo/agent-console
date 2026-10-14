@@ -945,6 +945,29 @@ export const defaultFixtures: FixtureMap = {
   plugins_list_installed: installedPlugins,
   plugins_list_available: availablePlugins,
   mcp_list: mcpServers,
+  console_reply: undefined,
+  console_mcp_config: (args: Record<string, unknown>) => {
+    const caller = typeof args.caller === "string" && args.caller ? args.caller : "agent";
+    const bridge = "/home/demo/.local/share/agent-console/bin/hook-bridge";
+    const a = ["console-mcp", "--project", ROOT, "--caller", caller];
+    return {
+      command: bridge,
+      args: a,
+      claudeAdd: `claude mcp add agent-console -- ${bridge} ${a.join(" ")}`,
+      codexToml: `[mcp_servers.agent_console]\ncommand = "${bridge}"\nargs = [${a.map((x) => `"${x}"`).join(", ")}]`,
+      tools: [
+        "console_state",
+        "list_actions",
+        "invoke_action",
+        "list_sessions",
+        "new_session",
+        "send_prompt",
+        "session_events",
+        "memory_search",
+        "ledger_verify",
+      ],
+    };
+  },
   // work
   jira_status: { configured: false, siteUrl: "", email: "" },
   jira_daily_digest: [],

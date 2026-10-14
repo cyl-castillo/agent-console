@@ -1048,7 +1048,102 @@ fn mcp_tool(name: &str, description: &str, properties: Value, required: &[&str])
     })
 }
 
-/// The tools an agent sees. Must stay in lockstep with the app's dispatcher
+/// Which server this process is: the room connector (per turn, per
+/// participant) or the console itself (D9: an agent the user configured
+/// drives the console with its own identity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum McpServer {
+    Connector,
+    Console,
+}
+
+impl McpServer {
+    fn route(self) -> &'static str {
+        match self {
+            Self::Connector => "/mcp",
+            Self::Console => "/console",
+        }
+    }
+    fn tools(self) -> Vec<Value> {
+        match self {
+            Self::Connector => mcp_tools(),
+            Self::Console => console_tools(),
+        }
+    }
+}
+
+/// The console's tools. Lockstep with `console_mcp::TOOL_NAMES` in the app.
+fn console_tools() -> Vec<Value> {
+    vec![
+        mcp_tool(
+            "console_state",
+            "Where the console is: the open project, its sessions (id, name, status, active), pending decisions, the current destination.",
+            json!({}),
+            &[],
+        ),
+        mcp_tool(
+            "list_actions",
+            "The console's action contract: every action id with its label and whether it is available right now. Run one with invoke_action.",
+            json!({}),
+            &[],
+        ),
+        mcp_tool(
+            "invoke_action",
+            "Run a console action by id (navigation, shell toggles, harmless app actions). Actions that kill, delete, push or spend are refused — those stay human gestures.",
+            json!({ "id": { "type": "string", "description": "An id from list_actions, e.g. nav.proof" } }),
+            &["id"],
+        ),
+        mcp_tool(
+            "list_sessions",
+            "The project's sessions with their attention state (needs-you, working, done, stopped), agent, model and age.",
+            json!({}),
+            &[],
+        ),
+        mcp_tool(
+            "new_session",
+            "Start a new agent session in the project. Returns its id. The ledger records that you opened it.",
+            json!({
+                "name": { "type": "string", "description": "Optional session name" },
+                "agent": { "type": "string", "description": "claude or codex (default: the project's default)" },
+                "model": { "type": "string", "description": "Optional model id" }
+            }),
+            &[],
+        ),
+        mcp_tool(
+            "send_prompt",
+            "Type a prompt into a live session's terminal. With submit=true (default) it is sent; otherwise it is left in the input for the human.",
+            json!({
+                "session": { "type": "string", "description": "Session id from list_sessions" },
+                "text": { "type": "string" },
+                "submit": { "type": "boolean" }
+            }),
+            &["session", "text"],
+        ),
+        mcp_tool(
+            "session_events",
+            "The witnessed ledger events of a session (prompts, tool results, approvals, turn ends, checks, commits), oldest first.",
+            json!({
+                "session": { "type": "string" },
+                "limit": { "type": "integer", "description": "Most recent N (default 200)" }
+            }),
+            &["session"],
+        ),
+        mcp_tool(
+            "memory_search",
+            "Semantic search over the project's memory corpus (memories and skills). Returns ids, titles, snippets and scores.",
+            json!({ "query": { "type": "string" }, "limit": { "type": "integer" } }),
+            &["query"],
+        ),
+        mcp_tool(
+            "ledger_verify",
+            "Verify the hash chain of the project's ledger: ok, total events, where it breaks if it does.",
+            json!({}),
+            &[],
+        ),
+    ]
+}
+
+/// The connector's tools. Must stay in lockstep with the app's dispatcher
 /// (`connector_service::TOOL_NAMES`): a name listed here but refused there
 /// would be a tool that always errors.
 fn mcp_tools() -> Vec<Value> {
@@ -1140,14 +1235,17 @@ fn mcp_tools() -> Vec<Value> {
 /// spawned us for exactly one participant of one room.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct McpIdentity {
+    server: McpServer,
     project: String,
-    job: String,
+    /// The room, for the connector; the console server has none.
+    job: Option<String>,
     caller: String,
 }
 
 impl McpIdentity {
-    /// `--project P --job J --caller C` in any order; all three required.
-    fn from_args(args: &[String]) -> Option<Self> {
+    /// `--project P --job J --caller C` in any order; all three required for
+    /// the connector, `--job` absent for the console server.
+    fn from_args(server: McpServer, args: &[String]) -> Option<Self> {
         let mut project = None;
         let mut job = None;
         let mut caller = None;
@@ -1161,9 +1259,19 @@ impl McpIdentity {
                 _ => return None,
             }
         }
+        let job = match server {
+            McpServer::Connector => Some(job?),
+            McpServer::Console => {
+                if job.is_some() {
+                    return None;
+                }
+                None
+            }
+        };
         Some(Self {
+            server,
             project: project?,
-            job: job?,
+            job,
             caller: caller?,
         })
     }
@@ -1173,8 +1281,8 @@ impl McpIdentity {
 /// process: unknown or missing keys and wrong primitive types are refused
 /// here, exactly as ai-connector's `call` does. `ask_user.options: null`
 /// counts as omitted. Returns the (possibly trimmed) arguments.
-fn mcp_check_arguments(name: &str, arguments: &Value) -> Result<Value, String> {
-    let tools = mcp_tools();
+fn mcp_check_arguments(server: McpServer, name: &str, arguments: &Value) -> Result<Value, String> {
+    let tools = server.tools();
     let Some(tool) = tools.iter().find(|t| t["name"] == name) else {
         return Err("Unknown tool".into());
     };
@@ -1209,6 +1317,7 @@ fn mcp_check_arguments(name: &str, arguments: &Value) -> Result<Value, String> {
             "array" => value.is_array(),
             "object" => value.is_object(),
             "boolean" => value.is_boolean(),
+            "integer" => value.is_u64() || value.is_i64(),
             _ => true,
         };
         if !ok {
@@ -1224,13 +1333,15 @@ trait McpRelay {
     fn relay(&self, body: &str) -> Option<Value>;
 }
 
-struct LoopbackRelay;
+struct LoopbackRelay {
+    path: &'static str,
+}
 
 impl McpRelay for LoopbackRelay {
     fn relay(&self, body: &str) -> Option<Value> {
         let (port, token) = inject_target()?;
         post_loopback(
-            "/mcp",
+            self.path,
             port,
             &token,
             body,
@@ -1249,19 +1360,24 @@ fn mcp_text_result(text: String, is_error: bool) -> Value {
 /// would surface as a broken server).
 fn mcp_call(identity: &McpIdentity, relay: &dyn McpRelay, params: &Value) -> Value {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-    let arguments = match mcp_check_arguments(name, params.get("arguments").unwrap_or(&Value::Null))
-    {
+    let arguments = match mcp_check_arguments(
+        identity.server,
+        name,
+        params.get("arguments").unwrap_or(&Value::Null),
+    ) {
         Ok(a) => a,
         Err(e) => return mcp_text_result(e, true),
     };
-    let body = json!({
+    let mut body = json!({
         "project": identity.project,
-        "job": identity.job,
         "caller": identity.caller,
         "name": name,
         "arguments": arguments,
-    })
-    .to_string();
+    });
+    if let Some(job) = &identity.job {
+        body["job"] = json!(job);
+    }
+    let body = body.to_string();
     match relay.relay(&body) {
         None => mcp_text_result(
             "Agent Console is not reachable; the connector cannot record this call. Retry later or end the turn.".into(),
@@ -1310,7 +1426,7 @@ fn mcp_handle_line(identity: &McpIdentity, relay: &dyn McpRelay, line: &str) -> 
             });
         }
         "ping" => response["result"] = json!({}),
-        "tools/list" => response["result"] = json!({ "tools": mcp_tools() }),
+        "tools/list" => response["result"] = json!({ "tools": identity.server.tools() }),
         "tools/call" => response["result"] = mcp_call(identity, relay, &params),
         _ => {
             response["error"] = json!({ "code": -32601, "message": "Method not implemented" });
@@ -1319,10 +1435,20 @@ fn mcp_handle_line(identity: &McpIdentity, relay: &dyn McpRelay, line: &str) -> 
     Some(response.to_string())
 }
 
-fn run_mcp(args: &[String]) {
-    let Some(identity) = McpIdentity::from_args(args) else {
-        eprintln!("hook-bridge mcp: usage: mcp --project <root> --job <room id> --caller <participant id>");
+fn run_mcp(server: McpServer, args: &[String]) {
+    let Some(identity) = McpIdentity::from_args(server, args) else {
+        match server {
+            McpServer::Connector => eprintln!(
+                "hook-bridge mcp: usage: mcp --project <root> --job <room id> --caller <participant id>"
+            ),
+            McpServer::Console => eprintln!(
+                "hook-bridge console-mcp: usage: console-mcp --project <root> --caller <agent name>"
+            ),
+        }
         std::process::exit(2);
+    };
+    let relay = LoopbackRelay {
+        path: server.route(),
     };
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
@@ -1336,7 +1462,7 @@ fn run_mcp(args: &[String]) {
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(reply) = mcp_handle_line(&identity, &LoopbackRelay, line.trim_end()) {
+        if let Some(reply) = mcp_handle_line(&identity, &relay, line.trim_end()) {
             if writeln!(out, "{reply}").and_then(|_| out.flush()).is_err() {
                 break;
             }
@@ -1356,9 +1482,14 @@ fn main() {
     }
     // The MCP server is addressed by argv, not by a session dir: the app
     // spawns the CLI that spawns us, and names the room and participant.
-    if mode == "mcp" {
+    if mode == "mcp" || mode == "console-mcp" {
         let rest: Vec<String> = std::env::args().skip(2).collect();
-        run_mcp(&rest);
+        let server = if mode == "mcp" {
+            McpServer::Connector
+        } else {
+            McpServer::Console
+        };
+        run_mcp(server, &rest);
         return;
     }
     // Every other mode is a silent no-op outside Agent Console.
@@ -1847,9 +1978,19 @@ mod tests {
 
     fn identity() -> McpIdentity {
         McpIdentity {
+            server: McpServer::Connector,
             project: "/proj".into(),
-            job: "room-1".into(),
+            job: Some("room-1".into()),
             caller: "p1".into(),
+        }
+    }
+
+    fn console_identity() -> McpIdentity {
+        McpIdentity {
+            server: McpServer::Console,
+            project: "/proj".into(),
+            job: None,
+            caller: "claude-desktop".into(),
         }
     }
 
@@ -1860,9 +2001,12 @@ mod tests {
     #[test]
     fn mcp_identity_requires_all_three_flags_in_any_order() {
         let ok = ["--caller", "p1", "--project", "/proj", "--job", "room-1"].map(String::from);
-        assert_eq!(McpIdentity::from_args(&ok), Some(identity()));
+        assert_eq!(
+            McpIdentity::from_args(McpServer::Connector, &ok),
+            Some(identity())
+        );
         let missing = ["--project", "/proj", "--job", "room-1"].map(String::from);
-        assert_eq!(McpIdentity::from_args(&missing), None);
+        assert_eq!(McpIdentity::from_args(McpServer::Connector, &missing), None);
         let unknown = [
             "--project",
             "/proj",
@@ -1874,9 +2018,12 @@ mod tests {
             "1",
         ]
         .map(String::from);
-        assert_eq!(McpIdentity::from_args(&unknown), None);
+        assert_eq!(McpIdentity::from_args(McpServer::Connector, &unknown), None);
         let dangling = ["--project", "/proj", "--job"].map(String::from);
-        assert_eq!(McpIdentity::from_args(&dangling), None);
+        assert_eq!(
+            McpIdentity::from_args(McpServer::Connector, &dangling),
+            None
+        );
     }
 
     #[test]
@@ -2107,5 +2254,70 @@ mod tests {
         assert!(answer.is_none());
         assert!(start.elapsed() < Duration::from_millis(550));
         server.join().unwrap();
+    }
+
+    #[test]
+    fn console_identity_needs_project_and_caller_but_refuses_a_job() {
+        let ok = ["--project", "/proj", "--caller", "claude-desktop"].map(String::from);
+        assert_eq!(
+            McpIdentity::from_args(McpServer::Console, &ok),
+            Some(console_identity())
+        );
+        let with_job = ["--project", "/proj", "--caller", "c", "--job", "r"].map(String::from);
+        assert_eq!(McpIdentity::from_args(McpServer::Console, &with_job), None);
+        let no_caller = ["--project", "/proj"].map(String::from);
+        assert_eq!(McpIdentity::from_args(McpServer::Console, &no_caller), None);
+    }
+
+    #[test]
+    fn console_server_lists_its_own_tools_and_relays_without_a_job() {
+        struct Capture(std::cell::RefCell<Vec<String>>);
+        impl McpRelay for Capture {
+            fn relay(&self, body: &str) -> Option<Value> {
+                self.0.borrow_mut().push(body.to_string());
+                Some(json!({ "ok": true, "result": { "id": "sess-9" } }))
+            }
+        }
+        let relay = Capture(Default::default());
+        let id = console_identity();
+        let list = mcp_handle_line(
+            &id,
+            &relay,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+        )
+        .unwrap();
+        let list: Value = serde_json::from_str(&list).unwrap();
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"new_session") && names.contains(&"ledger_verify"));
+        assert!(!names.contains(&"delegate_task"));
+
+        let call = mcp_handle_line(
+            &id,
+            &relay,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"new_session","arguments":{"name":"docs"}}}"#,
+        )
+        .unwrap();
+        let call: Value = serde_json::from_str(&call).unwrap();
+        assert_eq!(call["result"]["isError"], false);
+        let sent: Value = serde_json::from_str(&relay.0.borrow()[0]).unwrap();
+        assert_eq!(sent["caller"], "claude-desktop");
+        assert_eq!(sent["name"], "new_session");
+        assert!(sent.get("job").is_none(), "the console server has no room");
+
+        // Argument shapes are checked against the console tools, not the connector's.
+        let bad = mcp_handle_line(
+            &id,
+            &relay,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"session_events","arguments":{"session":"s","limit":"ten"}}}"#,
+        )
+        .unwrap();
+        let bad: Value = serde_json::from_str(&bad).unwrap();
+        assert_eq!(bad["result"]["isError"], true);
+        assert_eq!(McpServer::Console.route(), "/console");
     }
 }
