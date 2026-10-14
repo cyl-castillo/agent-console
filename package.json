@@ -14,7 +14,10 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\"",
     "preview": "vite preview",
     "tauri": "tauri",
-    "sidecar": "node scripts/build-sidecar.mjs"
+    "sidecar": "node scripts/build-sidecar.mjs",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build-storybook": "storybook build --quiet",
+    "test:visual": "playwright test -c tests/visual/playwright.config.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -33,7 +36,12 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@argos-ci/playwright": "^7.7.1",
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.64.0",
+    "@storybook/addon-a11y": "^10.6.2",
+    "@storybook/react-vite": "^10.6.2",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
@@ -43,6 +51,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "prettier": "^3.9.4",
+    "storybook": "^10.6.2",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.62.1",
     "vite": "^7.0.4",

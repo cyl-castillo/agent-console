@@ -47,3 +47,10 @@ src-tauri/binaries/
 
 # Upstream issue watcher state (scheduled task, local only)
 .issue-watch-state.json
+
+# Visual tests: static Storybook build, Playwright output, per-machine
+# screenshot baselines (Argos compares across machines in CI)
+storybook-static/
+tests/visual/out/
+tests/visual/*-snapshots/
+screenshots/

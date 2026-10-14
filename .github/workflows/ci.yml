@@ -36,6 +36,49 @@ jobs:
       - name: Unit tests
         run: npm test
 
+  # Visual contract: every Storybook story renders in Chromium against fixture
+  # data (src/dev), gets screenshotted and axe-audited. Screenshots upload to
+  # Argos for cross-run comparison when ARGOS_TOKEN is set; without it the job
+  # still fails on render errors and keeps the PNGs + a11y reports as artifacts.
+  visual:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Storybook
+        run: npm run build-storybook
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Screenshot + a11y sweep
+        env:
+          CI: "1"
+          ARGOS_TOKEN: ${{ secrets.ARGOS_TOKEN }}
+        run: npm run test:visual
+
+      - name: Upload screenshots and a11y reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-${{ github.sha }}
+          path: |
+            screenshots/
+            tests/visual/out/a11y/
+            tests/visual/out/missing-fixtures.txt
+            tests/visual/out/external-requests.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
   backend:
     runs-on: ubuntu-22.04
     env:
