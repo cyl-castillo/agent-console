@@ -17,7 +17,9 @@
     "sidecar": "node scripts/build-sidecar.mjs",
     "storybook": "storybook dev -p 6006 --no-open",
     "build-storybook": "storybook build --quiet",
-    "test:visual": "playwright test -c tests/visual/playwright.config.ts"
+    "test:visual": "playwright test -c tests/visual/playwright.config.ts",
+    "tokens": "node scripts/build-tokens.mjs",
+    "lint:css": "stylelint \"src/**/*.css\" --max-warnings 28"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -52,6 +54,8 @@
     "eslint-plugin-react-refresh": "^0.5.3",
     "prettier": "^3.9.4",
     "storybook": "^10.6.2",
+    "stylelint": "^17.16.0",
+    "stylelint-config-recommended": "^18.0.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.62.1",
     "vite": "^7.0.4",

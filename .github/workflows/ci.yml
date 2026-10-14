@@ -30,6 +30,15 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Ratchet: the CSS warning budget only goes down (duplicate selectors
+      # from the pre-token era); tokens.css must be regenerated and committed
+      # whenever tokens/*.tokens.json changes.
+      - name: Lint CSS
+        run: npm run lint:css
+
+      - name: Tokens are up to date
+        run: npm run tokens && git diff --exit-code -- src/styles/tokens.css
+
       - name: Type-check + build
         run: npm run build
 

@@ -7,6 +7,7 @@ import { useSessionStore } from "./sessionStore";
 import { useSkillsStore } from "./skillsStore";
 import { useTerminalsStore } from "./terminalsStore";
 import { useThemeStore } from "./themeStore";
+import { useFlagsStore } from "./flagsStore";
 import { useToastStore } from "./toastStore";
 import { useUpdaterStore } from "./updaterStore";
 import { reportProblem } from "../lib/reportProblem";
@@ -301,6 +302,13 @@ const ACTIONS: PaletteAction[] = [
     hint: "Switch between dark and light themes",
     keywords: ["dark", "light"],
     run: () => useThemeStore.getState().toggle(),
+  },
+  {
+    id: "ui.toggle_v2",
+    label: "Toggle UI v2 (preview)",
+    hint: "Try the redesigned shell as it lands, panel by panel",
+    keywords: ["redesign", "preview", "flag", "beta"],
+    run: () => useFlagsStore.getState().toggle("ui.v2"),
   },
   {
     id: "project.copy_path",
