@@ -1,0 +1,7 @@
+/* Tailwind 4 without preflight: the app keeps its own base styles
+   (global.css) untouched; utilities and the token-mapped theme are what the
+   primitives in src/ui compose with. Order matters — our @theme overrides
+   Tailwind's defaults, and utilities land in their own cascade layer. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "./theme.css";
+@import "tailwindcss/utilities.css" layer(utilities);
