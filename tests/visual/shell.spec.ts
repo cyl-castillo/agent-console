@@ -60,3 +60,34 @@ test("the top bar buttons open the overlays", async ({ page }) => {
   await page.getByRole("button", { name: "Getting started guide" }).click();
   await expect(page.getByText(/getting started/i).first()).toBeVisible();
 });
+
+test("v2 shell: rail, palette deep links and the decisions signal", async ({ page }) => {
+  await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
+  await page.goto("/iframe.html?id=app-v2--sessions&viewMode=story");
+  await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
+  const shell = page.getByTestId("shell-v2");
+  await expect(shell).toHaveAttribute("data-destination", "sessions");
+  await expect(page.getByTestId("inspector")).toContainText("Turns");
+
+  await page.getByTestId("rail-work").click();
+  await expect(shell).toHaveAttribute("data-destination", "work");
+  await expect(page.getByTestId("center-panel")).toContainText("Jobs");
+
+  await page.getByTestId("list-notes").click();
+  await expect(page.getByTestId("center-panel")).toContainText("Notes");
+
+  // A palette deep link to a settings tab pulls the shell to Settings.
+  await fire(page, "ac:open-workbench-tab", "vault");
+  await expect(shell).toHaveAttribute("data-destination", "settings");
+  await expect(page.getByTestId("center-panel")).toContainText("Vault");
+
+  await page.getByTestId("sb-decisions").click();
+  await expect(shell).toHaveAttribute("data-destination", "inbox");
+  await expect(page.getByTestId("inbox")).toBeVisible();
+
+  // Workspace button / palette toggle collapse the list pane in this shell.
+  await page.getByTestId("rail-settings").click();
+  await expect(page.getByTestId("list-pane")).toBeVisible();
+  await fire(page, "ac:toggle-sidebar");
+  await expect(page.getByTestId("list-pane")).toBeHidden();
+});

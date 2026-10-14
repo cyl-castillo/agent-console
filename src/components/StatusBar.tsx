@@ -140,7 +140,7 @@ export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }
 /// off (hooks not installed — click installs), silent (installed, nothing
 /// seen yet), ok (last event N ago), stale (a live Claude session swallowed
 /// prompts with no hook event — click reinstalls; the toast explains trust).
-function HooksPill() {
+export function HooksPill() {
   const verdict = useHooksHealthStore((s) => s.verdict);
   const check = useHooksHealthStore((s) => s.check);
   const install = useSkillsStore((s) => s.install);
@@ -247,7 +247,7 @@ function useBuildInfo(): { commit: string; builtAt: string; debug: boolean } | n
   return info;
 }
 
-function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
+export function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
   const blocked = useApprovalStore((s) => s.queue.length);
   const workingUntil = useAgentStatusStore((s) => s.workingUntil);
   const workingSince = useAgentStatusStore((s) => s.workingSince);
@@ -319,7 +319,13 @@ function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {
 /// live session whose agent supports it (Claude via `/model`), pushes the change
 /// into the PTY — best-effort: it only takes effect if the agent is idle at its
 /// prompt. Agents without a live switch (Codex) only apply the choice on resume.
-function ModelPill({ session, projectRoot }: { session: TerminalSession; projectRoot: string }) {
+export function ModelPill({
+  session,
+  projectRoot,
+}: {
+  session: TerminalSession;
+  projectRoot: string;
+}) {
   const setModel = useTerminalsStore((s) => s.setModel);
   const setDefaultFor = useModelStore((s) => s.setDefaultFor);
   const [open, setOpen] = useState(false);
@@ -404,7 +410,7 @@ function ModelPill({ session, projectRoot }: { session: TerminalSession; project
 /// What the active session's agent was last fed from workspace memory (E1).
 /// Renders only after an injection actually happened for THIS session — the
 /// transparency half of memory injection: nothing reaches the agent silently.
-function MemoryPill({ termId }: { termId: string }) {
+export function MemoryPill({ termId }: { termId: string }) {
   const record = useInjectStore((s) => s.lastByTerm[termId]);
   const feedback = useInjectStore((s) => s.feedback);
   const vote = useInjectStore((s) => s.vote);
@@ -481,7 +487,7 @@ function MemoryPill({ termId }: { termId: string }) {
 /// Local voice input toggle + state. Click (or Ctrl+Shift+V) enables voice
 /// mode: first use downloads the Whisper model, then holding Ctrl+Space
 /// records and releasing types the transcript into the active composer.
-function VoicePill() {
+export function VoicePill() {
   const phase = useVoiceStore((s) => s.phase);
   const progress = useVoiceStore((s) => s.progress);
   const speaking = useVoiceStore((s) => s.speaking);
@@ -531,7 +537,7 @@ function VoicePill() {
 /// (`contextTokens / contextWindow`). Polls while the session is live so it
 /// tracks the agent's progress; the totals live in the tooltip. Turns amber
 /// past 80% as a hint to compact.
-function UsagePill({
+export function UsagePill({
   termId,
   sessionId,
   projectRoot,
