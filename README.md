@@ -3,6 +3,11 @@
 [![Testigo: intent-to-proof](https://img.shields.io/badge/Testigo-intent--to--proof-2ea44f?logo=github)](https://github.com/cyl-castillo/testigo)
 
 A minimalist, AI-native console for directing agents inside a repository.
+Home: [agent-console.dev](https://agent-console.dev) · for agents and LLMs:
+[llms.txt](https://agent-console.dev/llms.txt). Not to be confused with
+[buhuipao/agent-console](https://github.com/buhuipao/agent-console), a Rust TUI
+that finds and resumes Codex and Claude Code sessions — different project,
+same slug.
 
 Not an IDE. Not a chat client. A small terminal-first desktop app that pairs the Claude Code CLI with an integrated shell, a git diff viewer, and per-turn snapshots — so you can drive an agent through real work without losing control.
 

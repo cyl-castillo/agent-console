@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# Machine-readable summary for coding agents and LLMs.
+# https://agent-console.dev/llms.txt
