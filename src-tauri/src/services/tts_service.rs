@@ -472,8 +472,10 @@ impl TtsService {
                 carry = bytes.pop();
             }
             let samples: Vec<i16> = bytes
-                .chunks_exact(2)
-                .map(|p| i16::from_le_bytes([p[0], p[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| i16::from_le_bytes(*p))
                 .collect();
             if tx.send(samples).is_err() {
                 break;
