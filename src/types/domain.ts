@@ -1022,6 +1022,9 @@ export interface VoiceStatus {
   modelPresent: boolean;
   modelFile: string;
   language: string;
+  /// Spoken-output engine in use: "piper" | "spd-say" | "say" | "sapi" | "none".
+  ttsEngine: string;
+  ttsVoice: string | null;
 }
 
 /// Payload of the `voice://model-progress` event during model download.

@@ -484,7 +484,10 @@ function MemoryPill({ termId }: { termId: string }) {
 function VoicePill() {
   const phase = useVoiceStore((s) => s.phase);
   const progress = useVoiceStore((s) => s.progress);
+  const speaking = useVoiceStore((s) => s.speaking);
+  const ttsEngine = useVoiceStore((s) => s.ttsEngine);
   const toggle = useVoiceStore((s) => s.toggle);
+  const hush = useVoiceStore((s) => s.hush);
 
   const pct = progress?.total ? Math.round((progress.downloaded / progress.total) * 100) : null;
   const label =
@@ -498,21 +501,25 @@ function VoicePill() {
           ? "listening…"
           : phase === "transcribing"
             ? "transcribing…"
-            : "voice ready";
+            : speaking
+              ? "speaking…"
+              : "voice ready";
   const title =
     phase === "off"
       ? "Enable voice input (Ctrl+Shift+V). First use downloads the Whisper model (~190 MB, local)."
       : phase === "loading"
-        ? "Downloading / loading the Whisper model…"
-        : "Hold Ctrl+Space to talk; release to type into the composer. Click to disable.";
+        ? "Downloading / loading the Whisper model and the Piper voice…"
+        : speaking
+          ? "The console is talking — click to interrupt."
+          : `Hold Ctrl+Space and say a command (“mandá”, “sí”, “abrí changes”, “sesión fixy”) or dictate; release to act. Say “qué puedo decir” for the list. Speech: ${ttsEngine}. Click to disable.`;
 
   return (
     <button
       className={`sb-item sb-clickable voice-pill voice-${phase}`}
-      onClick={() => void toggle()}
+      onClick={() => void (speaking ? hush() : toggle())}
       title={title}
     >
-      <span className="voice-glyph">{phase === "listening" ? "●" : "🎙"}</span>
+      <span className="voice-glyph">{phase === "listening" ? "●" : speaking ? "🔊" : "🎙"}</span>
       <span>{label}</span>
     </button>
   );

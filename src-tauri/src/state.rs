@@ -9,6 +9,7 @@ use crate::services::scheduler_service::SchedulerService;
 use crate::services::sessions_service::SessionsService;
 use crate::services::terminal_runner::TerminalRegistry;
 use crate::services::testigo_service::TestigoService;
+use crate::services::tts_service::TtsService;
 use crate::services::voice_service::VoiceService;
 
 pub struct AppState {
@@ -26,6 +27,7 @@ pub struct AppState {
     pub roundtable: RoundtableService,
     pub scheduler: SchedulerService,
     pub voice: VoiceService,
+    pub tts: TtsService,
     /// Connector: agent-facing delegation/question/review queue behind the
     /// `agent_console` MCP server each room turn is given.
     pub connector: crate::services::connector_service::ConnectorService,
@@ -46,6 +48,7 @@ impl AppState {
             roundtable: RoundtableService::new(),
             scheduler: SchedulerService::new(),
             voice: VoiceService::default(),
+            tts: TtsService::default(),
             connector: crate::services::connector_service::ConnectorService::new(),
         }
     }

@@ -30,7 +30,7 @@ fn model_file() -> String {
     std::env::var("AGENT_CONSOLE_VOICE_MODEL").unwrap_or_else(|_| "ggml-small-q5_1.bin".into())
 }
 
-fn model_language() -> String {
+pub(crate) fn model_language() -> String {
     std::env::var("AGENT_CONSOLE_VOICE_LANG").unwrap_or_else(|_| "es".into())
 }
 
@@ -47,6 +47,9 @@ pub struct VoiceStatus {
     pub model_present: bool,
     pub model_file: String,
     pub language: String,
+    /// Which spoken-output engine `voice_speak` will use right now.
+    pub tts_engine: String,
+    pub tts_voice: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -127,6 +130,8 @@ impl VoiceService {
             model_present: model_path().map(|p| p.exists()).unwrap_or(false),
             model_file: model_file(),
             language: model_language(),
+            tts_engine: crate::services::tts_service::engine_name(),
+            tts_voice: crate::services::tts_service::voice_if_ready(),
         }
     }
 
@@ -139,6 +144,10 @@ impl VoiceService {
         let path_str = path
             .to_str()
             .ok_or_else(|| AppError::Other("model path is not utf-8".into()))?;
+        // whisper.cpp logs every decoded token to stderr by default; route it
+        // through tracing (debug level) so the terminal stays readable.
+        // Idempotent: a second install just re-sets the same callbacks.
+        whisper_rs::install_logging_hooks();
         let ctx = WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
             .map_err(|e| AppError::Other(format!("failed to load whisper model: {e}")))?;
         *guard = Some(Arc::new(ctx));
@@ -233,28 +242,6 @@ impl VoiceService {
         std::thread::sleep(Duration::from_secs_f32(secs));
         self.stop_and_transcribe()
     }
-}
-
-/// Speak `text` through speech-dispatcher (`spd-say -w`), in the same language
-/// voice input uses. Blocking until the utterance finishes so callers can
-/// sequence speak → listen without overlap.
-pub fn speak(text: &str) -> AppResult<()> {
-    let lang = model_language();
-    let status = std::process::Command::new("spd-say")
-        .args(["-w", "-l", &lang])
-        .arg(text)
-        .status()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                AppError::Other("spd-say not found — install speech-dispatcher".into())
-            } else {
-                AppError::Other(format!("tts: {e}"))
-            }
-        })?;
-    if !status.success() {
-        return Err(AppError::Other(format!("spd-say exited with {status}")));
-    }
-    Ok(())
 }
 
 fn transcribe(ctx: &WhisperContext, audio: &[f32]) -> AppResult<String> {
@@ -392,7 +379,7 @@ fn to_mono(input: &[f32], channels: u16) -> Vec<f32> {
 }
 
 /// Linear-interpolation resampler — plenty for speech into whisper.
-fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
+pub(crate) fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
     if from == to || input.is_empty() {
         return input.to_vec();
     }

@@ -462,7 +462,12 @@ export const ipc = {
   voiceDisable: () => invoke<VoiceStatus>("voice_disable"),
   voicePttStart: () => invoke<void>("voice_ptt_start"),
   voicePttStop: () => invoke<string>("voice_ptt_stop"),
-  voiceSpeak: (text: string) => invoke<void>("voice_speak", { text }),
+  // Resolves when the utterance has been heard; false = cut short (barge-in
+  // or a newer announcement), so a caller meaning to listen next knows.
+  voiceSpeak: (text: string) => invoke<boolean>("voice_speak", { text }),
+  voiceStopSpeaking: () => invoke<void>("voice_stop_speaking"),
+  voiceEarcon: (kind: "listen" | "done" | "ack" | "error") =>
+    invoke<void>("voice_earcon", { kind }),
   voiceListen: (seconds: number) => invoke<string>("voice_listen", { seconds }),
 
   // Bundle the chosen blocks of work for `projectRoot` and write the archive to

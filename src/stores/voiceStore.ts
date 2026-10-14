@@ -3,11 +3,16 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
 import { useApprovalStore } from "./approvalStore";
-import { useTerminalsStore } from "./terminalsStore";
 import { useToastStore } from "./toastStore";
 import { assessCommand } from "../permissions/rules";
 import type { ApprovalRequest, VoiceModelProgress } from "../types/domain";
-import type { TermInputDetail } from "../components/Terminal";
+import { parseYesNo } from "../voice/grammar";
+import { runVoiceCommand } from "../voice/execute";
+import { turnAnnouncement } from "../voice/announce";
+import { describeTurnFailure } from "../lib/turnFailure";
+import { useTerminalsStore } from "./terminalsStore";
+
+export { parseYesNo };
 
 export type VoicePhase = "off" | "loading" | "ready" | "listening" | "transcribing";
 
@@ -17,6 +22,10 @@ interface VoiceState {
   progress: VoiceModelProgress | null;
   /// Voice-input language reported by the backend ("es" by default).
   lang: string;
+  /// Spoken-output engine the backend picked ("piper", "spd-say", "say", "sapi", "none").
+  ttsEngine: string;
+  /// True while the console is talking (any utterance).
+  speaking: boolean;
   /// Non-null while an approval is being announced / spoken-confirmed.
   approvalStage: "speaking" | "listening" | null;
   error: string | null;
@@ -25,12 +34,18 @@ interface VoiceState {
   pttStop: () => Promise<void>;
   /// Abort a hold without typing anything (e.g. window lost focus mid-hold).
   pttCancel: () => Promise<void>;
+  /// Say something and resolve once heard; false = cut short.
+  say: (text: string) => Promise<boolean>;
+  /// Silence the console.
+  hush: () => Promise<void>;
 }
 
 export const useVoiceStore = create<VoiceState>((set, get) => ({
   phase: "off",
   progress: null,
   lang: "es",
+  ttsEngine: "none",
+  speaking: false,
   approvalStage: null,
   error: null,
 
@@ -41,7 +56,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       set({ phase: "loading", error: null, progress: null });
       try {
         const status = await ipc.voiceEnable();
-        set({ phase: "ready", progress: null, lang: status.language });
+        set({ phase: "ready", progress: null, lang: status.language, ttsEngine: status.ttsEngine });
       } catch (e) {
         set({ phase: "off", error: String(e), progress: null });
         useToastStore.getState().show(`Voice: ${String(e)}`, "error");
@@ -52,14 +67,17 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       } catch {
         /* ignore */
       }
-      set({ phase: "off", progress: null, approvalStage: null });
+      set({ phase: "off", progress: null, approvalStage: null, speaking: false });
     }
   },
 
   pttStart: async () => {
     if (get().phase !== "ready" || get().approvalStage) return;
-    set({ phase: "listening" });
+    set({ phase: "listening", speaking: false });
     try {
+      // The backend cuts off any speech before opening the mic (barge-in);
+      // the cue tells the user the floor is theirs.
+      await ipc.voiceEarcon("listen").catch(() => {});
       await ipc.voicePttStart();
     } catch (e) {
       set({ phase: "ready", error: String(e) });
@@ -72,14 +90,18 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     set({ phase: "transcribing" });
     try {
       const text = (await ipc.voicePttStop()).trim();
+      // A command when it reads like one (keys, a panel, a session, yes/no to
+      // a question on screen); dictation into the composer otherwise. A
+      // silent take (released too early, mic still opening) says so instead
+      // of doing nothing.
       if (text) {
-        const sessionId = useTerminalsStore.getState().activeId;
-        if (sessionId) {
-          // Same path the model pill / drag-and-drop use: the Terminal owning
-          // this session writes the text into its PTY (the agent composer).
-          const detail: TermInputDetail = { sessionId, data: `${text} ` };
-          window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
-        }
+        void ipc.voiceEarcon("done").catch(() => {});
+        await runVoiceCommand(text);
+      } else {
+        void ipc.voiceEarcon("error").catch(() => {});
+        useToastStore
+          .getState()
+          .show(get().lang.startsWith("es") ? "No escuché nada" : "Didn't hear anything", "info");
       }
     } catch (e) {
       useToastStore.getState().show(`Voice: ${String(e)}`, "error");
@@ -97,12 +119,70 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     }
     set({ phase: "ready" });
   },
+
+  say: async (text) => {
+    set({ speaking: true });
+    try {
+      return await ipc.voiceSpeak(text);
+    } catch (e) {
+      // A silent console is a bug the user can't see: name the cause.
+      useToastStore.getState().show(`Voice: ${String(e)}`, "error");
+      return false;
+    } finally {
+      set({ speaking: false });
+    }
+  },
+
+  hush: async () => {
+    await ipc.voiceStopSpeaking().catch(() => {});
+    set({ speaking: false });
+  },
 }));
 
+/// Spoken end of turn: what the agent said last, in two sentences, when voice
+/// is on and nothing else is being announced. Failures say their reason.
+async function announceTurn(
+  payload: { termId?: string; summary?: string } | undefined,
+): Promise<void> {
+  const v = useVoiceStore.getState();
+  if (v.phase !== "ready" || v.approvalStage) return;
+  const termId = payload?.termId;
+  const terms = useTerminalsStore.getState();
+  const name = termId ? terms.sessions.find((t) => t.id === termId)?.name : undefined;
+  const isActive = !termId || termId === terms.activeId;
+  await v.say(turnAnnouncement(payload?.summary, name, isActive, v.lang.startsWith("es")));
+}
+
+async function announceFailure(
+  payload: { termId?: string; error?: string } | undefined,
+): Promise<void> {
+  const v = useVoiceStore.getState();
+  if (v.phase !== "ready" || v.approvalStage) return;
+  const termId = payload?.termId;
+  const name = termId
+    ? useTerminalsStore.getState().sessions.find((t) => t.id === termId)?.name
+    : undefined;
+  await v.say(describeTurnFailure(payload?.error, name).message);
+}
+
 export async function attachVoiceListeners(): Promise<UnlistenFn> {
-  return await listen<VoiceModelProgress>("voice://model-progress", (e) => {
-    useVoiceStore.setState({ progress: e.payload });
-  });
+  const offs: UnlistenFn[] = [];
+  offs.push(
+    await listen<VoiceModelProgress>("voice://model-progress", (e) => {
+      useVoiceStore.setState({ progress: e.payload });
+    }),
+  );
+  offs.push(
+    await listen<{ termId?: string; summary?: string }>("hook://turn_end", (e) => {
+      void announceTurn(e.payload);
+    }),
+  );
+  offs.push(
+    await listen<{ termId?: string; error?: string }>("hook://turn_failed", (e) => {
+      void announceFailure(e.payload);
+    }),
+  );
+  return () => offs.forEach((u) => u());
 }
 
 // --- Spoken approvals ---------------------------------------------------------
@@ -137,30 +217,33 @@ async function announceApproval(req: ApprovalRequest): Promise<void> {
   try {
     useVoiceStore.setState({ approvalStage: "speaking" });
     const announce = speechFor(req, es);
+    const { say } = useVoiceStore.getState();
     if (dangerous) {
-      await ipc.voiceSpeak(
+      await say(
         es
           ? `${announce}. Esta acción es peligrosa: confírmala en pantalla.`
           : `${announce}. This action is dangerous: confirm it on screen.`,
       );
       return;
     }
-    await ipc.voiceSpeak(es ? `${announce}. ¿Apruebo?` : `${announce}. Approve?`);
-    if (!stillPending()) return;
+    const heardOut = await say(es ? `${announce}. ¿Apruebo?` : `${announce}. Approve?`);
+    // Cut short (the user grabbed the mic, or a newer announcement): the
+    // question never landed, so don't listen for an answer to it.
+    if (!heardOut || !stillPending()) return;
     useVoiceStore.setState({ approvalStage: "listening" });
     const heard = await ipc.voiceListen(4);
     if (!stillPending()) return;
     const verdict = parseYesNo(heard);
     if (verdict === "yes") {
       await useApprovalStore.getState().decide(req.id, "allow", "approved by voice");
-      void ipc.voiceSpeak(es ? "Hecho." : "Done.").catch(() => {});
+      void say(es ? "Hecho." : "Done.").catch(() => {});
     } else if (verdict === "no") {
       await useApprovalStore.getState().decide(req.id, "deny", "denied by voice");
-      void ipc.voiceSpeak(es ? "Denegado." : "Denied.").catch(() => {});
+      void say(es ? "Denegado." : "Denied.").catch(() => {});
     } else {
-      void ipc
-        .voiceSpeak(es ? "No te entendí. Usa el modal." : "I didn't catch that. Use the modal.")
-        .catch(() => {});
+      void say(es ? "No te entendí. Usa el modal." : "I didn't catch that. Use the modal.").catch(
+        () => {},
+      );
     }
   } catch {
     // TTS or mic hiccup — the visual modal is still there as fallback.
@@ -199,35 +282,4 @@ export function speechFor(req: ApprovalRequest, es: boolean): string {
   return es
     ? `El agente quiere usar la herramienta ${req.tool}`
     : `The agent wants to use the ${req.tool} tool`;
-}
-
-/// Tolerant yes/no parser. Diacritics are stripped ("sí" → "si"); a negative
-/// anywhere wins over a positive ("no, dale" must not approve).
-/// Exported for tests — pure.
-export function parseYesNo(transcript: string): "yes" | "no" | "unclear" {
-  const norm = transcript
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-  const words = norm.split(/[^a-zñ]+/).filter(Boolean);
-  const NO = new Set(["no", "nope", "cancela", "cancelar", "niega", "deny", "denegar", "para"]);
-  const YES = new Set([
-    "si",
-    "dale",
-    "ok",
-    "okay",
-    "aprueba",
-    "apruebo",
-    "aprobar",
-    "hazlo",
-    "adelante",
-    "claro",
-    "confirmo",
-    "yes",
-    "approve",
-    "sure",
-  ]);
-  if (words.some((w) => NO.has(w))) return "no";
-  if (words.some((w) => YES.has(w))) return "yes";
-  return "unclear";
 }

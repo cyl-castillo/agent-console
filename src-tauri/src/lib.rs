@@ -302,6 +302,8 @@ pub fn run() {
             commands::voice::voice_ptt_stop,
             commands::voice::voice_speak,
             commands::voice::voice_listen,
+            commands::voice::voice_stop_speaking,
+            commands::voice::voice_earcon,
             commands::workspace_archive::export_work,
             commands::workspace_archive::import_work_preview,
             commands::workspace_archive::import_work_apply,

@@ -674,3 +674,22 @@ export const usePaletteStore = create<PaletteState>((set, get) => ({
     }
   },
 }));
+
+/// Actions a voice command may name right now (id + label; `available`
+/// already applied). Read by the voice grammar, which maps spoken aliases
+/// onto these ids.
+export function availablePaletteActions(): { id: string; label: string }[] {
+  return ACTIONS.filter((a) => (a.available ? a.available() : true)).map((a) => ({
+    id: a.id,
+    label: a.label,
+  }));
+}
+
+/// Run a palette action by id. False when it doesn't exist or isn't
+/// available right now.
+export async function runPaletteAction(id: string): Promise<boolean> {
+  const a = ACTIONS.find((x) => x.id === id);
+  if (!a || (a.available && !a.available())) return false;
+  await a.run();
+  return true;
+}
