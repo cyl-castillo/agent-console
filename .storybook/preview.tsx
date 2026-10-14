@@ -1,5 +1,10 @@
 import type { Preview } from "@storybook/react-vite";
 import React from "react";
+// The app's fonts plus the documented alternatives, for the Foundations specimens.
+import "@fontsource-variable/inter/opsz.css";
+import "@fontsource-variable/jetbrains-mono";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "../src/styles/global.css";
 import "../src/styles/tailwind.css";
 

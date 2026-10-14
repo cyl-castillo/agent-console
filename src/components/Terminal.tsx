@@ -90,7 +90,7 @@ export function Terminal({ session, visible }: Props) {
     if (!host) return;
 
     const term = new XTerm({
-      fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+      fontFamily: '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace',
       fontSize: 13,
       theme: TERM_THEMES[useThemeStore.getState().theme],
       cursorBlink: true,

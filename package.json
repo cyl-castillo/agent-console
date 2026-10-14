@@ -19,7 +19,8 @@
     "build-storybook": "storybook build --quiet",
     "test:visual": "playwright test -c tests/visual/playwright.config.ts",
     "tokens": "node scripts/build-tokens.mjs",
-    "lint:css": "stylelint \"src/**/*.css\" --max-warnings 28"
+    "lint:css": "stylelint \"src/**/*.css\" --max-warnings 28",
+    "check:contrast": "node scripts/check-contrast.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
