@@ -1,25 +1,32 @@
 import { Toast as BaseToast } from "@base-ui/react/toast";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { Button } from "./Button";
 import { IconButton } from "./IconButton";
 
 export type ToastTone = "info" | "success" | "error";
+export interface ToastData {
+  /// Optional trailing action ("Report", "Undo").
+  action?: { label: string; onClick: () => void };
+}
 
 /// One manager for the whole app: stores and non-React code call
-/// `toast.add(...)`; the viewport renders wherever ToastHost is mounted.
-export const toastManager = BaseToast.createToastManager();
+/// `toastManager.add(...)`; the viewport renders wherever ToastHost is mounted.
+export const toastManager = BaseToast.createToastManager<ToastData>();
 
-export function showToast(message: string, tone: ToastTone = "info") {
-  toastManager.add({
+/// Returns the toast id (so a caller can close or update it).
+export function showToast(message: string, tone: ToastTone = "info", data?: ToastData): string {
+  return toastManager.add({
     description: message,
     type: tone,
     // Info/success are transient; errors persist until dismissed.
     timeout: tone === "error" ? 0 : 2600,
+    data,
   });
 }
 
 function ToastList() {
-  const { toasts } = BaseToast.useToastManager();
+  const { toasts } = BaseToast.useToastManager<ToastData>();
   return (
     <>
       {toasts.map((t) => (
@@ -43,6 +50,15 @@ function ToastList() {
             </BaseToast.Title>
             <BaseToast.Description className="break-words">{t.description}</BaseToast.Description>
           </BaseToast.Content>
+          {t.data?.action && (
+            <BaseToast.Action
+              render={
+                <Button size="sm" variant="ghost" onClick={t.data.action.onClick}>
+                  {t.data.action.label}
+                </Button>
+              }
+            />
+          )}
           <BaseToast.Close
             render={<IconButton label="Dismiss" icon={<X size={14} />} size="sm" />}
           />

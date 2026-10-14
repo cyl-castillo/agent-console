@@ -5,11 +5,11 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GettingStartedModal } from "../components/GettingStartedModal";
 import { ModulesModal } from "../components/ModulesModal";
 import { ShortcutsModal } from "../components/ShortcutsModal";
-import { Toasts } from "../components/Toasts";
 import { UpdateBanner } from "../components/UpdateBanner";
 import { WelcomeWizard } from "../components/WelcomeWizard";
 import { useOverlaysStore } from "../stores/overlaysStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
+import { ToastHost } from "../ui/Toast";
 
 /// Every app-level modal, banner and toast, mounted once at the root.
 /// Approvals and the palette only make sense with a project open.
@@ -30,7 +30,7 @@ export function OverlayHost({ withProject }: { withProject: boolean }) {
       <UpdateBanner />
       {withProject && <ApprovalModal />}
       {withProject && <CommandPalette />}
-      <Toasts />
+      <ToastHost />
       <ConfirmDialog />
     </>
   );

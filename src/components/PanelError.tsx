@@ -1,6 +1,9 @@
-/// Shared error surface for workbench panels. Before this, each panel rendered
-/// fetch errors differently — some dead-end inline red text, some dismissible,
-/// only a couple with a Retry. This gives every panel the same affordances.
+import { TriangleAlert, X } from "lucide-react";
+import { Button } from "../ui/Button";
+import { IconButton } from "../ui/IconButton";
+
+/// Shared error surface for workbench panels: the same message, Retry and
+/// Dismiss affordances everywhere, announced as an alert.
 export function PanelError({
   message,
   onRetry,
@@ -11,25 +14,19 @@ export function PanelError({
   onDismiss?: () => void;
 }) {
   return (
-    <div className="panel-error" role="alert">
-      <span className="panel-error-icon" aria-hidden="true">
-        ⚠
-      </span>
-      <span className="panel-error-msg">{message}</span>
+    <div
+      role="alert"
+      className="m-2 flex items-start gap-2 rounded-2 border border-danger/40 bg-[var(--danger-08)] px-2.5 py-2 font-sans text-small text-foreground"
+    >
+      <TriangleAlert size={14} className="mt-0.5 shrink-0 text-danger" aria-hidden />
+      <span className="min-w-0 flex-1 break-words">{message}</span>
       {onRetry && (
-        <button className="btn btn-link btn-sm" onClick={onRetry}>
+        <Button size="sm" variant="ghost" onClick={onRetry}>
           Retry
-        </button>
+        </Button>
       )}
       {onDismiss && (
-        <button
-          className="btn btn-link btn-sm panel-error-dismiss"
-          onClick={onDismiss}
-          aria-label="Dismiss"
-          title="Dismiss"
-        >
-          ✕
-        </button>
+        <IconButton size="sm" label="Dismiss" icon={<X size={14} />} onClick={onDismiss} />
       )}
     </div>
   );

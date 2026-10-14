@@ -13,10 +13,10 @@ import overlays from "./app/OverlayHost.tsx?raw";
 // shell extraction both live in OverlayHost, which App mounts once per
 // branch; the check reads both sources.
 describe("every App render branch mounts the overlay host", () => {
-  it("OverlayHost mounts exactly one Toasts, immediately followed by ConfirmDialog", () => {
-    expect(overlays.match(/<Toasts \/>/g)?.length ?? 0).toBe(1);
+  it("OverlayHost mounts exactly one ToastHost, immediately followed by ConfirmDialog", () => {
+    expect(overlays.match(/<ToastHost \/>/g)?.length ?? 0).toBe(1);
     expect(overlays.match(/<ConfirmDialog \/>/g)?.length ?? 0).toBe(1);
-    expect(overlays.match(/<Toasts \/>\n\s*<ConfirmDialog \/>/g)?.length ?? 0).toBe(1);
+    expect(overlays.match(/<ToastHost \/>\n\s*<ConfirmDialog \/>/g)?.length ?? 0).toBe(1);
   });
 
   it("App returns OverlayHost from each of its render branches", () => {
