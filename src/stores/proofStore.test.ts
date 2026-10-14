@@ -8,6 +8,8 @@ vi.mock("../ipc/tauri", () => ({
     testigoList: vi.fn().mockResolvedValue([]),
     testigoVerify: vi.fn().mockResolvedValue(null),
     testigoGetSettings: vi.fn().mockResolvedValue(null),
+    testigoExportAat: vi.fn(),
+    testigoVerifyAat: vi.fn(),
     ledgerRootFor: vi.fn(),
   },
 }));
@@ -543,5 +545,40 @@ describe("following the active session's ledger", () => {
     releaseFirst("/work/first");
     await first;
     expect(useProofStore.getState().projectRoot).toBe("/work/second");
+  });
+});
+
+describe("exportAat (D3: IETF audit trail)", () => {
+  beforeEach(() => {
+    useProofStore.setState({ projectRoot: "/p", lastAat: null, exporting: null, error: null });
+    vi.mocked(ipc.testigoExportAat).mockReset();
+    vi.mocked(ipc.testigoVerifyAat).mockReset();
+  });
+
+  it("exports, then re-verifies every chain it wrote, and keeps both", async () => {
+    const summary = { dir: "/p/proofpacks/aat/c1", sessions: 1, records: 3, files: [], draft: "d" };
+    vi.mocked(ipc.testigoExportAat).mockResolvedValue(summary);
+    vi.mocked(ipc.testigoVerifyAat).mockResolvedValue([
+      [
+        "/p/proofpacks/aat/c1/s.jsonl",
+        { ok: true, records: 3, brokenAt: null, tailClosed: true, problems: [] },
+      ],
+    ]);
+    await useProofStore.getState().exportAat("c1");
+    expect(ipc.testigoExportAat).toHaveBeenCalledWith("/p", "c1");
+    expect(ipc.testigoVerifyAat).toHaveBeenCalledWith("/p/proofpacks/aat/c1");
+    const s = useProofStore.getState();
+    expect(s.lastAat?.summary).toEqual(summary);
+    expect(s.lastAat?.reports[0][1].ok).toBe(true);
+    expect(s.exporting).toBeNull();
+  });
+
+  it("surfaces a failed export and clears the busy flag", async () => {
+    vi.mocked(ipc.testigoExportAat).mockRejectedValue(new Error("Nothing to export"));
+    await useProofStore.getState().exportAat();
+    const s = useProofStore.getState();
+    expect(s.error).toContain("Nothing to export");
+    expect(s.exporting).toBeNull();
+    expect(s.lastAat).toBeNull();
   });
 });

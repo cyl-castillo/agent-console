@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use tauri::State;
 
 use crate::error::AppResult;
+use crate::services::aat_export::{self, AatExportSummary, AatVerifyReport};
 use crate::services::testigo_export::{self, ExportPreview, ExportSummary};
 use crate::services::testigo_service::{ProofEvent, TestigoSettings, VerifyReport};
 use crate::state::AppState;
@@ -43,6 +44,39 @@ pub fn testigo_export(
         &dest,
         &redact_seqs.unwrap_or_default(),
     )
+}
+
+/// D3: export a case (or the whole ledger) as IETF Agent Audit Trail JSONL
+/// (draft-sharif-agent-audit-trail-08), one hash-chained file per session
+/// under `<dest>/aat/<case>/`, with a dependency-free verifier alongside so
+/// a third party checks it offline without Agent Console.
+#[tauri::command(async)]
+pub fn testigo_export_aat(
+    project_root: String,
+    case_id: Option<String>,
+    dest_dir: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<AatExportSummary> {
+    let dest = dest_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&project_root).join("proofpacks"));
+    aat_export::export(
+        &state.testigo,
+        &project_root,
+        case_id.as_deref(),
+        &dest,
+        env!("CARGO_PKG_VERSION"),
+    )
+}
+
+/// Run the draft's Section 6.3 verification over every `.jsonl` in an export
+/// directory — the console's own self-check right after exporting.
+#[tauri::command(async)]
+pub fn testigo_verify_aat(dir: String) -> AppResult<Vec<(String, AatVerifyReport)>> {
+    Ok(aat_export::verify_dir(std::path::Path::new(&dir))?
+        .into_iter()
+        .map(|(p, r)| (p.to_string_lossy().to_string(), r))
+        .collect())
 }
 
 /// The pre-sign review: what the packet WOULD contain, so the human can mark

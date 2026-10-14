@@ -125,6 +125,16 @@ ProofEvent {
   `.proofpack` (zip: statement + evidencias referenciadas por hash).
 - **Verificador standalone**: CLI mínimo + página HTML single-file que valida hash-chain +
   firma + integridad de evidencias. Sin agent-console. Es la pieza de confianza y de adquisición.
+- **Export IETF (D3, 2026-10-14)**: el mismo ledger exportado como *Agent Audit Trail*
+  (`draft-sharif-agent-audit-trail-08`): un `.jsonl` por sesión, cada registro con los campos
+  obligatorios del borrador, `prev_hash` = SHA-256 sobre JCS (RFC 8785) del registro anterior,
+  génesis `lifecycle/session_start`, cierre `lifecycle/session_end` con `session_hash`,
+  `sequence_number` sin huecos, `trust_level` L1 (identificado y registrado de forma
+  independiente, no atestado criptográficamente). `action_detail` conserva `testigo_seq`,
+  `testigo_hash` y el payload: las dos cadenas se referencian. Se escribe junto a un
+  `aat-verify.mjs` sin dependencias (`node aat-verify.mjs *.jsonl`) y un README con la tabla
+  de mapeo; cualquier verificador del borrador (p. ej. `last-record`) también sirve. Código:
+  `src-tauri/src/services/aat_export.rs`; entrada en Proof → "audit trail".
 
 ### Qué NO hace (guardrails de scope)
 - No orquesta trabajo (no es workflow engine), no bloquea ejecución (captura, no gatekeeping —

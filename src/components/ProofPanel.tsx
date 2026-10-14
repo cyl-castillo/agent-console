@@ -64,6 +64,7 @@ export function ProofPanel() {
   const report = useProofStore((s) => s.report);
   const exporting = useProofStore((s) => s.exporting);
   const lastExport = useProofStore((s) => s.lastExport);
+  const lastAat = useProofStore((s) => s.lastAat);
   const error = useProofStore((s) => s.error);
   const selectedCase = useProofStore((s) => s.selectedCase);
   const review = useProofStore((s) => s.review);
@@ -71,6 +72,7 @@ export function ProofPanel() {
   const setSettings = useProofStore((s) => s.setSettings);
   const load = useProofStore((s) => s.load);
   const startExport = useProofStore((s) => s.startExport);
+  const exportAat = useProofStore((s) => s.exportAat);
   const toggleRedact = useProofStore((s) => s.toggleRedact);
   const confirmExport = useProofStore((s) => s.confirmExport);
   const cancelExport = useProofStore((s) => s.cancelExport);
@@ -316,6 +318,14 @@ export function ProofPanel() {
                 >
                   export
                 </button>
+                <button
+                  className="wb-link"
+                  disabled={exporting !== null}
+                  onClick={() => void exportAat(c.caseId)}
+                  title="Export this case as an IETF Agent Audit Trail (JSONL, hash-chained, verifiable offline by anyone)"
+                >
+                  audit trail
+                </button>
               </div>
             ))}
             <p className="wb-hint">
@@ -326,6 +336,15 @@ export function ProofPanel() {
                 title="Review and export the full ledger as one signed packet"
               >
                 export full ledger
+              </button>
+              {" · "}
+              <button
+                className="wb-link"
+                disabled={exporting !== null}
+                onClick={() => void exportAat(undefined)}
+                title="Export the full ledger as IETF Agent Audit Trail JSONL, one chain per session"
+              >
+                full ledger as audit trail
               </button>
             </p>
           </section>
@@ -467,6 +486,28 @@ export function ProofPanel() {
                 </div>
               );
             })}
+          </section>
+        )}
+
+        {!review && lastAat && (
+          <section className="wb-section">
+            <div className="wb-section-title">last audit-trail export</div>
+            <p className="wb-hint">
+              <code>{lastAat.summary.dir}</code>
+              <br />
+              {lastAat.summary.sessions} sessions · {lastAat.summary.records} records ·{" "}
+              {lastAat.summary.draft}
+              <br />
+              {lastAat.reports.every(([, r]) => r.ok)
+                ? "every chain re-verified after writing"
+                : `verification failed: ${lastAat.reports
+                    .filter(([, r]) => !r.ok)
+                    .map(([f, r]) => `${f.split("/").pop()} (${r.problems[0]})`)
+                    .join(", ")}`}
+              <br />
+              Verify anywhere with <code>node aat-verify.mjs *.jsonl</code> (written alongside, no
+              dependencies) or any verifier of the IETF draft.
+            </p>
           </section>
         )}
 

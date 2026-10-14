@@ -72,7 +72,10 @@ suggest-only, none of them able to block the core:
   agenda of due dates and scheduled runs.
 - **Proof** — every session witnessed into a hash-chained evidence ledger
   ([Testigo](https://github.com/cyl-castillo/testigo)); export signed proof
-  packets anyone verifies in a browser.
+  packets anyone verifies in a browser, or the same ledger as an
+  [IETF Agent Audit Trail](https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/)
+  (JSONL, SHA-256 over RFC 8785) that a third party verifies offline with
+  the dependency-free `aat-verify.mjs` written alongside.
 - **Coach** — the agent's playbook: skills generated from your project
   (Advisor), curated from your actual usage (Learning).
 - **Room** — you plus N agents (mixed engines) on one problem; working rooms
