@@ -6,6 +6,7 @@ const STORAGE_KEY = "agent-console:theme";
 
 function initialTheme(): Theme {
   try {
+    if (typeof localStorage === "undefined") return "dark";
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "dark" || stored === "light") return stored;
   } catch {
@@ -21,6 +22,7 @@ function initialTheme(): Theme {
 }
 
 function apply(theme: Theme) {
+  if (typeof document === "undefined") return; // store tests run in node
   document.documentElement.dataset.theme = theme;
 }
 

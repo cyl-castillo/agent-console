@@ -877,6 +877,27 @@ export const defaultFixtures: FixtureMap = {
   testigo_verify: verifyReport,
   testigo_get_settings: testigoSettings,
   testigo_public_key: { keyId: "ac-demo-2026", publicKey: "MCowBQYDK2VwAyEA…" },
+  testigo_export_preview: {
+    caseId: "case-2026-10-13",
+    entries: proofEvents.map((e) => ({
+      seq: e.seq,
+      ts: e.ts,
+      kind: e.kind,
+      actor: e.actor,
+      stub: false,
+      autoRedacted: false,
+    })),
+  },
+  testigo_export: {
+    path: "/home/demo/.local/share/agent-console/proofpacks/case-2026-10-13.json",
+    verifierPath: "/home/demo/.local/share/agent-console/proofpacks/verify.html",
+    eventCount: proofEvents.length,
+    stubCount: 0,
+    redactionCount: 0,
+    keyId: "ac-demo-2026",
+    subjectDigest: "sha256:7e3a1c…",
+    chainOk: true,
+  },
   // coach
   skill_list: skills,
   skill_read: "# vitest-focus\n\nRun the one test file that covers the change first.",
