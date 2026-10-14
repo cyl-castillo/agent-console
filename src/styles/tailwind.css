@@ -1,0 +1,28 @@
+/* Tailwind 4 without preflight: the app keeps its own base styles
+   (global.css) untouched; utilities and the token-mapped theme are what the
+   primitives in src/ui compose with. Order matters — our @theme overrides
+   Tailwind's defaults, and utilities land in their own cascade layer. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "./theme.css";
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Motion durations as utilities so primitives use the token, not a number. */
+@utility dur-1 {
+  transition-duration: var(--dur-1);
+}
+@utility dur-2 {
+  transition-duration: var(--dur-2);
+}
+@utility dur-3 {
+  transition-duration: var(--dur-3);
+}
+
+/* Indeterminate progress sweep (Progress primitive). */
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}

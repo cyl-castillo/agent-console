@@ -37,6 +37,15 @@
   /* Keyboard focus ring — outline-offset keeps the gap on any background. */
   --focus-color: var(--accent);
 
+  /* Ink variants of the status hues for text on their own 12% tints: full
+     strength in dark, darkened in light where the pastel tint would drop
+     the ratio under AA (see src/ui/Chip). */
+  --accent-ink: var(--accent);
+  --ok-ink: var(--ok);
+  --warn-ink: var(--warn);
+  --danger-ink: var(--danger);
+  --purple-ink: var(--purple);
+
   /* Spacing scale */
 
   /* Radius scale */
@@ -75,6 +84,12 @@
   /* Light-theme surfaces, hues and a softer, cooler shadow ramp so
      elevated chrome doesn't smudge dark on the white canvas. */
   --edge-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
+  --accent-ink: color-mix(in srgb, var(--accent) 82%, var(--text));
+  --ok-ink: color-mix(in srgb, var(--ok) 82%, var(--text));
+  --warn-ink: color-mix(in srgb, var(--warn) 82%, var(--text));
+  --danger-ink: color-mix(in srgb, var(--danger) 82%, var(--text));
+  --purple-ink: color-mix(in srgb, var(--purple) 82%, var(--text));
 
   color-scheme: light;
 }
@@ -2900,7 +2915,7 @@ select:focus-visible,
   cursor: default;
 }
 .term-menu kbd {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-faint);
 }
@@ -2934,7 +2949,7 @@ select:focus-visible,
 }
 .term-link-url {
   overflow: hidden;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text);
   text-overflow: ellipsis;
@@ -3122,7 +3137,7 @@ select:focus-visible,
   font-size: 12px;
 }
 .model-chooser-model {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-faint);
 }
@@ -3166,7 +3181,7 @@ select:focus-visible,
 /* Per-session model badge. */
 .session-model {
   flex-shrink: 0;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 9.5px;
   color: var(--accent);
   background: var(--accent-soft);
@@ -3229,7 +3244,7 @@ select:focus-visible,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 9.5px;
   color: var(--text-muted);
   border: 1px solid var(--border);
@@ -3328,7 +3343,7 @@ select:focus-visible,
   font-size: 11px;
 }
 .wt-branch {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--accent);
 }
@@ -3339,7 +3354,7 @@ select:focus-visible,
 .wt-state {
   color: var(--text-muted);
   font-size: 10px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
 }
 .wt-merge-btn,
 .wt-discard-btn {
@@ -3467,7 +3482,7 @@ select:focus-visible,
   flex: 1;
 }
 .model-menu-model {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-faint);
 }
@@ -3483,7 +3498,7 @@ select:focus-visible,
   margin-top: 2px;
 }
 .model-menu-note code {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
 }
@@ -4945,7 +4960,7 @@ select:focus-visible,
   padding: 4px 0;
 }
 .wb-advisor-md {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   line-height: 1.45;
   background: rgba(0, 0, 0, 0.3);
@@ -5750,7 +5765,7 @@ select:focus-visible,
 
 /* Side-by-side diff */
 .sbs-diff {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.45;
   overflow: auto;
@@ -5843,7 +5858,7 @@ select:focus-visible,
   min-width: 0;
 }
 .vault-key {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
   display: inline-flex;
@@ -5910,7 +5925,7 @@ select:focus-visible,
   opacity: 0.4;
 }
 .vault-value {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   margin: 6px 0 0;
   padding: 6px 8px;
@@ -6082,7 +6097,7 @@ select:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6179,7 +6194,7 @@ select:focus-visible,
 }
 .ctx-path {
   color: var(--text-faint);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6227,7 +6242,7 @@ select:focus-visible,
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 8px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
   resize: vertical;
@@ -6315,7 +6330,7 @@ select:focus-visible,
   background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .ctx-memory-name {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   flex-shrink: 0;
 }
@@ -6349,7 +6364,7 @@ select:focus-visible,
   border-top: 1px solid var(--border-faint);
 }
 .ctx-memory-content {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   line-height: 1.5;
   margin: 0;
@@ -6752,7 +6767,7 @@ select:focus-visible,
 .feedback-textarea {
   resize: vertical;
   min-height: 120px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
 }
 .feedback-context {
   background: color-mix(in srgb, var(--text) 3%, transparent);
@@ -7457,7 +7472,7 @@ select:focus-visible,
   color: var(--text);
 }
 .mcp-target {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--text-faint);
   overflow: hidden;
@@ -7491,7 +7506,7 @@ select:focus-visible,
   word-break: break-word;
 }
 .mcp-mono {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 10.5px;
   white-space: pre-wrap;
 }
@@ -7538,7 +7553,7 @@ select:focus-visible,
   padding: 5px 7px;
 }
 .mcp-textarea {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   resize: vertical;
 }
@@ -7577,7 +7592,7 @@ select:focus-visible,
   color: var(--text);
 }
 .wb-working-elapsed {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;

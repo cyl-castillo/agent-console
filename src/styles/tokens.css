@@ -10,15 +10,17 @@
   --border: #262b33;
   --text: #d9dde3;
   --text-dim: #8a93a0;
-  --text-muted: #707984;
-  --text-faint: #6b7480;
+  --text-muted: #838a94;
+  --text-faint: #7e8690;
   --accent: #6aa9ff;
   --danger: #ff6a6a;
   --ok: #6cd16c;
   --warn: #f0b34a;
-  --purple: #8a6aff;
-  --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
-  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --purple: #8b6cff;
+  --font-mono:
+    "JetBrains Mono Variable", ui-monospace, "JetBrains Mono", "Fira Code", Menlo, Consolas,
+    monospace;
+  --font-ui: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
@@ -36,6 +38,12 @@
   --dur-1: 90ms;
   --dur-2: 160ms;
   --dur-3: 240ms;
+  --fs-caption: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-lead: 14px;
+  --fs-title: 16px;
+  --fs-display: 20px;
 }
 
 :root[data-theme="light"] {
@@ -46,12 +54,12 @@
   --border: #d8dde5;
   --text: #1a1d23;
   --text-dim: #5b626d;
-  --text-muted: #6b7280;
-  --text-faint: #9ba3af;
+  --text-muted: #636976;
+  --text-faint: #696e77;
   --accent: #2563eb;
-  --danger: #dc2626;
-  --ok: #16a34a;
-  --warn: #b45309;
+  --danger: #d42525;
+  --ok: #117e39;
+  --warn: #b25209;
   --purple: #7c3aed;
   --shadow-1: 0px 1px 2px rgba(15, 23, 42, 0.1);
   --shadow-2: 0px 6px 22px rgba(15, 23, 42, 0.12), 0px 2px 6px rgba(15, 23, 42, 0.07);

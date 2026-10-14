@@ -37,7 +37,10 @@ jobs:
         run: npm run lint:css
 
       - name: Tokens are up to date
-        run: npm run tokens && git diff --exit-code -- src/styles/tokens.css
+        run: npm run tokens && git diff --exit-code -- src/styles/tokens.css src/styles/theme.css
+
+      - name: Text tokens reach WCAG AA contrast in both modes
+        run: npm run check:contrast
 
       - name: Type-check + build
         run: npm run build

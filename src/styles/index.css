@@ -1,0 +1,10 @@
+/* Single stylesheet entry. Everything is layered so the primitives' utility
+   classes (layer utilities) always win over the legacy element rules in
+   global.css (layer base) — an unlayered `button {}` would otherwise beat
+   every `bg-*` utility. xterm's stylesheet sits in base too, before ours,
+   so global.css keeps overriding it exactly as it did unlayered. */
+@layer base, theme, components, utilities;
+
+@import "@xterm/xterm/css/xterm.css" layer(base);
+@import "./global.css" layer(base);
+@import "./tailwind.css";

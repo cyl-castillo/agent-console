@@ -14,6 +14,9 @@
     "declaration-property-value-keyword-no-deprecated": null
   },
   "ignoreFiles": [
-    "src/styles/tokens.css"
+    "src/styles/tokens.css",
+    "src/styles/theme.css",
+    "src/styles/tailwind.css",
+    "src/styles/index.css"
   ]
 }
