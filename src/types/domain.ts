@@ -287,6 +287,25 @@ export interface TestigoExportSummary {
   timestampTsa?: string;
 }
 
+/// D3: an IETF Agent Audit Trail export (draft-sharif-agent-audit-trail-08):
+/// one JSONL chain per session plus index, README and a standalone verifier.
+export interface AatExportSummary {
+  dir: string;
+  sessions: number;
+  records: number;
+  files: string[];
+  draft: string;
+}
+
+/// Section 6.3 verification of one exported chain.
+export interface AatVerifyReport {
+  ok: boolean;
+  records: number;
+  brokenAt: number | null;
+  tailClosed: boolean;
+  problems: string[];
+}
+
 /// Per-project Testigo policy (mirrors the Rust TestigoSettings). Witnessing
 /// is local-only and on by default; repo marks (trailers + anchor ref) touch
 /// the project's git and are opt-in, as is the RFC 3161 timestamp (it sends

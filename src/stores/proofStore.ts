@@ -10,6 +10,8 @@ import type {
   ProofEvent,
   TestigoVerifyReport,
   TestigoExportSummary,
+  AatExportSummary,
+  AatVerifyReport,
   TestigoExportPreview,
   TestigoSettings,
 } from "../types/domain";
@@ -113,6 +115,9 @@ interface ProofState {
   report: TestigoVerifyReport | null;
   exporting: string | null;
   lastExport: TestigoExportSummary | null;
+  /// D3: last IETF audit-trail export plus the console's own re-verification
+  /// of every chain it wrote (a third party runs the same check offline).
+  lastAat: { summary: AatExportSummary; reports: [string, AatVerifyReport][] } | null;
   error: string | null;
   /// Case opened in the timeline view; null = case list.
   selectedCase: string | null;
@@ -130,6 +135,10 @@ interface ProofState {
   clear: () => void;
   /// Step 1: open the pre-sign review for a case (or the full ledger).
   startExport: (caseId?: string) => Promise<void>;
+  /// Export a case (or the ledger) as IETF Agent Audit Trail JSONL and
+  /// re-verify what was written. Nothing is signed; no review step needed —
+  /// the records carry the same payloads the ledger already holds locally.
+  exportAat: (caseId?: string) => Promise<void>;
   /// Toggle manual redaction of one event in the open review.
   toggleRedact: (seq: number) => void;
   /// Step 2: sign and write the packet with the chosen redactions.
@@ -293,6 +302,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
   report: null,
   exporting: null,
   lastExport: null,
+  lastAat: null,
   error: null,
   selectedCase: null,
   review: null,
@@ -337,6 +347,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
       events: [],
       report: null,
       lastExport: null,
+      lastAat: null,
       error: null,
       selectedCase: null,
       review: null,
@@ -353,6 +364,19 @@ export const useProofStore = create<ProofState>((set, get) => ({
       set({ review: { caseId, preview, redactSeqs: [] } });
     } catch (e) {
       set({ error: String(e) });
+    }
+  },
+
+  exportAat: async (caseId) => {
+    const root = get().projectRoot;
+    if (!root) return;
+    set({ exporting: caseId ?? "__ledger__", error: null });
+    try {
+      const summary = await ipc.testigoExportAat(root, caseId);
+      const reports = await ipc.testigoVerifyAat(summary.dir);
+      set({ lastAat: { summary, reports }, exporting: null });
+    } catch (e) {
+      set({ exporting: null, error: String(e) });
     }
   },
 

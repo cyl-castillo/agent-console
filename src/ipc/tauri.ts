@@ -79,6 +79,8 @@ import type {
   MergeOutcome,
   PushResult,
   AttachProofSummary,
+  AatExportSummary,
+  AatVerifyReport,
 } from "../types/domain";
 
 export const ipc = {
@@ -364,6 +366,14 @@ export const ipc = {
       destDir: destDir ?? null,
       redactSeqs: redactSeqs ?? null,
     }),
+  testigoExportAat: (projectRoot: string, caseId?: string, destDir?: string) =>
+    invoke<AatExportSummary>("testigo_export_aat", {
+      projectRoot,
+      caseId: caseId ?? null,
+      destDir: destDir ?? null,
+    }),
+  testigoVerifyAat: (dir: string) =>
+    invoke<[string, AatVerifyReport][]>("testigo_verify_aat", { dir }),
   testigoExportPreview: (projectRoot: string, caseId?: string) =>
     invoke<TestigoExportPreview>("testigo_export_preview", {
       projectRoot,

@@ -898,6 +898,19 @@ export const defaultFixtures: FixtureMap = {
     subjectDigest: "sha256:7e3a1c…",
     chainOk: true,
   },
+  testigo_export_aat: {
+    dir: "/home/demo/.local/share/agent-console/proofpacks/aat/case-2026-10-13",
+    sessions: 1,
+    records: proofEvents.length + 2,
+    files: ["sess-1.jsonl", "index.json", "README.md", "aat-verify.mjs"],
+    draft: "draft-sharif-agent-audit-trail-08",
+  },
+  testigo_verify_aat: [
+    [
+      "/home/demo/.local/share/agent-console/proofpacks/aat/case-2026-10-13/sess-1.jsonl",
+      { ok: true, records: proofEvents.length + 2, brokenAt: null, tailClosed: true, problems: [] },
+    ],
+  ],
   // coach
   skill_list: skills,
   skill_read: "# vitest-focus\n\nRun the one test file that covers the change first.",
