@@ -91,6 +91,16 @@ export const InboxEmpty = scenario({
   liveTerminal: false,
 });
 export const Sessions = scenario({ destination: "sessions" });
+export const SessionsDrawerOpen = scenario({
+  destination: "sessions",
+  after: () => {
+    if (!useShellStore.getState().drawerOpen) useShellStore.getState().toggleDrawer();
+  },
+});
+export const SessionsNoTurns = scenario({
+  destination: "sessions",
+  fixtures: { testigo_list: [] },
+});
 export const SessionsChanges = scenario({ destination: "sessions", centerTab: "changes" });
 export const WorkJobs = scenario({ destination: "work", tab: "jobs" });
 export const WorkRoom = scenario({ destination: "work", tab: "roundtable" });

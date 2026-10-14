@@ -17,11 +17,14 @@ interface ShellState {
   lastTab: Partial<Record<Destination, WorkbenchTab>>;
   /// Whether the list pane (second column) is open.
   listOpen: boolean;
+  /// Whether the terminal drawer under the conversation is open.
+  drawerOpen: boolean;
   goTo: (d: Destination) => void;
   toggleList: () => void;
+  toggleDrawer: () => void;
 }
 
-function load(): Pick<ShellState, "destination" | "lastTab" | "listOpen"> {
+function load(): Pick<ShellState, "destination" | "lastTab" | "listOpen" | "drawerOpen"> {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -30,15 +33,16 @@ function load(): Pick<ShellState, "destination" | "lastTab" | "listOpen"> {
         destination: p.destination ?? "inbox",
         lastTab: p.lastTab ?? {},
         listOpen: p.listOpen ?? true,
+        drawerOpen: p.drawerOpen ?? false,
       };
     }
   } catch {
     /* ignore */
   }
-  return { destination: "inbox", lastTab: {}, listOpen: true };
+  return { destination: "inbox", lastTab: {}, listOpen: true, drawerOpen: false };
 }
 
-function save(s: Pick<ShellState, "destination" | "lastTab" | "listOpen">) {
+function save(s: Pick<ShellState, "destination" | "lastTab" | "listOpen" | "drawerOpen">) {
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch {
@@ -62,11 +66,15 @@ export const useShellStore = create<ShellState>((set, get) => ({
       if (tab) useWorkbenchStore.getState().setTab(tab);
     }
     set({ destination });
-    save({ destination, lastTab: get().lastTab, listOpen: get().listOpen });
+    save(get());
   },
   toggleList: () => {
     set((s) => ({ listOpen: !s.listOpen }));
-    save({ destination: get().destination, lastTab: get().lastTab, listOpen: get().listOpen });
+    save(get());
+  },
+  toggleDrawer: () => {
+    set((s) => ({ drawerOpen: !s.drawerOpen }));
+    save(get());
   },
 }));
 
@@ -79,6 +87,6 @@ export function attachShellListeners(): () => void {
     const st = useShellStore.getState();
     const lastTab = { ...st.lastTab, [dest]: s.tab };
     useShellStore.setState({ destination: dest, lastTab });
-    save({ destination: dest, lastTab, listOpen: st.listOpen });
+    save({ destination: dest, lastTab, listOpen: st.listOpen, drawerOpen: st.drawerOpen });
   });
 }

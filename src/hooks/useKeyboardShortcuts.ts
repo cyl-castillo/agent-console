@@ -111,6 +111,12 @@ export function useKeyboardShortcuts({ setTab }: Args) {
           window.dispatchEvent(new CustomEvent("ac:toggle-composer"));
           e.preventDefault();
           break;
+        case "`":
+          // Ctrl+` — the terminal drawer of the v2 shell (no-op in v1).
+          if (inTerminal) return;
+          window.dispatchEvent(new CustomEvent("ac:toggle-terminal-drawer"));
+          e.preventDefault();
+          break;
         case "]":
           // Ctrl+] is a terminal control sequence — leave it to the PTY.
           if (inTerminal) return;
