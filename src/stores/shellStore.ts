@@ -19,6 +19,9 @@ interface ShellState {
   listOpen: boolean;
   /// Whether the terminal drawer under the conversation is open.
   drawerOpen: boolean;
+  /// Turn selected in the ledger minimap (Proof destination); not persisted.
+  selectedTurnId: string | null;
+  selectTurn: (id: string | null) => void;
   goTo: (d: Destination) => void;
   toggleList: () => void;
   toggleDrawer: () => void;
@@ -55,6 +58,8 @@ function save(s: Pick<ShellState, "destination" | "lastTab" | "listOpen" | "draw
 /// the palette or a deep link pulls the shell to that tab's destination.
 export const useShellStore = create<ShellState>((set, get) => ({
   ...load(),
+  selectedTurnId: null,
+  selectTurn: (selectedTurnId) => set({ selectedTurnId }),
   goTo: (destination) => {
     const def = destinationDef(destination);
     if (def.sections.length > 0) {

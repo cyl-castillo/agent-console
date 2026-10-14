@@ -68,7 +68,8 @@ export function ShellV2({
     sessions: sessions.filter((s) => s.status === "live").length,
   };
   const hasList = destination !== "inbox" && listOpen;
-  const hasInspector = rightOpen && inspectorFor(destination, centerTab) !== null;
+  const selectedTurn = useShellStore((s) => s.selectedTurnId);
+  const hasInspector = rightOpen && inspectorFor(destination, centerTab, selectedTurn) !== null;
 
   return (
     <TooltipProvider>

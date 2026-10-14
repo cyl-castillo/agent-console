@@ -15,6 +15,10 @@ export interface AttentionInputs {
   workingTermId?: string | null;
   activeId: string | null;
   now: number;
+  /// The ledger shows a turn that started and has not ended (prompt without
+  /// turn_end, with recent events) — the agent is working whatever the
+  /// status hooks say.
+  openTurn?: boolean;
 }
 
 /// The attention state of one session, in priority order: it needs you
@@ -26,6 +30,7 @@ export function sessionAttention(i: AttentionInputs): AgentState {
   if (session.status === "stopped") return "stopped";
   if (i.approvalTermIds.includes(session.id)) return "needs-you";
   if (i.waitingTermId && i.waitingTermId === session.id) return "needs-you";
+  if (i.openTurn) return "working";
   const working = i.now < i.workingUntil;
   if (working && (i.workingTermId ? i.workingTermId === session.id : i.activeId === session.id)) {
     return "working";

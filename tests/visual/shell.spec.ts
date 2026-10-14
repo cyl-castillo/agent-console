@@ -147,3 +147,28 @@ test("v2 sessions: the conversation is the stage, the terminal a drawer", async 
   await page.getByTestId("diff-block").first().getByRole("button").first().click();
   await expect(page.getByRole("tab", { name: /Changes/ })).toHaveAttribute("aria-selected", "true");
 });
+
+test("v2 proof: the ledger map selects a turn into the inspector", async ({ page }) => {
+  await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
+  await page.goto("/iframe.html?id=app-v2--proof-ledger&viewMode=story");
+  await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
+  await expect(page.getByTestId("ledger-minimap")).toBeVisible();
+  await expect(page.getByTestId("inspector")).toBeHidden();
+  await page.getByTestId("minimap-turn-turn-002").click();
+  await expect(page.getByTestId("inspector")).toContainText("Turn");
+  await expect(page.getByTestId("turn-inspector")).toContainText("turn-002");
+  await expect(page.getByTestId("turn-inspector")).toContainText("commit");
+});
+
+test("v2 sessions list: grouped by attention, WIP visible, files underneath", async ({ page }) => {
+  await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
+  await page.goto("/iframe.html?id=app-v2--sessions&viewMode=story");
+  await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
+  const list = page.getByTestId("sessions-list");
+  await expect(list).toContainText("Stopped");
+  await expect(page.getByTestId("session-sess-retry")).toContainText("ac/retry-path");
+  await page.getByRole("button", { name: "Files" }).click();
+  await expect(list).toContainText("package.json");
+  await page.getByTestId("sessions-new").click();
+  await expect(page.getByRole("listbox", { name: "Choose an agent and model" })).toBeVisible();
+});
