@@ -79,6 +79,36 @@ pub fn testigo_verify_aat(dir: String) -> AppResult<Vec<(String, AatVerifyReport
         .collect())
 }
 
+/// D5: the hard budget as evidence. Without `decision` it records
+/// `budget_reached` (the console interrupted the turn at the cap); with one
+/// (`stop` | `summary` | `raise`) it records `budget_decision`.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+pub fn testigo_budget_event(
+    project_root: String,
+    term_id: String,
+    session_id: Option<String>,
+    spent_usd: f64,
+    cap_usd: f64,
+    decision: Option<String>,
+    new_cap_usd: Option<f64>,
+    state: State<'_, AppState>,
+) -> AppResult<ProofEvent> {
+    state.testigo.on_budget(
+        &project_root,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0),
+        &term_id,
+        session_id.as_deref(),
+        spent_usd,
+        cap_usd,
+        decision.as_deref(),
+        new_cap_usd,
+    )
+}
+
 /// The pre-sign review: what the packet WOULD contain, so the human can mark
 /// events for manual redaction before anything is signed.
 #[tauri::command(async)]

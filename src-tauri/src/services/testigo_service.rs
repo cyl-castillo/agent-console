@@ -1012,6 +1012,55 @@ impl TestigoService {
         )
     }
 
+    /// D5, the hard budget as evidence. `budget_reached`: the console
+    /// interrupted the turn because the session's reported cost crossed its
+    /// cap — actor `console`, inside the turn open on that terminal, so the
+    /// pause sits next to the work it cut. `budget_decision`: what the human
+    /// answered (stop / summary / raise, with the new cap). No session
+    /// crosses its cap without both lines in the ledger.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_budget(
+        &self,
+        project_root: &str,
+        ts: i64,
+        term_id: &str,
+        session_id: Option<&str>,
+        spent_usd: f64,
+        cap_usd: f64,
+        decision: Option<&str>,
+        new_cap_usd: Option<f64>,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        let turn_id = inner.turns.get(term_id).map(|s| s.turn_id.clone());
+        let case = Self::case_for(&inner, Some(term_id));
+        let mut payload = json!({ "spentUsd": spent_usd, "capUsd": cap_usd });
+        let (kind, actor) = match decision {
+            None => {
+                payload["action"] = json!("interrupted");
+                ("budget_reached", "console")
+            }
+            Some(d) => {
+                payload["decision"] = json!(d);
+                if let Some(n) = new_cap_usd {
+                    payload["newCapUsd"] = json!(n);
+                }
+                ("budget_decision", "human")
+            }
+        };
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case,
+            turn_id,
+            kind,
+            Some(term_id.to_string()),
+            session_id.map(String::from),
+            actor,
+            payload,
+        )
+    }
+
     /// Record a turn rewind: the working tree was restored to a snapshot and
     /// (when the fork succeeded) the conversation transcript was forked to a
     /// new session id. A rewind rewrites what the checkout contains, so it is
@@ -2324,5 +2373,65 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&repo);
         let _ = std::fs::remove_dir_all(&plain);
+    }
+
+    /// D5: a budget breach and its answer land inside the open turn of the
+    /// terminal, with the amounts, so "no session crossed its cap without a
+    /// pause in the ledger" is checkable.
+    #[test]
+    fn budget_reached_and_decision_sit_in_the_open_turn() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-tbudget-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+
+        let svc = TestigoService::new();
+        let root = "/proj/budget";
+        let prompt = svc
+            .on_prompt(
+                root,
+                1,
+                Some("t1"),
+                Some("s1"),
+                Some("refactor"),
+                None,
+                None,
+            )
+            .unwrap();
+        let reached = svc
+            .on_budget(root, 2, "t1", Some("s1"), 12.34, 10.0, None, None)
+            .unwrap();
+        assert_eq!(reached.kind, "budget_reached");
+        assert_eq!(reached.actor, "console");
+        assert_eq!(reached.turn_id, prompt.turn_id, "inside the open turn");
+        assert_eq!(reached.case_id, prompt.case_id);
+        assert_eq!(reached.payload["spentUsd"], 12.34);
+        assert_eq!(reached.payload["capUsd"], 10.0);
+        assert_eq!(reached.payload["action"], "interrupted");
+
+        let decided = svc
+            .on_budget(
+                root,
+                3,
+                "t1",
+                Some("s1"),
+                12.34,
+                10.0,
+                Some("raise"),
+                Some(15.0),
+            )
+            .unwrap();
+        assert_eq!(decided.kind, "budget_decision");
+        assert_eq!(decided.actor, "human");
+        assert_eq!(decided.payload["decision"], "raise");
+        assert_eq!(decided.payload["newCapUsd"], 15.0);
+        assert_eq!(decided.prev_hash, reached.hash, "chained");
+        assert!(svc.verify(root).unwrap().ok);
+        std::fs::remove_dir_all(&base).ok();
     }
 }

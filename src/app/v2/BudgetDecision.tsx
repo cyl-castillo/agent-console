@@ -1,4 +1,6 @@
 import { useBudgetStore } from "../../stores/budgetStore";
+import { useSessionStore } from "../../stores/sessionStore";
+import { recordBudget } from "../../lib/budgetGuard";
 import { useTerminalsStore, type TerminalSession } from "../../stores/terminalsStore";
 import { useShellStore } from "../../stores/shellStore";
 import { useUIStore } from "../../stores/uiStore";
@@ -13,7 +15,8 @@ function sendToSession(sessionId: string, data: string) {
 
 /// `budget_reached` as a decision: the turn was interrupted when the cap was
 /// crossed; nothing resumes until you raise the cap, stop the session or ask
-/// for a summary. The three multipliers behind a surprise are named.
+/// for a summary — and the answer is witnessed as `budget_decision` next to
+/// the pause. The three multipliers behind a surprise are named.
 export function BudgetDecision({
   session,
   spent,
@@ -24,6 +27,7 @@ export function BudgetDecision({
   cap: number;
 }) {
   const setCap = useBudgetStore((s) => s.setCap);
+  const root = useSessionStore((s) => s.project?.root);
   const clearBreach = useBudgetStore((s) => s.clearBreach);
   const setActive = useTerminalsStore((s) => s.setActive);
   const goTo = useShellStore((s) => s.goTo);
@@ -48,6 +52,7 @@ export function BudgetDecision({
             label: "Stop session",
             variant: "danger",
             onClick: () => {
+              void recordBudget(root, session, spent, cap, "stop");
               sendToSession(session.id, "\x03");
               clearBreach(session.id);
             },
@@ -56,6 +61,7 @@ export function BudgetDecision({
             label: "Ask for a summary",
             variant: "secondary",
             onClick: () => {
+              void recordBudget(root, session, spent, cap, "summary", cap + 1);
               setCap(session.id, cap + 1);
               sendToSession(session.id, "Summarize what you did and what is left, then stop.\r");
               setActive(session.id);
@@ -66,7 +72,10 @@ export function BudgetDecision({
           {
             label: `Raise to $${cap + raise}`,
             variant: "primary",
-            onClick: () => setCap(session.id, cap + raise),
+            onClick: () => {
+              void recordBudget(root, session, spent, cap, "raise", cap + raise);
+              setCap(session.id, cap + raise);
+            },
           },
         ]}
       />

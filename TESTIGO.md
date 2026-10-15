@@ -135,6 +135,13 @@ ProofEvent {
   `aat-verify.mjs` sin dependencias (`node aat-verify.mjs *.jsonl`) y un README con la tabla
   de mapeo; cualquier verificador del borrador (p. ej. `last-record`) también sirve. Código:
   `src-tauri/src/services/aat_export.rs`; entrada en Proof → "audit trail".
+- **Presupuesto duro como evidencia (D5, 2026-10-14)**: cuando el costo que reporta el CLI cruza el
+  tope de la sesión, la consola interrumpe el turno y registra `budget_reached` (actor `console`,
+  dentro del turno abierto, con `spentUsd`/`capUsd`); la respuesta del humano en el Inbox
+  (stop / summary / raise) queda como `budget_decision` (actor `human`, con `newCapUsd`). En el
+  export IETF: `budget_reached` → escalation/escalated, `budget_decision` → decision
+  (success, o denied si fue stop). Compuerta del estudio: ninguna sesión supera el tope sin pausa
+  registrada en el ledger. El tope vive por máquina (budgetStore); la evidencia, en el ledger.
 
 ### Qué NO hace (guardrails de scope)
 - No orquesta trabajo (no es workflow engine), no bloquea ejecución (captura, no gatekeeping —

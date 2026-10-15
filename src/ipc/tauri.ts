@@ -374,6 +374,25 @@ export const ipc = {
     }),
   testigoVerifyAat: (dir: string) =>
     invoke<[string, AatVerifyReport][]>("testigo_verify_aat", { dir }),
+  /// D5: `budget_reached` (no decision) or `budget_decision` into the ledger.
+  testigoBudgetEvent: (
+    projectRoot: string,
+    termId: string,
+    sessionId: string | undefined,
+    spentUsd: number,
+    capUsd: number,
+    decision?: "stop" | "summary" | "raise",
+    newCapUsd?: number,
+  ) =>
+    invoke<ProofEvent>("testigo_budget_event", {
+      projectRoot,
+      termId,
+      sessionId: sessionId ?? null,
+      spentUsd,
+      capUsd,
+      decision: decision ?? null,
+      newCapUsd: newCapUsd ?? null,
+    }),
   testigoExportPreview: (projectRoot: string, caseId?: string) =>
     invoke<TestigoExportPreview>("testigo_export_preview", {
       projectRoot,

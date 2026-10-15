@@ -66,6 +66,45 @@ describe("summarizeCases", () => {
 });
 
 describe("buildTimeline", () => {
+  it("D5: a budget pause and its answer attach to the turn they cut", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 1, kind: "prompt", turnId: "t1", payload: { prompt: "go" } }),
+      ev({
+        seq: 2,
+        ts: 2,
+        kind: "budget_reached",
+        turnId: "t1",
+        actor: "console",
+        payload: { spentUsd: 12.3, capUsd: 10, action: "interrupted" },
+      }),
+    ]);
+    expect(turns[0].budget).toEqual({ spentUsd: 12.3, capUsd: 10 });
+    const decided = buildTimeline([
+      ev({ seq: 1, ts: 1, kind: "prompt", turnId: "t1", payload: { prompt: "go" } }),
+      ev({
+        seq: 2,
+        ts: 2,
+        kind: "budget_reached",
+        turnId: "t1",
+        payload: { spentUsd: 12.3, capUsd: 10 },
+      }),
+      ev({
+        seq: 3,
+        ts: 3,
+        kind: "budget_decision",
+        turnId: "t1",
+        actor: "human",
+        payload: { decision: "raise", spentUsd: 12.3, capUsd: 10, newCapUsd: 15 },
+      }),
+    ]);
+    expect(decided[0].budget).toEqual({
+      spentUsd: 12.3,
+      capUsd: 10,
+      decision: "raise",
+      newCapUsd: 15,
+    });
+  });
+
   it("folds a case's events into turns with approvals, results and diff", () => {
     const turns = buildTimeline([
       ev({
