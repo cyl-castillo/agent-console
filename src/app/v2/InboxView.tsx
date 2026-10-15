@@ -15,6 +15,7 @@ import { Chip } from "../../ui/Chip";
 import { OnboardingHint } from "./OnboardingHint";
 import { useOnboardingSteps } from "../useOnboardingSteps";
 import { useOverlaysStore } from "../../stores/overlaysStore";
+import { useSponsorStore } from "../../stores/sponsorStore";
 import { EmptyState } from "../../ui/EmptyState";
 import { Row } from "../../ui/Row";
 import { SectionHeader } from "../../ui/SectionHeader";
@@ -56,6 +57,7 @@ export function InboxView() {
   const setCenterTab = useUIStore((s) => s.setTab);
   const visible = sessions;
   const onboarding = useOnboardingSteps();
+  const sponsor = useSponsorStore((s) => s.sponsor);
   const showOverlay = useOverlaysStore((s) => s.show);
 
   const openSession = (id: string) => {
@@ -122,6 +124,15 @@ export function InboxView() {
             </span>
           </Tooltip>
         ))}
+        {sponsor?.autoApprove && (
+          <Tooltip content="The sponsor policy decides low-risk requests alone; you see what crosses the threshold. Work → Jobs to change it.">
+            <span>
+              <Chip tone="ok" mono>
+                sponsor ≤ {sponsor.riskThreshold}
+              </Chip>
+            </span>
+          </Tooltip>
+        )}
         <span className="ml-auto" />
         <Button size="sm" onClick={newSession}>
           New session

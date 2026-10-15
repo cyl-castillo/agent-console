@@ -10,6 +10,7 @@ import { toastManager } from "../ui/Toast";
 import { installAgentBridge } from "../lib/agentBridge";
 import { useDeclinesStore } from "../stores/declinesStore";
 import { useReviewsStore } from "../stores/reviewsStore";
+import { useSponsorStore } from "../stores/sponsorStore";
 
 export const READY_ATTR = "data-story-ready";
 
@@ -36,6 +37,7 @@ export function beginScenario(fixtures: FixtureMap = {}, theme: "dark" | "light"
   toastManager.close();
   useDeclinesStore.setState({ items: [] });
   useReviewsStore.setState({ items: [] });
+  useSponsorStore.setState({ project: null, sponsor: null, autoApproved: 0 });
   installAgentBridge();
   // Specs drive the backend side: push events the Rust side would emit and
   // read which commands the webview invoked in return.

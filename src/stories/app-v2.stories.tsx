@@ -14,6 +14,7 @@ import { useBudgetStore } from "../stores/budgetStore";
 import { useLiveStatusStore } from "../stores/liveStatusStore";
 import { useDeclinesStore } from "../stores/declinesStore";
 import { useReviewsStore } from "../stores/reviewsStore";
+import { useSponsorStore } from "../stores/sponsorStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import type { FixtureMap } from "../dev/fixtures/registry";
 import { useApprovalStore } from "../stores/approvalStore";
@@ -182,6 +183,24 @@ export const SessionsNoTurns = scenario({
 export const SessionsChanges = scenario({ destination: "sessions", centerTab: "changes" });
 export const WorkJobs = scenario({ destination: "work", tab: "jobs" });
 export const WorkRoom = scenario({ destination: "work", tab: "roundtable" });
+/// D11: a sponsor that decides low-risk requests alone, with a weekly budget.
+export const WorkJobsSponsor = scenario({
+  destination: "work",
+  tab: "jobs",
+  fixtures: {
+    sponsor_get: {
+      objective: "Ship billing v2 without regressions",
+      owner: "Carlos",
+      weeklyBudgetUsd: 40,
+      riskThreshold: "low",
+      autoApprove: true,
+    },
+  },
+  after: () => {
+    useLiveStatusStore.getState().note({ ts: Date.now(), termId: "sess-auth", costUsd: 12.4 });
+    useSponsorStore.setState({ autoApproved: 7 });
+  },
+});
 export const ProofLedger = scenario({ destination: "proof", tab: "proof" });
 export const ProofTurnSelected = scenario({
   destination: "proof",

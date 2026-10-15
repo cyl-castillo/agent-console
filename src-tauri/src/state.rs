@@ -33,6 +33,8 @@ pub struct AppState {
     pub connector: crate::services::connector_service::ConnectorService,
     /// The console's own MCP server (D9): pending webview roundtrips.
     pub console_mcp: crate::services::console_mcp::ConsoleMcp,
+    /// D11: the sponsor policy per project (objective, budget, risk threshold).
+    pub sponsor: crate::services::sponsor_service::SponsorService,
 }
 
 impl AppState {
@@ -53,6 +55,7 @@ impl AppState {
             tts: TtsService::default(),
             connector: crate::services::connector_service::ConnectorService::new(),
             console_mcp: crate::services::console_mcp::ConsoleMcp::new(),
+            sponsor: crate::services::sponsor_service::SponsorService::new(),
         }
     }
 }

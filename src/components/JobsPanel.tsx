@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { useJobsStore } from "../stores/jobsStore";
+import { SponsorBar } from "./SponsorBar";
 import { useRoundtableStore } from "../stores/roundtableStore";
 import { useSessionStore } from "../stores/sessionStore";
 import type { JobCard, JobColumn, JobPendingCard } from "../types/domain";
@@ -72,6 +73,7 @@ export function JobsPanel() {
 
   return (
     <section className="wb-section jobs-panel">
+      <SponsorBar />
       <div className="jobs-head">
         <p className="wb-hint">
           Every job room of this project, by state. The organizer drives each job through the

@@ -1063,6 +1063,29 @@ impl TestigoService {
         )
     }
 
+    /// D11: the sponsor policy changed — the auditable statement of what the
+    /// console may decide alone for this product.
+    pub fn on_sponsor_set(
+        &self,
+        project_root: &str,
+        ts: i64,
+        payload: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            "unbound".into(),
+            None,
+            "sponsor_set",
+            None,
+            None,
+            "human",
+            payload,
+        )
+    }
+
     /// D14: witness an agent's identity once per project — its card (signed
     /// for sessions), under its own actor, so no sub-agent or reviewer ever
     /// appears in the ledger as the human. Returns None when already seen.
@@ -1241,6 +1264,7 @@ impl TestigoService {
         id: &str,
         decision: &str,
         reason: Option<&str>,
+        policy: Option<&str>,
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
         // remove(): one decision closes one request. A post-restart decision
@@ -1266,8 +1290,10 @@ impl TestigoService {
             "approval_decision",
             term_id,
             None,
-            "human",
-            json!({ "approvalId": id, "tool": tool, "decision": decision, "reason": reason }),
+            // D11: a decision the sponsor policy took is the policy's act,
+            // never the human's — the ledger shows what nobody looked at.
+            if policy.is_some() { "sponsor" } else { "human" },
+            json!({ "approvalId": id, "tool": tool, "decision": decision, "reason": reason, "policy": policy }),
         )
     }
 
@@ -1712,7 +1738,7 @@ mod tests {
         });
         svc.on_approval_request(b, &req).unwrap();
         let d = svc
-            .on_approval_decision(a, 10, "apX", "deny", None)
+            .on_approval_decision(a, 10, "apX", "deny", None, None)
             .unwrap();
         assert_eq!(d.payload["tool"], "Bash");
         let in_b = svc
@@ -1860,7 +1886,7 @@ mod tests {
 
         // An unknown id (post-restart) still records — in the caller's ledger.
         let orphan = svc
-            .on_approval_decision(a, 11, "never-seen", "allow", None)
+            .on_approval_decision(a, 11, "never-seen", "allow", None, None)
             .unwrap();
         assert!(orphan.payload["tool"].is_null());
         assert!(svc.verify(a).unwrap().ok);
@@ -2023,7 +2049,7 @@ mod tests {
         let r = svc.on_approval_request(root, &req).unwrap();
         assert_eq!(r.turn_id.as_deref(), Some(turn.as_str()));
         let d = svc
-            .on_approval_decision(root, 4, "ap1", "allow", Some("looks safe"))
+            .on_approval_decision(root, 4, "ap1", "allow", Some("looks safe"), None)
             .unwrap();
         assert_eq!(d.case_id, "jira:FIXY-1");
         assert_eq!(d.payload["tool"], "write_file");

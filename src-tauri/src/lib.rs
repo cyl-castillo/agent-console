@@ -257,6 +257,8 @@ pub fn run() {
             commands::review::review_turn,
             commands::identity::identity_card,
             commands::identity::identity_verify,
+            commands::sponsor::sponsor_get,
+            commands::sponsor::sponsor_set,
             commands::review::review_decide,
             commands::testigo::testigo_public_key,
             commands::testigo::testigo_get_settings,

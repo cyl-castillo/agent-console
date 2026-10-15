@@ -26,6 +26,7 @@ pub mod session_folder;
 pub mod sessions;
 pub mod skills;
 pub mod snapshot;
+pub mod sponsor;
 pub mod teams;
 pub mod terminal;
 pub mod testigo;

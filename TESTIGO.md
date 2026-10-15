@@ -165,6 +165,16 @@ ProofEvent {
   nada cambia. El PTY recibe `AGENT_CONSOLE_AGENT_ID` y `AGENT_CONSOLE_ALLOWED_HOSTS`. Compuerta
   del estudio: sub-agentes y revisores no heredan la identidad del humano — el ledger los nombra
   siempre como `agent:…` (test de actores). microVM/nube existen en el enum pero no se asignan aún.
+- **Sponsor por producto (D11, 2026-10-14)**: `sponsor_service.rs` + `sponsorStore`. Por proyecto:
+  objetivo, dueño, presupuesto semanal, umbral de riesgo (low|medium|high) y el interruptor de
+  auto-aprobación. Cada cambio queda como `sponsor_set`; cada decisión que toma la política queda
+  como `approval_decision` con actor `sponsor` y `policy: sponsor:<owner>:<umbral>` — nunca como el
+  humano. La política solo aprueba (nunca deniega) requests cuyo tier (reglas de `lib/decisions`,
+  incl. el perímetro de D14) está dentro del umbral y mientras el gasto semanal (costo que reportan
+  las sesiones creadas en los últimos 7 días) no alcance el presupuesto; al alcanzarlo se pausa sola.
+  UI: barra Sponsor arriba del kanban de Jobs; chip "sponsor ≤ low" en el Inbox. Compuerta del
+  estudio: "el humano solo decide lo que cruza el umbral" (spec en agent.spec). NO hecho: feedback de
+  CI al agente responsable (no hay watcher de CI en la consola), gasto de corridas headless.
 
 ### Qué NO hace (guardrails de scope)
 - No orquesta trabajo (no es workflow engine), no bloquea ejecución (captura, no gatekeeping —

@@ -84,6 +84,7 @@ import type {
   ReviewVerdict,
   RunsIn,
   SignedAgentCard,
+  Sponsor,
 } from "../types/domain";
 
 export const ipc = {
@@ -273,8 +274,22 @@ export const ipc = {
   hooksInstall: () => invoke<HooksStatus>("hooks_install"),
   hooksUninstall: () => invoke<HooksStatus>("hooks_uninstall"),
 
-  approvalRespond: (id: string, decision: "allow" | "deny" | "ask", reason?: string) =>
-    invoke<void>("approval_respond", { id, decision, reason: reason ?? null }),
+  approvalRespond: (
+    id: string,
+    decision: "allow" | "deny" | "ask",
+    reason?: string,
+    policy?: string,
+  ) =>
+    invoke<void>("approval_respond", {
+      id,
+      decision,
+      reason: reason ?? null,
+      policy: policy ?? null,
+    }),
+  /// D11: the product's sponsor policy.
+  sponsorGet: (projectRoot: string) => invoke<Sponsor>("sponsor_get", { projectRoot }),
+  sponsorSet: (projectRoot: string, sponsor: Sponsor) =>
+    invoke<Sponsor>("sponsor_set", { projectRoot, sponsor }),
   approvalsPending: () => invoke<ApprovalRequest[]>("approvals_pending"),
 
   permissionsSnapshot: () => invoke<PermissionsSnapshot>("permissions_snapshot"),

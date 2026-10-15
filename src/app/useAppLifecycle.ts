@@ -15,6 +15,7 @@ import { attachConsoleMcpHost } from "../lib/consoleMcpHost";
 import { attachDeclineListener } from "../stores/declinesStore";
 import { attachReviewListener } from "../stores/reviewsStore";
 import { attachHandoffWatcher } from "../stores/handoffStore";
+import { attachSponsorWatcher } from "../stores/sponsorStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUpdaterStore } from "../stores/updaterStore";
 import { useFeedbackStore } from "../stores/feedbackStore";
@@ -68,6 +69,7 @@ export function useAppLifecycle(): void {
     adopt(attachDeclineListener());
     adopt(attachReviewListener());
     offs.push(attachHandoffWatcher());
+    offs.push(attachSponsorWatcher());
     offs.push(attachVoiceApprovalWatcher());
     offs.push(attachWorkbenchListeners());
     offs.push(attachOverlayListeners());

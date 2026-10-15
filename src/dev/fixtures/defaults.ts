@@ -910,6 +910,20 @@ export const defaultFixtures: FixtureMap = {
     subjectDigest: "sha256:7e3a1c…",
     chainOk: true,
   },
+  sponsor_get: {
+    objective: "",
+    owner: "",
+    weeklyBudgetUsd: 0,
+    riskThreshold: "low",
+    autoApprove: false,
+  },
+  sponsor_set: {
+    objective: "Ship billing v2 without regressions",
+    owner: "Carlos",
+    weeklyBudgetUsd: 40,
+    riskThreshold: "low",
+    autoApprove: true,
+  },
   identity_card: {
     card: {
       type: "https://agent-console.dev/agent-card/v0.1",
