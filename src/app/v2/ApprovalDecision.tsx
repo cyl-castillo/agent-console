@@ -29,7 +29,7 @@ export function ApprovalDecision({
   const [always, setAlways] = useState(false);
   const [scope, setScope] = useState<Scope>("project");
   const suggestions = useMemo(() => suggestRules(req, scope), [req, scope]);
-  const info = tierFor(req);
+  const info = tierFor(req, { allowedHosts: session?.allowedHosts });
   const { primary, secondary } = describe(req);
   const diff = editPreview(req);
 

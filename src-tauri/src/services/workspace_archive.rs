@@ -630,6 +630,9 @@ mod tests {
             name_suggested: Some(true),
             model: Some("opus".into()),
             worktree: None,
+            agent_id: None,
+            runs_in: None,
+            allowed_hosts: None,
             archived: None,
             last_active_ms: None,
         }

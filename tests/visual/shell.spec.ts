@@ -109,7 +109,13 @@ test("v2 inbox: tiers gate the decision, deny removes the card", async ({ page }
   await page.goto("/iframe.html?id=app-v2--inbox-decisions&viewMode=story");
   await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
   const cards = page.locator("[data-testid^='decision-']");
-  await expect(cards).toHaveCount(3);
+  await expect(cards).toHaveCount(4);
+
+  // D14: reaching outside the session perimeter is high tier, whatever the tool.
+  await expect(page.locator("[data-testid='decision-apr-0045']")).toHaveAttribute(
+    "data-tier",
+    "high",
+  );
 
   // High tier: Approve stays disabled until the word is typed.
   const high = page.locator("[data-testid='decision-apr-0043']");
@@ -123,7 +129,7 @@ test("v2 inbox: tiers gate the decision, deny removes the card", async ({ page }
   const low = page.locator("[data-testid='decision-apr-0042']");
   await expect(low).toHaveAttribute("data-tier", "low");
   await low.getByRole("button", { name: "Deny" }).click();
-  await expect(cards).toHaveCount(2);
+  await expect(cards).toHaveCount(3);
   await expect(page.getByTestId("budget-sess-auth")).toBeVisible();
 });
 

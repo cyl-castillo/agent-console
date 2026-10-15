@@ -55,7 +55,7 @@ pub struct ExportSummary {
 
 /// Load the ed25519 signing seed from the OS keychain, generating and storing
 /// one on first export. The private key never leaves the keychain entry.
-fn load_or_create_seed() -> AppResult<[u8; 32]> {
+pub(crate) fn load_or_create_seed() -> AppResult<[u8; 32]> {
     let entry = Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
         .map_err(|e| AppError::Other(format!("keyring open: {e}")))?;
     match entry.get_password() {

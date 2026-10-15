@@ -9,6 +9,8 @@ use crate::state::AppState;
 pub fn term_spawn(
     cwd: String,
     term_key: Option<String>,
+    agent_id: Option<String>,
+    allowed_hosts: Option<Vec<String>>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<String> {
@@ -29,6 +31,17 @@ pub fn term_spawn(
                 key,
             ));
         }
+    }
+    // D14: the agent learns who it is and its perimeter from the environment
+    // (hooks and MCP servers forward them; nothing here enforces the network,
+    // the console's own gates do — see lib/perimeter.ts).
+    if let Some(id) = agent_id.filter(|s| !s.is_empty()) {
+        extra.push(("AGENT_CONSOLE_AGENT_ID".to_string(), id));
+    }
+    let hosts =
+        crate::services::identity_service::normalize_hosts(&allowed_hosts.unwrap_or_default());
+    if !hosts.is_empty() {
+        extra.push(("AGENT_CONSOLE_ALLOWED_HOSTS".to_string(), hosts.join(",")));
     }
     // Inject Vault entries (project overrides global) so the agent can use
     // `$KEY` in shell commands without ever seeing the value in its context.

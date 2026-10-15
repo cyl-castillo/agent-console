@@ -153,6 +153,18 @@ ProofEvent {
   conversación, tool MCP `request_review`. **Compuerta del estudio**: el check de proof-on-PR
   (`.github/testigo/testigo-verify.mjs`) falla si el packet contiene un `review_verdict` block sin
   un `review_decision` override posterior para ese turno — el bloqueo no se levanta solo.
+- **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
+  `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
+  persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A
+  (principal explícito = el humano local, `runsIn` local|worktree|microvm|cloud, `allowedHosts`,
+  presupuesto). Las tarjetas de sesión se firman con la misma clave ed25519 del keychain que firma
+  los packets (mismo `keyId`); todas se registran una vez por proyecto como `agent_identity` bajo
+  `agent:<agent_id>`. Perímetro: la compuerta de aprobaciones (la única que la consola controla)
+  marca como tier alto "Outside the session perimeter" todo request que alcance un host fuera de
+  los `allowedHosts` declarados (URLs en Bash, WebFetch, ssh/scp/rsync); sin perímetro declarado
+  nada cambia. El PTY recibe `AGENT_CONSOLE_AGENT_ID` y `AGENT_CONSOLE_ALLOWED_HOSTS`. Compuerta
+  del estudio: sub-agentes y revisores no heredan la identidad del humano — el ledger los nombra
+  siempre como `agent:…` (test de actores). microVM/nube existen en el enum pero no se asignan aún.
 
 ### Qué NO hace (guardrails de scope)
 - No orquesta trabajo (no es workflow engine), no bloquea ejecución (captura, no gatekeeping —

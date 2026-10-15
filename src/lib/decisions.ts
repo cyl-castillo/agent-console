@@ -1,5 +1,6 @@
 import type { ApprovalRequest } from "../types/domain";
 import { assessCommand, toRelative } from "../permissions/rules";
+import { hostsOutside } from "./perimeter";
 
 /// Friction proportional to reversibility and external reach (UI-2026-10.md
 /// §Principios 3): low = read-only or trivially undone, medium = edits inside
@@ -18,7 +19,22 @@ const READ_ONLY_BASH =
 
 const HIGH_REASON = /remote|delete|discards|destroys|removes|elevated|truncates|rewrites/i;
 
-export function tierFor(req: ApprovalRequest): TierInfo {
+export interface Perimeter {
+  /// The session's declared allowed hosts; undefined/empty = none declared.
+  allowedHosts?: string[];
+}
+
+export function tierFor(req: ApprovalRequest, perimeter?: Perimeter): TierInfo {
+  // D14: reaching outside the session's declared perimeter is always high
+  // tier, whatever the tool — the one gate the console actually controls.
+  const outside = hostsOutside(req, perimeter?.allowedHosts);
+  if (outside.length > 0) {
+    return {
+      tier: "high",
+      label: "Outside the session perimeter",
+      reason: `${outside.join(", ")} is not an allowed host of this session`,
+    };
+  }
   const inp = req.input ?? {};
   const tool = req.tool;
   if (tool === "Bash") {

@@ -33,13 +33,21 @@ test("an agent drives the console by roles, names and the bridge", async ({ page
   const actions = await page.evaluate(() => window.__agentConsole.listActions().map((a) => a.id));
   expect(actions).toContain("nav.proof");
   expect(actions).toContain("session.new");
-  expect((await state(page)).pendingDecisions).toBe(3); // the approval queue
+  expect((await state(page)).pendingDecisions).toBe(4); // the approval queue
 
   // Decide: the read-only request, by its card's words and the button's name.
   const readOnly = page.getByRole("article").filter({ hasText: "Read-only" }).first();
   await readOnly.getByRole("button", { name: "Approve once" }).click();
   await expect(page.getByRole("article").filter({ hasText: "Read-only" })).toHaveCount(0);
-  expect((await state(page)).pendingDecisions).toBe(2);
+  expect((await state(page)).pendingDecisions).toBe(3);
+
+  // D14: a fetch outside the session's declared perimeter is high tier
+  // whatever the tool — deny it by name.
+  const outside = page.getByRole("article").filter({ hasText: "Outside the session perimeter" });
+  await expect(outside).toContainText("pastebin.com");
+  await expect(outside.getByRole("button", { name: "Approve once" })).toBeDisabled();
+  await outside.getByRole("button", { name: "Deny" }).click();
+  await expect(outside).toHaveCount(0);
 
   // A high-tier request refuses a bare click: the word must be typed first.
   const high = page.getByRole("article").filter({ hasText: "Irreversible" }).first();

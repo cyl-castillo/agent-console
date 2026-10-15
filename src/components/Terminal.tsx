@@ -7,6 +7,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useHooksHealthStore } from "../stores/hooksHealthStore";
+import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useToastStore } from "../stores/toastStore";
@@ -271,12 +272,36 @@ export function Terminal({ session, visible }: Props) {
       unlistenDragDrop = uDrop;
 
       try {
-        termId = await ipc.termSpawn(session.cwd, session.id);
+        termId = await ipc.termSpawn(
+          session.cwd,
+          session.id,
+          session.agentId,
+          session.allowedHosts,
+        );
         if (disposed) {
           await ipc.termKill(termId);
           return;
         }
         markLive(session.id);
+        // D14: the agent's own identity, signed and witnessed (best-effort —
+        // a machine without a keychain still runs the session).
+        if (session.agentId) {
+          const root = useSessionStore.getState().project?.root;
+          if (root) {
+            ipc
+              .identityCard(root, {
+                termId: session.id,
+                agentId: session.agentId,
+                name: session.name,
+                agent: session.agent,
+                model: session.model,
+                cwd: session.cwd,
+                runsIn: session.runsIn,
+                allowedHosts: session.allowedHosts,
+              })
+              .catch((e) => console.warn("[identity] card not witnessed:", e));
+          }
+        }
         await ipc.termResize(termId, term.cols, term.rows);
       } catch (err) {
         term.write(`\x1b[31m✕ Couldn't start a shell session.\x1b[0m\r\n`);

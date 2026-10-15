@@ -82,6 +82,8 @@ import type {
   AatExportSummary,
   AatVerifyReport,
   ReviewVerdict,
+  RunsIn,
+  SignedAgentCard,
 } from "../types/domain";
 
 export const ipc = {
@@ -95,8 +97,29 @@ export const ipc = {
   readFileText: (path: string) => invoke<FileContent>("read_file_text", { path }),
   workspaceContext: () => invoke<WorkspaceContext>("workspace_context"),
 
-  termSpawn: (cwd: string, termKey?: string) =>
-    invoke<string>("term_spawn", { cwd, termKey: termKey ?? null }),
+  termSpawn: (cwd: string, termKey?: string, agentId?: string, allowedHosts?: string[]) =>
+    invoke<string>("term_spawn", {
+      cwd,
+      termKey: termKey ?? null,
+      agentId: agentId ?? null,
+      allowedHosts: allowedHosts ?? null,
+    }),
+  /// D14: mint, sign and witness a session's agent card.
+  identityCard: (
+    projectRoot: string,
+    session: {
+      termId: string;
+      agentId: string;
+      name: string;
+      agent?: string;
+      model?: string;
+      cwd?: string;
+      runsIn?: RunsIn;
+      allowedHosts?: string[];
+      budgetUsd?: number;
+    },
+  ) => invoke<SignedAgentCard>("identity_card", { projectRoot, session }),
+  identityVerify: (card: SignedAgentCard) => invoke<boolean>("identity_verify", { card }),
   termWrite: (id: string, data: string) => invoke<void>("term_write", { id, data }),
   // Save pasted image bytes to a temp file; returns its absolute path.
   // Raw-body invoke: bytes travel as the request body, ext as a header.

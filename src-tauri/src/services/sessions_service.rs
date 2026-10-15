@@ -50,6 +50,16 @@ pub struct PersistedSession {
     /// the session runs directly in the project checkout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<crate::services::worktree_service::WorktreeInfo>,
+    /// D14: the agent's own id (`urn:agent-console:agent:<uuid>`), minted
+    /// by the webview when the session is created; never the human's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// local | worktree | microvm | cloud
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runs_in: Option<String>,
+    /// Network perimeter the console's gates enforce for this session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_hosts: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -333,6 +343,9 @@ mod tests {
             name_suggested: None,
             model: None,
             worktree: None,
+            agent_id: None,
+            runs_in: None,
+            allowed_hosts: None,
             archived: None,
             last_active_ms: None,
         }

@@ -3,7 +3,13 @@
 // stays on the visual and a11y contract.
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import App from "../App";
-import { approvalEdit, approvalHigh, pendingApproval, ROOT } from "../dev/fixtures/defaults";
+import {
+  approvalEdit,
+  approvalFetch,
+  approvalHigh,
+  pendingApproval,
+  ROOT,
+} from "../dev/fixtures/defaults";
 import { useBudgetStore } from "../stores/budgetStore";
 import { useLiveStatusStore } from "../stores/liveStatusStore";
 import { useDeclinesStore } from "../stores/declinesStore";
@@ -74,9 +80,11 @@ export const Inbox = scenario({
   after: () => useApprovalStore.setState({ queue: [pendingApproval] }),
 });
 export const InboxDecisions = scenario({
-  fixtures: { approvals_pending: [pendingApproval, approvalHigh, approvalEdit] },
+  fixtures: { approvals_pending: [pendingApproval, approvalHigh, approvalEdit, approvalFetch] },
   after: () => {
-    useApprovalStore.setState({ queue: [pendingApproval, approvalHigh, approvalEdit] });
+    useApprovalStore.setState({
+      queue: [pendingApproval, approvalHigh, approvalEdit, approvalFetch],
+    });
     const b = useBudgetStore.getState();
     b.setCap("sess-auth", 5);
     b.markBreached("sess-auth", 5.12);

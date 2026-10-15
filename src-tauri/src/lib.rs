@@ -255,6 +255,8 @@ pub fn run() {
             commands::testigo::testigo_verify_aat,
             commands::testigo::testigo_budget_event,
             commands::review::review_turn,
+            commands::identity::identity_card,
+            commands::identity::identity_verify,
             commands::review::review_decide,
             commands::testigo::testigo_public_key,
             commands::testigo::testigo_get_settings,

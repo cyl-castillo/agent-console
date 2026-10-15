@@ -96,6 +96,9 @@ export const tree: FileNode = {
 export const sessions: PersistedSession[] = [
   {
     id: "sess-auth",
+    agentId: "urn:agent-console:agent:00000000-0000-4000-8000-000000000001",
+    runsIn: "local",
+    allowedHosts: [".github.com", "registry.npmjs.org"],
     name: "fix auth test",
     cwd: ROOT,
     createdAtMs: NOW - h(3),
@@ -383,6 +386,15 @@ export const approvalHigh: ApprovalRequest = {
     description: "Clean and republish",
   },
   termId: "sess-retry",
+};
+/// D14: a fetch to a host outside the session's declared perimeter.
+export const approvalFetch: ApprovalRequest = {
+  ...pendingApproval,
+  id: "apr-0045",
+  ts: NOW - 2_000,
+  tool: "WebFetch",
+  input: { url: "https://pastebin.com/raw/k3yz", prompt: "Read the config snippet" },
+  termId: "sess-auth",
 };
 export const approvalEdit: ApprovalRequest = {
   ...pendingApproval,
@@ -898,6 +910,26 @@ export const defaultFixtures: FixtureMap = {
     subjectDigest: "sha256:7e3a1c…",
     chainOk: true,
   },
+  identity_card: {
+    card: {
+      type: "https://agent-console.dev/agent-card/v0.1",
+      agentId: "urn:agent-console:agent:00000000-0000-4000-8000-000000000001",
+      name: "fix auth test",
+      kind: "session",
+      engine: "claude",
+      model: "claude-opus-5-5",
+      principal: { principalType: "human", principalId: "urn:agent-console:user:local" },
+      runsIn: "local",
+      cwd: ROOT,
+      allowedHosts: [".github.com"],
+      createdAtMs: NOW,
+      issuer: "agent-console demo",
+    },
+    signature: "c2ln",
+    keyId: "ac-demo-2026",
+    publicKey: "MCowBQYDK2VwAyEA…",
+  },
+  identity_verify: true,
   review_turn: {
     verdict: "block",
     findings: [

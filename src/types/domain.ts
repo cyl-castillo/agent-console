@@ -190,6 +190,38 @@ export interface PersistedSession {
   model?: string;
   /// Isolated worktree this session runs in. Undefined = runs in the project checkout.
   worktree?: WorktreeRef;
+  /// D14: the agent's own id (`urn:agent-console:agent:<uuid>`).
+  agentId?: string;
+  /// D14: where it runs — local | worktree | microvm | cloud.
+  runsIn?: RunsIn;
+  /// D14: hosts the console's gates let this session reach (exact or `.suffix`).
+  allowedHosts?: string[];
+}
+
+export type RunsIn = "local" | "worktree" | "microvm" | "cloud";
+
+/// D14: an A2A-shaped agent card (mirrors the Rust AgentCard).
+export interface AgentCard {
+  type: string;
+  agentId: string;
+  name: string;
+  kind: "session" | "reviewer" | "mcp";
+  engine?: string | null;
+  model?: string | null;
+  principal: { principalType: string; principalId: string };
+  runsIn: RunsIn;
+  cwd?: string | null;
+  allowedHosts: string[];
+  budgetUsd?: number | null;
+  createdAtMs: number;
+  issuer: string;
+}
+
+export interface SignedAgentCard {
+  card: AgentCard;
+  signature: string;
+  keyId: string;
+  publicKey: string;
 }
 
 /// Outcome of `git_push` (P1).

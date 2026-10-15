@@ -250,6 +250,8 @@ struct Inner {
     /// status line's per-render model report yields one line per session,
     /// not one per render.
     seen_session_models: std::collections::HashSet<(String, String)>,
+    /// (project, agent_id) pairs already witnessed as `agent_identity`.
+    seen_identities: std::collections::HashSet<(String, String)>,
     /// Per-project policy, lazily loaded from testigo-settings.json.
     settings: Option<HashMap<String, TestigoSettings>>,
 }
@@ -1059,6 +1061,40 @@ impl TestigoService {
             actor,
             payload,
         )
+    }
+
+    /// D14: witness an agent's identity once per project — its card (signed
+    /// for sessions), under its own actor, so no sub-agent or reviewer ever
+    /// appears in the ledger as the human. Returns None when already seen.
+    pub fn on_agent_identity(
+        &self,
+        project_root: &str,
+        ts: i64,
+        agent_id: &str,
+        term_id: Option<&str>,
+        payload: Value,
+    ) -> AppResult<Option<ProofEvent>> {
+        let mut inner = self.inner.lock();
+        let key = (project_root.to_string(), agent_id.to_string());
+        if inner.seen_identities.contains(&key) {
+            return Ok(None);
+        }
+        let case = Self::case_for(&inner, term_id);
+        let actor = format!("agent:{agent_id}");
+        let ev = Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case,
+            None,
+            "agent_identity",
+            term_id.map(String::from),
+            None,
+            &actor,
+            payload,
+        )?;
+        inner.seen_identities.insert(key);
+        Ok(Some(ev))
     }
 
     /// D10: the reviewer agent's verdict (`review_verdict`, actor
