@@ -277,3 +277,35 @@ test("v2 parity: onboarding is folded into the Inbox", async ({ page }) => {
   await hint.getByRole("button", { name: "Don't show again" }).click();
   await expect(hint).toBeHidden();
 });
+
+test("D12 harness lab: declared metric, lineage, and a run the human merges", async ({ page }) => {
+  await openV2(page, "app-v2--panel-learning");
+  const lab = page.getByTestId("harness-lab");
+  await expect(lab).toContainText("heldout_pass_rate");
+  await expect(page.getByTestId("lab-stats")).toContainText(
+    "2 experiments · 1 kept · 2 without touching the evaluator",
+  );
+  // Lineage and the PR link of the kept experiment are visible; nothing merges here.
+  await expect(page.getByTestId("lab-experiments")).toContainText("↳ hx-1792000000-001");
+  await expect(page.getByTestId("lab-experiments").getByRole("button", { name: "PR" })).toHaveCount(
+    1,
+  );
+  await expect(lab.getByRole("button", { name: /merge/i })).toHaveCount(0);
+  // Hidden tasks are edited only here (outside the repo).
+  await lab.getByRole("button", { name: /edit hidden tasks/ }).click();
+  await expect(page.getByTestId("lab-heldout")).toContainText("the agent never reads them");
+  // Run now goes through the backend command.
+  await lab.getByRole("button", { name: "Run experiment" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const log = (
+          window as unknown as {
+            __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+          }
+        ).__fixtures.invokeLog;
+        return log.some((l) => l.cmd === "harness_lab_run");
+      }),
+    )
+    .toBe(true);
+});

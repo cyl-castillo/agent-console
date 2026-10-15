@@ -85,6 +85,11 @@ import type {
   RunsIn,
   SignedAgentCard,
   Sponsor,
+  Experiment,
+  HeldOut,
+  HeldOutTask,
+  LabConfig,
+  LabSummary,
 } from "../types/domain";
 
 export const ipc = {
@@ -286,6 +291,13 @@ export const ipc = {
       reason: reason ?? null,
       policy: policy ?? null,
     }),
+  /// D12: the harness lab.
+  harnessLabGet: (projectRoot: string) => invoke<LabSummary>("harness_lab_get", { projectRoot }),
+  harnessLabSetConfig: (projectRoot: string, config: LabConfig) =>
+    invoke<LabConfig>("harness_lab_set_config", { projectRoot, config }),
+  harnessLabSetHeldout: (projectRoot: string, tasks: HeldOutTask[]) =>
+    invoke<HeldOut>("harness_lab_set_heldout", { projectRoot, tasks }),
+  harnessLabRun: (projectRoot: string) => invoke<Experiment>("harness_lab_run", { projectRoot }),
   /// D11: the product's sponsor policy.
   sponsorGet: (projectRoot: string) => invoke<Sponsor>("sponsor_get", { projectRoot }),
   sponsorSet: (projectRoot: string, sponsor: Sponsor) =>

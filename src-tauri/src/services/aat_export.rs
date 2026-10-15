@@ -637,7 +637,7 @@ Mapping from the Testigo ledger (the console's native chain):
 | turn_end | lifecycle | post_execution | success / failure / timeout |
 | agent_action (MCP) | tool_call | post_execution | success / denied |
 | agent_declined (MCP) | escalation | post_execution | escalated |
-| agent_identity, sponsor_set | lifecycle | concurrent | success |
+| agent_identity, sponsor_set, experiment_started, experiment_result | lifecycle | concurrent | success |
 | review_verdict (reviewer agent) | decision | post_execution | success / failure (request_changes) / denied (block) |
 | review_decision (human) | decision | post_execution | success (override) / denied (accept) |
 | budget_reached | escalation | concurrent | escalated |

@@ -91,6 +91,8 @@ function describeAction(a: Action): string {
       return a.text.length > 60 ? `${a.text.slice(0, 60)}…` : a.text;
     case "pipeline":
       return `pipeline · ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
+    case "harnessExperiment":
+      return "harness-lab experiment";
   }
 }
 
@@ -179,7 +181,7 @@ function draftFromJob(job: Job): Draft {
     d.skillArgs = job.action.args ?? "";
   } else if (job.action.type === "prompt") {
     d.promptText = job.action.text;
-  } else {
+  } else if (job.action.type === "pipeline") {
     d.steps = job.action.steps;
   }
   return d;
@@ -216,6 +218,8 @@ function buildAction(d: Draft): Action {
       return { type: "prompt", text: d.promptText.trim() };
     case "pipeline":
       return { type: "pipeline", steps: d.steps };
+    case "harnessExperiment":
+      return { type: "harnessExperiment" };
   }
 }
 
@@ -655,6 +659,7 @@ function JobEditor({
           <option value="prompt">run a prompt</option>
           <option value="skill">run a skill</option>
           <option value="pipeline">run a pipeline</option>
+          <option value="harnessExperiment">harness-lab experiment (D12)</option>
         </select>
       </label>
 

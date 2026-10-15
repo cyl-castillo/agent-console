@@ -1063,6 +1063,31 @@ impl TestigoService {
         )
     }
 
+    /// D12: the harness lab's lineage — `experiment_started` /
+    /// `experiment_result` — under the console's own actor: an experiment
+    /// is the console's act, proposed to the human, never merged by itself.
+    pub fn on_harness(
+        &self,
+        project_root: &str,
+        ts: i64,
+        kind: &str,
+        payload: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            "harness-lab".into(),
+            None,
+            kind,
+            None,
+            None,
+            "console",
+            payload,
+        )
+    }
+
     /// D11: the sponsor policy changed — the auditable statement of what the
     /// console may decide alone for this product.
     pub fn on_sponsor_set(
