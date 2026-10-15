@@ -7,8 +7,8 @@ import {
   ModelPill,
   UsagePill,
   VoicePill,
-  useBuildInfo,
 } from "../../components/StatusBar";
+import { useBuildInfo } from "../../hooks/useBuildInfo";
 import { useChangesStore } from "../../stores/changesStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useShellStore } from "../../stores/shellStore";
