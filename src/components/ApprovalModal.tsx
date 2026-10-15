@@ -125,7 +125,12 @@ export function ApprovalModal() {
     const wasLast = queue.length <= 1;
     void decide(id, decision, reason).then((delivered) => {
       if (delivered && req && decision !== "ask") {
-        useDecisionStatsStore.getState().record(tierFor(req).tier, decision);
+        useDecisionStatsStore.getState().record(
+          tierFor(req, {
+            allowedHosts: sessions.find((s) => s.id === req.termId)?.allowedHosts,
+          }).tier,
+          decision,
+        );
       }
       if (!delivered) {
         // Delivery failed; the request stays queued (the store toasted). Unlock

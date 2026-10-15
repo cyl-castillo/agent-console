@@ -5,6 +5,7 @@ pub mod diagnostics;
 pub mod feedback;
 pub mod git;
 pub mod hooks;
+pub mod identity;
 pub mod inject;
 pub mod jira;
 pub mod learning;

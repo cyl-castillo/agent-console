@@ -137,6 +137,23 @@ impl ConsoleMcp {
                 ));
             }
         }
+        // D14: the caller's identity, witnessed once per project under its own
+        // actor — an MCP agent never appears as the human.
+        {
+            let state = app.state::<AppState>();
+            let card = crate::services::identity_service::card_for_mcp_caller(
+                &req.caller,
+                now_ms(),
+                &crate::commands::identity::issuer(),
+            );
+            let _ = state.testigo.on_agent_identity(
+                &req.project,
+                now_ms(),
+                &card.agent_id,
+                None,
+                crate::services::identity_service::ledger_payload(&card, None),
+            );
+        }
         if req.name == "decline" {
             // Its own first-class ledger event (D13), not a generic action.
             return self.decline(app, req);

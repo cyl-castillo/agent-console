@@ -536,6 +536,24 @@ pub fn review_with_runner(
         "costUsd": run.cost_usd,
         "deterministic": !floor.is_empty(),
     });
+    // D14: the reviewer's own identity, once per project.
+    let engine_name = match engine {
+        Engine::Claude => "claude",
+        Engine::Codex => "codex",
+    };
+    let card = crate::services::identity_service::card_for_reviewer(
+        engine_name,
+        model.as_deref(),
+        ts,
+        &crate::commands::identity::issuer(),
+    );
+    let _ = testigo.on_agent_identity(
+        project_root,
+        ts,
+        &card.agent_id,
+        Some(term_id),
+        crate::services::identity_service::ledger_payload(&card, None),
+    );
     let ev = testigo.on_review(
         project_root,
         ts,

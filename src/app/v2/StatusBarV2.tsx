@@ -9,6 +9,7 @@ import {
   VoicePill,
 } from "../../components/StatusBar";
 import { useBuildInfo } from "../../hooks/useBuildInfo";
+import { IdentityRow } from "./IdentityRow";
 import { useChangesStore } from "../../stores/changesStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useShellStore } from "../../stores/shellStore";
@@ -120,6 +121,7 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
             />
           )}
           {active && <MemoryPill termId={active.id} />}
+          {active && <IdentityRow session={active} />}
           {active && (
             <div className="mt-1 flex items-center gap-2 text-caption" data-testid="budget-row">
               <BudgetRing

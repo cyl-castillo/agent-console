@@ -1,7 +1,8 @@
 import { create } from "zustand";
+import { mintAgentId } from "../lib/perimeter";
 import { ipc } from "../ipc/tauri";
 import { useToastStore } from "./toastStore";
-import type { PersistedSession, WorktreeRef } from "../types/domain";
+import type { PersistedSession, WorktreeRef, RunsIn } from "../types/domain";
 import { asAgentKind, type AgentKind } from "../agents/profiles";
 
 const MAX_SCROLLBACK = 50_000;
@@ -45,6 +46,12 @@ export interface TerminalSession {
   /// Isolated worktree this session runs in (cwd === worktree.path).
   /// Undefined = the session runs directly in the project checkout.
   worktree?: WorktreeRef;
+  /// D14: the agent's own id, minted with the session; never the human's.
+  agentId?: string;
+  /// D14: local | worktree | microvm | cloud (derived from the worktree).
+  runsIn?: RunsIn;
+  /// D14: network perimeter the approval gate enforces for this session.
+  allowedHosts?: string[];
   /// One-shot workspace install command (from .claude/worktree-setup.json),
   /// typed into the terminal before the agent launches on the FIRST spawn
   /// only. Never persisted — resumed sessions are already set up.
@@ -104,6 +111,8 @@ interface TerminalsState {
   setAgentSessionId: (id: string, agentSessionId: string) => void;
   /// Set (or clear, with undefined) the model for a session and persist it.
   setModel: (id: string, model: string | undefined) => void;
+  /// D14: declare (or clear) the session's network perimeter and persist it.
+  setAllowedHosts: (id: string, hosts: string[]) => void;
   /// Silently rename a session that still wears its default "shell N" name —
   /// derived from its first prompt. Never touches a user-chosen name, never
   /// fires twice (nameSuggested marker), never asks.
@@ -172,6 +181,9 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         initialScrollback: p.scrollback,
         liveScrollback: "",
         status: "stopped" as const,
+        agentId: p.agentId ?? mintAgentId(),
+        runsIn: p.runsIn ?? (p.worktree ? "worktree" : "local"),
+        allowedHosts: p.allowedHosts,
         agent: asAgentKind(p.agent),
         agentSessionId: p.agentSessionId,
         model: p.model,
@@ -208,9 +220,21 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       loginOnly,
       shellCmd,
       lastActiveMs: Date.now(),
+      agentId: mintAgentId(),
+      runsIn: worktree ? "worktree" : "local",
     };
     set({ sessions: [...sessions, session], activeId: id });
     return id;
+  },
+
+  setAllowedHosts: (id, hosts) => {
+    const { sessions } = get();
+    set({
+      sessions: sessions.map((s) =>
+        s.id === id ? { ...s, allowedHosts: hosts.length ? hosts : undefined } : s,
+      ),
+    });
+    void get().persist();
   },
 
   resume: (id) => {
@@ -387,6 +411,9 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         nameSuggested: s.nameSuggested,
         model: s.model,
         worktree: s.worktree,
+        agentId: s.agentId,
+        runsIn: s.runsIn,
+        allowedHosts: s.allowedHosts,
         archived: s.archived || undefined,
         // A live session is active right now — stamp it at save time so the
         // 7-day auto-archive clock starts from the last real use.
