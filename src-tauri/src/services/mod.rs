@@ -16,6 +16,7 @@ pub mod flywheel;
 pub mod fs_names;
 pub mod git_service;
 pub mod git_watcher;
+pub mod harness_lab;
 pub mod hooks_service;
 pub mod identity_service;
 pub mod inject_service;

@@ -175,6 +175,22 @@ ProofEvent {
   UI: barra Sponsor arriba del kanban de Jobs; chip "sponsor ≤ low" en el Inbox. Compuerta del
   estudio: "el humano solo decide lo que cruza el umbral" (spec en agent.spec). NO hecho: feedback de
   CI al agente responsable (no hay watcher de CI en la consola), gasto de corridas headless.
+- **Automejora del harness (D12, 2026-10-15)**: `harness_lab.rs`, forma autoresearch con las
+  compuertas del estudio. G1: la métrica (`heldout_pass_rate`) se declara antes y la calcula la
+  consola, no el agente. G2: las tareas held-out (prompt + check de shell) viven en el data dir de la
+  consola, nunca en el repo ni en el prompt; cada experimento corre una ventana rotativa de 3. G3:
+  presupuesto fijo (minutos de silencio + tokens máximos; el exceso revierte y queda registrado).
+  G4: cada experimento es un worktree aislado + rama `harness/<id>`; el agente edita solo la lista
+  editable (CLAUDE.md, AGENTS.md, .claude/skills|agents|hooks) y un diff posterior rechaza cualquier
+  otro toque (el evaluador queda fuera por construcción); la línea base se mide con el harness
+  intacto; si el score sube, se commitea con trailers `Harness-Experiment`/`Harness-Parent`, se
+  pushea y se ofrece el PR — la consola nunca mergea. Ledger: `experiment_started`/`experiment_result`
+  (actor `console`, case `harness-lab`). Nocturno: acción `harnessExperiment` del Scheduler. UI en
+  Learning → "harness lab" (editables, foco, presupuesto, tareas ocultas, experimentos con linaje y
+  PR, contador "sin tocar el evaluador"). Compuerta del estudio ("30 noches sin editar el
+  evaluador"): el contador `clean_runs` lo mide. NO hecho: linaje visual en Proof, métricas
+  secundarias desde el ledger (tasa de denegación, bloqueos del revisor), revisor sobre el PR del
+  experimento (D10 encaja natural).
 
 ### Qué NO hace (guardrails de scope)
 - No orquesta trabajo (no es workflow engine), no bloquea ejecución (captura, no gatekeeping —

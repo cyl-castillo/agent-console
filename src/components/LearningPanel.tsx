@@ -4,6 +4,7 @@ import { isAuthError, startLoginSession } from "../lib/loginSession";
 import { useInjectStore } from "../stores/injectStore";
 import { useLearningStore, type CurationItem, type LearningItem } from "../stores/learningStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { HarnessLabSection } from "./HarnessLabSection";
 
 export function LearningPanel() {
   const status = useLearningStore((s) => s.status);
@@ -62,6 +63,7 @@ export function LearningPanel() {
 
       <div className="workbench-body">
         <FlywheelCard />
+        <HarnessLabSection />
         {status === "idle" && (
           <section className="wb-section">
             <p className="wb-hint">

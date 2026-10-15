@@ -4,6 +4,7 @@ pub mod context;
 pub mod diagnostics;
 pub mod feedback;
 pub mod git;
+pub mod harness_lab;
 pub mod hooks;
 pub mod identity;
 pub mod inject;

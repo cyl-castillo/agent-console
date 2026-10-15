@@ -88,6 +88,8 @@ pub enum Action {
     Prompt { text: String },
     /// Run a sequence of conditional steps (see `PipelineStep`).
     Pipeline { steps: Vec<PipelineStep> },
+    /// D12: one harness-lab experiment (nightly is the point).
+    HarnessExperiment {},
 }
 
 /// One step of a pipeline: an action plus an optional condition gating it on the
@@ -489,7 +491,46 @@ impl SchedulerService {
             "scheduler://run_started",
             serde_json::json!({ "jobId": job.id, "jobName": job.name, "startedMs": started }),
         );
-        let outcome = run_action(Path::new(project_root), &job.action);
+        let outcome = if matches!(job.action, Action::HarnessExperiment {}) {
+            // Needs the ledger for lineage: handled here, not in the free fn.
+            let state = app.state::<AppState>();
+            match crate::services::harness_lab::run_experiment(
+                &state.testigo,
+                project_root,
+                started as i64,
+            ) {
+                Ok(exp) => ActionOutcome {
+                    status: if exp.status == "failed" {
+                        "error".into()
+                    } else {
+                        "ok".into()
+                    },
+                    output: format!(
+                        "experiment {}: {}{}{}",
+                        exp.id,
+                        exp.status,
+                        exp.stop_reason
+                            .as_ref()
+                            .map(|r| format!(" — {r}"))
+                            .unwrap_or_default(),
+                        exp.pr_url
+                            .as_ref()
+                            .map(|u| format!(" — {u}"))
+                            .unwrap_or_default()
+                    ),
+                    tokens: exp.tokens,
+                    cost_usd: exp.cost_usd,
+                    session_id: None,
+                },
+                Err(e) => ActionOutcome {
+                    status: "error".into(),
+                    output: e.to_string(),
+                    ..Default::default()
+                },
+            }
+        } else {
+            run_action(Path::new(project_root), &job.action)
+        };
         let finished = now_ms();
         let rec = RunRecord {
             job_id: job.id.clone(),
@@ -729,6 +770,11 @@ fn run_action(project_root: &Path, action: &Action) -> ActionOutcome {
         }
         Action::Prompt { text } => run_claude(project_root, text),
         Action::Pipeline { steps } => run_pipeline(project_root, steps),
+        Action::HarnessExperiment {} => ActionOutcome {
+            status: "error".into(),
+            output: "a harness experiment cannot run inside a pipeline step".into(),
+            ..Default::default()
+        },
     }
 }
 

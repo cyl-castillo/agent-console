@@ -670,7 +670,63 @@ export interface PipelineStep {
 export type Action =
   | { type: "skill"; name: string; args?: string }
   | { type: "prompt"; text: string }
-  | { type: "pipeline"; steps: PipelineStep[] };
+  | { type: "pipeline"; steps: PipelineStep[] }
+  /// D12: one harness-lab experiment (nightly is the point).
+  | { type: "harnessExperiment" };
+
+/// D12: a hidden task of the harness lab (mirrors the Rust HeldOutTask).
+export interface HeldOutTask {
+  id: string;
+  prompt: string;
+  check: string;
+}
+export interface HeldOut {
+  version: number;
+  tasks: HeldOutTask[];
+}
+export interface LabBudget {
+  idleMinutes: number;
+  maxTokens: number;
+}
+export interface LabConfig {
+  metric: string;
+  editable: string[];
+  budget: LabBudget;
+  focus: string;
+}
+export interface LabScore {
+  passed: number;
+  total: number;
+  tasks: { id: string; passed: boolean; excerpt: string }[];
+}
+export interface Experiment {
+  id: string;
+  parentId?: string | null;
+  createdMs: number;
+  finishedMs?: number | null;
+  metric: string;
+  hypothesis: string;
+  branch: string;
+  status: "planned" | "running" | "kept" | "reverted" | "rejected" | "failed";
+  stopReason?: string | null;
+  heldoutVersion: number;
+  selectedTasks: string[];
+  baseline?: LabScore | null;
+  score?: LabScore | null;
+  filesChanged: string[];
+  outsideFiles: string[];
+  tokens: number;
+  costUsd: number;
+  prUrl?: string | null;
+  commit?: string | null;
+}
+export interface LabSummary {
+  config: LabConfig;
+  heldout: HeldOut;
+  experiments: Experiment[];
+  clean_runs: number;
+  kept: number;
+}
 
 /// What to do with a firing missed because the app was closed.
 export type OnMissed = "catchup" | "skip";
