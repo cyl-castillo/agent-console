@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Square, TerminalSquare } from "lucide-react";
+import { Clock, MessageSquare, Square, TerminalSquare, X } from "lucide-react";
 import { typeIntoActiveSession } from "../../../lib/termInput";
 import type { TermInputDetail } from "../../../components/Terminal";
 import { useChangesStore } from "../../../stores/changesStore";
@@ -9,6 +9,7 @@ import { useShellStore } from "../../../stores/shellStore";
 import { useToastStore } from "../../../stores/toastStore";
 import { useUIStore } from "../../../stores/uiStore";
 import { useWorkbenchStore } from "../../../stores/workbenchStore";
+import { queueFor, usePromptQueueStore } from "../../../stores/promptQueueStore";
 import { Button } from "../../../ui/Button";
 import { EmptyState } from "../../../ui/EmptyState";
 import { Kbd } from "../../../ui/Kbd";
@@ -115,17 +116,57 @@ export function ConversationView() {
     if (left.length !== pending.length) setPending(left);
   }, [turns, pending]);
 
+  const deliver = async (text: string): Promise<boolean> => {
+    const ok = await typeIntoActiveSession(text, { submit: true });
+    if (ok) setPending((p) => [...p, { text, ts: Date.now() }]);
+    return ok;
+  };
   const send = async () => {
     const text = draft.trim();
     if (!text) return;
-    const ok = await typeIntoActiveSession(text, { submit: true });
+    const ok = await deliver(text);
     if (ok) {
       setDraft("");
-      setPending((p) => [...p, { text, ts: Date.now() }]);
       showToast(`Sent to ${session?.name ?? "the session"}`, "success");
       draftRef.current?.focus();
     } else showToast("No live session to send to — copied to the clipboard instead", "info");
   };
+
+  // Ctrl+Enter: queue for later. The prompt waits here, visible and
+  // removable, and goes out on its own when the session has no live turn —
+  // one at a time, so each lands as its own turn.
+  const queued = usePromptQueueStore((s) => queueFor(s.bySession, session?.id));
+  const enqueue = usePromptQueueStore((s) => s.enqueue);
+  const removeQueued = usePromptQueueStore((s) => s.remove);
+  const queueLater = () => {
+    const text = draft.trim();
+    if (!text || !session) return;
+    enqueue(session.id, text);
+    setDraft("");
+    showToast(
+      liveTurn ? "Queued — goes out when this turn ends" : "Queued — going out now",
+      "info",
+    );
+    draftRef.current?.focus();
+  };
+  const sending = useRef(false);
+  useEffect(() => {
+    if (!session || liveTurn || queued.length === 0 || sending.current) return;
+    if (pending.length > 0) return; // the last send has not been witnessed yet
+    sending.current = true;
+    const next = usePromptQueueStore.getState().shift(session.id);
+    if (!next) {
+      sending.current = false;
+      return;
+    }
+    void deliver(next.text).then((ok) => {
+      sending.current = false;
+      if (ok) showToast(`Queued prompt sent to ${session.name}`, "success");
+      else usePromptQueueStore.getState().enqueue(session.id, next.text);
+    });
+    // deliver/showToast are stable enough for this effect's purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id, liveTurn, queued.length, pending.length]);
   const interrupt = () => {
     if (!session) return;
     const detail: TermInputDetail = { sessionId: session.id, data: "\x1b" };
@@ -228,14 +269,41 @@ export function ConversationView() {
           onChange={(e) => setDraft(e.target.value)}
           rows={2}
           onKeyDown={(e) => {
-            // Enter sends, like the terminal it stands in for; Shift+Enter
-            // (or Alt+Enter) adds a line. Ctrl/Cmd+Enter keeps sending too.
-            if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing) {
+            if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+            // Enter sends, like the terminal it stands in for. Ctrl/Cmd+Enter
+            // queues for later (sent when the turn ends). Shift/Alt+Enter
+            // adds a line.
+            if (e.ctrlKey || e.metaKey) {
+              e.preventDefault();
+              queueLater();
+            } else if (!e.shiftKey && !e.altKey) {
               e.preventDefault();
               void send();
             }
           }}
         />
+        {queued.length > 0 && (
+          <ul className="m-0 flex list-none flex-col gap-1 p-0" data-testid="prompt-queue">
+            {queued.map((q, i) => (
+              <li
+                key={q.id}
+                className="flex items-start gap-2 rounded-2 border border-dashed border-border px-2 py-1 font-sans text-small text-muted-foreground"
+              >
+                <Clock size={14} className="mt-0.5 shrink-0" aria-hidden />
+                <span className="min-w-0 flex-1 whitespace-pre-wrap text-foreground">{q.text}</span>
+                <span className="shrink-0 text-caption text-faint-foreground">
+                  {i === 0 ? (liveTurn ? "next, when this turn ends" : "sending…") : `#${i + 1}`}
+                </span>
+                <IconButton
+                  size="sm"
+                  label="Remove from queue"
+                  icon={<X size={14} />}
+                  onClick={() => session && removeQueued(session.id, q.id)}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="flex items-center gap-2">
           <Tooltip
             content={drawerOpen ? "Hide the terminal (Ctrl+`)" : "Show the terminal (Ctrl+`)"}
@@ -255,12 +323,28 @@ export function ConversationView() {
           )}
           <span className="flex-1" />
           <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={!draft.trim() || !session}
+            trailing={
+              <>
+                <Kbd>Ctrl</Kbd>
+                <Kbd>⏎</Kbd>
+              </>
+            }
+            title="Queue for later: sent on its own when the current turn ends"
+            onClick={queueLater}
+          >
+            Queue
+          </Button>
+          <Button
             type="submit"
             variant="primary"
             size="sm"
             disabled={!draft.trim()}
             trailing={<Kbd>⏎</Kbd>}
-            title="Enter sends · Shift+Enter adds a line"
+            title="Enter sends · Ctrl+Enter queues for later · Shift+Enter adds a line"
           >
             Send
           </Button>

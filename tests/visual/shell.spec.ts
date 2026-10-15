@@ -236,6 +236,79 @@ test("the conversation follows the ledger live: an appended line shows without a
   await expect(page.getByTestId("conversation")).not.toContainText("Working…");
 });
 
+test("Ctrl+Enter queues for later; the prompt goes out on its own when the turn ends", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  await page.evaluate(() => {
+    const w = window as unknown as { __termInputs: { data: string }[] };
+    w.__termInputs = [];
+    window.addEventListener("ac:term-input", (e) =>
+      w.__termInputs.push((e as CustomEvent<{ data: string }>).detail),
+    );
+  });
+  const prompt = page.getByLabel("Prompt for the agent");
+  await expect(page.getByTestId("conversation")).toContainText("Working…");
+  await prompt.fill("Then add the changelog entry");
+  await page.keyboard.press("Control+Enter");
+  // Queued, visible, not sent: the turn is still live.
+  await expect(page.getByTestId("prompt-queue")).toContainText("Then add the changelog entry");
+  await expect(page.getByTestId("prompt-queue")).toContainText("next, when this turn ends");
+  await expect(prompt).toHaveValue("");
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __termInputs: unknown[] }).__termInputs.length,
+    ),
+  ).toBe(0);
+
+  // The turn ends (the ledger appends its close and announces it).
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __fixtures: {
+        setFixture: (c: string, v: unknown) => void;
+        emit: (n: string, p: unknown) => Promise<void>;
+        getFixture: (c: string) => unknown;
+      };
+    };
+    const base = w.__fixtures.getFixture("testigo_list") as {
+      turnId?: string;
+      termId?: string;
+      kind: string;
+    }[];
+    const live = [...base].reverse().find((e) => e.kind === "prompt" && e.termId === "sess-auth");
+    w.__fixtures.setFixture("testigo_list", [
+      ...base,
+      {
+        seq: 901,
+        ts: Date.now(),
+        caseId: "case-2026-10-13",
+        turnId: live?.turnId,
+        kind: "turn_end",
+        termId: "sess-auth",
+        actor: "agent",
+        payload: { summary: "Done.", filesChanged: [] },
+        prevHash: "",
+        hash: "",
+      },
+    ]);
+    await w.__fixtures.emit("ledger://appended", {
+      projectRoot: "/home/demo/code/demo-playground",
+      seq: 901,
+      kind: "turn_end",
+      termId: "sess-auth",
+    });
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as { __termInputs: { data: string }[] }).__termInputs.map((d) => d.data),
+      ),
+    )
+    .toEqual(["Then add the changelog entry", "\r"]);
+  await expect(page.getByTestId("prompt-queue")).toHaveCount(0);
+  await expect(page.getByTestId("pending-prompt")).toContainText("Then add the changelog entry");
+});
+
 test("v2 proof: the ledger map selects a turn into the inspector", async ({ page }) => {
   await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
   await page.goto("/iframe.html?id=app-v2--proof-ledger&viewMode=story");
