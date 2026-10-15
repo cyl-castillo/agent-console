@@ -134,6 +134,9 @@ interface ProofState {
   settings: TestigoSettings | null;
 
   load: (projectRoot: string) => Promise<void>;
+  /// Re-read the events only (no chain verification, no settings): what the
+  /// live listener calls on every appended line. Cheap enough to run often.
+  refresh: (projectRoot: string) => Promise<void>;
   /// Show the ledger the session running in `cwd` writes to (its worktree or
   /// linked folder may file evidence apart from the project root). Same rule
   /// as the hook events, resolved by the backend.
@@ -379,6 +382,18 @@ export const useProofStore = create<ProofState>((set, get) => ({
       review: null,
     }),
 
+  refresh: async (projectRoot) => {
+    if (projectRoot !== get().projectRoot) return get().load(projectRoot);
+    try {
+      const events = await ipc.testigoList(projectRoot);
+      if (get().projectRoot !== projectRoot) return;
+      set({ events });
+    } catch (e) {
+      if (get().projectRoot !== projectRoot) return;
+      set({ error: String(e) });
+    }
+  },
+
   selectCase: (caseId) => set({ selectedCase: caseId }),
 
   startExport: async (caseId) => {
@@ -509,11 +524,14 @@ export const useProofStore = create<ProofState>((set, get) => ({
   },
 }));
 
-/// Keep the ledger view live: every hook-borne event that lands in the
-/// ledger re-reads it (debounced — a turn can emit a dozen tool results in
-/// a second). Until now Proof loaded on project open and on a manual ↻; the
-/// Turns view is watched while the agent works, so it has to move by itself.
-export const PROOF_RELOAD_DEBOUNCE_MS = 400;
+/// Keep the ledger view live. The source of truth is `ledger://appended`,
+/// which the Rust side emits AFTER each line is on disk — the hook events
+/// (`hook://turn_end` and friends) fire before the slow parts (snapshot,
+/// diff) and used to trigger a re-read of a ledger that did not yet hold the
+/// line, so the conversation lagged until the next prompt. Those events stay
+/// as a fallback; every trigger is debounced, and re-reads the events only
+/// (the chain is verified on the full `load`, not on every line).
+export const PROOF_RELOAD_DEBOUNCE_MS = 150;
 
 export async function attachProofListeners(): Promise<UnlistenFn> {
   let timer: number | null = null;
@@ -522,10 +540,11 @@ export async function attachProofListeners(): Promise<UnlistenFn> {
     timer = window.setTimeout(() => {
       timer = null;
       const root = useProofStore.getState().projectRoot;
-      if (root) void useProofStore.getState().load(root);
+      if (root) void useProofStore.getState().refresh(root);
     }, PROOF_RELOAD_DEBOUNCE_MS);
   };
   const kinds = [
+    "ledger://appended",
     "hook://user_prompt",
     "hook://tool_result",
     "hook://tool_failed",

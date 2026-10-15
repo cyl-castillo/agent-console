@@ -38,6 +38,8 @@ pub fn run() {
             // Start the events.jsonl watcher as soon as the app is up so
             // hook events arriving from any terminal session are observed.
             let state = app.state::<AppState>();
+            // The ledger announces every appended line to the views.
+            state.testigo.attach_app(app.handle().clone());
             state.hooks.start_watcher(app.handle().clone());
             // Start the scheduler tick loop: reconciles firings missed while the
             // app was closed, then runs due jobs on a calm poll. Suggest-only —

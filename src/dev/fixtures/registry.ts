@@ -19,6 +19,11 @@ export function applyFixtures(overrides: FixtureMap = {}): void {
   invokeLog.length = 0;
 }
 
+/// The current fixture for a command (specs read, extend and set it back).
+export function getFixture(cmd: string): Fixture {
+  return active[cmd];
+}
+
 /// Change one fixture at runtime (specs drive the backend side mid-story).
 export function setFixture(cmd: string, value: Fixture): void {
   active[cmd] = value;

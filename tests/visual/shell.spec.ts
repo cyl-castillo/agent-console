@@ -187,6 +187,55 @@ test("v2 sessions: the conversation is the stage, the terminal a drawer", async 
   await expect(page.getByRole("tab", { name: /Changes/ })).toHaveAttribute("aria-selected", "true");
 });
 
+test("the conversation follows the ledger live: an appended line shows without a new prompt", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  // The live turn is still "working" in the story's ledger.
+  await expect(page.getByTestId("conversation")).toContainText("Working…");
+  // The Rust side appends the turn's close and announces it AFTER the write.
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __fixtures: {
+        setFixture: (c: string, v: unknown) => void;
+        emit: (n: string, p: unknown) => Promise<void>;
+        getFixture: (c: string) => unknown;
+      };
+    };
+    const base = w.__fixtures.getFixture("testigo_list") as {
+      seq: number;
+      turnId?: string;
+      termId?: string;
+      kind: string;
+    }[];
+    const live = [...base].reverse().find((e) => e.kind === "prompt" && e.termId === "sess-auth");
+    const close = {
+      seq: 900,
+      ts: Date.now(),
+      caseId: "case-2026-10-13",
+      turnId: live?.turnId,
+      kind: "turn_end",
+      termId: "sess-auth",
+      actor: "agent",
+      payload: { summary: "Backoff is now configurable through RetryOptions.", filesChanged: [] },
+      prevHash: "",
+      hash: "",
+    };
+    w.__fixtures.setFixture("testigo_list", [...base, close]);
+    await w.__fixtures.emit("ledger://appended", {
+      projectRoot: "/home/demo/code/demo-playground",
+      seq: 900,
+      kind: "turn_end",
+      termId: "sess-auth",
+    });
+  });
+  await expect(page.getByTestId("conversation")).toContainText(
+    "Backoff is now configurable through RetryOptions.",
+    { timeout: 3000 },
+  );
+  await expect(page.getByTestId("conversation")).not.toContainText("Working…");
+});
+
 test("v2 proof: the ledger map selects a turn into the inspector", async ({ page }) => {
   await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
   await page.goto("/iframe.html?id=app-v2--proof-ledger&viewMode=story");
