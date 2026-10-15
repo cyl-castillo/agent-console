@@ -3,6 +3,8 @@ import { MessageSquare, Square, TerminalSquare } from "lucide-react";
 import { typeIntoActiveSession } from "../../../lib/termInput";
 import type { TermInputDetail } from "../../../components/Terminal";
 import { useChangesStore } from "../../../stores/changesStore";
+import { ipc } from "../../../ipc/tauri";
+import { useSessionStore } from "../../../stores/sessionStore";
 import { useShellStore } from "../../../stores/shellStore";
 import { useToastStore } from "../../../stores/toastStore";
 import { useUIStore } from "../../../stores/uiStore";
@@ -89,6 +91,17 @@ export function ConversationView() {
     // Re-attach once turns exist: the first anchoring needs real content.
   }, [hasTurns]);
 
+  // D10: a different identity reads what the turn changed and argues
+  // against it; the verdict lands in the ledger and the Inbox.
+  const review = (termId: string, turnId: string) => {
+    const root = useSessionStore.getState().project?.root;
+    if (!root) return;
+    showToast("Review requested — the verdict will land in the Inbox", "info");
+    ipc
+      .reviewTurn(root, termId, turnId)
+      .catch((e) => showToast(`Review failed: ${String(e)}`, "error"));
+  };
+
   const send = async () => {
     const text = draft.trim();
     if (!text) return;
@@ -153,6 +166,7 @@ export function ConversationView() {
                 onCopy={() => copy(t.summary)}
                 onRerun={() => rerun(t.prompt)}
                 onLedger={() => setWorkbenchTab("proof")}
+                onReview={t.termId && t.turnId ? () => review(t.termId!, t.turnId!) : undefined}
               />
             ))}
           </div>

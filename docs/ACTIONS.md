@@ -99,6 +99,7 @@ the call names one — never as the human.
 | `memory_search` | semantic search over memories and skills |
 | `ledger_verify` | verify the ledger's hash chain |
 | `decline` | decline (won't / shouldn't) or escalate (can't without a human) a task, with the reason and a suggestion; witnessed as `agent_declined`, shown in the Inbox as a decision, never retried by the console |
+| `request_review` | ask the reviewer agent (a different identity: the other engine when installed, else the other model family) to adversarially review a session's finished turn; the verdict (`approve` / `request_changes` / `block`, with findings) is witnessed as `review_verdict` under `agent:reviewer:<engine>` and shown in the Inbox; a block stands until a human overrides it with a reason (`review_decision`) |
 
 The allowlist for `invoke_action` is enforced on both sides
 (`console_mcp::action_allowed` in Rust, `actionAllowed` in the webview host).

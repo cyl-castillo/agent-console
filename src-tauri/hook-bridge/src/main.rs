@@ -1151,6 +1151,15 @@ fn console_tools() -> Vec<Value> {
             }),
             &["kind", "reason"],
         ),
+        mcp_tool(
+            "request_review",
+            "Ask the console's reviewer agent — a different identity, a different engine or model when one is installed — to adversarially review a finished turn of a session (its last turn unless `turn` names one). Returns the verdict (approve | request_changes | block) and findings; a block stands until a human overrides it. Use it on your own work before declaring it done.",
+            json!({
+                "session": { "type": "string", "description": "The session whose turn to review" },
+                "turn": { "type": "string", "description": "A specific turn id from session_events; default: the last finished turn" }
+            }),
+            &["session"],
+        ),
     ]
 }
 
