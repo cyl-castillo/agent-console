@@ -19,6 +19,10 @@ interface ShellState {
   listOpen: boolean;
   /// Whether the terminal drawer under the conversation is open.
   drawerOpen: boolean;
+  /// Column widths in px (list pane, inspector), drag-resizable, persisted.
+  listWidth: number;
+  inspectorWidth: number;
+  setWidth: (col: "list" | "inspector", px: number | null) => void;
   /// Turn selected in the ledger minimap (Proof destination); not persisted.
   selectedTurnId: string | null;
   selectTurn: (id: string | null) => void;
@@ -27,7 +31,15 @@ interface ShellState {
   toggleDrawer: () => void;
 }
 
-function load(): Pick<ShellState, "destination" | "lastTab" | "listOpen" | "drawerOpen"> {
+export const COLUMN_DEFAULTS = { list: 240, inspector: 360 } as const;
+export const COLUMN_LIMITS = { list: [200, 420], inspector: [280, 560] } as const;
+
+type Persisted = Pick<
+  ShellState,
+  "destination" | "lastTab" | "listOpen" | "drawerOpen" | "listWidth" | "inspectorWidth"
+>;
+
+function load(): Persisted {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -37,15 +49,24 @@ function load(): Pick<ShellState, "destination" | "lastTab" | "listOpen" | "draw
         lastTab: p.lastTab ?? {},
         listOpen: p.listOpen ?? true,
         drawerOpen: p.drawerOpen ?? false,
+        listWidth: p.listWidth ?? COLUMN_DEFAULTS.list,
+        inspectorWidth: p.inspectorWidth ?? COLUMN_DEFAULTS.inspector,
       };
     }
   } catch {
     /* ignore */
   }
-  return { destination: "inbox", lastTab: {}, listOpen: true, drawerOpen: false };
+  return {
+    destination: "inbox",
+    lastTab: {},
+    listOpen: true,
+    drawerOpen: false,
+    listWidth: COLUMN_DEFAULTS.list,
+    inspectorWidth: COLUMN_DEFAULTS.inspector,
+  };
 }
 
-function save(s: Pick<ShellState, "destination" | "lastTab" | "listOpen" | "drawerOpen">) {
+function save(s: Persisted) {
   try {
     localStorage.setItem(KEY, JSON.stringify(s));
   } catch {
@@ -81,6 +102,12 @@ export const useShellStore = create<ShellState>((set, get) => ({
     set((s) => ({ drawerOpen: !s.drawerOpen }));
     save(get());
   },
+  setWidth: (col, px) => {
+    const [min, max] = COLUMN_LIMITS[col];
+    const w = px === null ? COLUMN_DEFAULTS[col] : Math.max(min, Math.min(max, Math.round(px)));
+    set(col === "list" ? { listWidth: w } : { inspectorWidth: w });
+    save(get());
+  },
 }));
 
 /// Keep destination ↔ tab coherent when the tab changes from outside (palette,
@@ -92,6 +119,6 @@ export function attachShellListeners(): () => void {
     const st = useShellStore.getState();
     const lastTab = { ...st.lastTab, [dest]: s.tab };
     useShellStore.setState({ destination: dest, lastTab });
-    save({ destination: dest, lastTab, listOpen: st.listOpen, drawerOpen: st.drawerOpen });
+    save({ ...st, destination: dest, lastTab });
   });
 }

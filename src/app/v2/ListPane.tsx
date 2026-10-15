@@ -5,6 +5,8 @@ import { Row } from "../../ui/Row";
 import { SectionHeader } from "../../ui/SectionHeader";
 import { destinationDef, TAB_LABELS } from "./destinations";
 import { SessionsList } from "./SessionsList";
+import { RoomsList } from "../../components/RoomsList";
+import { useRoundtableStore } from "../../stores/roundtableStore";
 
 /// The second column: what the destination offers. Sessions reuse the
 /// existing workspace sidebar (sessions, rooms, changes, files); the other
@@ -13,6 +15,12 @@ export function ListPane() {
   const destination = useShellStore((s) => s.destination);
   const tab = useWorkbenchStore((s) => s.tab);
   const setTab = useWorkbenchStore((s) => s.setTab);
+  const openRoom = useRoundtableStore((s) => s.openRoom);
+  // Opening a saved room re-hydrates the Room panel read-only and shows it.
+  const onOpenRoom = (id: string) => {
+    void openRoom(id);
+    setTab("roundtable");
+  };
   if (destination === "sessions") return <SessionsList />;
   const def = destinationDef(destination);
   return (
@@ -35,6 +43,12 @@ export function ListPane() {
           </section>
         );
       })}
+      {destination === "work" && isTabEnabled("roundtable") && (
+        <section className="mb-2 min-h-0" data-testid="saved-rooms">
+          <SectionHeader title="Saved rooms" />
+          <RoomsList onOpenRoom={onOpenRoom} />
+        </section>
+      )}
     </div>
   );
 }

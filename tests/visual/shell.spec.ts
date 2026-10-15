@@ -172,3 +172,90 @@ test("v2 sessions list: grouped by attention, WIP visible, files underneath", as
   await page.getByTestId("sessions-new").click();
   await expect(page.getByRole("listbox", { name: "Choose an agent and model" })).toBeVisible();
 });
+
+async function openV2(page: Page, story: string) {
+  await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
+  await page.goto(`/iframe.html?id=${story}&viewMode=story`);
+  await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
+}
+
+test("v2 parity: the terminal survives a trip to the Inbox", async ({ page }) => {
+  await openV2(page, "app-v2--sessions-drawer-open");
+  const drawer = page.getByTestId("terminal-drawer");
+  await expect(drawer).toBeVisible();
+  const xtermBefore = await page.locator(".xterm").count();
+  expect(xtermBefore).toBeGreaterThan(0);
+
+  await page.getByTestId("rail-inbox").click();
+  await expect(page.getByTestId("inbox")).toBeVisible();
+  // Hidden, not unmounted: the same xterm instances are still in the DOM.
+  await expect(page.getByTestId("zone-sessions")).toBeHidden();
+  await expect(drawer).toBeAttached();
+  expect(await page.locator(".xterm").count()).toBe(xtermBefore);
+
+  await page.getByTestId("rail-sessions").click();
+  await expect(drawer).toBeVisible();
+});
+
+test("v2 parity: below 900 px the side columns collapse, the list can be summoned", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  await expect(page.getByTestId("inspector")).toBeVisible();
+  await page.setViewportSize({ width: 860, height: 720 });
+  const shell = page.getByTestId("shell-v2");
+  await expect(shell).toHaveAttribute("data-narrow", "true");
+  await expect(page.getByTestId("inspector")).toBeHidden();
+  await expect(page.getByTestId("sessions-list")).toBeHidden();
+  await fire(page, "ac:toggle-sidebar");
+  await expect(page.getByTestId("sessions-list")).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(shell).not.toHaveAttribute("data-narrow", "true");
+  await expect(page.getByTestId("inspector")).toBeVisible();
+});
+
+test("v2 parity: saved rooms live under Work and open the Room panel", async ({ page }) => {
+  await openV2(page, "app-v2--work-jobs");
+  const rooms = page.getByTestId("saved-rooms");
+  await expect(rooms).toBeVisible();
+  await rooms.locator(".session-row").first().click();
+  await expect(page.getByTestId("center-panel")).toContainText("Room");
+});
+
+test("v2 parity: the inspector is drag-resizable and the width persists", async ({ page }) => {
+  await openV2(page, "app-v2--sessions");
+  const handle = page.getByTestId("resize-inspector");
+  await expect(handle).toBeVisible();
+  const box = (await handle.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 100, y, { steps: 5 });
+  await page.mouse.up();
+  const width = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("agent-console:shell-v2") ?? "{}").inspectorWidth,
+  );
+  expect(width).toBeGreaterThanOrEqual(450);
+  const cols = await page
+    .getByTestId("shell-v2")
+    .evaluate((el) => getComputedStyle(el).gridTemplateColumns);
+  expect(cols).toContain(`${width}px`);
+  // Double-click resets to the default.
+  await handle.dblclick();
+  const reset = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("agent-console:shell-v2") ?? "{}").inspectorWidth,
+  );
+  expect(reset).toBe(360);
+});
+
+test("v2 parity: onboarding is folded into the Inbox", async ({ page }) => {
+  await openV2(page, "app-v2--inbox-onboarding-hint");
+  const hint = page.getByTestId("onboarding-hint");
+  await expect(hint).toContainText(/getting-started step/);
+  await hint.getByRole("button", { name: "Open guide" }).click();
+  await expect(page.getByText(/getting started/i).first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await hint.getByRole("button", { name: "Don't show again" }).click();
+  await expect(hint).toBeHidden();
+});

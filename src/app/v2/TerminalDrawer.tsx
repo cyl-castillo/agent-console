@@ -11,10 +11,14 @@ export function TerminalDrawer({
   liveTerminals,
   activeTerminal,
   activeStopped,
+  shown = true,
 }: {
   liveTerminals: TerminalSession[];
   activeTerminal: TerminalSession | undefined;
   activeStopped: boolean;
+  /// False while the Sessions zone itself is hidden (another destination is
+  /// up): the PTYs stay mounted, xterm just stops fitting an invisible box.
+  shown?: boolean;
 }) {
   const open = useShellStore((s) => s.drawerOpen);
   const activeId = useTerminalsStore((s) => s.activeId);
@@ -43,7 +47,7 @@ export function TerminalDrawer({
       )}
       <div className="terminals-stack" style={{ display: activeStopped ? "none" : undefined }}>
         {liveTerminals.map((s) => (
-          <Terminal key={s.id} session={s} visible={open && s.id === activeId} />
+          <Terminal key={s.id} session={s} visible={shown && open && s.id === activeId} />
         ))}
       </div>
     </section>
