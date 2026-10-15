@@ -240,6 +240,15 @@ test("the sponsor policy decides low-risk requests alone; the human sees the res
       autoApprove: true,
     }),
   );
+  // Clear the story's queued approval first: leaving the Inbox with a
+  // decision pending pops the modal everywhere else (by design).
+  await page
+    .getByRole("article")
+    .filter({ hasText: "Read-only" })
+    .first()
+    .getByRole("button", { name: "Deny" })
+    .click();
+  await expect.poll(async () => (await state(page)).pendingDecisions).toBe(0);
   await page.evaluate(() => window.__agentConsole.invoke("nav.jobs"));
   await expect(page.getByTestId("sponsor-bar")).toContainText("auto-approves ≤ low");
   await page.getByTestId("rail-inbox").click();
