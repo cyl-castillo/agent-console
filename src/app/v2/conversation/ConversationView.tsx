@@ -32,6 +32,7 @@ export function ConversationView() {
   const [now, setNow] = useState(() => Date.now());
   const listRef = useRef<HTMLDivElement>(null);
   const liveTurn = turns.length > 0 && turns[turns.length - 1].endTs === null;
+  const hasTurns = turns.length > 0;
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
@@ -49,6 +50,30 @@ export function ConversationView() {
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     if (first || nearBottom) el.scrollTop = el.scrollHeight;
   }, [turns]);
+  // The Sessions zone stays mounted while hidden (display:none → 0 px tall),
+  // and the drawer changes the list's height: re-anchor to the end when the
+  // box becomes visible for the first time or resizes while at the bottom.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let anchoredVisible = el.clientHeight > 0;
+    let atBottom = true;
+    const onScroll = () => {
+      if (el.clientHeight > 0) atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
+    const ro = new ResizeObserver(() => {
+      if (el.clientHeight === 0) return;
+      if (!anchoredVisible || atBottom) el.scrollTop = el.scrollHeight;
+      anchoredVisible = true;
+    });
+    el.addEventListener("scroll", onScroll);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+    };
+    // Re-attach once turns exist: the first anchoring needs real content.
+  }, [hasTurns]);
 
   const send = async () => {
     const text = draft.trim();

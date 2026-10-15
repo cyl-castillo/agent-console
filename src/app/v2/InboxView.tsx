@@ -11,6 +11,9 @@ import { tierRates, useDecisionStatsStore } from "../../stores/decisionStatsStor
 import { Tooltip } from "../../ui/Tooltip";
 import { Button } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
+import { OnboardingHint } from "./OnboardingHint";
+import { useOnboardingSteps } from "../useOnboardingSteps";
+import { useOverlaysStore } from "../../stores/overlaysStore";
 import { EmptyState } from "../../ui/EmptyState";
 import { Row } from "../../ui/Row";
 import { SectionHeader } from "../../ui/SectionHeader";
@@ -50,6 +53,8 @@ export function InboxView() {
   const setWorkbenchTab = useWorkbenchStore((s) => s.setTab);
   const setCenterTab = useUIStore((s) => s.setTab);
   const visible = sessions;
+  const onboarding = useOnboardingSteps();
+  const showOverlay = useOverlaysStore((s) => s.show);
 
   const openSession = (id: string) => {
     setActive(id);
@@ -75,16 +80,25 @@ export function InboxView() {
         title="Nothing to decide"
         description="Start a session and the agent's questions, approvals and finished work will land here."
         action={
-          <Button variant="primary" onClick={newSession}>
-            New session
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="primary" onClick={newSession}>
+              New session
+            </Button>
+            {onboarding.pending > 0 && !onboarding.dismissed && (
+              <Button variant="ghost" onClick={() => showOverlay("gettingStarted")}>
+                Open the guide
+              </Button>
+            )}
+          </div>
         }
+        checklist={onboarding.pending > 0 && !onboarding.dismissed ? onboarding.steps : undefined}
       />
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-auto" data-testid="inbox">
+      <OnboardingHint />
       <div className="flex items-center gap-2 border-b border-border px-4 py-2 font-sans">
         <h1 className="m-0 text-title font-semibold text-foreground">Inbox</h1>
         <Chip tone={decisions > 0 ? "warn" : "neutral"} mono>

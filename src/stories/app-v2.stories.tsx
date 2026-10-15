@@ -7,6 +7,7 @@ import { approvalEdit, approvalHigh, pendingApproval, ROOT } from "../dev/fixtur
 import { useBudgetStore } from "../stores/budgetStore";
 import { useLiveStatusStore } from "../stores/liveStatusStore";
 import { useDeclinesStore } from "../stores/declinesStore";
+import { useOnboardingStore } from "../stores/onboardingStore";
 import type { FixtureMap } from "../dev/fixtures/registry";
 import { useApprovalStore } from "../stores/approvalStore";
 import { useFlagsStore } from "../stores/flagsStore";
@@ -100,6 +101,24 @@ export const InboxEmpty = scenario({
     jobs_board: { project: ROOT, settings: { parallelJobs: 1 }, cards: [], pending: [], busy: 0 },
   },
   liveTerminal: false,
+});
+/// First run after the wizard: the empty Inbox teaches with the checklist,
+/// and a non-empty one keeps a single dismissable line (onboarding folded
+/// into the shell, no banner above the top bar).
+export const InboxOnboarding = scenario({
+  fixtures: {
+    sessions_list: [],
+    jobs_board: { project: ROOT, settings: { parallelJobs: 1 }, cards: [], pending: [], busy: 0 },
+  },
+  liveTerminal: false,
+  after: () => useOnboardingStore.setState({ bannerDismissed: false }),
+});
+export const InboxOnboardingHint = scenario({
+  fixtures: { approvals_pending: [pendingApproval] },
+  after: () => {
+    useApprovalStore.setState({ queue: [pendingApproval] });
+    useOnboardingStore.setState({ bannerDismissed: false });
+  },
 });
 export const Sessions = scenario({ destination: "sessions" });
 export const SessionsDrawerOpen = scenario({

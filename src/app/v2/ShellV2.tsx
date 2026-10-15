@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Project } from "../../types/domain";
 import { useJobsStore } from "../../stores/jobsStore";
 import { attachShellListeners, useShellStore } from "../../stores/shellStore";
@@ -15,6 +15,8 @@ import { Rail } from "./Rail";
 import { StatusBarV2 } from "./StatusBarV2";
 import { useInbox } from "./useInbox";
 import { useBudgetWatch } from "./useBudgetWatch";
+import { useColumnResize, type Column } from "./useColumnResize";
+import { NARROW_QUERY, useMediaQuery } from "../../hooks/useMediaQuery";
 
 interface Props extends ProjectBootstrap {
   project: Project;
@@ -37,6 +39,15 @@ export function ShellV2({
   const { decisions } = useInbox();
   const sessions = useTerminalsStore((s) => s.sessions);
   const toggleList = useShellStore((s) => s.toggleList);
+  const listWidth = useShellStore((s) => s.listWidth);
+  const inspectorWidth = useShellStore((s) => s.inspectorWidth);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const resize = useColumnResize(shellRef);
+  // Below 900 px the side columns collapse on their own; the list can still
+  // be summoned (Workspace button, Ctrl+B) and then takes the inspector's
+  // place rather than squeezing the centre.
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const [narrowListOpen, setNarrowListOpen] = useState(false);
   const loadJobs = useJobsStore((s) => s.load);
   const initJobListeners = useJobsStore((s) => s.initListeners);
 
@@ -53,9 +64,11 @@ export function ShellV2({
   useEffect(
     () =>
       useUIStore.subscribe((s, prev) => {
-        if (s.leftOpen !== prev.leftOpen) toggleList();
+        if (s.leftOpen === prev.leftOpen) return;
+        if (narrow) setNarrowListOpen((v) => !v);
+        else toggleList();
       }),
-    [toggleList],
+    [toggleList, narrow],
   );
   // The inbox counts jobs that need a human; fetch the board once per project.
   useEffect(() => {
@@ -67,23 +80,48 @@ export function ShellV2({
     inbox: decisions,
     sessions: sessions.filter((s) => s.status === "live").length,
   };
-  const hasList = destination !== "inbox" && listOpen;
+  const hasList = destination !== "inbox" && (narrow ? narrowListOpen : listOpen);
   const selectedTurn = useShellStore((s) => s.selectedTurnId);
-  const hasInspector = rightOpen && inspectorFor(destination, centerTab, selectedTurn) !== null;
+  const hasInspector =
+    rightOpen && !narrow && inspectorFor(destination, centerTab, selectedTurn) !== null;
+  const handle = (col: Column, className: string) => (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={col === "list" ? "Resize list pane" : "Resize inspector"}
+      data-testid={`resize-${col}`}
+      className={cn(
+        "absolute bottom-6 top-8 z-5 w-2 cursor-col-resize",
+        "after:absolute after:bottom-0 after:left-[3px] after:top-0 after:w-0.5 after:bg-transparent after:content-['']",
+        "hover:after:bg-primary",
+        resize.dragging === col && "after:bg-primary",
+        className,
+      )}
+      onPointerDown={resize.start(col)}
+      onPointerMove={resize.move}
+      onPointerUp={resize.end}
+      onDoubleClick={resize.reset(col)}
+      title="Drag to resize · double-click to reset"
+    />
+  );
 
   return (
     <TooltipProvider>
       <div
+        ref={shellRef}
         className={cn(
-          "grid h-full w-full bg-background text-foreground",
+          "relative grid h-full w-full bg-background text-foreground",
           "grid-rows-[32px_minmax(0,1fr)_24px]",
           "[grid-template-areas:'top_top_top_top'_'rail_list_center_inspector'_'status_status_status_status']",
         )}
         style={{
-          gridTemplateColumns: `56px ${hasList ? "240px" : "0px"} minmax(0,1fr) ${hasInspector ? "360px" : "0px"}`,
+          ["--list-w-fallback" as string]: `${listWidth}px`,
+          ["--inspector-w-fallback" as string]: `${inspectorWidth}px`,
+          gridTemplateColumns: `56px ${hasList ? `var(--list-w, ${listWidth}px)` : "0px"} minmax(0,1fr) ${hasInspector ? `var(--inspector-w, ${inspectorWidth}px)` : "0px"}`,
         }}
         data-testid="shell-v2"
         data-destination={destination}
+        data-narrow={narrow || undefined}
       >
         <div className="[grid-area:top] min-w-0">
           <TopBar project={project} />
@@ -115,6 +153,9 @@ export function ShellV2({
         <div className="[grid-area:status] min-w-0">
           <StatusBarV2 workspace={workspace} />
         </div>
+        {hasList && handle("list", "left-[calc(56px+var(--list-w,var(--list-w-fallback))-4px)]")}
+        {hasInspector &&
+          handle("inspector", "right-[calc(var(--inspector-w,var(--inspector-w-fallback))-4px)]")}
       </div>
     </TooltipProvider>
   );

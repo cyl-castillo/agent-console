@@ -13,12 +13,19 @@ interface Props {
   liveTerminals: TerminalSession[];
   activeTerminal: TerminalSession | undefined;
   activeStopped: boolean;
+  /// False while another destination is up (the zone stays mounted, hidden).
+  shown?: boolean;
 }
 
 /// Sessions in the v2 shell: Conversation / Changes / Preview as real tabs,
 /// the terminal as a drawer under all three. The "terminal" tab id is kept
 /// (palette, shortcuts, voice all use it) and means the conversation here.
-export function SessionsCenter({ liveTerminals, activeTerminal, activeStopped }: Props) {
+export function SessionsCenter({
+  liveTerminals,
+  activeTerminal,
+  activeStopped,
+  shown = true,
+}: Props) {
   const tab = useUIStore((s) => s.tab);
   const setTab = useUIStore((s) => s.setTab);
   const changes = useChangesStore((s) => s.status?.changes.length ?? 0);
@@ -53,6 +60,7 @@ export function SessionsCenter({ liveTerminals, activeTerminal, activeStopped }:
         liveTerminals={liveTerminals}
         activeTerminal={activeTerminal}
         activeStopped={activeStopped}
+        shown={shown}
       />
     </div>
   );
