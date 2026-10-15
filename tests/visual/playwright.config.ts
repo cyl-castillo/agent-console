@@ -1,11 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const port = 6006;
+// VISUAL_BROWSER=webkit runs the same sweep on Playwright's Linux WebKit —
+// the closest engine to the app's WebKitGTK webview (UI review 2026-10-15).
+// Pixel baselines stay Chromium-only; WebKit runs the behavioural specs and
+// the layout gate, and writes its own screenshots under out/.
+const webkit = process.env.VISUAL_BROWSER === "webkit";
 
 export default defineConfig({
   testDir: ".",
   globalSetup: "./global-setup.ts",
-  outputDir: "out/results",
+  outputDir: webkit ? "out/results-webkit" : "out/results",
   fullyParallel: true,
   workers: process.env.CI ? 2 : 4,
   retries: 0,
@@ -17,10 +22,10 @@ export default defineConfig({
   ],
   use: {
     baseURL: `http://127.0.0.1:${port}`,
-    ...devices["Desktop Chrome"],
+    ...(webkit ? devices["Desktop Safari"] : devices["Desktop Chrome"]),
     // Argos' recommended flags: no subpixel AA or hinting differences between
     // machines, so screenshots compare across runners.
-    launchOptions: { args: ["--disable-lcd-text", "--font-render-hinting=none"] },
+    launchOptions: webkit ? {} : { args: ["--disable-lcd-text", "--font-render-hinting=none"] },
     viewport: { width: 1280, height: 800 },
     deviceScaleFactor: 1,
     colorScheme: "dark",
