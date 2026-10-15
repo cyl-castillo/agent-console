@@ -78,6 +78,9 @@ export interface TimelineTurn {
   model?: string;
   /// Case the turn belongs to (from its prompt event) — the Ledger view's key.
   caseId?: string;
+  /// D5: the turn was interrupted at its budget cap (`budget_reached`), and
+  /// what the human answered (`budget_decision`), when any.
+  budget?: { spentUsd: number; capUsd: number; decision?: string; newCapUsd?: number };
 }
 
 export interface TimelineTool {
@@ -269,6 +272,18 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         files: Array.isArray(p.files) ? p.files.length : 0,
         amend: p.amend === true,
       });
+    } else if (e.kind === "budget_reached") {
+      t.budget = {
+        spentUsd: typeof p.spentUsd === "number" ? p.spentUsd : 0,
+        capUsd: typeof p.capUsd === "number" ? p.capUsd : 0,
+      };
+    } else if (e.kind === "budget_decision") {
+      t.budget = {
+        spentUsd: typeof p.spentUsd === "number" ? p.spentUsd : (t.budget?.spentUsd ?? 0),
+        capUsd: typeof p.capUsd === "number" ? p.capUsd : (t.budget?.capUsd ?? 0),
+        decision: typeof p.decision === "string" ? p.decision : undefined,
+        newCapUsd: typeof p.newCapUsd === "number" ? p.newCapUsd : undefined,
+      };
     } else if (e.kind === "turn_end") {
       t.endTs = e.ts;
       if (Array.isArray(p.filesChanged)) {

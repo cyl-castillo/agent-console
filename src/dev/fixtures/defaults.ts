@@ -898,6 +898,16 @@ export const defaultFixtures: FixtureMap = {
     subjectDigest: "sha256:7e3a1c…",
     chainOk: true,
   },
+  testigo_budget_event: {
+    seq: 999,
+    ts: NOW,
+    caseId: "case-2026-10-13",
+    kind: "budget_reached",
+    actor: "console",
+    payload: { spentUsd: 10, capUsd: 10, action: "interrupted" },
+    prevHash: "",
+    hash: "",
+  },
   testigo_export_aat: {
     dir: "/home/demo/.local/share/agent-console/proofpacks/aat/case-2026-10-13",
     sessions: 1,

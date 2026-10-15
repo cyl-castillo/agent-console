@@ -390,6 +390,18 @@ export function ProofPanel() {
                         · turn interrupted
                       </span>
                     )}
+                    {t.budget && (
+                      <span
+                        className="wb-hint"
+                        title="The console interrupted the turn at its budget cap (budget_reached); the decision is witnessed next to it"
+                      >
+                        {" "}
+                        · budget ${t.budget.spentUsd.toFixed(2)} / ${t.budget.capUsd.toFixed(2)}
+                        {t.budget.decision
+                          ? ` → ${t.budget.decision}${t.budget.newCapUsd !== undefined ? ` to $${t.budget.newCapUsd.toFixed(2)}` : ""}`
+                          : " — awaiting decision"}
+                      </span>
+                    )}
                     {t.rewound && (
                       <span
                         className="wb-hint"

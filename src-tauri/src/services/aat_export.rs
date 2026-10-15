@@ -160,6 +160,19 @@ fn map_kind(e: &ProofEvent) -> Mapped {
                 phase: "post_execution",
             }
         }
+        "budget_reached" => Mapped {
+            action_type: "escalation",
+            outcome: "escalated",
+            phase: "concurrent",
+        },
+        "budget_decision" => {
+            let stop = p.get("decision").and_then(Value::as_str) == Some("stop");
+            Mapped {
+                action_type: "decision",
+                outcome: if stop { "denied" } else { "success" },
+                phase: "post_execution",
+            }
+        }
         "agent_declined" => Mapped {
             action_type: "escalation",
             outcome: "escalated",
@@ -601,6 +614,8 @@ Mapping from the Testigo ledger (the console's native chain):
 | turn_end | lifecycle | post_execution | success / failure / timeout |
 | agent_action (MCP) | tool_call | post_execution | success / denied |
 | agent_declined (MCP) | escalation | post_execution | escalated |
+| budget_reached | escalation | concurrent | escalated |
+| budget_decision | decision | post_execution | success / denied (stop) |
 | anything else | lifecycle | concurrent | success |
 
 `action_detail` keeps the Testigo `event`, `testigo_seq`, `testigo_hash`,
@@ -702,6 +717,22 @@ mod tests {
             ),
             ev(
                 7,
+                5_500,
+                "budget_reached",
+                "s1",
+                "console",
+                json!({ "spentUsd": 12.3, "capUsd": 10.0, "action": "interrupted" }),
+            ),
+            ev(
+                8,
+                5_600,
+                "budget_decision",
+                "s1",
+                "human",
+                json!({ "decision": "stop", "spentUsd": 12.3, "capUsd": 10.0 }),
+            ),
+            ev(
+                9,
                 6_000,
                 "turn_end",
                 "s1",
@@ -711,7 +742,9 @@ mod tests {
         ];
         let refs: Vec<&ProofEvent> = events.iter().collect();
         let records = build_session("s1", &refs, "0.89.0").unwrap();
-        assert_eq!(records.len(), 8, "genesis + 6 events + close");
+        assert_eq!(records.len(), 10, "genesis + 8 events + close");
+        assert_eq!(records[6]["action_type"], "escalation");
+        assert_eq!(records[7]["outcome"], "denied");
         assert_eq!(records[0]["action_detail"]["event"], "session_start");
         assert_eq!(records[0]["model_id"], "claude-opus-5-5");
         assert!(records[0]["prev_hash"].is_null() && records[0]["parent_record_id"].is_null());
@@ -723,7 +756,7 @@ mod tests {
         assert_eq!(records[5]["action_type"], "tool_call");
         let close = records.last().unwrap();
         assert_eq!(close["action_detail"]["event"], "session_end");
-        assert_eq!(close["action_detail"]["record_count"], 8);
+        assert_eq!(close["action_detail"]["record_count"], 10);
         for i in 1..records.len() {
             assert_eq!(
                 records[i]["prev_hash"],
@@ -748,7 +781,7 @@ mod tests {
         fs::write(&path, &body).unwrap();
         let ok = verify_file(&path).unwrap();
         assert!(ok.ok, "{:?}", ok.problems);
-        assert_eq!(ok.records, 8);
+        assert_eq!(ok.records, 10);
         assert!(ok.tail_closed);
 
         // Flip one character of record 4's payload: the link from 5 breaks.
