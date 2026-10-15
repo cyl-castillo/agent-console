@@ -22,7 +22,7 @@ interface Props extends ProjectBootstrap {
   project: Project;
 }
 
-/// The redesigned shell (flag ui.v2): rail → list → centre → inspector.
+/// The shell: rail → list → centre → inspector.
 /// The decision queue is the primary view; the terminal lives under
 /// Sessions; every panel keeps working from its new home.
 export function ShellV2({

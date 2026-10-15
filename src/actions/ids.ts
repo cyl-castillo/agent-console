@@ -43,7 +43,6 @@ export const ACTION_IDS = [
   "ui.toggle_sidebar",
   "ui.toggle_right_panel",
   "ui.toggle_theme",
-  "ui.toggle_v2",
   "project.copy_path",
   "auth.claude_login",
   "auth.codex_login",

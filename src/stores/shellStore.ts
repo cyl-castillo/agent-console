@@ -113,12 +113,25 @@ export const useShellStore = create<ShellState>((set, get) => ({
 /// Keep destination ↔ tab coherent when the tab changes from outside (palette,
 /// Getting Started deep links, onOpenRoom).
 export function attachShellListeners(): () => void {
-  return useWorkbenchStore.subscribe((s, prev) => {
-    if (s.tab === prev.tab) return;
-    const dest = destinationForTab(s.tab);
+  const follow = (tab: WorkbenchTab) => {
+    const dest = destinationForTab(tab);
     const st = useShellStore.getState();
-    const lastTab = { ...st.lastTab, [dest]: s.tab };
+    const lastTab = { ...st.lastTab, [dest]: tab };
     useShellStore.setState({ destination: dest, lastTab });
     save({ ...st, destination: dest, lastTab });
+  };
+  const unsub = useWorkbenchStore.subscribe((s, prev) => {
+    if (s.tab !== prev.tab) follow(s.tab);
   });
+  // A deep link to the tab already selected still has to pull the shell to
+  // its destination (e.g. "Open Turns" from the Inbox with Turns remembered).
+  const onOpen = (e: Event) => {
+    const tab = (e as CustomEvent<WorkbenchTab>).detail;
+    if (tab && isTabEnabled(tab)) follow(tab);
+  };
+  window.addEventListener("ac:open-workbench-tab", onOpen);
+  return () => {
+    unsub();
+    window.removeEventListener("ac:open-workbench-tab", onOpen);
+  };
 }

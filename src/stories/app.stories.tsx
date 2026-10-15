@@ -1,18 +1,17 @@
-// The whole app, surface by surface, rendered in a browser against fixture
-// data. These stories are the visual contract: Playwright screenshots every
-// one of them (tests/visual) and the a11y addon audits each.
+// App-level overlays and the no-project screen, rendered in a browser against
+// fixture data. The shell itself is covered surface by surface in
+// app-v2.stories. Playwright screenshots every story (tests/visual) and the
+// a11y addon audits each.
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import App from "../App";
 import { pendingApproval, ROOT } from "../dev/fixtures/defaults";
 import { useApprovalStore } from "../stores/approvalStore";
 import { useConfirmStore } from "../stores/confirmStore";
-import { useOnboardingStore } from "../stores/onboardingStore";
 import { usePaletteStore } from "../stores/paletteStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUIStore } from "../stores/uiStore";
-import { WORKBENCH_TABS, type WorkbenchTab } from "../lib/workbenchTabs";
 import { beginScenario, settle, sleep } from "./scenario";
 import type { FixtureMap } from "../dev/fixtures/registry";
 
@@ -20,8 +19,6 @@ interface Opts {
   fixtures?: FixtureMap;
   theme?: "dark" | "light";
   project?: boolean;
-  workbenchTab?: WorkbenchTab;
-  centerTab?: "terminal" | "changes" | "preview";
   /// Resume the first persisted session so a live terminal is mounted.
   liveTerminal?: boolean;
   after?: () => Promise<void> | void;
@@ -43,9 +40,6 @@ function scenario(opts: Opts = {}): StoryObj {
       async () => {
         beginScenario(opts.fixtures, opts.theme);
         resetStores();
-        if (opts.workbenchTab) {
-          localStorage.setItem(`agent-console:workbench-tab:${ROOT}`, opts.workbenchTab);
-        }
         if (project) await useSessionStore.getState().openProject(ROOT);
         return {};
       },
@@ -58,7 +52,6 @@ function scenario(opts: Opts = {}): StoryObj {
         const first = st.sessions[0];
         if (first) await st.resume(first.id);
       }
-      if (opts.centerTab) useUIStore.getState().setTab(opts.centerTab);
       await opts.after?.();
       await settle();
     },
@@ -75,44 +68,6 @@ export default meta;
 // ---- Shell -----------------------------------------------------------------
 
 export const NoProject = scenario({ project: false });
-export const Terminal = scenario({});
-export const TerminalNoSessions = scenario({
-  fixtures: { sessions_list: [] },
-  liveTerminal: false,
-});
-export const Changes = scenario({ centerTab: "changes" });
-export const Preview = scenario({ centerTab: "preview" });
-export const LightTerminal = scenario({ theme: "light" });
-export const LightChanges = scenario({ theme: "light", centerTab: "changes" });
-export const OnboardingBanner = scenario({
-  after: () => useOnboardingStore.setState({ bannerDismissed: false }),
-});
-
-// ---- Workbench: one story per tab ----------------------------------------
-
-const wb: Record<string, StoryObj> = {};
-for (const tab of WORKBENCH_TABS) {
-  wb[tab] = scenario({ workbenchTab: tab });
-}
-export const WorkbenchTurns = wb.turns;
-export const WorkbenchProof = wb.proof;
-export const WorkbenchSkills = wb.skills;
-export const WorkbenchAdvisor = wb.advisor;
-export const WorkbenchLearning = wb.learning;
-export const WorkbenchContext = wb.context;
-export const WorkbenchRoundtable = wb.roundtable;
-export const WorkbenchJobs = wb.jobs;
-export const WorkbenchSchedule = wb.schedule;
-export const WorkbenchPermissions = wb.permissions;
-export const WorkbenchVault = wb.vault;
-export const WorkbenchPlugins = wb.plugins;
-export const WorkbenchMcp = wb.mcp;
-export const WorkbenchJira = wb.jira;
-export const WorkbenchTeams = wb.teams;
-export const WorkbenchAgenda = wb.agenda;
-export const WorkbenchNotes = wb.notes;
-export const WorkbenchTransfer = wb.transfer;
-export const WorkbenchFeedback = wb.feedback;
 
 // ---- Overlays --------------------------------------------------------------
 

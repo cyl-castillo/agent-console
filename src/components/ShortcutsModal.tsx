@@ -8,7 +8,7 @@ const GROUPS = [
       ["Ctrl+1", "Open Terminal"],
       ["Ctrl+2", "Open Changes"],
       ["Ctrl+3", "Open Preview"],
-      ["Ctrl+B", "Toggle workspace sidebar"],
+      ["Ctrl+B", "Toggle the list pane"],
       ["Ctrl+J", "Toggle side panel"],
       ["Ctrl+P", "Open command palette"],
       ["Ctrl+/", "Show keyboard shortcuts"],

@@ -4,9 +4,7 @@ import { useUIStore } from "./stores/uiStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useVoicePtt } from "./hooks/useVoicePtt";
 import { OverlayHost } from "./app/OverlayHost";
-import { Shell } from "./app/Shell";
 import { ShellV2 } from "./app/v2/ShellV2";
-import { useFlagsStore } from "./stores/flagsStore";
 import { useAppLifecycle, useWindowTitle } from "./app/useAppLifecycle";
 import { useOnboardingAutoOpen } from "./app/useOnboardingAutoOpen";
 import { useProjectBootstrap } from "./app/useProjectBootstrap";
@@ -14,7 +12,6 @@ import { useProjectBootstrap } from "./app/useProjectBootstrap";
 export default function App() {
   const project = useSessionStore((s) => s.project);
   const setTab = useUIStore((s) => s.setTab);
-  const v2 = useFlagsStore((s) => s.flags["ui.v2"]);
 
   useAppLifecycle();
   useWindowTitle();
@@ -34,7 +31,7 @@ export default function App() {
 
   return (
     <>
-      {v2 ? <ShellV2 project={project} {...boot} /> : <Shell project={project} {...boot} />}
+      <ShellV2 project={project} {...boot} />
       <OverlayHost withProject />
     </>
   );

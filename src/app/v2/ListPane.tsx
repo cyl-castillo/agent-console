@@ -9,7 +9,7 @@ import { RoomsList } from "../../components/RoomsList";
 import { useRoundtableStore } from "../../stores/roundtableStore";
 
 /// The second column: what the destination offers. Sessions reuse the
-/// existing workspace sidebar (sessions, rooms, changes, files); the other
+/// session list (grouped by attention, files underneath); the other
 /// destinations list their panels as dense rows.
 export function ListPane() {
   const destination = useShellStore((s) => s.destination);

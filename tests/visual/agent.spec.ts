@@ -11,7 +11,6 @@ interface Bridge {
     sessions: unknown[];
     pendingDecisions: number;
     destination: string;
-    uiV2: boolean;
   };
 }
 declare global {
