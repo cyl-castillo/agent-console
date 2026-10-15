@@ -200,6 +200,19 @@ export interface PersistedSession {
 
 export type RunsIn = "local" | "worktree" | "microvm" | "cloud";
 
+export type RiskLevel = "low" | "medium" | "high";
+
+/// D11: the sponsor policy of a product (mirrors the Rust Sponsor).
+export interface Sponsor {
+  objective: string;
+  owner: string;
+  /// 0 = no budget declared.
+  weeklyBudgetUsd: number;
+  /// Decisions up to this tier may be taken by the policy.
+  riskThreshold: RiskLevel;
+  autoApprove: boolean;
+}
+
 /// D14: an A2A-shaped agent card (mirrors the Rust AgentCard).
 export interface AgentCard {
   type: string;

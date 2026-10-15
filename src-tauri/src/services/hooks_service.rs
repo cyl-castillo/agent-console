@@ -1690,6 +1690,7 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 &id,
                 "external",
                 Some("not answered in the console in time — decided in the CLI prompt or auto-denied"),
+                None,
             );
         }
     } else if kind == "tool_result" || kind == "tool_failed" {

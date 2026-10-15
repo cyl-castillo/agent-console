@@ -222,6 +222,83 @@ test("the reviewer agent's block is a decision: override needs a reason and the 
   });
 });
 
+test("the sponsor policy decides low-risk requests alone; the human sees the rest", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox");
+  // Sponsor on, low threshold, no budget (the store is what the watcher reads).
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __fixtures: { setFixture: (c: string, v: unknown) => void };
+      }
+    ).__fixtures.setFixture("sponsor_get", {
+      objective: "ship",
+      owner: "Carlos",
+      weeklyBudgetUsd: 0,
+      riskThreshold: "low",
+      autoApprove: true,
+    }),
+  );
+  await page.evaluate(() => window.__agentConsole.invoke("nav.jobs"));
+  await expect(page.getByTestId("sponsor-bar")).toContainText("auto-approves ≤ low");
+  await page.getByTestId("rail-inbox").click();
+  await expect(page.getByTestId("inbox")).toBeVisible();
+  const before = (await state(page)).pendingDecisions;
+
+  const emit = (p: unknown) =>
+    page.evaluate(
+      (payload) =>
+        (
+          window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+        ).__fixtures.emit("approval://request", payload),
+      p,
+    );
+  // Low tier (npm test): taken by the policy, witnessed with the policy name.
+  await emit({
+    id: "apr-9001",
+    ts: Date.now(),
+    sessionDir: "/home/demo/.claude",
+    cwd: "/home/demo/code/demo-playground",
+    tool: "Bash",
+    input: { command: "npm test -- --run" },
+    termId: "sess-auth",
+  });
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const log = (
+          window as unknown as {
+            __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+          }
+        ).__fixtures.invokeLog;
+        return log.find((l) => l.cmd === "approval_respond" && l.args.id === "apr-9001")?.args;
+      }),
+    )
+    .toMatchObject({ decision: "allow", policy: "sponsor:Carlos:low" });
+  expect((await state(page)).pendingDecisions).toBe(before);
+  // Medium tier (an edit): left for the human.
+  await emit({
+    id: "apr-9002",
+    ts: Date.now(),
+    sessionDir: "/home/demo/.claude",
+    cwd: "/home/demo/code/demo-playground",
+    tool: "Edit",
+    input: {
+      file_path: "/home/demo/code/demo-playground/src/x.ts",
+      old_string: "a",
+      new_string: "b",
+    },
+    termId: "sess-auth",
+  });
+  await expect(page.locator("[data-testid='decision-apr-9002']")).toBeVisible();
+  expect((await state(page)).pendingDecisions).toBe(before + 1);
+  await page
+    .locator("[data-testid='decision-apr-9002']")
+    .getByRole("button", { name: "Deny" })
+    .click();
+});
+
 test("closing a session can ask the agent for a handoff note saved as memory", async ({ page }) => {
   await open(page, "app-v2--sessions");
   const typed = page.evaluate(

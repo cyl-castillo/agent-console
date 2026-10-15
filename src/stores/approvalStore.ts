@@ -11,7 +11,13 @@ interface ApprovalState {
   queue: ApprovalRequest[];
   /// Resolves true when the decision reached the hook; false when delivery
   /// failed (the request stays queued for retry).
-  decide: (id: string, decision: "allow" | "deny" | "ask", reason?: string) => Promise<boolean>;
+  decide: (
+    id: string,
+    decision: "allow" | "deny" | "ask",
+    reason?: string,
+    /// D11: set when the sponsor policy, not the human, decides.
+    policy?: string,
+  ) => Promise<boolean>;
   _enqueue: (req: ApprovalRequest) => void;
   /// Reconcile the queue against the on-disk pending requests (the source of
   /// truth: the hook deletes each req file once decided or timed out). Heals
@@ -24,9 +30,9 @@ interface ApprovalState {
 export const useApprovalStore = create<ApprovalState>((set) => ({
   queue: [],
 
-  decide: async (id, decision, reason) => {
+  decide: async (id, decision, reason, policy) => {
     try {
-      await ipc.approvalRespond(id, decision, reason);
+      await ipc.approvalRespond(id, decision, reason, policy);
     } catch (e) {
       // The hook is still polling for this answer. Dropping the request on a
       // failed delivery (the old behavior) made the UI look "answered" while

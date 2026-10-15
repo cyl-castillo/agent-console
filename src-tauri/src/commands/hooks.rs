@@ -35,6 +35,7 @@ pub fn approval_respond(
     id: String,
     decision: String,
     reason: Option<String>,
+    policy: Option<String>,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     state.hooks.respond(&id, &decision, reason.as_deref())?;
@@ -55,6 +56,7 @@ pub fn approval_respond(
             &id,
             &decision,
             reason.as_deref(),
+            policy.as_deref(),
         );
     }
     Ok(())
