@@ -37,6 +37,7 @@ pub const TOOL_NAMES: &[&str] = &[
     "memory_search",
     "ledger_verify",
     "decline",
+    "request_review",
 ];
 
 /// Tools the webview answers (stores are the truth); the rest are local.
@@ -139,6 +140,13 @@ impl ConsoleMcp {
         if req.name == "decline" {
             // Its own first-class ledger event (D13), not a generic action.
             return self.decline(app, req);
+        }
+        if req.name == "request_review" {
+            // D10: the verdict is its own ledger event under the reviewer's
+            // identity; the request itself is witnessed as the caller's act.
+            let outcome = self.request_review(app, req);
+            self.witness(app, req, &outcome);
+            return outcome;
         }
         let outcome = if WEBVIEW_TOOLS.contains(&req.name.as_str()) {
             self.ask_webview(app, req)
@@ -284,6 +292,35 @@ impl ConsoleMcp {
         }))
     }
 
+    /// D10 over MCP: an agent asks for an adversarial review of a turn (its
+    /// own, typically) by a different identity. The run is blocking for the
+    /// caller — the reviewer reads the diff and answers — and the verdict
+    /// lands in the ledger and the Inbox either way.
+    fn request_review(&self, app: &AppHandle, req: &ConsoleCall) -> Result<Value, String> {
+        let session = arg_str(&req.arguments, "session").ok_or("Missing session")?;
+        let turn = arg_str(&req.arguments, "turn");
+        let state = app.state::<AppState>();
+        let verdict = crate::services::reviewer_service::review(
+            &state.testigo,
+            &req.project,
+            session,
+            turn,
+            now_ms(),
+        )
+        .map_err(|e| e.to_string())?;
+        let _ = app.emit(
+            "console://review",
+            &json!({ "project": req.project, "verdict": verdict }),
+        );
+        Ok(json!({
+            "verdict": verdict.verdict,
+            "findings": verdict.findings,
+            "reviewer": verdict.reviewer,
+            "seq": verdict.seq,
+            "note": "The human sees this verdict in the Inbox. A block stands until a human overrides it with a reason.",
+        }))
+    }
+
     /// Record the call in the ledger as the agent's act. A failure to witness
     /// never changes the answer (the ledger's witness switch may be off).
     fn witness(&self, app: &AppHandle, req: &ConsoleCall, outcome: &Result<Value, String>) {
@@ -291,7 +328,7 @@ impl ConsoleMcp {
         // The session the act concerns, when the tool names one: the ledger
         // map then shows the agent's hand on that session's lane.
         let term_id = match req.name.as_str() {
-            "send_prompt" | "session_events" => {
+            "send_prompt" | "session_events" | "request_review" => {
                 arg_str(&req.arguments, "session").map(String::from)
             }
             "new_session" => outcome

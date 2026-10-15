@@ -306,6 +306,37 @@ export interface AatVerifyReport {
   problems: string[];
 }
 
+/// D10: one finding of the reviewer agent (rule or model).
+export interface ReviewFinding {
+  severity: "block" | "high" | "medium" | "low" | string;
+  rule: string;
+  title: string;
+  detail: string;
+  file?: string;
+  deterministic: boolean;
+}
+
+export type ReviewVerdictKind = "approve" | "request_changes" | "block";
+
+/// D10: the reviewer agent's verdict on one turn (mirrors the Rust
+/// ReviewVerdict); witnessed as `review_verdict` under `agent:reviewer:*`.
+export interface ReviewVerdict {
+  verdict: ReviewVerdictKind;
+  findings: ReviewFinding[];
+  reviewer: string;
+  reviewerEngine: "claude" | "codex";
+  reviewerModel?: string | null;
+  producerModel?: string | null;
+  termId: string;
+  turnId: string;
+  caseId: string;
+  files: number;
+  tokens: number;
+  costUsd: number;
+  rationale: string;
+  seq?: number | null;
+}
+
 /// Per-project Testigo policy (mirrors the Rust TestigoSettings). Witnessing
 /// is local-only and on by default; repo marks (trailers + anchor ref) touch
 /// the project's git and are opt-in, as is the RFC 3161 timestamp (it sends

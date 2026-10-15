@@ -7,6 +7,7 @@ import { approvalEdit, approvalHigh, pendingApproval, ROOT } from "../dev/fixtur
 import { useBudgetStore } from "../stores/budgetStore";
 import { useLiveStatusStore } from "../stores/liveStatusStore";
 import { useDeclinesStore } from "../stores/declinesStore";
+import { useReviewsStore } from "../stores/reviewsStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import type { FixtureMap } from "../dev/fixtures/registry";
 import { useApprovalStore } from "../stores/approvalStore";
@@ -82,6 +83,46 @@ export const InboxDecisions = scenario({
     useLiveStatusStore
       .getState()
       .note({ ts: Date.now(), termId: "sess-auth", costUsd: 5.12, usedPct: 31 });
+    useReviewsStore.getState().add(
+      ROOT,
+      {
+        verdict: "block",
+        findings: [
+          {
+            severity: "block",
+            rule: "test_edited",
+            title: "1 test file changed together with 1 source file",
+            detail:
+              "The prompt did not ask for test changes. A test edited alongside the code it covers is how an agent makes a failing change look green.",
+            file: "tests/auth.test.ts",
+            deterministic: true,
+          },
+          {
+            severity: "medium",
+            rule: "model",
+            title: "Retry ceiling is hard-coded",
+            detail:
+              "src/retry.ts caps at 5 attempts with no configuration hook, unlike the summary claims.",
+            file: "src/retry.ts",
+            deterministic: false,
+          },
+        ],
+        reviewer: "reviewer:codex",
+        reviewerEngine: "codex",
+        reviewerModel: null,
+        producerModel: "claude-opus-5-5",
+        termId: "sess-auth",
+        turnId: "turn-001",
+        caseId: "case-2026-10-13",
+        files: 2,
+        tokens: 812,
+        costUsd: 0.01,
+        rationale:
+          "The assertion in tests/auth.test.ts went from toEqual to toBeTruthy, which would pass on the old bug too.",
+        seq: 777,
+      },
+      Date.now() - 120_000,
+    );
     useDeclinesStore.getState().add({
       seq: 99,
       ts: Date.now() - 60_000,

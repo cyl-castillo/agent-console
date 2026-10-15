@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, Copy, RotateCw, ShieldCheck } from "lucide-react";
+import { ChevronRight, Copy, RotateCw, ShieldCheck, Scale } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { TimelineTurn, TimelineTool } from "../../../stores/proofStore";
 import { Chip } from "../../../ui/Chip";
@@ -104,11 +104,13 @@ export function ProofBlock({
   onCopy,
   onRerun,
   onLedger,
+  onReview,
 }: {
   turn: TimelineTurn;
   onCopy: () => void;
   onRerun: () => void;
   onLedger: () => void;
+  onReview?: () => void;
 }) {
   return (
     <div
@@ -138,7 +140,32 @@ export function ProofBlock({
           </span>
         </Tooltip>
       )}
+      {turn.review && (
+        <Chip
+          tone={
+            turn.review.verdict === "block"
+              ? "danger"
+              : turn.review.verdict === "approve"
+                ? "ok"
+                : "warn"
+          }
+          mono
+        >
+          review: {turn.review.verdict}
+          {turn.review.decision ? ` → ${turn.review.decision}` : ""}
+        </Chip>
+      )}
       <span className="ml-auto inline-flex items-center gap-0.5">
+        {onReview && (
+          <Tooltip content="Ask the reviewer agent (a different identity) to review this turn">
+            <IconButton
+              size="sm"
+              label="Review this turn"
+              icon={<Scale size={14} />}
+              onClick={onReview}
+            />
+          </Tooltip>
+        )}
         <Tooltip content="Copy the agent's summary">
           <IconButton size="sm" label="Copy summary" icon={<Copy size={14} />} onClick={onCopy} />
         </Tooltip>
@@ -173,6 +200,7 @@ export function TurnBlock({
   onCopy,
   onRerun,
   onLedger,
+  onReview,
 }: {
   turn: TimelineTurn;
   live: boolean;
@@ -181,6 +209,7 @@ export function TurnBlock({
   onCopy: () => void;
   onRerun: () => void;
   onLedger: () => void;
+  onReview?: () => void;
 }) {
   const state = turn.failed ? "failed" : turn.interrupted ? "stopped" : live ? "working" : "done";
   const duration = turn.endTs ? turn.endTs - turn.ts : now - turn.ts;
@@ -231,7 +260,15 @@ export function TurnBlock({
           Working… {turn.toolResults} tool call{turn.toolResults === 1 ? "" : "s"} so far
         </div>
       )}
-      {!live && <ProofBlock turn={turn} onCopy={onCopy} onRerun={onRerun} onLedger={onLedger} />}
+      {!live && (
+        <ProofBlock
+          turn={turn}
+          onCopy={onCopy}
+          onRerun={onRerun}
+          onLedger={onLedger}
+          onReview={onReview}
+        />
+      )}
     </article>
   );
 }

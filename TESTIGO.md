@@ -142,6 +142,17 @@ ProofEvent {
   export IETF: `budget_reached` → escalation/escalated, `budget_decision` → decision
   (success, o denied si fue stop). Compuerta del estudio: ninguna sesión supera el tope sin pausa
   registrada en el ledger. El tope vive por máquina (budgetStore); la evidencia, en el ledger.
+- **Revisor-agente (D10, 2026-10-14)**: `reviewer_service.rs`. Una identidad distinta del productor
+  (el otro motor si está instalado; si no, la otra familia de modelo) lee el diff del turno
+  (snapshots pre/post) y argumenta en contra ("adversarial verification"). Dos capas: reglas
+  deterministas que el modelo no puede rebajar (test editado junto al código que cubre sin que el
+  prompt lo pidiera → `block`; resumen que dice "tests pass" sin `check_run` → `high`) y el
+  veredicto del modelo, que solo puede endurecer. Se registra `review_verdict` (actor
+  `agent:reviewer:<engine>`, pinneado al turno y al case) y la respuesta humana
+  `review_decision` (`accept` | `override` con razón). Entradas: botón "Review this turn" en la
+  conversación, tool MCP `request_review`. **Compuerta del estudio**: el check de proof-on-PR
+  (`.github/testigo/testigo-verify.mjs`) falla si el packet contiene un `review_verdict` block sin
+  un `review_decision` override posterior para ese turno — el bloqueo no se levanta solo.
 
 ### Qué NO hace (guardrails de scope)
 - No orquesta trabajo (no es workflow engine), no bloquea ejecución (captura, no gatekeeping —

@@ -81,6 +81,7 @@ import type {
   AttachProofSummary,
   AatExportSummary,
   AatVerifyReport,
+  ReviewVerdict,
 } from "../types/domain";
 
 export const ipc = {
@@ -392,6 +393,27 @@ export const ipc = {
       capUsd,
       decision: decision ?? null,
       newCapUsd: newCapUsd ?? null,
+    }),
+  /// D10: adversarial review of a finished turn by the reviewer agent.
+  reviewTurn: (projectRoot: string, termId: string, turnId?: string) =>
+    invoke<ReviewVerdict>("review_turn", { projectRoot, termId, turnId: turnId ?? null }),
+  reviewDecide: (
+    projectRoot: string,
+    termId: string,
+    turnId: string,
+    caseId: string,
+    verdictSeq: number,
+    decision: "accept" | "override",
+    reason?: string,
+  ) =>
+    invoke<ProofEvent>("review_decide", {
+      projectRoot,
+      termId,
+      turnId,
+      caseId,
+      verdictSeq,
+      decision,
+      reason: reason ?? null,
     }),
   testigoExportPreview: (projectRoot: string, caseId?: string) =>
     invoke<TestigoExportPreview>("testigo_export_preview", {

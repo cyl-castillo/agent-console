@@ -402,6 +402,16 @@ export function ProofPanel() {
                           : " — awaiting decision"}
                       </span>
                     )}
+                    {t.review && (
+                      <span
+                        className="wb-hint"
+                        title={`${t.review.reviewer} reviewed this turn (${t.review.findings} findings); the verdict is in the ledger`}
+                      >
+                        {" "}
+                        · review {t.review.verdict}
+                        {t.review.decision ? ` → ${t.review.decision}` : ""}
+                      </span>
+                    )}
                     {t.rewound && (
                       <span
                         className="wb-hint"

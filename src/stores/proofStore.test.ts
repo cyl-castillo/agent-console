@@ -66,6 +66,36 @@ describe("summarizeCases", () => {
 });
 
 describe("buildTimeline", () => {
+  it("D10: a reviewer verdict and the human's answer attach to the reviewed turn", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 1, kind: "prompt", turnId: "t1", payload: { prompt: "go" } }),
+      ev({ seq: 2, ts: 2, kind: "turn_end", turnId: "t1", payload: {} }),
+      ev({
+        seq: 3,
+        ts: 3,
+        kind: "review_verdict",
+        turnId: "t1",
+        actor: "agent:reviewer:codex",
+        payload: { verdict: "block", findings: [{ title: "x" }, { title: "y" }] },
+      }),
+      ev({
+        seq: 4,
+        ts: 4,
+        kind: "review_decision",
+        turnId: "t1",
+        actor: "human",
+        payload: { decision: "override", reason: "known flake" },
+      }),
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].review).toEqual({
+      verdict: "block",
+      findings: 2,
+      reviewer: "agent:reviewer:codex",
+      decision: "override",
+    });
+  });
+
   it("D5: a budget pause and its answer attach to the turn they cut", () => {
     const turns = buildTimeline([
       ev({ seq: 1, ts: 1, kind: "prompt", turnId: "t1", payload: { prompt: "go" } }),

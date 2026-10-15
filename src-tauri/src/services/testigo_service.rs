@@ -1061,6 +1061,37 @@ impl TestigoService {
         )
     }
 
+    /// D10: the reviewer agent's verdict (`review_verdict`, actor
+    /// `agent:reviewer:<engine>`) and the human's answer to it
+    /// (`review_decision`, actor `human`), both pinned to the reviewed turn
+    /// and its case even though that turn is already closed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_review(
+        &self,
+        project_root: &str,
+        ts: i64,
+        case_id: &str,
+        turn_id: Option<&str>,
+        term_id: &str,
+        kind: &str,
+        actor: &str,
+        payload: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case_id.to_string(),
+            turn_id.map(String::from),
+            kind,
+            Some(term_id.to_string()),
+            None,
+            actor,
+            payload,
+        )
+    }
+
     /// Record a turn rewind: the working tree was restored to a snapshot and
     /// (when the fork succeeded) the conversation transcript was forked to a
     /// new session id. A rewind rewrites what the checkout contains, so it is

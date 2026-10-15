@@ -40,14 +40,9 @@ const out = (s) => {
   lines.push(s);
 };
 
-const changed = git("diff", "--name-only", `${base}...${head}`)
-  .split("\n")
-  .filter(Boolean);
+const changed = git("diff", "--name-only", `${base}...${head}`).split("\n").filter(Boolean);
 const packets = changed.filter(
-  (f) =>
-    f.startsWith(".testigo/proofs/") &&
-    f.endsWith(".proofpack.json") &&
-    fs.existsSync(f),
+  (f) => f.startsWith(".testigo/proofs/") && f.endsWith(".proofpack.json") && fs.existsSync(f),
 );
 
 let failed = false;
@@ -65,6 +60,9 @@ if (packets.length === 0) {
   let coverageCheckable = true;
   let turns = 0;
   let approvals = 0;
+  // D10: a reviewer block stands until a human overrides it (with a reason).
+  const blocks = new Map(); // turnId → { seq, title }
+  const overrides = new Set(); // turnIds with a later review_decision override
   let checksPassed = 0;
   let checksFailed = 0;
 
@@ -76,13 +74,9 @@ if (packets.length === 0) {
       out(`- ✘ \`${file}\`: **INVALID** (${r.firstFailure})`);
       continue;
     }
-    const st = JSON.parse(
-      Buffer.from(pkt.envelope.payload, "base64").toString("utf8"),
-    );
+    const st = JSON.parse(Buffer.from(pkt.envelope.payload, "base64").toString("utf8"));
     const events = st.predicate?.events ?? [];
-    const parsed = events
-      .filter((e) => typeof e.line === "string")
-      .map((e) => JSON.parse(e.line));
+    const parsed = events.filter((e) => typeof e.line === "string").map((e) => JSON.parse(e.line));
 
     for (const e of parsed) {
       // Manually redacted events lose their payload; if one of them was a
@@ -100,6 +94,16 @@ if (packets.length === 0) {
       } else if (e.kind === "check_run") {
         if (e.payload?.status === "passed") checksPassed++;
         else checksFailed++;
+      } else if (e.kind === "review_verdict") {
+        if (e.payload?.verdict === "block" && e.turnId) {
+          blocks.set(e.turnId, {
+            seq: e.seq,
+            title: e.payload?.findings?.[0]?.title ?? "blocked by the reviewer",
+            actor: e.actor,
+          });
+        }
+      } else if (e.kind === "review_decision") {
+        if (e.payload?.decision === "override" && e.turnId) overrides.add(e.turnId);
       }
     }
     // Work pruned to stubs can't prove coverage either.
@@ -136,6 +140,20 @@ if (packets.length === 0) {
       }
     } else {
       out("- ⚠ no git subject in the packet (pre-P2 export?) — evidence not bound to the code");
+    }
+  }
+
+  for (const [turnId, b] of blocks) {
+    if (overrides.has(turnId)) {
+      out(
+        `- ⚠ reviewer block on turn \`${turnId.slice(0, 8)}\` (${b.title}) overridden by a human — recorded`,
+      );
+    } else {
+      failed = true;
+      out(
+        `- ✘ ${b.actor} **blocked** turn \`${turnId.slice(0, 8)}\` (#${b.seq}: ${b.title}) ` +
+          "and no human override is recorded — a block stands until someone answers it",
+      );
     }
   }
 

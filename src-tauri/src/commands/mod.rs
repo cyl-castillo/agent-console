@@ -16,6 +16,7 @@ pub mod plugins;
 pub mod preflight;
 pub mod project;
 pub mod projects;
+pub mod review;
 pub mod rewind;
 pub mod roundtable;
 pub mod scheduler;

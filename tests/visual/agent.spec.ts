@@ -143,6 +143,77 @@ test("an agent's decline lands in the Inbox as a decision and is never retried",
   await expect(page.locator("[data-testid^='decline-']")).toHaveCount(before);
 });
 
+test("the reviewer agent's block is a decision: override needs a reason and the typed word", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox");
+  const before = await page.locator("[data-testid^='review-']").count();
+  // The Rust side emits console://review after witnessing review_verdict.
+  await page.evaluate(() =>
+    (
+      window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+    ).__fixtures.emit("console://review", {
+      project: "/home/demo/code/demo-playground",
+      verdict: {
+        verdict: "block",
+        findings: [
+          {
+            severity: "block",
+            rule: "test_edited",
+            title: "1 test file changed together with 1 source file",
+            detail: "The prompt did not ask for test changes.",
+            file: "tests/auth.test.ts",
+            deterministic: true,
+          },
+        ],
+        reviewer: "reviewer:codex",
+        reviewerEngine: "codex",
+        producerModel: "claude-opus-5-5",
+        termId: "sess-auth",
+        turnId: "turn-001",
+        caseId: "case-2026-10-13",
+        files: 2,
+        tokens: 10,
+        costUsd: 0,
+        rationale: "The assertion was loosened.",
+        seq: 901,
+      },
+    }),
+  );
+  const card = page.locator("[data-testid^='review-']").last();
+  await expect(page.locator("[data-testid^='review-']")).toHaveCount(before + 1);
+  await expect(card).toContainText("Reviewer blocks");
+  await expect(card).toContainText("agent:reviewer:codex");
+  await expect(card).toContainText("rule test_edited");
+
+  // Override: a reason is required, and the high tier wants the typed word.
+  await card.getByRole("button", { name: "Override" }).click();
+  const record = card.getByRole("button", { name: "Record override" });
+  await expect(record).toBeDisabled();
+  await card
+    .getByRole("textbox", { name: /override the reviewer/i })
+    .fill("Known flaky assertion, tracked in #12.");
+  await expect(record).toBeDisabled();
+  await card.getByRole("textbox", { name: /type/i }).fill("approve");
+  await expect(record).toBeEnabled();
+  await record.click();
+  await expect(page.locator("[data-testid^='review-']")).toHaveCount(before);
+  const decided = await page.evaluate(() => {
+    const log = (
+      window as unknown as {
+        __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+      }
+    ).__fixtures.invokeLog;
+    return log.find((l) => l.cmd === "review_decide")?.args;
+  });
+  expect(decided).toMatchObject({
+    turnId: "turn-001",
+    decision: "override",
+    verdictSeq: 901,
+    reason: "Known flaky assertion, tracked in #12.",
+  });
+});
+
 test("closing a session can ask the agent for a handoff note saved as memory", async ({ page }) => {
   await open(page, "app-v2--sessions");
   const typed = page.evaluate(

@@ -8,6 +8,7 @@ import { capFor, useBudgetStore } from "../../stores/budgetStore";
 import { useLiveStatusStore } from "../../stores/liveStatusStore";
 import { useProofStore } from "../../stores/proofStore";
 import { useDeclinesStore, type Decline } from "../../stores/declinesStore";
+import { useReviewsStore, type Review } from "../../stores/reviewsStore";
 import { sessionAttention } from "../../lib/attention";
 import type { AgentState } from "../../ui/StatusGlyph";
 import type { ApprovalRequest, JobCard, JobPendingCard } from "../../types/domain";
@@ -24,6 +25,7 @@ export interface InboxData {
   breaches: { session: TerminalSession; spent: number; cap: number }[];
   /// Agents that declined or escalated, unacknowledged (D13).
   declines: Decline[];
+  reviews: Review[];
   /// Everything that waits for a human decision — the number on the rail
   /// and in the Inbox header are this same count.
   decisions: number;
@@ -43,6 +45,7 @@ export function useInbox(): InboxData {
   const events = useProofStore((s) => s.events);
   const project = useSessionStore((s) => s.project);
   const allDeclines = useDeclinesStore((s) => s.items);
+  const allReviews = useReviewsStore((s) => s.items);
   // A clock so relative ages move without a store write; the working window
   // needs it too.
   const [now, setNow] = useState(() => Date.now());
@@ -104,8 +107,10 @@ export function useInbox(): InboxData {
   const declines = allDeclines.filter(
     (d) => !d.resolved && (!project || d.project === project.root),
   );
+  const reviews = allReviews.filter((r) => !r.resolved && (!project || r.project === project.root));
   const decisions =
     queue.length +
+    reviews.length +
     jobsNeedingYou.length +
     pendingJobs.length +
     needsYouWithoutApproval +
@@ -122,6 +127,7 @@ export function useInbox(): InboxData {
     activeId,
     breaches,
     declines,
+    reviews,
     decisions,
   };
 }

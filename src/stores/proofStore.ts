@@ -81,6 +81,9 @@ export interface TimelineTurn {
   /// D5: the turn was interrupted at its budget cap (`budget_reached`), and
   /// what the human answered (`budget_decision`), when any.
   budget?: { spentUsd: number; capUsd: number; decision?: string; newCapUsd?: number };
+  /// D10: the reviewer agent's verdict on this turn (`review_verdict`) and
+  /// the human's answer (`review_decision`), when any.
+  review?: { verdict: string; findings: number; reviewer: string; decision?: string };
 }
 
 export interface TimelineTool {
@@ -272,6 +275,14 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         files: Array.isArray(p.files) ? p.files.length : 0,
         amend: p.amend === true,
       });
+    } else if (e.kind === "review_verdict") {
+      t.review = {
+        verdict: typeof p.verdict === "string" ? p.verdict : "approve",
+        findings: Array.isArray(p.findings) ? p.findings.length : 0,
+        reviewer: e.actor,
+      };
+    } else if (e.kind === "review_decision") {
+      if (t.review) t.review.decision = typeof p.decision === "string" ? p.decision : undefined;
     } else if (e.kind === "budget_reached") {
       t.budget = {
         spentUsd: typeof p.spentUsd === "number" ? p.spentUsd : 0,

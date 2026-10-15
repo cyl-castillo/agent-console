@@ -160,6 +160,29 @@ fn map_kind(e: &ProofEvent) -> Mapped {
                 phase: "post_execution",
             }
         }
+        "review_verdict" => {
+            let v = p
+                .get("verdict")
+                .and_then(Value::as_str)
+                .unwrap_or("approve");
+            Mapped {
+                action_type: "decision",
+                outcome: match v {
+                    "block" => "denied",
+                    "request_changes" => "failure",
+                    _ => "success",
+                },
+                phase: "post_execution",
+            }
+        }
+        "review_decision" => {
+            let over = p.get("decision").and_then(Value::as_str) == Some("override");
+            Mapped {
+                action_type: "decision",
+                outcome: if over { "success" } else { "denied" },
+                phase: "post_execution",
+            }
+        }
         "budget_reached" => Mapped {
             action_type: "escalation",
             outcome: "escalated",
@@ -614,6 +637,8 @@ Mapping from the Testigo ledger (the console's native chain):
 | turn_end | lifecycle | post_execution | success / failure / timeout |
 | agent_action (MCP) | tool_call | post_execution | success / denied |
 | agent_declined (MCP) | escalation | post_execution | escalated |
+| review_verdict (reviewer agent) | decision | post_execution | success / failure (request_changes) / denied (block) |
+| review_decision (human) | decision | post_execution | success (override) / denied (accept) |
 | budget_reached | escalation | concurrent | escalated |
 | budget_decision | decision | post_execution | success / denied (stop) |
 | anything else | lifecycle | concurrent | success |
