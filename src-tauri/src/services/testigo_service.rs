@@ -226,6 +226,12 @@ pub fn is_git_commit_command(cmd: &str) -> bool {
 
 #[derive(Default)]
 struct Inner {
+    /// The app, once it exists: every appended line is announced as
+    /// `ledger://appended` AFTER it is on disk, so the views re-read a ledger
+    /// that already holds it. (The hook events fire before the slow parts —
+    /// a turn-end snapshot can take seconds — which is how the conversation
+    /// used to lag until the next prompt.) None in tests and before setup.
+    app: Option<tauri::AppHandle>,
     /// project_root -> last (seq, hash); None = ledger empty. Lazily loaded
     /// from the file tail on first touch per project.
     tails: HashMap<String, Option<(u64, String)>>,
@@ -470,7 +476,27 @@ impl TestigoService {
         inner
             .tails
             .insert(project_root.to_string(), Some((ev.seq, ev.hash.clone())));
+        if let Some(app) = &inner.app {
+            use tauri::Emitter;
+            let _ = app.emit(
+                "ledger://appended",
+                serde_json::json!({
+                    "projectRoot": project_root,
+                    "seq": ev.seq,
+                    "kind": ev.kind,
+                    "termId": ev.term_id,
+                    "caseId": ev.case_id,
+                    "turnId": ev.turn_id,
+                }),
+            );
+        }
         Ok(ev)
+    }
+
+    /// Give the service the app handle so appended lines are announced
+    /// (`ledger://appended`). Called once from setup; harmless if never called.
+    pub fn attach_app(&self, app: tauri::AppHandle) {
+        self.inner.lock().app = Some(app);
     }
 
     /// A user prompt opens a new turn for its terminal (implicitly superseding

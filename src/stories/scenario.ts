@@ -3,7 +3,7 @@
 // settled (stores hydrate asynchronously after mount).
 import { applyFixtures, type FixtureMap } from "../dev/fixtures/registry";
 import { emit, resetEventBus } from "../dev/tauri-shim/event";
-import { invokeLog, setFixture } from "../dev/fixtures/registry";
+import { getFixture, invokeLog, setFixture } from "../dev/fixtures/registry";
 import { useThemeStore } from "../stores/themeStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { toastManager } from "../ui/Toast";
@@ -41,7 +41,12 @@ export function beginScenario(fixtures: FixtureMap = {}, theme: "dark" | "light"
   installAgentBridge();
   // Specs drive the backend side: push events the Rust side would emit and
   // read which commands the webview invoked in return.
-  (window as unknown as { __fixtures: unknown }).__fixtures = { emit, invokeLog, setFixture };
+  (window as unknown as { __fixtures: unknown }).__fixtures = {
+    emit,
+    invokeLog,
+    setFixture,
+    getFixture,
+  };
   applyFixtures(fixtures);
   useThemeStore.getState().setTheme(theme);
   // Stories render the working app, not first-run flows, unless they opt in.
