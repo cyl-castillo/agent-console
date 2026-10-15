@@ -8,6 +8,7 @@ import {
   UsagePill,
   VoicePill,
 } from "../../components/StatusBar";
+import { useBuildInfo } from "../../hooks/useBuildInfo";
 import { useChangesStore } from "../../stores/changesStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useShellStore } from "../../stores/shellStore";
@@ -36,6 +37,7 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
   const loadBranches = useChangesStore((s) => s.loadBranches);
   const { decisions: pending } = useInbox();
   const budgets = useBudgetStore();
+  const build = useBuildInfo();
   const byTerm = useLiveStatusStore((s) => s.byTerm);
   const sessions = useTerminalsStore((s) => s.sessions);
   const activeId = useTerminalsStore((s) => s.activeId);
@@ -146,6 +148,15 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
             {project.framework && <span>{project.framework}</span>}
             {workspace?.fileCount ? <span>{workspace.fileCount} files</span> : null}
             <span>v{__APP_VERSION__}</span>
+            {build?.debug && (
+              <span
+                className="font-mono"
+                title="Dev build: commit and build time of the running binary — if it is not what you just edited, you are staring at a stale binary"
+                data-testid="build-chip"
+              >
+                {build.commit} · {build.builtAt}
+              </span>
+            )}
           </div>
         </div>
       </Popover>

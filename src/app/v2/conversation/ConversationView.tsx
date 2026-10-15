@@ -31,6 +31,20 @@ export function ConversationView() {
   const [draft, setDraft] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const listRef = useRef<HTMLDivElement>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
+  const goTo = useShellStore((s) => s.goTo);
+  // Ctrl+E / palette "compose prompt": the conversation's draft IS the
+  // composer — bring Sessions up and focus it.
+  useEffect(
+    () =>
+      useUIStore.subscribe((s, prev) => {
+        if (!s.composerOpen || prev.composerOpen) return;
+        goTo("sessions");
+        useUIStore.getState().setComposerOpen(false);
+        window.setTimeout(() => draftRef.current?.focus(), 0);
+      }),
+    [goTo],
+  );
   const liveTurn = turns.length > 0 && turns[turns.length - 1].endTs === null;
   const hasTurns = turns.length > 0;
 
@@ -153,6 +167,7 @@ export function ConversationView() {
         data-testid="composer"
       >
         <Textarea
+          ref={draftRef}
           aria-label="Prompt for the agent"
           placeholder={
             liveTurn

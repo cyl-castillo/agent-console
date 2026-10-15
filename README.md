@@ -209,7 +209,7 @@ macOS and Windows builds use the same command; bundle output varies (`.dmg` / `.
 | `Ctrl+1` | Switch to Terminal tab |
 | `Ctrl+2` | Switch to Changes tab |
 | `Ctrl+3` | Switch to Preview tab |
-| `Ctrl+B` | Toggle workspace sidebar |
+| `Ctrl+B` | Toggle the list pane |
 | `Ctrl+J` | Toggle side panel |
 | `Ctrl+P` | Open command palette |
 | `Ctrl+/` | Show keyboard shortcuts |

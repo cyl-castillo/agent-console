@@ -11,7 +11,7 @@ palette registry and to this document.
 
 | id | opens |
 | --- | --- |
-| `nav.terminal` | the Terminal tab (v2: the conversation) |
+| `nav.terminal` | the Conversation tab of Sessions (the terminal is its drawer) |
 | `nav.changes` | the Changes tab |
 | `nav.preview` | the Preview tab |
 | `nav.skills` | Coach → Skills |
@@ -58,10 +58,9 @@ palette registry and to this document.
 
 | id | does |
 | --- | --- |
-| `ui.toggle_sidebar` | show/hide the workspace sidebar (v2: the list pane) |
+| `ui.toggle_sidebar` | show/hide the list pane |
 | `ui.toggle_right_panel` | show/hide the right panel |
 | `ui.toggle_theme` | dark ↔ light |
-| `ui.toggle_v2` | the redesigned shell (preview flag) |
 | `project.copy_path` | copy the project path |
 | `auth.claude_login` | open a `claude login` session |
 | `auth.codex_login` | open a `codex login` session |
@@ -73,7 +72,7 @@ palette registry and to this document.
 ## The bridge
 
 `window.__agentConsole` exposes `listActions()`, `invoke(id)` and `state()`
-(project, sessions, pending decisions, destination, `ui.v2`). Reads come from
+(project, sessions, pending decisions, destination). Reads come from
 the stores; every write goes through an action. In the app it is reachable
 from the console's own code and tests; the MCP server relays the same calls
 from the loopback listener.

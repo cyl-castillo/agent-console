@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-import { useChangesStore } from "../stores/changesStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
-import { useUIStore } from "../stores/uiStore";
 import { useModelStore, modelLabel } from "../stores/modelStore";
 import { useVoiceStore } from "../stores/voiceStore";
 import { useApprovalStore } from "../stores/approvalStore";
@@ -17,124 +15,7 @@ import { useInjectStore } from "../stores/injectStore";
 import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
 import type { TermInputDetail } from "./Terminal";
-import type { SessionUsage, WorkspaceContext } from "../types/domain";
-
-export function StatusBar({ workspace }: { workspace?: WorkspaceContext | null }) {
-  const project = useSessionStore((s) => s.project);
-  const status = useChangesStore((s) => s.status);
-  const branches = useChangesStore((s) => s.branches);
-  const setTab = useUIStore((s) => s.setTab);
-  const sessions = useTerminalsStore((s) => s.sessions);
-  const activeId = useTerminalsStore((s) => s.activeId);
-  const loadBranches = useChangesStore((s) => s.loadBranches);
-  const branch = status?.branch ?? null;
-
-  // Lazy-load branches once we know the current branch, so ahead/behind shows.
-  useEffect(() => {
-    if (branch && branches.length === 0) void loadBranches();
-  }, [branch, branches.length, loadBranches]);
-
-  // Hooks must run unconditionally — keep this above the early return.
-  const build = useBuildInfo();
-
-  if (!project) return null;
-
-  const branchInfo = branches.find((b) => b.name === branch);
-  const ahead = branchInfo?.ahead ?? 0;
-  const behind = branchInfo?.behind ?? 0;
-  const changesCount = status?.changes.length ?? 0;
-  const liveCount = sessions.filter((s) => s.status === "live").length;
-  const activeSession = sessions.find((s) => s.id === activeId);
-  const appVersion = __APP_VERSION__;
-
-  return (
-    <footer className="statusbar">
-      {branch && (
-        <button
-          className="sb-item sb-clickable"
-          onClick={() => setTab("changes")}
-          title="Open Changes"
-        >
-          <span className="sb-icon">⎇</span>
-          <span>{branch}</span>
-          {(ahead > 0 || behind > 0) && (
-            <span className="sb-sub">
-              {ahead > 0 && <>↑{ahead}</>}
-              {behind > 0 && <>↓{behind}</>}
-            </span>
-          )}
-        </button>
-      )}
-      {status?.isRepo && (
-        <button
-          className={`sb-item sb-clickable ${changesCount > 0 ? "sb-warn" : ""}`}
-          onClick={() => setTab("changes")}
-          title="Open Changes"
-        >
-          <span>
-            {changesCount} change{changesCount === 1 ? "" : "s"}
-          </span>
-        </button>
-      )}
-      <div className="sb-spacer" />
-      {activeSession && (
-        <button
-          className="sb-item sb-clickable"
-          onClick={() => setTab("terminal")}
-          title="Open Terminal"
-        >
-          <span className={`sb-dot sb-dot-${activeSession.status}`} />
-          <span>{activeSession.name}</span>
-        </button>
-      )}
-      <AgentStatePill onShowTerminal={() => setTab("terminal")} />
-      {activeSession && <MemoryPill termId={activeSession.id} />}
-      {activeSession && <ModelPill session={activeSession} projectRoot={project.root} />}
-      {activeSession?.agentSessionId && (
-        <UsagePill
-          termId={activeSession.id}
-          sessionId={activeSession.agentSessionId}
-          projectRoot={project.root}
-          agent={activeSession.agent}
-          live={activeSession.status === "live"}
-        />
-      )}
-      <VoicePill />
-      <HooksPill />
-      <span className="sb-item sb-muted" title="Live PTY sessions">
-        {liveCount} live
-      </span>
-      {project.language && (
-        <span className="sb-item sb-muted" title="Language">
-          {project.language}
-        </span>
-      )}
-      {project.framework && (
-        <span className="sb-item sb-muted" title="Framework">
-          {project.framework}
-        </span>
-      )}
-      {workspace?.fileCount ? (
-        <span className="sb-item sb-muted" title="Tracked files">
-          {workspace.fileCount} files
-        </span>
-      ) : null}
-      {build?.debug && (
-        <span
-          className="sb-item sb-muted"
-          title={`Dev build — commit ${build.commit}, built ${build.builtAt}. If this doesn't match what you just changed, you're on a stale binary.`}
-        >
-          dev {build.commit} · {build.builtAt}
-        </span>
-      )}
-      {appVersion && (
-        <span className="sb-item sb-muted" title="Agent Console version">
-          v{appVersion}
-        </span>
-      )}
-    </footer>
-  );
-}
+import type { SessionUsage } from "../types/domain";
 
 /// Is the CLI→console bridge alive? Four states, two of them actionable:
 /// off (hooks not installed — click installs), silent (installed, nothing
@@ -213,38 +94,6 @@ function formatWorking(ms: number): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ${(s % 60).toString().padStart(2, "0")}s`;
   return `${Math.floor(m / 60)}h ${(m % 60).toString().padStart(2, "0")}m`;
-}
-
-/// Glanceable agent activity. "waiting on you" (an approval is pending) is the
-/// reliable state; "working… N" shows elapsed time since the turn started and
-/// ends precisely on the Stop hook (activity decay stays as the fallback for
-/// hooks not yet installed/trusted). Idle renders nothing — the live session
-/// dot already says the agent is up.
-/// Build provenance chip data, dev builds only. One fetch per mount; the
-/// answer never changes for a running binary — that's the point: if the chip
-/// doesn't match what you just edited, you're staring at a stale binary.
-function useBuildInfo(): { commit: string; builtAt: string; debug: boolean } | null {
-  const [info, setInfo] = useState<{ commit: string; builtAt: string; debug: boolean } | null>(
-    null,
-  );
-  useEffect(() => {
-    ipc
-      .appBuildInfo()
-      .then((b) =>
-        setInfo({
-          commit: b.commit,
-          builtAt: b.buildTimeSecs
-            ? new Date(b.buildTimeSecs * 1000).toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : "?",
-          debug: b.debug,
-        }),
-      )
-      .catch(() => setInfo(null));
-  }, []);
-  return info;
 }
 
 export function AgentStatePill({ onShowTerminal }: { onShowTerminal: () => void }) {

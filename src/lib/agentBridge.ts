@@ -7,7 +7,6 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useApprovalStore } from "../stores/approvalStore";
 import { useShellStore } from "../stores/shellStore";
-import { useFlagsStore } from "../stores/flagsStore";
 
 declare const __APP_VERSION__: string;
 
@@ -23,7 +22,6 @@ export interface AgentBridge {
     sessions: { id: string; name: string; status: string; active: boolean }[];
     pendingDecisions: number;
     destination: string;
-    uiV2: boolean;
   };
 }
 
@@ -47,7 +45,6 @@ export function bridgeState() {
       .map((s) => ({ id: s.id, name: s.name, status: s.status, active: s.id === t.activeId })),
     pendingDecisions: useApprovalStore.getState().queue.length,
     destination: useShellStore.getState().destination,
-    uiV2: useFlagsStore.getState().flags["ui.v2"],
   };
 }
 

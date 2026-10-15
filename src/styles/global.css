@@ -378,27 +378,6 @@ select:focus-visible,
 .panel.left {
   grid-area: left;
 }
-.app.left-collapsed {
-  grid-template-columns: 0 1fr var(--right-w, 320px);
-  grid-template-areas:
-    "topbar topbar topbar"
-    "center center right"
-    "status status status";
-}
-.app.right-collapsed {
-  grid-template-columns: var(--left-w, 240px) 1fr 0;
-  grid-template-areas:
-    "topbar topbar topbar"
-    "left   center center"
-    "status status status";
-}
-.app.left-collapsed.right-collapsed {
-  grid-template-columns: 0 1fr 0;
-  grid-template-areas:
-    "topbar topbar topbar"
-    "center center center"
-    "status status status";
-}
 .panel.center {
   grid-area: center;
   background: var(--bg);
@@ -708,33 +687,6 @@ select:focus-visible,
 .tab.active {
   color: var(--text);
   border-bottom-color: var(--accent);
-}
-.tab-shortcut {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--text-faint);
-  letter-spacing: 0.3px;
-  opacity: 0.7;
-}
-.tab.active .tab-shortcut {
-  color: var(--text-dim);
-  opacity: 1;
-}
-.tab-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 16px;
-  padding: 0 5px;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--bg);
-  background: var(--accent);
-  border-radius: 8px;
-  letter-spacing: 0;
-  text-transform: none;
-  line-height: 1;
 }
 .tab-pane {
   flex: 1;
@@ -3457,68 +3409,6 @@ select:focus-visible,
 .panel.left {
   padding: 0;
 }
-.side-section {
-  display: flex;
-  flex-direction: column;
-  border-bottom: 1px solid var(--border);
-  min-height: 0;
-}
-.side-section.grow {
-  flex: 1;
-  min-height: 0;
-}
-.side-section.collapsed .side-section-body {
-  display: none;
-}
-.side-section-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-faint);
-  cursor: pointer;
-  user-select: none;
-}
-.side-section-header:hover {
-  color: var(--text);
-  background: var(--hover);
-}
-.side-section-header .caret {
-  font-size: 10px;
-  width: 10px;
-  color: var(--text-faint);
-}
-.side-section-header .title {
-  flex: 1;
-  text-align: left;
-}
-.side-badge {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: 8px;
-  padding: 0 6px;
-  font-size: 10px;
-  letter-spacing: 0;
-  text-transform: none;
-  min-width: 16px;
-  text-align: center;
-}
-.side-section-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: auto;
-}
-.side-section.grow .side-section-body {
-  flex: 1;
-}
 
 /* Sessions enrichments */
 .sessions-count {
@@ -4466,45 +4356,6 @@ select:focus-visible,
   margin: 14px 0 4px;
 }
 
-/* ===== Onboarding banner ===== */
-.onboarding-banner {
-  /* Absolute within .panel.center: floating over the workbench panel it used
-     to cover interactive controls pinned to the panel's bottom (e.g. Proof's
-     "sign & export"). Over the terminal/diff there is nothing clickable to hide. */
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  background: var(--accent-12);
-  border: 1px solid var(--accent-35);
-  color: var(--text);
-  border-radius: 8px;
-  font-size: 11.5px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  z-index: 50;
-}
-.ob-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.ob-dismiss {
-  background: none;
-  border: none;
-  color: var(--text-faint);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 0 4px;
-  line-height: 1;
-}
-.ob-dismiss:hover {
-  color: var(--text);
-}
-
 /* ===== Workbench empty state helper ===== */
 .wb-empty {
   display: flex;
@@ -5329,30 +5180,6 @@ select:focus-visible,
   overflow: auto;
 }
 
-/* --- Terminal empty state --- */
-.terminal-empty {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 14px;
-  padding: 24px;
-  color: var(--text-dim);
-  text-align: center;
-}
-.terminal-empty-title {
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.terminal-empty-copy {
-  max-width: 420px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
 /* --- Toasts --- */
 
 /* --- Shared panel error (PanelError component) --- */
@@ -5983,11 +5810,6 @@ select:focus-visible,
 }
 .usage-warn {
   color: var(--warn);
-}
-
-/* Muted side section (e.g. Changes when not a git repo). */
-.side-section.muted .side-section-header .title {
-  color: var(--text-faint);
 }
 
 /* ===== Light theme surface tweaks =====

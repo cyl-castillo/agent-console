@@ -1,6 +1,6 @@
-// The v2 shell (flag ui.v2): the same fixtures as App/*, rendered through the
-// rail → list → centre → inspector layout. Compared against their own
-// baseline; the v1 stories stay untouched.
+// The shell, surface by surface: rail → list → centre → inspector over the
+// fixture project. Every workbench tab has a story so each of the 19 panels
+// stays on the visual and a11y contract.
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import App from "../App";
 import { approvalEdit, approvalHigh, pendingApproval, ROOT } from "../dev/fixtures/defaults";
@@ -10,7 +10,6 @@ import { useDeclinesStore } from "../stores/declinesStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import type { FixtureMap } from "../dev/fixtures/registry";
 import { useApprovalStore } from "../stores/approvalStore";
-import { useFlagsStore } from "../stores/flagsStore";
 import { usePaletteStore } from "../stores/paletteStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useShellStore } from "../stores/shellStore";
@@ -18,7 +17,8 @@ import { useTerminalsStore } from "../stores/terminalsStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUIStore } from "../stores/uiStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
-import type { WorkbenchTab } from "../lib/workbenchTabs";
+import { WORKBENCH_TABS, type WorkbenchTab } from "../lib/workbenchTabs";
+import { destinationForTab } from "../app/v2/destinations";
 import type { Destination } from "../app/v2/destinations";
 import { beginScenario, settle, sleep } from "./scenario";
 
@@ -44,7 +44,6 @@ function scenario(opts: Opts = {}): StoryObj {
         useApprovalStore.setState({ queue: [] });
         usePaletteStore.getState().close();
         useToastStore.setState({ toasts: [] });
-        useFlagsStore.getState().set("ui.v2", true);
         if (opts.tab) localStorage.setItem(`agent-console:workbench-tab:${ROOT}`, opts.tab);
         await useSessionStore.getState().openProject(ROOT);
         return {};
@@ -145,3 +144,31 @@ export const SettingsSkills = scenario({ destination: "settings", tab: "skills" 
 export const SettingsMcp = scenario({ destination: "settings", tab: "mcp" });
 export const LightInbox = scenario({ theme: "light" });
 export const LightSessions = scenario({ theme: "light", destination: "sessions" });
+
+// ---- Every panel ------------------------------------------------------------
+
+const covered = new Set<WorkbenchTab>([
+  "jobs",
+  "roundtable",
+  "proof",
+  "permissions",
+  "skills",
+  "mcp",
+]);
+const panel: Partial<Record<WorkbenchTab, StoryObj>> = {};
+for (const tab of WORKBENCH_TABS) {
+  if (!covered.has(tab)) panel[tab] = scenario({ destination: destinationForTab(tab), tab });
+}
+export const PanelTurns = panel.turns!;
+export const PanelAdvisor = panel.advisor!;
+export const PanelLearning = panel.learning!;
+export const PanelContext = panel.context!;
+export const PanelSchedule = panel.schedule!;
+export const PanelVault = panel.vault!;
+export const PanelPlugins = panel.plugins!;
+export const PanelJira = panel.jira!;
+export const PanelTeams = panel.teams!;
+export const PanelAgenda = panel.agenda!;
+export const PanelNotes = panel.notes!;
+export const PanelTransfer = panel.transfer!;
+export const PanelFeedback = panel.feedback!;
