@@ -84,6 +84,55 @@ test.describe("stories", () => {
         stabilize: { waitForAriaBusy: false },
       });
       if (SNAPSHOTS) await expect(page).toHaveScreenshot(`${e.id}.png`);
+      // Layout gate (UI review 2026-10-15): the shell never scrolls as a
+      // document, and nothing pokes out of the viewport unless it sits inside
+      // a container that scrolls or clips on purpose. Overlays (modals,
+      // popovers) are positioned by their own rules and are skipped.
+      if (e.id.startsWith("app-v2--") || e.id.startsWith("app--")) {
+        const layout = await page.evaluate(() => {
+          const doc = document.documentElement;
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          const clips = (el: Element): boolean => {
+            for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+              const o = getComputedStyle(p);
+              if (/(auto|scroll|hidden|clip)/.test(`${o.overflowX} ${o.overflowY}`)) return true;
+            }
+            return false;
+          };
+          const out: string[] = [];
+          for (const el of Array.from(document.querySelectorAll("#root *"))) {
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) continue;
+            const cs = getComputedStyle(el);
+            if (
+              cs.position === "fixed" ||
+              el.closest("[role='dialog'],[data-popover],.modal,[data-base-ui-popup]")
+            )
+              continue;
+            if (
+              (r.bottom > vh + 1 || r.right > vw + 1 || r.left < -1 || r.top < -1) &&
+              !clips(el)
+            ) {
+              out.push(
+                `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}.${String(el.className).split(" ").slice(0, 3).join(".")} ` +
+                  `[${Math.round(r.left)},${Math.round(r.top)}→${Math.round(r.right)},${Math.round(r.bottom)}]`,
+              );
+            }
+            if (out.length >= 8) break;
+          }
+          return {
+            docScroll: [doc.scrollHeight, doc.clientHeight, doc.scrollWidth, doc.clientWidth],
+            out,
+          };
+        });
+        expect(
+          layout.docScroll[0] <= layout.docScroll[1] + 1 &&
+            layout.docScroll[2] <= layout.docScroll[3] + 1,
+          `story ${e.id}: the document scrolls (${layout.docScroll.join("/")})`,
+        ).toBe(true);
+        expect(layout.out, `story ${e.id}: elements outside the viewport`).toEqual([]);
+      }
       // The Storybook a11y addon may still be mid-run inside the preview on
       // slow CI runners ("Axe is already running"); wait it out, don't fail.
       const axe = await (async () => {
