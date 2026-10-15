@@ -55,7 +55,7 @@ export async function typeIntoActiveSession(
   const detail: TermInputDetail = { sessionId: active.id, data: trimmed };
   window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
   if (opts.submit) {
-    await new Promise<void>((r) => window.setTimeout(r, SUBMIT_DELAY_MS));
+    await new Promise<void>((r) => setTimeout(r, SUBMIT_DELAY_MS));
     const enter: TermInputDetail = { sessionId: active.id, data: "\r" };
     window.dispatchEvent(new CustomEvent("ac:term-input", { detail: enter }));
   }
