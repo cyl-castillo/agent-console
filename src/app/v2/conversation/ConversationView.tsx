@@ -17,6 +17,7 @@ import { Tooltip } from "../../../ui/Tooltip";
 import { IconButton } from "../../../ui/IconButton";
 import { newSession } from "../../actions";
 import { TurnBlock } from "./blocks";
+import { StatusGlyph } from "../../../ui/StatusGlyph";
 import { useSessionTimeline } from "./useSessionTimeline";
 
 /// The conversation the app renders itself (F4): the session's turns from the
@@ -102,12 +103,28 @@ export function ConversationView() {
       .catch((e) => showToast(`Review failed: ${String(e)}`, "error"));
   };
 
+  // What was sent and not yet witnessed as a prompt: shown at once, so the
+  // click never looks like nothing happened (the ledger line arrives through
+  // the hook a moment later, or never if the hooks are off — then the echo
+  // stays with its note).
+  const [pending, setPending] = useState<{ text: string; ts: number }[]>([]);
+  useEffect(() => {
+    if (pending.length === 0) return;
+    const witnessed = new Set(turns.map((t) => t.prompt.trim()));
+    const left = pending.filter((p) => !witnessed.has(p.text));
+    if (left.length !== pending.length) setPending(left);
+  }, [turns, pending]);
+
   const send = async () => {
     const text = draft.trim();
     if (!text) return;
     const ok = await typeIntoActiveSession(text, { submit: true });
-    if (ok) setDraft("");
-    else showToast("No live session to send to — copied to the clipboard instead", "info");
+    if (ok) {
+      setDraft("");
+      setPending((p) => [...p, { text, ts: Date.now() }]);
+      showToast(`Sent to ${session?.name ?? "the session"}`, "success");
+      draftRef.current?.focus();
+    } else showToast("No live session to send to — copied to the clipboard instead", "info");
   };
   const interrupt = () => {
     if (!session) return;
@@ -171,6 +188,25 @@ export function ConversationView() {
             ))}
           </div>
         )}
+        {pending.map((p) => (
+          <div
+            key={p.ts}
+            className="flex flex-col gap-1 border-t border-border px-3 py-2 font-sans text-body"
+            data-testid="pending-prompt"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-2 text-caption text-muted-foreground">
+              <StatusGlyph state="working" />
+              <span>you · sent to the terminal</span>
+              {now - p.ts > 15_000 && (
+                <span className="text-warn">
+                  · not witnessed yet — open the terminal (Ctrl+`) to see what the agent did with it
+                </span>
+              )}
+            </div>
+            <div className="whitespace-pre-wrap text-foreground">{p.text}</div>
+          </div>
+        ))}
       </div>
       <form
         className="flex shrink-0 flex-col gap-2 border-t border-border bg-surface-1 p-3"
@@ -192,7 +228,9 @@ export function ConversationView() {
           onChange={(e) => setDraft(e.target.value)}
           rows={2}
           onKeyDown={(e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            // Enter sends, like the terminal it stands in for; Shift+Enter
+            // (or Alt+Enter) adds a line. Ctrl/Cmd+Enter keeps sending too.
+            if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void send();
             }
@@ -221,12 +259,8 @@ export function ConversationView() {
             variant="primary"
             size="sm"
             disabled={!draft.trim()}
-            trailing={
-              <>
-                <Kbd>Ctrl</Kbd>
-                <Kbd>⏎</Kbd>
-              </>
-            }
+            trailing={<Kbd>⏎</Kbd>}
+            title="Enter sends · Shift+Enter adds a line"
           >
             Send
           </Button>

@@ -26,6 +26,9 @@ export function sendKeysToActiveSession(data: string): boolean {
   return true;
 }
 
+/// Gap between the text and its Enter (ms).
+export const SUBMIT_DELAY_MS = 80;
+
 export async function typeIntoActiveSession(
   text: string,
   opts: { submit?: boolean } = {},
@@ -46,10 +49,15 @@ export async function typeIntoActiveSession(
     useToastStore.getState().show("No live session — text copied instead", "info");
     return false;
   }
-  const detail: TermInputDetail = {
-    sessionId: active.id,
-    data: trimmed + (opts.submit ? "\r" : ""),
-  };
+  // The text first, Enter on its own a beat later — the way a person types.
+  // A TUI that treats a chunk ending in CR as a paste (and the CR as a line
+  // break) then still submits; Claude Code accepts both, Codex is stricter.
+  const detail: TermInputDetail = { sessionId: active.id, data: trimmed };
   window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
+  if (opts.submit) {
+    await new Promise<void>((r) => setTimeout(r, SUBMIT_DELAY_MS));
+    const enter: TermInputDetail = { sessionId: active.id, data: "\r" };
+    window.dispatchEvent(new CustomEvent("ac:term-input", { detail: enter }));
+  }
   return true;
 }

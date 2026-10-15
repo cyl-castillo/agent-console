@@ -77,11 +77,14 @@ describe("typeIntoActiveSession", () => {
     expect(world.tabs).toEqual(["terminal"]);
   });
 
-  it("appends Enter when submit is requested", async () => {
+  it("sends the text, then Enter as its own keystroke a beat later", async () => {
     world.sessions = [{ id: "t-1", status: "live" }];
     world.activeId = "t-1";
     await typeIntoActiveSession("run it", { submit: true });
-    expect(dispatched[0].detail).toEqual({ sessionId: "t-1", data: "run it\r" });
+    expect(dispatched.map((d) => d.detail)).toEqual([
+      { sessionId: "t-1", data: "run it" },
+      { sessionId: "t-1", data: "\r" },
+    ]);
   });
 
   it("falls back to the clipboard when there is no active session", async () => {
