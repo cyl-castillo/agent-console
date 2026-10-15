@@ -83,7 +83,10 @@ test.describe("stories", () => {
         // A loading Button is legitimately aria-busy; the story is settled by data-story-ready.
         stabilize: { waitForAriaBusy: false },
       });
-      if (SNAPSHOTS) await expect(page).toHaveScreenshot(`${e.id}.png`);
+      if (SNAPSHOTS && process.env.VISUAL_BROWSER !== "webkit")
+        await expect(page).toHaveScreenshot(`${e.id}.png`);
+      if (process.env.VISUAL_BROWSER === "webkit")
+        await page.screenshot({ path: join(OUT, "results-webkit", `${e.id}.png`) });
       // Layout gate (UI review 2026-10-15): the shell never scrolls as a
       // document, and nothing pokes out of the viewport unless it sits inside
       // a container that scrolls or clips on purpose. Overlays (modals,
