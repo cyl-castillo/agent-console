@@ -8812,7 +8812,9 @@ select:focus-visible,
 }
 .jobs-board {
   display: grid;
-  grid-template-columns: repeat(6, minmax(180px, 1fr));
+  /* Six columns must fit the centre at the default 1280 px window
+     (centre ≈ 960 px): 6 × 150 + 5 × 8 = 940. Narrower windows scroll. */
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
   gap: 8px;
   overflow: auto;
   flex: 1;
