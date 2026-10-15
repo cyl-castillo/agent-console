@@ -148,18 +148,39 @@ test("v2 sessions: the conversation is the stage, the terminal a drawer", async 
   await page.keyboard.press("Control+`");
   await expect(drawer).toHaveAttribute("data-open", "true");
 
-  // Sending from the composer types into the active session's PTY.
-  const received = page.evaluate(
-    () =>
-      new Promise<string>((resolve) =>
-        window.addEventListener("ac:term-input", (e) =>
-          resolve((e as CustomEvent<{ sessionId: string; data: string }>).detail.sessionId),
-        ),
+  // Sending from the composer types into the active session's PTY: the text,
+  // then Enter as its own keystroke. Plain Enter sends (Shift+Enter adds a
+  // line), and the prompt is echoed at once so the click never looks dead.
+  await page.evaluate(() => {
+    const w = window as unknown as { __termInputs: { sessionId: string; data: string }[] };
+    w.__termInputs = [];
+    window.addEventListener("ac:term-input", (e) =>
+      w.__termInputs.push((e as CustomEvent<{ sessionId: string; data: string }>).detail),
+    );
+  });
+  const prompt = page.getByLabel("Prompt for the agent");
+  await prompt.fill("Add a changelog");
+  await page.keyboard.press("Shift+Enter");
+  await prompt.type(" entry");
+  await expect(prompt).toHaveValue("Add a changelog\n entry");
+  await prompt.fill("Add a changelog entry");
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as { __termInputs: { data: string }[] }).__termInputs.map((d) => d.data),
       ),
-  );
-  await page.getByLabel("Prompt for the agent").fill("Add a changelog entry");
-  await page.keyboard.press("Control+Enter");
-  expect(await received).toBe("sess-auth");
+    )
+    .toEqual(["Add a changelog entry", "\r"]);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as unknown as { __termInputs: { sessionId: string }[] }).__termInputs[0].sessionId,
+    ),
+  ).toBe("sess-auth");
+  await expect(page.getByTestId("pending-prompt")).toContainText("Add a changelog entry");
+  await expect(prompt).toHaveValue("");
+  await expect(prompt).toBeFocused();
 
   // A file chip opens Changes at that file.
   await page.getByTestId("diff-block").first().getByRole("button").first().click();
