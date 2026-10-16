@@ -20,6 +20,12 @@ import { newSession } from "../../actions";
 import { TurnBlock } from "./blocks";
 import { StatusGlyph } from "../../../ui/StatusGlyph";
 import { useSessionTimeline } from "./useSessionTimeline";
+import {
+  UNWITNESSED_GRACE_MS,
+  holdsQueue,
+  unwitnessed,
+  type PendingPrompt,
+} from "./pendingPrompts";
 
 /// The conversation the app renders itself (F4): the session's turns from the
 /// ledger, newest at the bottom and kept in view, a composer that types into
@@ -108,11 +114,10 @@ export function ConversationView() {
   // click never looks like nothing happened (the ledger line arrives through
   // the hook a moment later, or never if the hooks are off — then the echo
   // stays with its note).
-  const [pending, setPending] = useState<{ text: string; ts: number }[]>([]);
+  const [pending, setPending] = useState<PendingPrompt[]>([]);
   useEffect(() => {
     if (pending.length === 0) return;
-    const witnessed = new Set(turns.map((t) => t.prompt.trim()));
-    const left = pending.filter((p) => !witnessed.has(p.text));
+    const left = unwitnessed(pending, turns);
     if (left.length !== pending.length) setPending(left);
   }, [turns, pending]);
 
@@ -133,8 +138,9 @@ export function ConversationView() {
   };
 
   // Ctrl+Enter: queue for later. The prompt waits here, visible and
-  // removable, and goes out on its own when the session has no live turn —
-  // one at a time, so each lands as its own turn.
+  // removable, and goes out on its own when the session is live and has no
+  // live turn — one at a time, so each lands as its own turn.
+  const sessionLive = session?.status === "live";
   const queued = usePromptQueueStore((s) => queueFor(s.bySession, session?.id));
   const enqueue = usePromptQueueStore((s) => s.enqueue);
   const removeQueued = usePromptQueueStore((s) => s.remove);
@@ -144,29 +150,37 @@ export function ConversationView() {
     enqueue(session.id, text);
     setDraft("");
     showToast(
-      liveTurn ? "Queued — goes out when this turn ends" : "Queued — going out now",
+      !sessionLive
+        ? "Queued — goes out when the session is live again"
+        : liveTurn
+          ? "Queued — goes out when this turn ends"
+          : "Queued — going out now",
       "info",
     );
     draftRef.current?.focus();
   };
+  // The last send holds the queue until it is witnessed, or for the grace
+  // period when nothing witnesses it (hooks off).
+  const queueHeld = holdsQueue(pending, now);
   const sending = useRef(false);
   useEffect(() => {
-    if (!session || liveTurn || queued.length === 0 || sending.current) return;
-    if (pending.length > 0) return; // the last send has not been witnessed yet
+    if (!session || !sessionLive || liveTurn || queueHeld || sending.current) return;
+    const next = queued[0];
+    if (!next) return;
+    // The prompt leaves the queue only once it is in the PTY. A failed
+    // delivery leaves it where it is — re-queueing it changed the queue,
+    // which re-ran this effect, which failed again: a hot loop that froze
+    // the webview whenever the session had stopped.
     sending.current = true;
-    const next = usePromptQueueStore.getState().shift(session.id);
-    if (!next) {
-      sending.current = false;
-      return;
-    }
     void deliver(next.text).then((ok) => {
       sending.current = false;
-      if (ok) showToast(`Queued prompt sent to ${session.name}`, "success");
-      else usePromptQueueStore.getState().enqueue(session.id, next.text);
+      if (!ok) return;
+      usePromptQueueStore.getState().remove(session.id, next.id);
+      showToast(`Queued prompt sent to ${session.name}`, "success");
     });
     // deliver/showToast are stable enough for this effect's purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.id, liveTurn, queued.length, pending.length]);
+  }, [session?.id, sessionLive, liveTurn, queued, queueHeld]);
   const interrupt = () => {
     if (!session) return;
     const detail: TermInputDetail = { sessionId: session.id, data: "\x1b" };
@@ -239,7 +253,7 @@ export function ConversationView() {
             <div className="flex items-center gap-2 text-caption text-muted-foreground">
               <StatusGlyph state="working" />
               <span>you · sent to the terminal</span>
-              {now - p.ts > 15_000 && (
+              {now - p.ts > UNWITNESSED_GRACE_MS && (
                 <span className="text-warn">
                   · not witnessed yet — open the terminal (Ctrl+`) to see what the agent did with it
                 </span>
@@ -292,7 +306,15 @@ export function ConversationView() {
                 <Clock size={14} className="mt-0.5 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1 whitespace-pre-wrap text-foreground">{q.text}</span>
                 <span className="shrink-0 text-caption text-faint-foreground">
-                  {i === 0 ? (liveTurn ? "next, when this turn ends" : "sending…") : `#${i + 1}`}
+                  {i !== 0
+                    ? `#${i + 1}`
+                    : !sessionLive
+                      ? "waiting for the session"
+                      : liveTurn
+                        ? "next, when this turn ends"
+                        : queueHeld
+                          ? "next, after the last send"
+                          : "sending…"}
                 </span>
                 <IconButton
                   size="sm"

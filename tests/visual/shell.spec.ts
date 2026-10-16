@@ -340,6 +340,79 @@ async function openV2(page: Page, story: string) {
   await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
 }
 
+test("a queued prompt waits for a stopped session instead of looping", async ({ page }) => {
+  await openV2(page, "app-v2--sessions");
+  await page.evaluate(() => {
+    const w = window as unknown as { __termInputs: { data: string }[] };
+    w.__termInputs = [];
+    window.addEventListener("ac:term-input", (e) =>
+      w.__termInputs.push((e as CustomEvent<{ data: string }>).detail),
+    );
+  });
+  const prompt = page.getByLabel("Prompt for the agent");
+  await expect(page.getByTestId("conversation")).toContainText("Working…");
+  await prompt.fill("Then add the changelog entry");
+  await page.keyboard.press("Control+Enter");
+  await expect(page.getByTestId("prompt-queue")).toContainText("next, when this turn ends");
+
+  // The PTY exits (the session is "stopped"), then the turn closes. Before
+  // the fix, a failed delivery re-queued the prompt and re-ran the sender
+  // forever: the webview froze.
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __fixtures: {
+        invokeLog: { cmd: string; args: Record<string, unknown> }[];
+        setFixture: (c: string, v: unknown) => void;
+        emit: (n: string, p: unknown) => Promise<void>;
+        getFixture: (c: string) => unknown;
+      };
+    };
+    for (const s of w.__fixtures.invokeLog.filter((i) => i.cmd === "term_spawn")) {
+      await w.__fixtures.emit("term://exit", {
+        id: `term-${String(s.args.termKey ?? "x")}`,
+        code: 0,
+      });
+    }
+    const base = w.__fixtures.getFixture("testigo_list") as {
+      turnId?: string;
+      termId?: string;
+      kind: string;
+    }[];
+    const live = [...base].reverse().find((e) => e.kind === "prompt" && e.termId === "sess-auth");
+    w.__fixtures.setFixture("testigo_list", [
+      ...base,
+      {
+        seq: 901,
+        ts: Date.now(),
+        caseId: "case-2026-10-13",
+        turnId: live?.turnId,
+        kind: "turn_end",
+        termId: "sess-auth",
+        actor: "agent",
+        payload: { summary: "Done.", filesChanged: [] },
+        prevHash: "",
+        hash: "",
+      },
+    ]);
+    await w.__fixtures.emit("ledger://appended", {
+      projectRoot: "/home/demo/code/demo-playground",
+      seq: 901,
+      kind: "turn_end",
+      termId: "sess-auth",
+    });
+  });
+  await expect(page.getByTestId("conversation")).toContainText("Done.");
+  // Still queued, labelled, nothing typed, and the page answers.
+  await expect(page.getByTestId("prompt-queue")).toContainText("waiting for the session");
+  await page.waitForTimeout(500);
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __termInputs: unknown[] }).__termInputs.length,
+    ),
+  ).toBe(0);
+  await expect(page.getByTestId("prompt-queue").locator("li")).toHaveCount(1);
+});
+
 test("v2 parity: the terminal survives a trip to the Inbox", async ({ page }) => {
   await openV2(page, "app-v2--sessions-drawer-open");
   const drawer = page.getByTestId("terminal-drawer");
