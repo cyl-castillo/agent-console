@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Clock, MessageSquare, Square, TerminalSquare, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowDown, Clock, MessageSquare, Square, TerminalSquare, X } from "lucide-react";
 import { typeIntoActiveSession } from "../../../lib/termInput";
 import type { TermInputDetail } from "../../../components/Terminal";
 import { useChangesStore } from "../../../stores/changesStore";
@@ -26,6 +26,13 @@ import {
   unwitnessed,
   type PendingPrompt,
 } from "./pendingPrompts";
+
+/// Claude has no interrupt hook: after Esc the ledger's turn stays open until
+/// the next prompt closes it. Interrupt is taken at its word after this long
+/// with no close — the turn shows as cut short and the queue moves on.
+export const INTERRUPT_GRACE_MS = 3000;
+/// Closer than this to the end counts as "reading the latest".
+const NEAR_BOTTOM_PX = 80;
 
 /// The conversation the app renders itself (F4): the session's turns from the
 /// ledger, newest at the bottom and kept in view, a composer that types into
@@ -55,25 +62,66 @@ export function ConversationView() {
       }),
     [goTo],
   );
-  const liveTurn = turns.length > 0 && turns[turns.length - 1].endTs === null;
+  // What was sent and not yet witnessed as a prompt: shown at once, so the
+  // click never looks like nothing happened (the ledger line arrives through
+  // the hook a moment later, or never if the hooks are off — then the echo
+  // stays with its note).
+  const [pending, setPending] = useState<PendingPrompt[]>([]);
+  useEffect(() => {
+    if (pending.length === 0) return;
+    const left = unwitnessed(pending, turns);
+    if (left.length !== pending.length) setPending(left);
+  }, [turns, pending]);
+
+  const last = turns.length > 0 ? turns[turns.length - 1] : null;
+  const lastOpen = last !== null && last.endTs === null;
   const hasTurns = turns.length > 0;
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
-  // End-anchored: the first paint lands at the bottom (the newest turn), and
-  // the view stays there as turns arrive unless the user scrolled up to read
-  // (then nothing moves under them).
-  const shown = useRef(0);
+
+  // Interrupt, taken at its word: Codex closes the turn through its hook,
+  // Claude never does. Pressing it marks the open turn "stopping"; after the
+  // grace with no close the turn shows as cut short and liveTurn lets go.
+  const [stopping, setStopping] = useState<{ turnId: string | null; at: number } | null>(null);
   useEffect(() => {
+    if (stopping && (!lastOpen || last?.turnId !== stopping.turnId)) setStopping(null);
+  }, [stopping, lastOpen, last?.turnId]);
+  const stoppedLocally = stopping !== null && lastOpen && now - stopping.at >= INTERRUPT_GRACE_MS;
+  const liveTurn = lastOpen && !stoppedLocally;
+
+  // End-anchored. Whether the reader is at the end is measured when THEY
+  // scroll (before anything grows under them), never after the DOM grew —
+  // measured after, a long reply had already pushed the end out of reach and
+  // the view stayed put without a word. Away from the end, growth raises a
+  // pill instead of moving the view.
+  const atBottom = useRef(true);
+  const [unseen, setUnseen] = useState(false);
+  const measure = () => {
+    const el = listRef.current;
+    if (!el || el.clientHeight === 0) return;
+    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    if (atBottom.current) setUnseen(false);
+  };
+  const toBottom = () => {
     const el = listRef.current;
     if (!el) return;
-    const first = shown.current === 0 && turns.length > 0;
-    shown.current = turns.length;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (first || nearBottom) el.scrollTop = el.scrollHeight;
-  }, [turns]);
+    el.scrollTop = el.scrollHeight;
+    atBottom.current = true;
+    setUnseen(false);
+  };
+  const shown = useRef({ turns: 0, height: 0 });
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const first = shown.current.turns === 0 && turns.length > 0;
+    const grew = el.scrollHeight > shown.current.height;
+    shown.current = { turns: turns.length, height: el.scrollHeight };
+    if (first || atBottom.current) toBottom();
+    else if (grew && el.clientHeight > 0) setUnseen(true);
+  }, [turns, pending]);
   // The Sessions zone stays mounted while hidden (display:none → 0 px tall),
   // and the drawer changes the list's height: re-anchor to the end when the
   // box becomes visible for the first time or resizes while at the bottom.
@@ -81,21 +129,13 @@ export function ConversationView() {
     const el = listRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     let anchoredVisible = el.clientHeight > 0;
-    let atBottom = true;
-    const onScroll = () => {
-      if (el.clientHeight > 0) atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    };
     const ro = new ResizeObserver(() => {
       if (el.clientHeight === 0) return;
-      if (!anchoredVisible || atBottom) el.scrollTop = el.scrollHeight;
+      if (!anchoredVisible || atBottom.current) el.scrollTop = el.scrollHeight;
       anchoredVisible = true;
     });
-    el.addEventListener("scroll", onScroll);
     ro.observe(el);
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      ro.disconnect();
-    };
+    return () => ro.disconnect();
     // Re-attach once turns exist: the first anchoring needs real content.
   }, [hasTurns]);
 
@@ -110,17 +150,6 @@ export function ConversationView() {
       .catch((e) => showToast(`Review failed: ${String(e)}`, "error"));
   };
 
-  // What was sent and not yet witnessed as a prompt: shown at once, so the
-  // click never looks like nothing happened (the ledger line arrives through
-  // the hook a moment later, or never if the hooks are off — then the echo
-  // stays with its note).
-  const [pending, setPending] = useState<PendingPrompt[]>([]);
-  useEffect(() => {
-    if (pending.length === 0) return;
-    const left = unwitnessed(pending, turns);
-    if (left.length !== pending.length) setPending(left);
-  }, [turns, pending]);
-
   const deliver = async (text: string): Promise<boolean> => {
     const ok = await typeIntoActiveSession(text, { submit: true });
     if (ok) setPending((p) => [...p, { text, ts: Date.now() }]);
@@ -129,6 +158,8 @@ export function ConversationView() {
   const send = async () => {
     const text = draft.trim();
     if (!text) return;
+    // Sending is reading the latest: the echo lands in view.
+    atBottom.current = true;
     const ok = await deliver(text);
     if (ok) {
       setDraft("");
@@ -185,6 +216,10 @@ export function ConversationView() {
     if (!session) return;
     const detail: TermInputDetail = { sessionId: session.id, data: "\x1b" };
     window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
+    setStopping({ turnId: last?.turnId ?? null, at: Date.now() });
+  };
+  const openTerminal = () => {
+    if (!drawerOpen) toggleDrawer();
   };
   const openFile = (path: string) => {
     void selectFile(path);
@@ -218,50 +253,81 @@ export function ConversationView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="conversation">
-      <div ref={listRef} className="min-h-0 flex-1 overflow-auto">
-        {turns.length === 0 ? (
-          <EmptyState
-            className="h-full"
-            icon={<MessageSquare />}
-            title="No turns yet"
-            description="Send a prompt below. Each turn lands here as it happens: prompt, tools, files, tests, proof. If prompts go by and nothing shows up, check the hooks pill in the status bar."
-          />
-        ) : (
-          <div className="divide-y divide-border">
-            {turns.map((t, i) => (
-              <TurnBlock
-                key={t.turnId ?? i}
-                turn={t}
-                live={i === turns.length - 1 && t.endTs === null}
-                now={now}
-                onOpenFile={openFile}
-                onCopy={() => copy(t.summary)}
-                onRerun={() => rerun(t.prompt)}
-                onLedger={() => setWorkbenchTab("proof")}
-                onReview={t.termId && t.turnId ? () => review(t.termId!, t.turnId!) : undefined}
-              />
-            ))}
-          </div>
-        )}
-        {pending.map((p) => (
-          <div
-            key={p.ts}
-            className="flex flex-col gap-1 border-t border-border px-3 py-2 font-sans text-body"
-            data-testid="pending-prompt"
-            aria-live="polite"
-          >
-            <div className="flex items-center gap-2 text-caption text-muted-foreground">
-              <StatusGlyph state="working" />
-              <span>you · sent to the terminal</span>
-              {now - p.ts > UNWITNESSED_GRACE_MS && (
-                <span className="text-warn">
-                  · not witnessed yet — open the terminal (Ctrl+`) to see what the agent did with it
-                </span>
-              )}
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={listRef}
+          onScroll={measure}
+          className="h-full overflow-auto"
+          role="log"
+          aria-label="Conversation"
+          data-testid="conversation-log"
+        >
+          {turns.length === 0 ? (
+            <EmptyState
+              className="h-full"
+              icon={<MessageSquare />}
+              title="No turns yet"
+              description="Send a prompt below. Each turn lands here as it happens: prompt, tools, files, tests, proof. If prompts go by and nothing shows up, check the hooks pill in the status bar."
+            />
+          ) : (
+            <div className="divide-y divide-border">
+              {turns.map((t, i) => {
+                const isLast = i === turns.length - 1;
+                // Interrupt taken at its word: the open turn reads as cut short
+                // once the grace passed with no close from the ledger.
+                const turn =
+                  isLast && stoppedLocally && stopping
+                    ? { ...t, endTs: stopping.at, interrupted: true }
+                    : t;
+                return (
+                  <TurnBlock
+                    key={t.turnId ?? i}
+                    turn={turn}
+                    live={isLast && liveTurn}
+                    now={now}
+                    onOpenFile={openFile}
+                    onCopy={() => copy(t.summary)}
+                    onRerun={() => rerun(t.prompt)}
+                    onLedger={() => setWorkbenchTab("proof")}
+                    onReview={t.termId && t.turnId ? () => review(t.termId!, t.turnId!) : undefined}
+                    onMore={openTerminal}
+                  />
+                );
+              })}
             </div>
-            <div className="whitespace-pre-wrap text-foreground">{p.text}</div>
-          </div>
-        ))}
+          )}
+          {pending.map((p) => (
+            <div
+              key={p.ts}
+              className="flex flex-col gap-1 border-t border-border px-3 py-2 font-sans text-body"
+              data-testid="pending-prompt"
+              aria-live="polite"
+            >
+              <div className="flex items-center gap-2 text-caption text-muted-foreground">
+                <StatusGlyph state="working" />
+                <span>you · sent to the terminal</span>
+                {now - p.ts > UNWITNESSED_GRACE_MS && (
+                  <span className="text-warn">
+                    · not witnessed yet — open the terminal (Ctrl+`) to see what the agent did with
+                    it
+                  </span>
+                )}
+              </div>
+              <div className="whitespace-pre-wrap text-foreground">{p.text}</div>
+            </div>
+          ))}
+        </div>
+        {unseen && (
+          <button
+            type="button"
+            onClick={toBottom}
+            className="unbutton absolute bottom-2 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 rounded-pill border border-border bg-surface-2 px-3 py-1 font-sans text-small text-foreground shadow-md hover:bg-[var(--hover)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+            data-testid="new-reply-pill"
+          >
+            <ArrowDown size={14} aria-hidden />
+            New reply
+          </button>
+        )}
       </div>
       <form
         className="flex shrink-0 flex-col gap-2 border-t border-border bg-surface-1 p-3"
@@ -339,8 +405,15 @@ export function ConversationView() {
             />
           </Tooltip>
           {liveTurn && (
-            <Button size="sm" variant="danger" icon={<Square size={12} />} onClick={interrupt}>
-              Interrupt
+            <Button
+              size="sm"
+              variant="danger"
+              icon={<Square size={12} />}
+              onClick={interrupt}
+              disabled={stopping !== null}
+              data-testid="interrupt"
+            >
+              {stopping ? "Stopping…" : "Interrupt"}
             </Button>
           )}
           <span className="flex-1" />

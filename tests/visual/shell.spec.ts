@@ -588,3 +588,153 @@ test("F1 sidebar: names keep their width, rows are flat, recency orders, ✻ sta
   await expect(page.getByTestId("session-sess-m05")).toHaveAttribute("data-state", "working");
   await expect(page.getByTestId("session-sess-m06")).toHaveAttribute("data-state", "idle");
 });
+
+// ---- CHAT-2026-10 F2: the chat follows and answers -------------------------
+
+type Fx = {
+  __fixtures: {
+    setFixture: (c: string, v: unknown) => void;
+    emit: (n: string, p: unknown) => Promise<void>;
+    getFixture: (c: string) => unknown;
+  };
+};
+/// Append one ledger line for sess-auth and announce it, as the Rust side does.
+const appendLedger = (page: Page, line: Record<string, unknown>) =>
+  page.evaluate(async (line) => {
+    const w = window as unknown as Fx;
+    const base = w.__fixtures.getFixture("testigo_list") as { kind: string; termId?: string }[];
+    w.__fixtures.setFixture("testigo_list", [...base, line]);
+    await w.__fixtures.emit("ledger://appended", {
+      projectRoot: "/home/demo/code/demo-playground",
+      seq: line.seq,
+      kind: line.kind,
+      termId: "sess-auth",
+    });
+  }, line);
+const liveTurnId = (page: Page) =>
+  page.evaluate(() => {
+    const base = (window as unknown as Fx).__fixtures.getFixture("testigo_list") as {
+      kind: string;
+      termId?: string;
+      turnId?: string;
+    }[];
+    return [...base].reverse().find((e) => e.kind === "prompt" && e.termId === "sess-auth")?.turnId;
+  });
+const closeLine = (turnId: string | undefined, summary: string, seq = 900) => ({
+  seq,
+  ts: Date.now(),
+  caseId: "case-2026-10-13",
+  turnId,
+  kind: "turn_end",
+  termId: "sess-auth",
+  actor: "agent",
+  payload: { summary, summaryTruncated: summary.length >= 1000, filesChanged: [] },
+  prevHash: "",
+  hash: "",
+});
+const distanceFromEnd = (page: Page) =>
+  page.evaluate(() => {
+    const el = document.querySelector("[data-testid='conversation-log']") as HTMLElement;
+    return el.scrollHeight - el.scrollTop - el.clientHeight;
+  });
+const LONG = "The agent wrote a long reply here. ".repeat(40);
+
+test("F2 the conversation follows: a long reply and a send land at the end", async ({ page }) => {
+  await openV2(page, "app-v2--sessions");
+  expect(await distanceFromEnd(page)).toBeLessThanOrEqual(1);
+  await appendLedger(page, closeLine(await liveTurnId(page), LONG));
+  await expect(page.getByTestId("conversation")).toContainText("The agent wrote a long reply");
+  await expect.poll(() => distanceFromEnd(page)).toBeLessThanOrEqual(1);
+  await expect(page.getByTestId("new-reply-pill")).toHaveCount(0);
+  // The cut summary says where the rest is, and takes you there.
+  await page.getByTestId("summary-more").click();
+  await expect(page.getByTestId("terminal-drawer")).toHaveAttribute("data-open", "true");
+  await page.keyboard.press("Control+`");
+
+  const prompt = page.getByLabel("Prompt for the agent");
+  await prompt.fill("And now the changelog");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("pending-prompt")).toContainText("And now the changelog");
+  await expect.poll(() => distanceFromEnd(page)).toBeLessThanOrEqual(1);
+});
+
+test("F2 away from the end, a reply raises a pill and the view stays put", async ({ page }) => {
+  await openV2(page, "app-v2--sessions");
+  await page.evaluate(() => {
+    const el = document.querySelector("[data-testid='conversation-log']") as HTMLElement;
+    el.scrollTop = 0;
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (document.querySelector("[data-testid='conversation-log']") as HTMLElement).scrollTop,
+      ),
+    )
+    .toBe(0);
+  await appendLedger(page, closeLine(await liveTurnId(page), LONG));
+  await expect(page.getByTestId("new-reply-pill")).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => (document.querySelector("[data-testid='conversation-log']") as HTMLElement).scrollTop,
+    ),
+  ).toBe(0);
+  await page.getByTestId("new-reply-pill").click();
+  await expect.poll(() => distanceFromEnd(page)).toBeLessThanOrEqual(1);
+  await expect(page.getByTestId("new-reply-pill")).toHaveCount(0);
+});
+
+test("F2 a prompt on an open turn ends it as interrupted; the new one is live", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  await expect(page.getByTestId("turn")).toHaveCount(3);
+  await appendLedger(page, {
+    seq: 902,
+    ts: Date.now(),
+    caseId: "case-2026-10-13",
+    turnId: "turn-004",
+    kind: "prompt",
+    termId: "sess-auth",
+    actor: "human",
+    payload: { prompt: "Next thing, please" },
+    prevHash: "",
+    hash: "",
+  });
+  await expect(page.getByTestId("turn")).toHaveCount(4);
+  await expect(page.getByTestId("turn").nth(2)).toContainText("interrupted");
+  await expect(page.getByTestId("turn").nth(2)).not.toHaveAttribute("data-live", "true");
+  await expect(page.getByTestId("turn").nth(3)).toHaveAttribute("data-live", "true");
+  await expect(page.getByTestId("turn").nth(3)).toContainText("Next thing, please");
+});
+
+test("F2 Interrupt is taken at its word: the turn reads cut short and the queue goes out", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  await page.evaluate(() => {
+    const w = window as unknown as { __termInputs: { data: string }[] };
+    w.__termInputs = [];
+    window.addEventListener("ac:term-input", (e) =>
+      w.__termInputs.push((e as CustomEvent<{ data: string }>).detail),
+    );
+  });
+  const prompt = page.getByLabel("Prompt for the agent");
+  await prompt.fill("After that, the docs");
+  await page.keyboard.press("Control+Enter");
+  await expect(page.getByTestId("prompt-queue")).toContainText("next, when this turn ends");
+  await page.getByTestId("interrupt").click();
+  await expect(page.getByTestId("interrupt")).toContainText("Stopping…");
+  await expect(page.getByTestId("interrupt")).toBeDisabled();
+  // Claude sends no close: after the grace the turn reads as cut short, the
+  // Interrupt button is gone and the queued prompt goes out on its own.
+  await expect(page.getByTestId("turn").last()).toContainText("interrupted", { timeout: 8000 });
+  await expect(page.getByTestId("interrupt")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as { __termInputs: { data: string }[] }).__termInputs.map((d) => d.data),
+      ),
+    )
+    .toEqual(["\x1b", "After that, the docs", "\r"]);
+  await expect(page.getByTestId("prompt-queue")).toHaveCount(0);
+});

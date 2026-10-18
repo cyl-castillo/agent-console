@@ -252,6 +252,36 @@ describe("buildTimeline", () => {
     expect(ok[0].interrupted).toBe(false);
   });
 
+  it("a new prompt on the same terminal ends the turn still open there (CHAT-2026-10 F2)", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", termId: "t", payload: { prompt: "a" } }),
+      ev({ seq: 2, ts: 20, kind: "prompt", turnId: "T2", termId: "t", payload: { prompt: "b" } }),
+      // Another terminal's open turn is not touched.
+      ev({ seq: 3, ts: 30, kind: "prompt", turnId: "T3", termId: "u", payload: { prompt: "c" } }),
+    ]);
+    expect(turns.map((t) => [t.turnId, t.endTs, t.interrupted, t.superseded])).toEqual([
+      ["T1", 20, true, true],
+      ["T2", null, false, false],
+      ["T3", null, false, false],
+    ]);
+    // The Rust side's synthetic close carries the same marks.
+    const closed = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", termId: "t", payload: { prompt: "a" } }),
+      ev({
+        seq: 2,
+        ts: 20,
+        kind: "turn_end",
+        turnId: "T1",
+        termId: "t",
+        payload: { interrupted: true, superseded: true },
+      }),
+      ev({ seq: 3, ts: 20, kind: "prompt", turnId: "T2", termId: "t", payload: { prompt: "b" } }),
+    ]);
+    expect(closed[0].superseded).toBe(true);
+    expect(closed[0].endTs).toBe(20);
+    expect(closed[1].endTs).toBeNull();
+  });
+
   it("carries the rewind bindings: term, session, cwd and post-turn snapshot", () => {
     const turns = buildTimeline([
       ev({
@@ -470,6 +500,7 @@ function turn(partial: Partial<TimelineTurn>): TimelineTurn {
     summaryTruncated: false,
     failed: false,
     interrupted: false,
+    superseded: false,
     rewound: false,
     checks: [],
     commits: [],

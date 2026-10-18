@@ -517,6 +517,26 @@ impl TestigoService {
         Self::ensure_tail(&mut inner, project_root)?;
         let turn_id = uuid::Uuid::new_v4().to_string();
         if let Some(t) = term_id {
+            // A turn still open on this terminal never got its Stop: Claude
+            // has no interrupt hook (Esc leaves the turn open), and a killed
+            // session fires nothing. Close it here, marked as cut short, so
+            // the ledger never shows two live turns on one terminal and
+            // nothing in the UI waits on a turn that will not end.
+            if let Some(open) = inner.turns.remove(t) {
+                let case = Self::case_for(&inner, term_id);
+                Self::record(
+                    &mut inner,
+                    project_root,
+                    ts,
+                    case,
+                    Some(open.turn_id),
+                    "turn_end",
+                    Some(t.to_string()),
+                    session_id.map(String::from),
+                    "agent",
+                    json!({ "interrupted": true, "superseded": true }),
+                )?;
+            }
             inner.turns.insert(
                 t.to_string(),
                 TurnState {
@@ -1604,6 +1624,56 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// CHAT-2026-10 F2: a prompt on a terminal whose turn is still open
+    /// (Esc in Claude, a killed session) closes that turn as cut short
+    /// before opening the new one — one live turn per terminal, ever.
+    #[test]
+    fn a_prompt_on_a_terminal_with_an_open_turn_closes_it_as_interrupted() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-testigo-f2-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let svc = TestigoService::new();
+        let root = "/proj/open";
+        let first = svc
+            .on_prompt(root, 1, Some("t1"), None, Some("first"), None, None)
+            .unwrap();
+        let second = svc
+            .on_prompt(root, 5, Some("t1"), None, Some("second"), None, None)
+            .unwrap();
+        assert_ne!(first.turn_id, second.turn_id);
+        let events = svc.list(root, None, None).unwrap();
+        let close = events
+            .iter()
+            .find(|e| e.kind == "turn_end")
+            .expect("the open turn was closed");
+        assert_eq!(close.turn_id, first.turn_id);
+        assert_eq!(close.ts, 5, "closed at the moment the next prompt landed");
+        assert_eq!(close.payload["interrupted"], true);
+        assert_eq!(close.payload["superseded"], true);
+        assert_eq!(close.seq + 1, second.seq, "right before the new prompt");
+        // A terminal with no open turn gets no close.
+        svc.on_prompt(root, 6, Some("t2"), None, Some("other"), None, None)
+            .unwrap();
+        let closes = svc
+            .list(root, None, None)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "turn_end")
+            .count();
+        assert_eq!(closes, 1);
+        // The new turn is the one a real Stop closes.
+        let end = svc
+            .on_turn_end(root, 9, Some("t1"), None, json!({}))
+            .unwrap();
+        assert_eq!(end.turn_id, second.turn_id);
+    }
+
     /// D9: what an agent does through the console's MCP server is witnessed
     /// under the agent's identity, on the session's lane when it names one.
     #[test]
@@ -2323,7 +2393,9 @@ mod tests {
         let root = "/proj/suffix";
         svc.on_prompt(root, 1, Some("t1"), None, Some("first"), None, None)
             .unwrap();
-        svc.on_prompt(root, 2, Some("t1"), None, Some("second"), None, None)
+        // A second terminal: a second prompt on t1 would first close t1's
+        // open turn (F2), and this test wants exactly two sealed lines.
+        svc.on_prompt(root, 2, Some("t2"), None, Some("second"), None, None)
             .unwrap();
         let path = TestigoService::ledger_path(root).unwrap();
         let original = fs::read_to_string(&path).unwrap();
