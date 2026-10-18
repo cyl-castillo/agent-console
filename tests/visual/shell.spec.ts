@@ -525,3 +525,66 @@ test("D12 harness lab: declared metric, lineage, and a run the human merges", as
     )
     .toBe(true);
 });
+
+/// CHAT-2026-10 F1: the sidebar reads at thirty sessions. The name keeps the
+/// row's width (actions live out of flow), rows carry no button chrome, each
+/// group is newest-activity first, "working" belongs to the terminal that
+/// earned it, and the rail badge counts what needs the human, not what is live.
+test("F1 sidebar: names keep their width, rows are flat, recency orders, ✻ stays put", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date(1792245600000));
+  await openV2(page, "app-v2--sessions-many");
+  const list = page.getByTestId("sessions-list");
+  const names = list.getByTestId("session-name");
+  await expect(names).toHaveCount(30);
+  for (const box of await names.evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect().width),
+  )) {
+    expect(box).toBeGreaterThanOrEqual(150);
+  }
+  const row = page.locator("[data-testid='session-sess-m09'] > button");
+  await expect(row).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(row).toHaveCSS("border-top-width", "0px");
+
+  // Groups: 1–3 working (open turn), 4–8 idle, the rest stopped — and each
+  // group newest first, by (k · 7) mod 30 slots ago.
+  const ids = (state: string) =>
+    page
+      .locator(`[data-testid='sessions-${state}'] [data-testid^='session-sess-']`)
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")!.slice(8)));
+  const order = (ks: number[]) =>
+    [...ks]
+      .sort((a, b) => ((a * 7) % 30) - ((b * 7) % 30))
+      .map((k) => `sess-m${String(k).padStart(2, "0")}`);
+  expect(await ids("working")).toEqual(order([1, 2, 3]));
+  expect(await ids("stopped")).toEqual(order(Array.from({ length: 22 }, (_, i) => i + 9)));
+  await expect(
+    page.locator("[data-testid='sessions-idle'] [data-testid^='session-sess-']"),
+  ).toHaveCount(5);
+
+  // The rail counts "needs you", not "live": eight live sessions, no badge.
+  await expect(page.getByTestId("rail-sessions")).toHaveAttribute("aria-label", "Sessions");
+  await expect(list).toContainText("Sessions8");
+
+  // A hook event names its terminal: ✻ lands on that row and stays there
+  // when another row is clicked.
+  await page.evaluate(() =>
+    (
+      window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+    ).__fixtures.emit("hook://user_prompt", {
+      type: "user_prompt",
+      ts: Date.now(),
+      prompt: "Carry on",
+      termId: "sess-m05",
+    }),
+  );
+  await expect(page.getByTestId("session-sess-m05")).toHaveAttribute("data-state", "working");
+  await page.getByTestId("session-sess-m06").getByRole("button").first().click();
+  await expect(page.locator("[data-testid='session-sess-m06'] > button").first()).toHaveAttribute(
+    "aria-current",
+    "true",
+  );
+  await expect(page.getByTestId("session-sess-m05")).toHaveAttribute("data-state", "working");
+  await expect(page.getByTestId("session-sess-m06")).toHaveAttribute("data-state", "idle");
+});

@@ -1,18 +1,21 @@
 import { cn } from "@/lib/cn";
 
-export type AgentState = "needs-you" | "working" | "review" | "done" | "failed" | "stopped";
+export type AgentState =
+  "needs-you" | "working" | "review" | "done" | "idle" | "failed" | "stopped";
 
 const META: Record<AgentState, { label: string; className: string; glyph: string }> = {
   "needs-you": { label: "Needs you", className: "text-warn", glyph: "●" },
   working: { label: "Working", className: "text-primary", glyph: "✻" },
   review: { label: "Ready for review", className: "text-purple", glyph: "◆" },
   done: { label: "Done", className: "text-ok", glyph: "✓" },
+  idle: { label: "Idle", className: "text-muted-foreground", glyph: "∙" },
   failed: { label: "Failed", className: "text-danger", glyph: "✕" },
-  stopped: { label: "Stopped", className: "text-faint-foreground", glyph: "∙" },
+  stopped: { label: "Stopped", className: "text-faint-foreground", glyph: "○" },
 };
 
-/// The five attention states, each with a glyph AND a name — never colour
-/// alone. `working` pulses unless the user prefers reduced motion.
+/// The attention states, each with a glyph AND a name — never colour alone.
+/// `working` pulses unless the user prefers reduced motion. `done` is a
+/// finished turn; `idle` is a live session with nothing happening.
 export function StatusGlyph({
   state,
   showLabel,
@@ -27,6 +30,7 @@ export function StatusGlyph({
     <span
       role="img"
       aria-label={m.label}
+      title={showLabel ? undefined : m.label}
       className={cn(
         "inline-flex items-center gap-1.5 font-sans text-small",
         m.className,

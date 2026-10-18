@@ -18,7 +18,11 @@ export interface InboxData {
   approvals: ApprovalRequest[];
   jobsNeedingYou: JobCard[];
   pendingJobs: JobPendingCard[];
+  /// Each group newest-activity first.
   byState: Map<AgentState, TerminalSession[]>;
+  /// Last activity per session: the later of the store's stamp and the
+  /// session's last ledger line — the age in the list and its order.
+  lastActive: Map<string, number>;
   sessions: TerminalSession[];
   activeId: string | null;
   /// Sessions whose cost crossed their cap (the turn was interrupted).
@@ -37,6 +41,7 @@ export function useInbox(): InboxData {
   const queue = useApprovalStore((s) => s.queue);
   const waiting = useAgentStatusStore((s) => s.waiting);
   const workingUntil = useAgentStatusStore((s) => s.workingUntil);
+  const workingTermId = useAgentStatusStore((s) => s.workingTermId);
   const sessions = useTerminalsStore((s) => s.sessions);
   const activeId = useTerminalsStore((s) => s.activeId);
   const board = useJobsStore((s) => s.board);
@@ -58,7 +63,9 @@ export function useInbox(): InboxData {
   // Sessions whose latest ledger turn is still open and recent.
   const OPEN_TURN_FRESH_MS = 15 * 60_000;
   const lastTurn = new Map<string, { ended: boolean; ts: number }>();
+  const lastEvent = new Map<string, number>();
   for (const e of events) {
+    if (e.termId) lastEvent.set(e.termId, Math.max(lastEvent.get(e.termId) ?? 0, e.ts));
     if (!e.termId || !e.turnId) continue;
     if (e.kind === "prompt") lastTurn.set(e.termId, { ended: false, ts: e.ts });
     else {
@@ -75,6 +82,10 @@ export function useInbox(): InboxData {
       .map(([id]) => id),
   );
   const approvalTermIds = queue.map((r) => r.termId).filter((t): t is string => Boolean(t));
+  const lastActive = new Map<string, number>();
+  for (const s of sessions) {
+    lastActive.set(s.id, Math.max(s.lastActiveMs ?? s.createdAtMs, lastEvent.get(s.id) ?? 0));
+  }
   const byState = new Map<AgentState, TerminalSession[]>();
   for (const s of visible) {
     const st = sessionAttention({
@@ -82,12 +93,15 @@ export function useInbox(): InboxData {
       approvalTermIds,
       waitingTermId: waiting?.termId ?? null,
       workingUntil,
-      workingTermId: null,
+      workingTermId,
       activeId,
       now,
       openTurn: openTurnIds.has(s.id),
     });
     byState.set(st, [...(byState.get(st) ?? []), s]);
+  }
+  for (const list of byState.values()) {
+    list.sort((a, b) => (lastActive.get(b.id) ?? 0) - (lastActive.get(a.id) ?? 0));
   }
   const jobsNeedingYou = (board?.cards ?? []).filter(
     (c) => c.status === "needs_attention" || c.status === "awaiting_confirmation",
@@ -123,6 +137,7 @@ export function useInbox(): InboxData {
     jobsNeedingYou,
     pendingJobs,
     byState,
+    lastActive,
     sessions: visible,
     activeId,
     breaches,

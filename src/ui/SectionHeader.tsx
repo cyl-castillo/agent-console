@@ -6,18 +6,22 @@ import { cn } from "@/lib/cn";
 export function SectionHeader({
   title,
   count,
+  leading,
   actions,
   className,
   as: Tag = "h3",
 }: {
   title: string;
   count?: number;
+  /// A glyph that stands for the section's state, shown before the title.
+  leading?: ReactNode;
   actions?: ReactNode;
   className?: string;
   as?: "h2" | "h3" | "h4";
 }) {
   return (
     <div className={cn("flex h-7 items-center gap-2 px-3", className)}>
+      {leading}
       <Tag className="m-0 font-sans text-caption font-semibold uppercase tracking-wide text-faint-foreground">
         {title}
       </Tag>

@@ -29,7 +29,7 @@ export function Rail({ counts }: { counts: Partial<Record<Destination, number>> 
               data-testid={`rail-${d.key}`}
               onClick={() => goTo(d.key)}
               className={cn(
-                "relative flex h-12 flex-col items-center justify-center gap-0.5 rounded-2 font-sans text-caption font-medium text-muted-foreground transition-colors dur-1",
+                "unbutton relative flex h-12 flex-col items-center justify-center gap-0.5 rounded-2 font-sans text-caption font-medium text-muted-foreground transition-colors dur-1",
                 "hover:bg-[var(--hover)] hover:text-foreground",
                 "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                 active && "bg-[var(--accent-12)] text-[var(--accent-ink)]",

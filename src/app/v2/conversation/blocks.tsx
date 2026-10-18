@@ -27,7 +27,7 @@ export function ToolCallBlock({ tools, total }: { tools: TimelineTool[]; total: 
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex h-7 w-full items-center gap-1.5 px-2 text-left font-sans text-small text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        className="unbutton flex h-7 w-full items-center gap-1.5 px-2 text-left font-sans text-small text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
       >
         <ChevronRight
           size={14}

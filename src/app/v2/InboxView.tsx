@@ -72,7 +72,7 @@ export function InboxView() {
   const groups: { state: AgentState; title: string }[] = [
     { state: "needs-you", title: "Needs you" },
     { state: "working", title: "Working" },
-    { state: "done", title: "Idle" },
+    { state: "idle", title: "Idle" },
     { state: "stopped", title: "Stopped" },
   ];
 

@@ -25,19 +25,19 @@ describe("sessionAttention", () => {
   });
   it("the CLI waiting at its own prompt means it needs you", () => {
     expect(sessionAttention(base({ waitingTermId: "a" }))).toBe("needs-you");
-    expect(sessionAttention(base({ waitingTermId: "b" }))).toBe("done");
+    expect(sessionAttention(base({ waitingTermId: "b" }))).toBe("idle");
   });
   it("the working window belongs to the terminal it names, else the active one", () => {
-    expect(sessionAttention(base({ workingUntil: 5000, workingTermId: "b" }))).toBe("done");
+    expect(sessionAttention(base({ workingUntil: 5000, workingTermId: "b" }))).toBe("idle");
     expect(sessionAttention(base({ workingUntil: 5000, workingTermId: "a" }))).toBe("working");
     expect(sessionAttention(base({ workingUntil: 5000, activeId: "a" }))).toBe("working");
-    expect(sessionAttention(base({ workingUntil: 5000, activeId: "b" }))).toBe("done");
+    expect(sessionAttention(base({ workingUntil: 5000, activeId: "b" }))).toBe("idle");
   });
   it("an open turn in the ledger means working, even with no status window", () => {
     expect(sessionAttention(base({ openTurn: true }))).toBe("working");
     expect(sessionAttention(base({ openTurn: true, approvalTermIds: ["a"] }))).toBe("needs-you");
   });
   it("an expired working window is idle", () => {
-    expect(sessionAttention(base({ workingUntil: 500 }))).toBe("done");
+    expect(sessionAttention(base({ workingUntil: 500 }))).toBe("idle");
   });
 });

@@ -28,6 +28,7 @@ import { useWorkbenchStore } from "../stores/workbenchStore";
 import { WORKBENCH_TABS, type WorkbenchTab } from "../lib/workbenchTabs";
 import { destinationForTab } from "../app/v2/destinations";
 import type { Destination } from "../app/v2/destinations";
+import { manyEvents, manyId, manySessions } from "../dev/fixtures/manySessions";
 import { beginScenario, settle, sleep } from "./scenario";
 
 interface Opts {
@@ -181,6 +182,17 @@ export const SessionsNoTurns = scenario({
   fixtures: { testigo_list: [] },
 });
 export const SessionsChanges = scenario({ destination: "sessions", centerTab: "changes" });
+/// Thirty sessions, eight live, three mid-turn: the list at the scale a week
+/// reaches (CHAT-2026-10 F1 gate).
+export const SessionsMany = scenario({
+  destination: "sessions",
+  fixtures: { sessions_list: manySessions, testigo_list: manyEvents },
+  after: async () => {
+    const st = useTerminalsStore.getState();
+    for (let k = 2; k <= 8; k++) await st.resume(manyId(k));
+    st.setActive(manyId(1));
+  },
+});
 export const WorkJobs = scenario({ destination: "work", tab: "jobs" });
 export const WorkRoom = scenario({ destination: "work", tab: "roundtable" });
 /// D11: a sponsor that decides low-risk requests alone, with a weekly budget.

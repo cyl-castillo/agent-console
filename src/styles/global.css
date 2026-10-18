@@ -149,6 +149,18 @@ button.primary {
 button.primary:hover {
   background: var(--accent-20);
 }
+/* A <button> that is a row, a tab or a link, not a control: the bare element
+   rule above would paint it as a card (background, border, radius, padding)
+   wherever Tailwind utilities do not say otherwise — the v2 sidebar rows
+   looked like boxes ending before the highlight for exactly that reason. */
+.unbutton,
+.unbutton:hover,
+.unbutton:active {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
 
 /* --- Button vocabulary ---
    Canonical set components compose instead of hand-rolling one-off button
