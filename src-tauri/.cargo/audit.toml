@@ -9,4 +9,14 @@ ignore = [
     # Tauri upgrade and drop these when `cargo update quick-xml` moves.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    # zip <9 `extract()` issues (SUID/SGID bits kept, permissions applied
+    # through symlinks, symlink targets outside the destination). Our own
+    # `zip` is on 9 and unpacks entry by entry behind `enclosed_name`. What
+    # remains: zip 8 pinned by candle-core 0.11 (loads safetensors, never
+    # extracts an archive) and zip 4 pinned by tauri-plugin-updater 2.10
+    # (extracts only the update it downloaded, after verifying our minisign
+    # signature). Drop these when candle and the updater move to zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
 ]
