@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Project } from "../../types/domain";
 import { useJobsStore } from "../../stores/jobsStore";
 import { attachShellListeners, useShellStore } from "../../stores/shellStore";
+import { useTerminalsStore } from "../../stores/terminalsStore";
 import { useUIStore } from "../../stores/uiStore";
 import { cn } from "@/lib/cn";
 import { TooltipProvider } from "../../ui/Tooltip";
@@ -51,6 +52,20 @@ export function ShellV2({
 
   useEffect(() => attachShellListeners(), []);
   useBudgetWatch();
+  // F4 landing: with nothing to decide and at most one session, Sessions is
+  // where the work is — not an empty Inbox. Once per project open, when
+  // the sessions have hydrated.
+  const ready = useTerminalsStore((s) => s.ready);
+  const landed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ready || landed.current === project.root) return;
+    landed.current = project.root;
+    const live = useTerminalsStore.getState().sessions.filter((s) => !s.archived).length;
+    if (decisions === 0 && live <= 1 && useShellStore.getState().destination === "inbox") {
+      useShellStore.getState().goTo("sessions");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, project.root]);
   // Ctrl+` toggles the terminal drawer; the shortcut hook dispatches it.
   useEffect(() => {
     const h = () => useShellStore.getState().toggleDrawer();

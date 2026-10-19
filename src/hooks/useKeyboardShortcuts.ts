@@ -2,7 +2,6 @@ import { useEffect } from "react";
 
 import { useChangesStore } from "../stores/changesStore";
 import { usePaletteStore } from "../stores/paletteStore";
-import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 
 import type { CenterTab } from "../stores/uiStore";
@@ -16,15 +15,6 @@ interface Args {
 /// (Terminal, AgentChat) decides what to do — keeps coupling minimal.
 export function useKeyboardShortcuts({ setTab }: Args) {
   useEffect(() => {
-    const newSession = () => {
-      const project = useSessionStore.getState().project;
-      if (!project) return;
-      const terminals = useTerminalsStore.getState();
-      terminals.add(project.root);
-      setTab("terminal");
-      void terminals.persist();
-    };
-
     const cycleSession = (direction: 1 | -1): boolean => {
       const terminals = useTerminalsStore.getState();
       const live = terminals.sessions.filter((s) => s.status === "live");
@@ -100,7 +90,8 @@ export function useKeyboardShortcuts({ setTab }: Args) {
         case "T":
           // Ctrl+T is readline transpose-chars inside the terminal — don't steal it.
           if (inTerminal || inField) return;
-          newSession();
+          // The same chooser the "+" opens (F4): one path to a new session.
+          window.dispatchEvent(new CustomEvent("ac:new-session-chooser"));
           e.preventDefault();
           break;
         case "e":

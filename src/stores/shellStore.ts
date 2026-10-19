@@ -31,6 +31,9 @@ interface ShellState {
   listWidth: number;
   inspectorWidth: number;
   setWidth: (col: "list" | "inspector", px: number | null) => void;
+  /// The new-session chooser (the "+" and Ctrl+T open the same one); not persisted.
+  chooserOpen: boolean;
+  setChooserOpen: (v: boolean) => void;
   /// Turn selected in the ledger minimap (Proof destination); not persisted.
   selectedTurnId: string | null;
   selectTurn: (id: string | null) => void;
@@ -102,6 +105,8 @@ export const useShellStore = create<ShellState>((set, get) => ({
   ...load(),
   selectedTurnId: null,
   selectTurn: (selectedTurnId) => set({ selectedTurnId }),
+  chooserOpen: false,
+  setChooserOpen: (chooserOpen) => set({ chooserOpen }),
   goTo: (destination) => {
     const def = destinationDef(destination);
     if (def.sections.length > 0) {

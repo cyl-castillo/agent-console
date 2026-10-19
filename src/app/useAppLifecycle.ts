@@ -15,6 +15,7 @@ import { attachConsoleMcpHost } from "../lib/consoleMcpHost";
 import { attachDeclineListener } from "../stores/declinesStore";
 import { attachReviewListener } from "../stores/reviewsStore";
 import { attachHandoffWatcher } from "../stores/handoffStore";
+import { useShellStore } from "../stores/shellStore";
 import { attachSponsorWatcher } from "../stores/sponsorStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUpdaterStore } from "../stores/updaterStore";
@@ -89,6 +90,10 @@ export function useAppLifecycle(): void {
     const onToggleSidebar = () => ui().toggleLeft();
     const onToggleRight = () => ui().toggleRight();
     const onNewSession = () => newSession();
+    const onNewSessionChooser = () => {
+      useShellStore.getState().goTo("sessions");
+      useShellStore.getState().setChooserOpen(true);
+    };
     const onCopyProjectPath = () => copyProjectPath();
     const onToggleComposer = () => ui().toggleComposer();
     window.addEventListener("ac:toggle-composer", onToggleComposer);
@@ -96,12 +101,14 @@ export function useAppLifecycle(): void {
     window.addEventListener("ac:toggle-sidebar", onToggleSidebar);
     window.addEventListener("ac:toggle-right-panel", onToggleRight);
     window.addEventListener("ac:new-session", onNewSession);
+    window.addEventListener("ac:new-session-chooser", onNewSessionChooser);
     window.addEventListener("ac:copy-project-path", onCopyProjectPath);
     return () => {
       window.removeEventListener("ac:open-tab", onOpenTab);
       window.removeEventListener("ac:toggle-sidebar", onToggleSidebar);
       window.removeEventListener("ac:toggle-right-panel", onToggleRight);
       window.removeEventListener("ac:new-session", onNewSession);
+      window.removeEventListener("ac:new-session-chooser", onNewSessionChooser);
       window.removeEventListener("ac:copy-project-path", onCopyProjectPath);
       window.removeEventListener("ac:toggle-composer", onToggleComposer);
     };
