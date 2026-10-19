@@ -141,7 +141,10 @@ test.describe("stories", () => {
       const axe = await (async () => {
         for (let attempt = 0; ; attempt++) {
           try {
-            return await new AxeBuilder({ page }).analyze();
+            // The terminal's screen is the CLI's own output in the CLI's own
+            // colours (the 256-colour cube is xterm's, not themeable); the
+            // contract covers the console's chrome around it.
+            return await new AxeBuilder({ page }).exclude(".xterm-screen").analyze();
           } catch (err) {
             if (attempt >= 4 || !String(err).includes("already running")) throw err;
             await page.waitForTimeout(400);
@@ -156,8 +159,13 @@ test.describe("stories", () => {
       }));
       writeFileSync(join(A11Y_DIR, `${e.id}.json`), JSON.stringify(violations, null, 2));
       // The primitives are the a11y contract: nothing serious or critical,
-      // ever. App stories only report (their debt is tracked by the audit).
-      if (e.id.startsWith("primitives--")) {
+      // ever — and since F6 the Sessions stories too. Other app stories only
+      // report (their debt is tracked by the audit).
+      if (
+        e.id.startsWith("primitives--") ||
+        e.id.startsWith("app-v2--sessions") ||
+        e.id === "app-v2--light-sessions"
+      ) {
         const blocking = violations.filter(
           (v) => v.impact === "serious" || v.impact === "critical",
         );

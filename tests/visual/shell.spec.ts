@@ -79,7 +79,7 @@ test("v2 shell: rail, palette deep links and the decisions signal", async ({ pag
   await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
   const shell = page.getByTestId("shell-v2");
   await expect(shell).toHaveAttribute("data-destination", "sessions");
-  await expect(page.getByTestId("inspector")).toContainText("Turns");
+  await expect(page.getByTestId("inspector")).toContainText("Turn");
 
   await page.getByTestId("rail-work").click();
   await expect(shell).toHaveAttribute("data-destination", "work");
@@ -325,15 +325,18 @@ test("v2 proof: the ledger map selects a turn into the inspector", async ({ page
   await expect(page.getByTestId("turn-inspector")).toContainText("commit");
 });
 
-test("v2 sessions list: grouped by attention, WIP visible, files underneath", async ({ page }) => {
+test("v2 sessions list: grouped by attention, WIP visible, files under Preview", async ({ page }) => {
   await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
   await page.goto("/iframe.html?id=app-v2--sessions&viewMode=story");
   await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
   const list = page.getByTestId("sessions-list");
   await expect(list).toContainText("Stopped");
   await expect(page.getByTestId("session-sess-retry")).toContainText("ac/retry-path");
-  await page.getByRole("button", { name: "Files" }).click();
-  await expect(list).toContainText("package.json");
+  // F6: the project files moved out of the list, under Preview.
+  await expect(list).not.toContainText("package.json");
+  await page.getByRole("tab", { name: "Preview" }).click();
+  await expect(page.getByTestId("preview-files")).toContainText("package.json");
+  await page.getByRole("tab", { name: "Conversation" }).click();
   await page.getByTestId("sessions-new").click();
   await expect(page.getByRole("listbox", { name: "Choose an agent and model" })).toBeVisible();
 });

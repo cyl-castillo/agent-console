@@ -1,5 +1,14 @@
-import { useState } from "react";
-import { ChevronRight, Copy, RotateCw, ShieldCheck, Scale } from "lucide-react";
+import { memo, useState } from "react";
+import {
+  ChevronRight,
+  Copy,
+  Info,
+  MoreHorizontal,
+  RotateCw,
+  ShieldCheck,
+  Scale,
+} from "lucide-react";
+import { Menu, type MenuItemDef } from "../../../ui/Menu";
 import { cn } from "@/lib/cn";
 import type { TimelineTurn, TimelineTool } from "../../../stores/proofStore";
 import { Chip } from "../../../ui/Chip";
@@ -114,12 +123,15 @@ export function ProofBlock({
   onRerun,
   onLedger,
   onReview,
+  menu,
 }: {
   turn: TimelineTurn;
   onCopy: () => void;
   onRerun: () => void;
   onLedger: () => void;
   onReview?: () => void;
+  /// F6: the same actions (and more) behind one tab stop.
+  menu?: MenuItemDef[];
 }) {
   return (
     <div
@@ -172,11 +184,18 @@ export function ProofBlock({
               label="Review this turn"
               icon={<Scale size={14} />}
               onClick={onReview}
+              tabIndex={-1}
             />
           </Tooltip>
         )}
         <Tooltip content="Copy the agent's summary">
-          <IconButton size="sm" label="Copy summary" icon={<Copy size={14} />} onClick={onCopy} />
+          <IconButton
+            size="sm"
+            label="Copy summary"
+            icon={<Copy size={14} />}
+            onClick={onCopy}
+            tabIndex={-1}
+          />
         </Tooltip>
         <Tooltip content="Type this prompt again into the terminal">
           <IconButton
@@ -184,6 +203,7 @@ export function ProofBlock({
             label="Re-run prompt"
             icon={<RotateCw size={14} />}
             onClick={onRerun}
+            tabIndex={-1}
           />
         </Tooltip>
         <Tooltip content="Open this turn in the ledger">
@@ -192,8 +212,22 @@ export function ProofBlock({
             label="Open in ledger"
             icon={<ShieldCheck size={14} />}
             onClick={onLedger}
+            tabIndex={-1}
           />
         </Tooltip>
+        {menu && (
+          <Menu
+            items={menu}
+            trigger={
+              <IconButton
+                size="sm"
+                label="More actions for this turn"
+                icon={<MoreHorizontal size={14} />}
+                data-testid="turn-menu"
+              />
+            }
+          />
+        )}
       </span>
     </div>
   );
@@ -209,8 +243,10 @@ function SpeakerLabel({ children }: { children: string }) {
 }
 
 /// One turn: the prompt, what the agent did, what it changed, what it said,
-/// and the proof line. A turn without an end is live.
-export function TurnBlock({
+/// and the proof line. A turn without an end is live. Memoised (F6): the
+/// handlers take the turn, so the parent passes the same functions to every
+/// row and only the live turn re-renders with the clock.
+export const TurnBlock = memo(function TurnBlock({
   turn,
   live,
   now,
@@ -223,17 +259,22 @@ export function TurnBlock({
   waitingApproval,
   stream = EMPTY_STREAM,
   onCopyText,
+  selected,
+  onSelect,
 }: {
   turn: TimelineTurn;
   live: boolean;
   now: number;
   onOpenFile: (path: string) => void;
-  onCopy: () => void;
-  onRerun: () => void;
-  onLedger: () => void;
-  onReview?: () => void;
+  onCopy: (turn: TimelineTurn) => void;
+  onRerun: (turn: TimelineTurn) => void;
+  onLedger: (turn: TimelineTurn) => void;
+  onReview?: (turn: TimelineTurn) => void;
   /// Where the rest of a cut summary lives (the terminal).
   onMore?: () => void;
+  /// F6: this turn is the one the Inspector details.
+  selected?: boolean;
+  onSelect?: (turn: TimelineTurn) => void;
   /// F3: an approval of this session is pending — the agent is not working,
   /// it is waiting for the human.
   waitingApproval?: boolean;
@@ -244,13 +285,27 @@ export function TurnBlock({
   onCopyText?: (text: string) => void;
 }) {
   const said = saidText(stream, turn.summary);
+  const menu: MenuItemDef[] = [
+    ...(onSelect ? [{ label: "Details", icon: <Info />, onSelect: () => onSelect(turn) }] : []),
+    { label: "Copy summary", icon: <Copy />, onSelect: () => onCopy(turn) },
+    { label: "Re-run prompt", icon: <RotateCw />, onSelect: () => onRerun(turn) },
+    ...(onReview
+      ? [{ label: "Review this turn", icon: <Scale />, onSelect: () => onReview(turn) }]
+      : []),
+    { label: "Open in ledger", icon: <ShieldCheck />, onSelect: () => onLedger(turn) },
+  ];
   const state = turn.failed ? "failed" : turn.interrupted ? "stopped" : live ? "working" : "done";
   const duration = turn.endTs ? turn.endTs - turn.ts : now - turn.ts;
   return (
     <article
-      className="flex flex-col gap-2 px-4 py-3"
+      className={cn(
+        "flex flex-col gap-2 border-l-2 px-4 py-3",
+        selected ? "border-primary" : "border-transparent",
+      )}
       data-testid="turn"
       data-live={live || undefined}
+      data-selected={selected || undefined}
+      onClick={onSelect ? () => onSelect(turn) : undefined}
     >
       <header className="flex items-center gap-2 font-sans text-caption text-faint-foreground">
         <StatusGlyph state={state} />
@@ -338,12 +393,13 @@ export function TurnBlock({
       {!live && (
         <ProofBlock
           turn={turn}
-          onCopy={onCopy}
-          onRerun={onRerun}
-          onLedger={onLedger}
-          onReview={onReview}
+          onCopy={() => onCopy(turn)}
+          onRerun={() => onRerun(turn)}
+          onLedger={() => onLedger(turn)}
+          onReview={onReview ? () => onReview(turn) : undefined}
+          menu={menu}
         />
       )}
     </article>
   );
-}
+});
