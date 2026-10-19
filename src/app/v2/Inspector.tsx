@@ -1,13 +1,14 @@
 import { FileInspector } from "../../components/FileInspector";
-import { TurnsPanel } from "../../components/TurnsPanel";
+import { TurnDetail } from "./conversation/TurnDetail";
 import { useShellStore } from "../../stores/shellStore";
 import { useUIStore } from "../../stores/uiStore";
 import { TurnInspector } from "./proof/TurnInspector";
 
 /// The right column, always rotulated: what it shows never changes without a
-/// visible title (UX_REVIEW P2.2). Sessions get the turn timeline, or the
-/// file inspector while Changes is up; other destinations show nothing here
-/// in F2 (the shell collapses the column).
+/// visible title (UX_REVIEW P2.2). Sessions get the selected turn in full
+/// (F6: the detail, not the thread again), or the file inspector while
+/// Changes is up; other destinations show nothing here (the shell collapses
+/// the column).
 export function inspectorFor(
   destination: string,
   centerTab: string,
@@ -15,7 +16,7 @@ export function inspectorFor(
 ): { title: string } | null {
   if (destination === "proof") return selectedTurn ? { title: "Turn" } : null;
   if (destination !== "sessions") return null;
-  return centerTab === "changes" ? { title: "File" } : { title: "Turns" };
+  return centerTab === "changes" ? { title: "File" } : { title: "Turn" };
 }
 
 export function Inspector() {
@@ -43,7 +44,7 @@ export function Inspector() {
           ) : centerTab === "changes" ? (
             <FileInspector />
           ) : (
-            <TurnsPanel />
+            <TurnDetail />
           )}
         </div>
       </div>

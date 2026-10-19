@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, Clock, MessageSquare, Square, TerminalSquare, X } from "lucide-react";
 import { typeIntoActiveSession } from "../../../lib/termInput";
+import { cn } from "@/lib/cn";
 import type { TermInputDetail } from "../../../components/Terminal";
 import { useChangesStore } from "../../../stores/changesStore";
 import { ipc } from "../../../ipc/tauri";
@@ -8,6 +10,7 @@ import { useSessionStore } from "../../../stores/sessionStore";
 import { useTerminalsStore } from "../../../stores/terminalsStore";
 import { useShellStore } from "../../../stores/shellStore";
 import { useToastStore } from "../../../stores/toastStore";
+import type { TimelineTurn } from "../../../stores/proofStore";
 import { useUIStore } from "../../../stores/uiStore";
 import { useWorkbenchStore } from "../../../stores/workbenchStore";
 import { queueFor, usePromptQueueStore } from "../../../stores/promptQueueStore";
@@ -40,14 +43,19 @@ import {
 export const INTERRUPT_GRACE_MS = 3000;
 /// Closer than this to the end counts as "reading the latest".
 const NEAR_BOTTOM_PX = 80;
+/// A turn's height before it is measured (prompt + a few tool calls).
+const TURN_ESTIMATE_PX = 220;
 
 /// The conversation the app renders itself (F4): the session's turns from the
 /// ledger, newest at the bottom and kept in view, a composer that types into
 /// the PTY, and the terminal one keystroke away in the drawer.
 export function ConversationView() {
   const { session, turns } = useSessionTimeline();
-  // F5: the agent's words as the CLI writes them, per turn.
+  // F5: the agent's words as the CLI writes them, per turn. Memoised per
+  // turn so the clock tick does not hand every row a new object.
   const transcript = useTranscriptWatch(session);
+  const transcriptRef = useRef(transcript);
+  transcriptRef.current = transcript;
   const setCenterTab = useUIStore((s) => s.setTab);
   const selectFile = useChangesStore((s) => s.setSelected);
   const setWorkbenchTab = useWorkbenchStore((s) => s.setTab);
@@ -85,11 +93,47 @@ export function ConversationView() {
   const last = turns.length > 0 ? turns[turns.length - 1] : null;
   const lastOpen = last !== null && last.endTs === null;
   const hasTurns = turns.length > 0;
+  const streams = useMemo(() => turns.map((t) => streamFor(transcript, t)), [transcript, turns]);
+  const selectedTurnId = useShellStore((s) => s.selectedTurnId);
+  const selectTurn = useShellStore((s) => s.selectTurn);
+  // A closed turn only needs the clock for "today / yesterday": once a minute.
+  const minuteNow = Math.floor(now / 60_000) * 60_000;
 
+  // F6: the thread is virtualised — 200 turns render a screenful.
+  const virtualizer = useVirtualizer({
+    count: turns.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: () => TURN_ESTIMATE_PX,
+    overscan: 4,
+    getItemKey: (i) => turns[i].turnId ?? `i${i}`,
+  });
+  const totalSize = virtualizer.getTotalSize();
+
+  // Announce a turn closing to assistive tech (role="log" is polite by
+  // default, but a virtualised row may never enter the DOM).
+  const [announce, setAnnounce] = useState("");
+  const closedRef = useRef<{ id: string | null; endTs: number | null }>({ id: null, endTs: null });
   useEffect(() => {
+    if (!last) return;
+    const prev = closedRef.current;
+    if (prev.id === last.turnId && prev.endTs === null && last.endTs !== null) {
+      setAnnounce(
+        `Turn finished${last.summary ? `: ${last.summary.slice(0, 160)}` : ""}${last.failed ? " (failed)" : ""}`,
+      );
+    }
+    closedRef.current = { id: last.turnId, endTs: last.endTs };
+  }, [last]);
+
+  // The clock ticks only while something is moving: the live turn's
+  // duration, an unwitnessed echo, an Interrupt in its grace.
+  useEffect(() => {
+    if (!lastOpen && pending.length === 0) {
+      setNow(Date.now());
+      return;
+    }
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [lastOpen, pending.length]);
 
   // Interrupt, taken at its word: Codex closes the turn through its hook,
   // Claude never does. Pressing it marks the open turn "stopping"; after the
@@ -108,16 +152,24 @@ export function ConversationView() {
   // pill instead of moving the view.
   const atBottom = useRef(true);
   const [unseen, setUnseen] = useState(false);
+  // While following the end, only a scroll UP lets go: the virtualised rows
+  // measure themselves as they come in and the list shifts under the view
+  // (down, never up), which must not read as the human leaving the end.
+  const lastTop = useRef(0);
   const measure = () => {
     const el = listRef.current;
     if (!el || el.clientHeight === 0) return;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    const up = el.scrollTop < lastTop.current - 1;
+    lastTop.current = el.scrollTop;
+    atBottom.current = atBottom.current ? !(up && !near) : near;
     if (atBottom.current) setUnseen(false);
   };
   const toBottom = () => {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+    lastTop.current = el.scrollTop;
     atBottom.current = true;
     setUnseen(false);
   };
@@ -130,7 +182,7 @@ export function ConversationView() {
     shown.current = { turns: turns.length, height: el.scrollHeight };
     if (first || atBottom.current) toBottom();
     else if (grew && el.clientHeight > 0) setUnseen(true);
-  }, [turns, pending]);
+  }, [turns, pending, totalSize]);
   // The Sessions zone stays mounted while hidden (display:none → 0 px tall),
   // and the drawer changes the list's height: re-anchor to the end when the
   // box becomes visible for the first time or resizes while at the bottom.
@@ -249,13 +301,16 @@ export function ConversationView() {
     window.dispatchEvent(new CustomEvent("ac:term-input", { detail }));
     setStopping({ turnId: last?.turnId ?? null, at: Date.now() });
   };
-  const openTerminal = () => {
-    if (!drawerOpen) toggleDrawer();
-  };
-  const openFile = (path: string) => {
-    void selectFile(path);
-    setCenterTab("changes");
-  };
+  const openTerminal = useCallback(() => {
+    if (!useShellStore.getState().drawerOpen) useShellStore.getState().toggleDrawer();
+  }, []);
+  const openFile = useCallback(
+    (path: string) => {
+      void selectFile(path);
+      setCenterTab("changes");
+    },
+    [selectFile, setCenterTab],
+  );
   const rerun = (prompt: string) => {
     setDraft(prompt);
   };
@@ -265,6 +320,21 @@ export function ConversationView() {
       () => showToast("Couldn't copy", "error"),
     );
   };
+  // F6: one function per action for every row (memo keeps closed turns
+  // still); they read the latest `copy`/`review` through a ref.
+  const latest = useRef({ copy, review, rerun });
+  latest.current = { copy, review, rerun };
+  const copyTurn = useCallback(
+    (t: TimelineTurn) =>
+      latest.current.copy(saidText(streamFor(transcriptRef.current, t), t.summary)),
+    [],
+  );
+  const rerunTurn = useCallback((t: TimelineTurn) => latest.current.rerun(t.prompt), []);
+  const ledgerTurn = useCallback(() => setWorkbenchTab("proof"), [setWorkbenchTab]);
+  const reviewTurn = useCallback((t: TimelineTurn) => {
+    if (t.termId && t.turnId) latest.current.review(t.termId, t.turnId);
+  }, []);
+  const selectTurnBlock = useCallback((t: TimelineTurn) => selectTurn(t.turnId), [selectTurn]);
 
   if (!session) {
     return (
@@ -329,8 +399,10 @@ export function ConversationView() {
               }
             />
           ) : (
-            <div className="divide-y divide-border">
-              {turns.map((t, i) => {
+            <div className="relative w-full" style={{ height: totalSize }} data-testid="turn-list">
+              {virtualizer.getVirtualItems().map((vi) => {
+                const i = vi.index;
+                const t = turns[i];
                 const isLast = i === turns.length - 1;
                 // Interrupt taken at its word: the open turn reads as cut short
                 // once the grace passed with no close from the ledger.
@@ -338,23 +410,34 @@ export function ConversationView() {
                   isLast && stoppedLocally && stopping
                     ? { ...t, endTs: stopping.at, interrupted: true }
                     : t;
-                const stream = streamFor(transcript, turn);
                 return (
-                  <TurnBlock
-                    key={t.turnId ?? i}
-                    turn={turn}
-                    live={isLast && liveTurn}
-                    waitingApproval={isLast && liveTurn && waitingApproval}
-                    now={now}
-                    stream={stream}
-                    onCopyText={copy}
-                    onOpenFile={openFile}
-                    onCopy={() => copy(saidText(stream, t.summary))}
-                    onRerun={() => rerun(t.prompt)}
-                    onLedger={() => setWorkbenchTab("proof")}
-                    onReview={t.termId && t.turnId ? () => review(t.termId!, t.turnId!) : undefined}
-                    onMore={openTerminal}
-                  />
+                  <div
+                    key={vi.key}
+                    data-index={i}
+                    ref={virtualizer.measureElement}
+                    className={cn(
+                      "absolute left-0 top-0 w-full",
+                      i > 0 && "border-t border-border",
+                    )}
+                    style={{ transform: `translateY(${vi.start}px)` }}
+                  >
+                    <TurnBlock
+                      turn={turn}
+                      live={isLast && liveTurn}
+                      waitingApproval={isLast && liveTurn && waitingApproval}
+                      now={isLast && liveTurn ? now : minuteNow}
+                      stream={streams[i]}
+                      onCopyText={copy}
+                      onOpenFile={openFile}
+                      onCopy={copyTurn}
+                      onRerun={rerunTurn}
+                      onLedger={ledgerTurn}
+                      onReview={t.termId && t.turnId ? reviewTurn : undefined}
+                      onMore={openTerminal}
+                      selected={!!t.turnId && t.turnId === selectedTurnId}
+                      onSelect={selectTurnBlock}
+                    />
+                  </div>
                 );
               })}
             </div>
@@ -387,6 +470,9 @@ export function ConversationView() {
               <div className="whitespace-pre-wrap text-foreground">{p.text}</div>
             </div>
           ))}
+        </div>
+        <div className="sr-only" aria-live="polite" data-testid="turn-announcer">
+          {announce}
         </div>
         {unseen && (
           <button

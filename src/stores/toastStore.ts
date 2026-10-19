@@ -12,29 +12,35 @@ export interface Toast {
 
 interface ToastState {
   toasts: Toast[];
-  show: (message: string, tone?: ToastTone) => void;
+  /// Returns the toast id. `action` adds a trailing button ("Undo");
+  /// `timeoutMs` overrides the transient delay.
+  show: (
+    message: string,
+    tone?: ToastTone,
+    opts?: { action?: { label: string; onClick: () => void }; timeoutMs?: number },
+  ) => string;
   dismiss: (id: string) => void;
 }
 
 export const useToastStore = create<ToastState>((set, get) => ({
   toasts: [],
 
-  show: (message, tone = "info") => {
+  show: (message, tone = "info", opts) => {
     // Rendered by the Base UI toast manager (ui/Toast → ToastHost). Info and
     // success are transient; errors persist until dismissed so a real
     // failure can't vanish before it's read — and carry a one-click field
     // report, the moment it is worth the most.
-    const id = showToast(
-      message,
-      tone,
-      tone === "error"
-        ? { action: { label: "Report", onClick: () => void reportProblem(message) } }
-        : undefined,
-    );
+    const action =
+      opts?.action ??
+      (tone === "error"
+        ? { label: "Report", onClick: () => void reportProblem(message) }
+        : undefined);
+    const id = showToast(message, tone, action ? { action } : undefined, opts?.timeoutMs);
     set((s) => ({ toasts: [...s.toasts, { id, message, tone }].slice(-4) }));
-    if (tone !== "error") {
-      window.setTimeout(() => get().dismiss(id), 2600);
+    if (tone !== "error" || opts?.timeoutMs) {
+      window.setTimeout(() => get().dismiss(id), opts?.timeoutMs ?? 2600);
     }
+    return id;
   },
 
   dismiss: (id) => {

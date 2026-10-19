@@ -15,12 +15,17 @@ export interface ToastData {
 export const toastManager = BaseToast.createToastManager<ToastData>();
 
 /// Returns the toast id (so a caller can close or update it).
-export function showToast(message: string, tone: ToastTone = "info", data?: ToastData): string {
+export function showToast(
+  message: string,
+  tone: ToastTone = "info",
+  data?: ToastData,
+  timeoutMs?: number,
+): string {
   return toastManager.add({
     description: message,
     type: tone,
     // Info/success are transient; errors persist until dismissed.
-    timeout: tone === "error" ? 0 : 2600,
+    timeout: timeoutMs ?? (tone === "error" ? 0 : 2600),
     data,
   });
 }

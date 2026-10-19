@@ -1,9 +1,24 @@
-import { useMemo, useState } from "react";
-import { Archive, ChevronRight, FileText, FolderTree, Plus, RotateCcw, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Archive,
+  ChevronRight,
+  Copy,
+  CopyPlus,
+  FileText,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RotateCcw,
+  TerminalSquare,
+  Trash2,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
 import { AgentModelChooser } from "../../components/SessionList";
-import { FileTree } from "../../components/FileTree";
 import { createSession } from "../../lib/createSession";
+import { copyText } from "../../lib/clipboard";
+import { useToastStore } from "../../stores/toastStore";
+import { ContextMenu, Menu, type MenuItemDef } from "../../ui/Menu";
 import { confirmDialog } from "../../stores/confirmStore";
 import { useLiveStatusStore } from "../../stores/liveStatusStore";
 import { useHandoffStore } from "../../stores/handoffStore";
@@ -31,6 +46,8 @@ const GROUPS: { state: AgentState; title: string }[] = [
 ];
 /// Live sessions beyond which attention measurably degrades (2–4 in focus).
 const WIP_SOFT_LIMIT = 4;
+/// How long "Remove" can be undone before the session is really gone.
+export const REMOVE_UNDO_MS = 5000;
 
 function relative(ms: number, now: number): string {
   const s = Math.max(0, Math.round((now - ms) / 1000));
@@ -74,6 +91,11 @@ function SessionRow({
   onRestore,
   onClose,
   onHandoff,
+  renaming,
+  onRenameStart,
+  onRenameCommit,
+  menu,
+  tabIndex,
 }: {
   session: TerminalSession;
   state: AgentState;
@@ -87,11 +109,24 @@ function SessionRow({
   onRestore?: () => void;
   onClose: () => void;
   onHandoff?: () => void;
+  /// F6: the name is an input (double-click or F2 on the row).
+  renaming: boolean;
+  onRenameStart: () => void;
+  onRenameCommit: (name: string | null) => void;
+  /// F6: the row's actions, in the "…" button and on right-click.
+  menu: MenuItemDef[];
+  /// Roving: one row is the tab stop, ↑/↓ move between rows.
+  tabIndex: 0 | -1;
 }) {
+  const [draft, setDraft] = useState(session.name);
+  useEffect(() => {
+    if (renaming) setDraft(session.name);
+  }, [renaming, session.name]);
   return (
-    <div
+    <ContextMenu
+      items={menu}
       className={cn(
-        "group relative transition-colors dur-1 hover:bg-[var(--hover)]",
+        "group relative block transition-colors dur-1 hover:bg-[var(--hover)]",
         active && "bg-[var(--accent-12)]",
       )}
       data-testid={`session-${session.id}`}
@@ -100,14 +135,50 @@ function SessionRow({
       <button
         type="button"
         onClick={onActivate}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          onRenameStart();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "F2") {
+            e.preventDefault();
+            onRenameStart();
+          }
+        }}
         aria-current={active ? "true" : undefined}
+        tabIndex={tabIndex}
+        data-session-row
         className="unbutton flex min-h-9 w-full items-center gap-2 px-3 py-1 text-left font-sans text-body text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
       >
         <StatusGlyph state={state} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate" data-testid="session-name">
-            {session.name}
-          </span>
+          {renaming ? (
+            <input
+              aria-label={`Rename ${session.name}`}
+              value={draft}
+              autoFocus
+              onFocus={(e) => e.currentTarget.select()}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => onRenameCommit(draft.trim() || null)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onRenameCommit(draft.trim() || null);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  onRenameCommit(null);
+                }
+              }}
+              className="block w-full rounded-1 border border-border bg-background px-1 font-sans text-body text-foreground outline-none focus:border-primary"
+              data-testid="session-rename"
+            />
+          ) : (
+            <span className="block truncate" data-testid="session-name">
+              {session.name}
+            </span>
+          )}
           {(session.worktree || summary) && (
             <span className="block truncate text-small text-muted-foreground">
               {session.worktree && (
@@ -164,7 +235,11 @@ function SessionRow({
             />
           </Tooltip>
         )}
-        <Tooltip content={session.status === "live" ? "Close — kills the process" : "Remove"}>
+        <Tooltip
+          content={
+            session.status === "live" ? "Close — kills the process" : "Remove (undo for 5 s)"
+          }
+        >
           <IconButton
             size="sm"
             label={`Close ${session.name}`}
@@ -172,17 +247,28 @@ function SessionRow({
             onClick={onClose}
           />
         </Tooltip>
+        <Menu
+          items={menu}
+          trigger={
+            <IconButton
+              size="sm"
+              label={`More actions for ${session.name}`}
+              icon={<MoreHorizontal size={14} />}
+              data-testid="session-menu"
+            />
+          }
+        />
       </span>
-    </div>
+    </ContextMenu>
   );
 }
 
 /// The Sessions list of the v2 shell: grouped by attention state, one line of
 /// meaning per row, cost and age, a visible WIP count, History for archived
-/// sessions, and the project files underneath.
+/// sessions. Rename in place, a menu per row, ↑/↓ between rows. The project
+/// files live under Preview.
 export function SessionsList() {
   const project = useSessionStore((s) => s.project);
-  const tree = useSessionStore((s) => s.tree);
   const { byState, lastActive, now, activeId } = useInbox();
   const summaries = useSummaries();
   const byTerm = useLiveStatusStore((s) => s.byTerm);
@@ -196,11 +282,139 @@ export function SessionsList() {
   const defaultFor = useModelStore((s) => s.defaultFor);
   const choosing = useShellStore((s) => s.chooserOpen);
   const setChoosing = useShellStore((s) => s.setChooserOpen);
+  const rename = useTerminalsStore((s) => s.rename);
+  const goTo = useShellStore((s) => s.goTo);
+  const showToast = useToastStore((s) => s.show);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [filesOpen, setFilesOpen] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // F6: "Remove" hides the row at once and really closes after the undo
+  // window; Undo cancels the timer and the row comes back.
+  const [removing, setRemoving] = useState<Set<string>>(() => new Set());
+  const timers = useRef(new Map<string, number>());
+  useEffect(() => {
+    const t = timers.current;
+    return () => t.forEach((id) => window.clearTimeout(id));
+  }, []);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const live = sessions.filter((s) => s.status === "live" && !s.archived).length;
-  const archived = sessions.filter((s) => s.archived);
+  const archived = sessions.filter((s) => s.archived && !removing.has(s.id));
+  // The row that holds the tab stop: the active one, else the first shown.
+  const stopId = useMemo(() => {
+    const shown = GROUPS.flatMap(({ state }) => byState.get(state) ?? []).filter(
+      (s) => !removing.has(s.id),
+    );
+    return shown.some((s) => s.id === activeId) ? activeId : (shown[0]?.id ?? null);
+  }, [byState, activeId, removing]);
+
+  const commitRename = (id: string, name: string | null) => {
+    setRenaming(null);
+    if (name) rename(id, name);
+  };
+  const removeSession = (s: TerminalSession) => {
+    setRemoving((prev) => new Set(prev).add(s.id));
+    const timer = window.setTimeout(() => {
+      timers.current.delete(s.id);
+      void close(s.id).finally(() =>
+        setRemoving((prev) => {
+          const next = new Set(prev);
+          next.delete(s.id);
+          return next;
+        }),
+      );
+    }, REMOVE_UNDO_MS);
+    timers.current.set(s.id, timer);
+    showToast(`Removed "${s.name}"`, "info", {
+      timeoutMs: REMOVE_UNDO_MS,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          const t = timers.current.get(s.id);
+          if (t !== undefined) {
+            window.clearTimeout(t);
+            timers.current.delete(s.id);
+          }
+          setRemoving((prev) => {
+            const next = new Set(prev);
+            next.delete(s.id);
+            return next;
+          });
+        },
+      },
+    });
+  };
+  const openInTerminal = (s: TerminalSession) => {
+    if (s.status === "stopped") resume(s.id);
+    else setActive(s.id);
+    goTo("sessions");
+    if (!useShellStore.getState().drawerOpen) useShellStore.getState().toggleDrawer();
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent("ac:focus-terminal")), 50);
+  };
+  const duplicate = (s: TerminalSession) => {
+    const { add, persist, setActive: activate } = useTerminalsStore.getState();
+    const id = add(s.cwd, `${s.name} (copy)`, s.model, s.agent, s.worktree);
+    activate(id);
+    void persist();
+  };
+  const menuFor = (s: TerminalSession): MenuItemDef[] => [
+    { label: "Rename", icon: <Pencil />, hint: "F2", onSelect: () => setRenaming(s.id) },
+    { label: "Open in terminal", icon: <TerminalSquare />, onSelect: () => openInTerminal(s) },
+    { label: "Duplicate", icon: <CopyPlus />, onSelect: () => duplicate(s) },
+    {
+      label: "Copy id",
+      icon: <Copy />,
+      onSelect: () =>
+        void copyText(s.agentSessionId ?? s.id).then(
+          () => showToast("Session id copied", "success"),
+          (e) => showToast(`Copy failed: ${String(e)}`, "error"),
+        ),
+    },
+    s.archived
+      ? { label: "Restore", icon: <RotateCcw />, onSelect: () => resume(s.id) }
+      : {
+          label: "Archive",
+          icon: <Archive />,
+          disabled: s.status === "live",
+          title: s.status === "live" ? "Close the session first" : undefined,
+          onSelect: () => archive(s.id),
+        },
+    s.status === "live"
+      ? {
+          label: "Close",
+          icon: <X />,
+          danger: true,
+          separatorBefore: true,
+          onSelect: () => void closeSession(s),
+        }
+      : {
+          label: "Remove",
+          icon: <Trash2 />,
+          danger: true,
+          separatorBefore: true,
+          hint: "undo 5 s",
+          onSelect: () => removeSession(s),
+        },
+  ];
+  // ↑/↓ move between rows (roving tab stop); Home/End jump.
+  const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    if ((e.target as HTMLElement).tagName === "INPUT") return;
+    const rows = Array.from(
+      listRef.current?.querySelectorAll<HTMLButtonElement>("[data-session-row]") ?? [],
+    );
+    if (rows.length === 0) return;
+    const i = rows.findIndex((r) => r === document.activeElement);
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? rows.length - 1
+          : e.key === "ArrowDown"
+            ? Math.min(rows.length - 1, i + 1)
+            : Math.max(0, i - 1);
+    e.preventDefault();
+    rows[next]?.focus();
+  };
   const needsYou = byState.get("needs-you")?.length ?? 0;
   const overWip = live > WIP_SOFT_LIMIT;
 
@@ -279,9 +493,9 @@ export function SessionsList() {
           />
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto" ref={listRef} onKeyDown={onListKeyDown}>
         {GROUPS.map(({ state, title }) => {
-          const list = byState.get(state) ?? [];
+          const list = (byState.get(state) ?? []).filter((s) => !removing.has(s.id));
           if (list.length === 0) return null;
           return (
             <section key={state} data-testid={`sessions-${state}`}>
@@ -304,10 +518,15 @@ export function SessionsList() {
                   // A live session is closed, not archived: archiving hides
                   // a process still running.
                   onArchive={s.status === "live" ? undefined : () => archive(s.id)}
-                  onClose={() => void closeSession(s)}
+                  onClose={() => (s.status === "live" ? void closeSession(s) : removeSession(s))}
                   onHandoff={
                     s.status === "live" && s.agent ? () => requestHandoff(s.id) : undefined
                   }
+                  renaming={renaming === s.id}
+                  onRenameStart={() => setRenaming(s.id)}
+                  onRenameCommit={(name) => commitRename(s.id, name)}
+                  menu={menuFor(s)}
+                  tabIndex={s.id === stopId ? 0 : -1}
                 />
               ))}
             </section>
@@ -341,27 +560,16 @@ export function SessionsList() {
                   active={false}
                   onActivate={() => resume(s.id)}
                   onRestore={() => resume(s.id)}
-                  onClose={() => void closeSession(s)}
+                  onClose={() => removeSession(s)}
+                  renaming={renaming === s.id}
+                  onRenameStart={() => setRenaming(s.id)}
+                  onRenameCommit={(name) => commitRename(s.id, name)}
+                  menu={menuFor(s)}
+                  tabIndex={-1}
                 />
               ))}
           </section>
         )}
-        <section className="border-t border-border">
-          <button
-            type="button"
-            onClick={() => setFilesOpen((v) => !v)}
-            aria-expanded={filesOpen}
-            className="unbutton flex h-7 w-full items-center gap-1 px-3 text-left font-sans text-caption font-semibold uppercase tracking-wide text-faint-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
-          >
-            <FolderTree size={12} aria-hidden />
-            Files
-          </button>
-          {filesOpen && tree && (
-            <div className="px-1 pb-2">
-              <FileTree root={tree} />
-            </div>
-          )}
-        </section>
       </div>
     </div>
   );

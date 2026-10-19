@@ -45,6 +45,9 @@ const TERM_THEMES = {
   dark: {
     background: "#0d0f12",
     foreground: "#d9dde3",
+    // xterm's default bright black (#555753) reads at 2.6:1 here; the CLIs
+    // use it for hints and timestamps, so it has to be legible.
+    brightBlack: "#8b949e",
     cursor: "#6aa9ff",
     selectionBackground: "rgba(106, 169, 255, 0.35)",
   },
@@ -53,6 +56,25 @@ const TERM_THEMES = {
     foreground: "#1a1d23",
     cursor: "#2563eb",
     selectionBackground: "rgba(37, 99, 235, 0.25)",
+    // xterm's default ANSI palette is tuned for a dark screen: on this
+    // background cyan reads at 3.4:1 and yellow worse. Every one of the
+    // sixteen here clears 4.5:1 (the 256-colour cube is xterm's own).
+    black: "#1a1d23",
+    red: "#b42318",
+    green: "#1f7a3a",
+    yellow: "#8a5a00",
+    blue: "#1d4ed8",
+    magenta: "#9d174d",
+    cyan: "#0e6e73",
+    white: "#4b5563",
+    brightBlack: "#5b6572",
+    brightRed: "#c2410c",
+    brightGreen: "#15803d",
+    brightYellow: "#92400e",
+    brightBlue: "#2563eb",
+    brightMagenta: "#a21caf",
+    brightCyan: "#0f766e",
+    brightWhite: "#374151",
   },
 } as const;
 

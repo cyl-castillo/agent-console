@@ -90,9 +90,6 @@ export function TerminalDrawer({
           !full && "cursor-row-resize",
           dragging && "bg-[var(--hover)]",
         )}
-        role={full ? undefined : "separator"}
-        aria-orientation={full ? undefined : "horizontal"}
-        aria-label={full ? undefined : "Resize the terminal"}
         data-testid="drawer-strip"
         onPointerDown={startDrag}
         onPointerMove={moveDrag}
@@ -100,9 +97,17 @@ export function TerminalDrawer({
         onDoubleClick={() => !full && setDrawerPct(null)}
         title={full ? undefined : "Drag to resize · double-click to reset"}
       >
-        <span className="font-medium text-foreground">Terminal</span>
-        {activeTerminal && <span className="truncate">{activeTerminal.name}</span>}
-        <span className="flex-1" />
+        {/* The grip is the separator; the buttons are its neighbours, not
+            its children (a separator may not contain focusable content). */}
+        <div
+          className="flex min-w-0 flex-1 items-center gap-2 self-stretch"
+          role={full ? undefined : "separator"}
+          aria-orientation={full ? undefined : "horizontal"}
+          aria-label={full ? undefined : "Resize the terminal"}
+        >
+          <span className="font-medium text-foreground">Terminal</span>
+          {activeTerminal && <span className="truncate">{activeTerminal.name}</span>}
+        </div>
         <Tooltip
           content={
             chatCollapsed

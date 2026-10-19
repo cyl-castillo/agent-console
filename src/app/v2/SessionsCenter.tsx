@@ -1,6 +1,8 @@
 import { useRef } from "react";
 import { ChangesView } from "../../components/ChangesView";
 import { Preview } from "../../components/Preview";
+import { FileTree } from "../../components/FileTree";
+import { useSessionStore } from "../../stores/sessionStore";
 import type { Project } from "../../types/domain";
 import type { TerminalSession } from "../../stores/terminalsStore";
 import { useChangesStore } from "../../stores/changesStore";
@@ -33,6 +35,7 @@ export function SessionsCenter({
   const tab = useUIStore((s) => s.tab);
   const setTab = useUIStore((s) => s.setTab);
   const changes = useChangesStore((s) => s.status?.changes.length ?? 0);
+  const tree = useSessionStore((s) => s.tree);
   const chatCollapsed = useShellStore((s) => s.chatCollapsed || s.focus);
   const containerRef = useRef<HTMLDivElement>(null);
   return (
@@ -57,7 +60,18 @@ export function SessionsCenter({
           ),
           preview: (
             <div className="tab-pane flex h-full">
-              <Preview />
+              {tree && (
+                <aside
+                  className="w-56 shrink-0 overflow-auto border-r border-border px-1 py-1"
+                  aria-label="Project files"
+                  data-testid="preview-files"
+                >
+                  <FileTree root={tree} />
+                </aside>
+              )}
+              <div className="min-w-0 flex-1">
+                <Preview />
+              </div>
             </div>
           ),
         }}
