@@ -31,6 +31,10 @@ interface ShellState {
   listWidth: number;
   inspectorWidth: number;
   setWidth: (col: "list" | "inspector", px: number | null) => void;
+  /// Focus mode: the terminal alone — rail, list, inspector, top bar and
+  /// chat out of the way. Session-only: the app always starts in full view.
+  focus: boolean;
+  toggleFocus: () => void;
   /// The new-session chooser (the "+" and Ctrl+T open the same one); not persisted.
   chooserOpen: boolean;
   setChooserOpen: (v: boolean) => void;
@@ -107,6 +111,17 @@ export const useShellStore = create<ShellState>((set, get) => ({
   selectTurn: (selectedTurnId) => set({ selectedTurnId }),
   chooserOpen: false,
   setChooserOpen: (chooserOpen) => set({ chooserOpen }),
+  focus: false,
+  toggleFocus: () => {
+    const entering = !get().focus;
+    // Focus is about the terminal: land in Sessions with the drawer open.
+    set((s) => ({
+      focus: entering,
+      destination: entering ? "sessions" : s.destination,
+      drawerOpen: entering ? true : s.drawerOpen,
+    }));
+    save(get());
+  },
   goTo: (destination) => {
     const def = destinationDef(destination);
     if (def.sections.length > 0) {

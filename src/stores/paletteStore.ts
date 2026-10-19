@@ -282,6 +282,13 @@ const ACTIONS: PaletteAction[] = [
     },
   },
   {
+    id: "ui.focus_mode",
+    label: "Focus mode: the terminal alone",
+    hint: "Hide the rail, lists, chat and top bar; Ctrl+Shift+F toggles it",
+    keywords: ["fullscreen", "zen", "terminal", "focus", "maximize"],
+    run: () => emit("ac:toggle-focus", null),
+  },
+  {
     id: "ui.toggle_sidebar",
     label: "Toggle Workspace Sidebar",
     hint: "Show or hide Sessions, Changes, and Files",

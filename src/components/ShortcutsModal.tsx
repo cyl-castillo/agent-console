@@ -10,6 +10,7 @@ const GROUPS = [
       ["Ctrl+3", "Open Preview"],
       ["Ctrl+B", "Toggle the list pane"],
       ["Ctrl+J", "Toggle side panel"],
+      ["Ctrl+Shift+F", "Focus mode: the terminal alone"],
       ["Ctrl+P", "Open command palette"],
       ["Ctrl+/", "Show keyboard shortcuts"],
     ],

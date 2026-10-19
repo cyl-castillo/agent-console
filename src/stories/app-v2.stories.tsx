@@ -210,6 +210,13 @@ export const SessionsBooting = scenario({
   },
   after: () => useTermSignalsStore.getState().markBooting("sess-auth"),
 });
+/// Focus mode: the terminal alone.
+export const SessionsFocus = scenario({
+  destination: "sessions",
+  after: () => {
+    if (!useShellStore.getState().focus) useShellStore.getState().toggleFocus();
+  },
+});
 /// F4: coming back — every session stopped, the last active one selected.
 export const SessionsAllStopped = scenario({ destination: "sessions", liveTerminal: false });
 /// F4: first launch with nothing to decide lands in Sessions, not an empty Inbox.

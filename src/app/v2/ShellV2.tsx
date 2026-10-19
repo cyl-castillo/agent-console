@@ -38,6 +38,8 @@ export function ShellV2({
   const centerTab = useUIStore((s) => s.tab);
   const { decisions, byState } = useInbox();
   const toggleList = useShellStore((s) => s.toggleList);
+  const focus = useShellStore((s) => s.focus);
+  const toggleFocus = useShellStore((s) => s.toggleFocus);
   const listWidth = useShellStore((s) => s.listWidth);
   const inspectorWidth = useShellStore((s) => s.inspectorWidth);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -72,6 +74,12 @@ export function ShellV2({
     window.addEventListener("ac:toggle-terminal-drawer", h);
     return () => window.removeEventListener("ac:toggle-terminal-drawer", h);
   }, []);
+  // Ctrl+Shift+F / palette "Focus mode": the terminal alone.
+  useEffect(() => {
+    const h = () => useShellStore.getState().toggleFocus();
+    window.addEventListener("ac:toggle-focus", h);
+    return () => window.removeEventListener("ac:toggle-focus", h);
+  }, []);
   // The top bar's Workspace button and the palette's "toggle sidebar" still
   // flip uiStore.leftOpen; in this shell that gesture means the list pane.
   useEffect(
@@ -95,10 +103,10 @@ export function ShellV2({
     inbox: decisions,
     sessions: byState.get("needs-you")?.length ?? 0,
   };
-  const hasList = destination !== "inbox" && (narrow ? narrowListOpen : listOpen);
+  const hasList = !focus && destination !== "inbox" && (narrow ? narrowListOpen : listOpen);
   const selectedTurn = useShellStore((s) => s.selectedTurnId);
   const hasInspector =
-    rightOpen && !narrow && inspectorFor(destination, centerTab, selectedTurn) !== null;
+    !focus && rightOpen && !narrow && inspectorFor(destination, centerTab, selectedTurn) !== null;
   const handle = (col: Column, className: string) => (
     <div
       role="separator"
@@ -126,22 +134,23 @@ export function ShellV2({
         ref={shellRef}
         className={cn(
           "relative grid h-full w-full bg-background text-foreground",
-          "grid-rows-[32px_minmax(0,1fr)_24px]",
+          focus ? "grid-rows-[0px_minmax(0,1fr)_24px]" : "grid-rows-[32px_minmax(0,1fr)_24px]",
           "[grid-template-areas:'top_top_top_top'_'rail_list_center_inspector'_'status_status_status_status']",
         )}
         style={{
           ["--list-w-fallback" as string]: `${listWidth}px`,
           ["--inspector-w-fallback" as string]: `${inspectorWidth}px`,
-          gridTemplateColumns: `56px ${hasList ? `var(--list-w, ${listWidth}px)` : "0px"} minmax(0,1fr) ${hasInspector ? `var(--inspector-w, ${inspectorWidth}px)` : "0px"}`,
+          gridTemplateColumns: `${focus ? "0px" : "56px"} ${hasList ? `var(--list-w, ${listWidth}px)` : "0px"} minmax(0,1fr) ${hasInspector ? `var(--inspector-w, ${inspectorWidth}px)` : "0px"}`,
         }}
         data-testid="shell-v2"
         data-destination={destination}
         data-narrow={narrow || undefined}
+        data-focus={focus || undefined}
       >
-        <div className="[grid-area:top] min-w-0">
+        <div className={cn("[grid-area:top] min-w-0", focus && "hidden")}>
           <TopBar project={project} />
         </div>
-        <div className="[grid-area:rail] min-h-0">
+        <div className={cn("[grid-area:rail] min-h-0", focus && "hidden")}>
           <Rail counts={counts} />
         </div>
         <div
@@ -168,6 +177,17 @@ export function ShellV2({
         <div className="[grid-area:status] min-w-0">
           <StatusBarV2 workspace={workspace} />
         </div>
+        {focus && (
+          <button
+            type="button"
+            onClick={toggleFocus}
+            className="unbutton absolute right-3 top-2 z-10 inline-flex items-center gap-1.5 rounded-pill border border-border bg-surface-2 px-2.5 py-1 font-sans text-caption text-muted-foreground shadow-md hover:bg-[var(--hover)] hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+            data-testid="exit-focus"
+            title="Leave focus mode (Ctrl+Shift+F)"
+          >
+            Focus · Ctrl+Shift+F to leave
+          </button>
+        )}
         {hasList && handle("list", "left-[calc(56px+var(--list-w,var(--list-w-fallback))-4px)]")}
         {hasInspector &&
           handle("inspector", "right-[calc(var(--inspector-w,var(--inspector-w-fallback))-4px)]")}

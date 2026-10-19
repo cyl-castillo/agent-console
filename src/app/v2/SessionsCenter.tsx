@@ -33,7 +33,7 @@ export function SessionsCenter({
   const tab = useUIStore((s) => s.tab);
   const setTab = useUIStore((s) => s.setTab);
   const changes = useChangesStore((s) => s.status?.changes.length ?? 0);
-  const chatCollapsed = useShellStore((s) => s.chatCollapsed);
+  const chatCollapsed = useShellStore((s) => s.chatCollapsed || s.focus);
   const containerRef = useRef<HTMLDivElement>(null);
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col" data-testid="sessions-center">
