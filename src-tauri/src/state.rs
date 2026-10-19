@@ -35,6 +35,8 @@ pub struct AppState {
     pub console_mcp: crate::services::console_mcp::ConsoleMcp,
     /// D11: the sponsor policy per project (objective, budget, risk threshold).
     pub sponsor: crate::services::sponsor_service::SponsorService,
+    /// F5: transcript tails streaming the agent's words into the conversation.
+    pub transcripts: crate::services::transcript_service::TranscriptWatchers,
 }
 
 impl AppState {
@@ -56,6 +58,7 @@ impl AppState {
             connector: crate::services::connector_service::ConnectorService::new(),
             console_mcp: crate::services::console_mcp::ConsoleMcp::new(),
             sponsor: crate::services::sponsor_service::SponsorService::new(),
+            transcripts: crate::services::transcript_service::TranscriptWatchers::new(),
         }
     }
 }

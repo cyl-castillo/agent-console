@@ -21,6 +21,8 @@ import { newSession } from "../../actions";
 import { TurnBlock } from "./blocks";
 import { StatusGlyph } from "../../../ui/StatusGlyph";
 import { useSessionTimeline } from "./useSessionTimeline";
+import { useTranscriptWatch } from "./useTranscriptWatch";
+import { saidText, streamFor } from "./stream";
 import { SessionCards } from "./SessionCards";
 import { useApprovalStore } from "../../../stores/approvalStore";
 import { useHooksHealthStore } from "../../../stores/hooksHealthStore";
@@ -44,6 +46,8 @@ const NEAR_BOTTOM_PX = 80;
 /// the PTY, and the terminal one keystroke away in the drawer.
 export function ConversationView() {
   const { session, turns } = useSessionTimeline();
+  // F5: the agent's words as the CLI writes them, per turn.
+  const transcript = useTranscriptWatch(session);
   const setCenterTab = useUIStore((s) => s.setTab);
   const selectFile = useChangesStore((s) => s.setSelected);
   const setWorkbenchTab = useWorkbenchStore((s) => s.setTab);
@@ -334,6 +338,7 @@ export function ConversationView() {
                   isLast && stoppedLocally && stopping
                     ? { ...t, endTs: stopping.at, interrupted: true }
                     : t;
+                const stream = streamFor(transcript, turn);
                 return (
                   <TurnBlock
                     key={t.turnId ?? i}
@@ -341,8 +346,10 @@ export function ConversationView() {
                     live={isLast && liveTurn}
                     waitingApproval={isLast && liveTurn && waitingApproval}
                     now={now}
+                    stream={stream}
+                    onCopyText={copy}
                     onOpenFile={openFile}
-                    onCopy={() => copy(t.summary)}
+                    onCopy={() => copy(saidText(stream, t.summary))}
                     onRerun={() => rerun(t.prompt)}
                     onLedger={() => setWorkbenchTab("proof")}
                     onReview={t.termId && t.turnId ? () => review(t.termId!, t.turnId!) : undefined}

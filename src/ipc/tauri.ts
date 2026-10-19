@@ -299,6 +299,10 @@ export const ipc = {
     invoke<HeldOut>("harness_lab_set_heldout", { projectRoot, tasks }),
   harnessLabRun: (projectRoot: string) => invoke<Experiment>("harness_lab_run", { projectRoot }),
   /// D11: the product's sponsor policy.
+  /// F5: follow / stop following the CLI's transcript of an agent session.
+  transcriptWatch: (sessionId: string, engine: string) =>
+    invoke<void>("transcript_watch", { sessionId, engine }),
+  transcriptUnwatch: (sessionId: string) => invoke<void>("transcript_unwatch", { sessionId }),
   sponsorGet: (projectRoot: string) => invoke<Sponsor>("sponsor_get", { projectRoot }),
   sponsorSet: (projectRoot: string, sponsor: Sponsor) =>
     invoke<Sponsor>("sponsor_set", { projectRoot, sponsor }),

@@ -7,6 +7,7 @@ import { IconButton } from "../../../ui/IconButton";
 import { MarkdownText } from "../../../ui/MarkdownText";
 import { StatusGlyph } from "../../../ui/StatusGlyph";
 import { Tooltip } from "../../../ui/Tooltip";
+import { EMPTY_STREAM, saidText, type TurnStream } from "./stream";
 
 /// "10:58 AM" today, "yesterday 10:58 AM", else "Oct 15, 10:58 AM".
 const fmtTime = (ts: number, now: number) => {
@@ -131,19 +132,19 @@ export function ProofBlock({
           tone={c.status === "passed" ? "ok" : c.status === "failed" ? "danger" : "warn"}
           mono
         >
-          {c.status === "passed" ? "✓" : c.status === "failed" ? "✕" : "∙"} {c.command}
+          check {c.status === "passed" ? "✓" : c.status === "failed" ? "✕" : "∙"} {c.command}
         </Chip>
       ))}
       {turn.commits.map((c) => (
         <Chip key={c.sha} mono>
-          {c.sha.slice(0, 7)} · {c.subject}
+          commit {c.sha.slice(0, 7)} · {c.subject}
         </Chip>
       ))}
       {turn.injected.length > 0 && (
         <Tooltip content={turn.injected.join(", ")}>
           <span>
             <Chip tone="purple" mono>
-              {turn.injected.length} memory
+              memory ×{turn.injected.length}
             </Chip>
           </span>
         </Tooltip>
@@ -159,7 +160,7 @@ export function ProofBlock({
           }
           mono
         >
-          review: {turn.review.verdict}
+          review {turn.review.verdict}
           {turn.review.decision ? ` → ${turn.review.decision}` : ""}
         </Chip>
       )}
@@ -198,6 +199,15 @@ export function ProofBlock({
   );
 }
 
+/// Who is speaking: "You" over the prompt, "Agent" over the reply.
+function SpeakerLabel({ children }: { children: string }) {
+  return (
+    <span className="font-sans text-caption font-medium uppercase tracking-wide text-faint-foreground">
+      {children}
+    </span>
+  );
+}
+
 /// One turn: the prompt, what the agent did, what it changed, what it said,
 /// and the proof line. A turn without an end is live.
 export function TurnBlock({
@@ -211,6 +221,8 @@ export function TurnBlock({
   onReview,
   onMore,
   waitingApproval,
+  stream = EMPTY_STREAM,
+  onCopyText,
 }: {
   turn: TimelineTurn;
   live: boolean;
@@ -225,7 +237,13 @@ export function TurnBlock({
   /// F3: an approval of this session is pending — the agent is not working,
   /// it is waiting for the human.
   waitingApproval?: boolean;
+  /// F5: what the transcript says about this turn — the agent's paragraphs
+  /// as they are written and the tool call still running.
+  stream?: TurnStream;
+  /// Copy a code fence from the agent's prose.
+  onCopyText?: (text: string) => void;
 }) {
+  const said = saidText(stream, turn.summary);
   const state = turn.failed ? "failed" : turn.interrupted ? "stopped" : live ? "working" : "done";
   const duration = turn.endTs ? turn.endTs - turn.ts : now - turn.ts;
   return (
@@ -261,18 +279,21 @@ export function TurnBlock({
           </span>
         )}
       </header>
-      <div className="rounded-2 bg-surface-2 px-3 py-2 font-sans text-body text-foreground">
-        <span className="mr-1.5 text-faint-foreground" aria-hidden>
-          ›
-        </span>
-        <span className="whitespace-pre-wrap break-words">
+      <div className="flex flex-col gap-1" data-testid="you-block">
+        <SpeakerLabel>You</SpeakerLabel>
+        <div className="whitespace-pre-wrap break-words rounded-2 bg-surface-2 px-3 py-2 font-sans text-body text-foreground">
           {turn.prompt || "(no prompt recorded)"}
-        </span>
+        </div>
       </div>
       <ToolCallBlock tools={turn.tools} total={turn.toolResults} />
       <DiffBlock files={turn.files} truncated={turn.filesTruncated} onOpenFile={onOpenFile} />
-      {turn.summary && <MarkdownText text={turn.summary} />}
-      {turn.summaryTruncated && (
+      {said && (
+        <div className="flex flex-col gap-1" data-testid="agent-block">
+          <SpeakerLabel>Agent</SpeakerLabel>
+          <MarkdownText text={said} onOpenFile={onOpenFile} onCopy={onCopyText} />
+        </div>
+      )}
+      {turn.summaryTruncated && stream.texts.length === 0 && (
         <button
           type="button"
           onClick={onMore}
@@ -293,13 +314,23 @@ export function TurnBlock({
           )}
         </div>
       )}
-      {live && !turn.summary && (
+      {live && (
         <div className="font-sans text-small text-muted-foreground" data-testid="live-status">
           {waitingApproval ? (
             <span className="text-warn">Waiting for your approval below</span>
+          ) : stream.running ? (
+            <span className="inline-flex max-w-full items-baseline gap-1.5">
+              <span className="shrink-0">Running {stream.running.name}</span>
+              {stream.running.input && (
+                <span className="min-w-0 truncate font-code text-caption text-faint-foreground">
+                  {stream.running.input}
+                </span>
+              )}
+            </span>
           ) : (
             <>
-              Working… {turn.toolResults} tool call{turn.toolResults === 1 ? "" : "s"} so far
+              Working… {Math.max(turn.toolResults, stream.toolUses)} tool call
+              {Math.max(turn.toolResults, stream.toolUses) === 1 ? "" : "s"} so far
             </>
           )}
         </div>

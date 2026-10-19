@@ -125,7 +125,7 @@ const CODEX_CONTEXT_WINDOW_FALLBACK: u64 = 258_400;
 /// `~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-<timestamp>-<session-id>.jsonl`;
 /// the date prefix isn't derivable from the id, so walk the (shallow, 3-level)
 /// date tree newest-first and stop at the first filename match.
-fn find_codex_rollout(session_id: &str) -> Option<PathBuf> {
+pub(crate) fn find_codex_rollout(session_id: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let root = home.join(".codex").join("sessions");
     let suffix = format!("-{session_id}.jsonl");

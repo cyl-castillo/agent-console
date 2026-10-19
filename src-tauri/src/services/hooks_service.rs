@@ -1460,7 +1460,7 @@ fn has_command_path(entry: &Value, target: &Path) -> bool {
 /// something changes, with a slow 2s heartbeat as a safety net for missed
 /// events. If the watcher can't start (inotify exhaustion, exotic FS), fall
 /// back to pure polling at `poll_fallback` — the pre-notify behavior.
-fn dir_wake_source(
+pub(crate) fn dir_wake_source(
     dir: &Path,
     poll_fallback: Duration,
 ) -> (
@@ -1490,7 +1490,7 @@ fn dir_wake_source(
 
 /// Block until the next filesystem wake-up (or the heartbeat), then coalesce
 /// any burst of queued wake-ups into this one pass.
-fn await_wake(rx: &mpsc::Receiver<()>, interval: Duration, watching: bool) {
+pub(crate) fn await_wake(rx: &mpsc::Receiver<()>, interval: Duration, watching: bool) {
     if watching {
         let _ = rx.recv_timeout(interval);
         while rx.try_recv().is_ok() {}
@@ -1504,7 +1504,7 @@ fn await_wake(rx: &mpsc::Receiver<()>, interval: Duration, watching: bool) {
 /// a torn tail mid-append stays buffered for the next pass instead of being
 /// half-parsed and dropped. A shrunken file (truncation) resets to 0 so the
 /// next pass reprocesses from the start.
-fn drain_new_lines(path: &Path, last_size: u64) -> (Vec<Value>, u64) {
+pub(crate) fn drain_new_lines(path: &Path, last_size: u64) -> (Vec<Value>, u64) {
     let Ok(meta) = fs::metadata(path) else {
         return (Vec::new(), last_size);
     };
