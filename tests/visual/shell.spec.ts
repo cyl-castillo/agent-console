@@ -501,6 +501,70 @@ test("F3: the trust question, a login ask and a missing CLI surface as cards wit
   await expect(page.getByText("Welcome to Agent Console")).toBeVisible();
 });
 
+test("F5: the agent's words stream into the live turn before it closes, as real markdown", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  await expect(page.getByTestId("live-status")).toContainText("Working…");
+  // The conversation asked the Rust side to follow this session's transcript.
+  const watched = await page.evaluate(() => {
+    const log = (
+      window as unknown as {
+        __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+      }
+    ).__fixtures.invokeLog;
+    return log.find((e) => e.cmd === "transcript_watch")?.args;
+  });
+  expect(watched).toEqual({ sessionId: "0f2c1e4a-9b7d-4c1e-8a2f-5d6e7f8a9b0c", engine: "claude" });
+  const emit = (items: unknown[]) =>
+    page.evaluate(
+      (payload) =>
+        (
+          window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+        ).__fixtures.emit("transcript://delta", payload),
+      {
+        sessionId: "0f2c1e4a-9b7d-4c1e-8a2f-5d6e7f8a9b0c",
+        engine: "claude",
+        backfill: false,
+        items,
+      },
+    );
+  // A tool call with no result yet: the turn says what is running.
+  await emit([
+    { kind: "tool_use", id: "t1", ts: Date.now(), name: "Bash", input: "npm test -- --run" },
+  ]);
+  await expect(page.getByTestId("live-status")).toContainText("Running Bash");
+  await expect(page.getByTestId("live-status")).toContainText("npm test -- --run");
+  // The agent writes: its paragraph appears while the turn is still open.
+  await emit([
+    { kind: "tool_result", id: "t1", ts: Date.now(), ok: true },
+    {
+      kind: "text",
+      id: "a1",
+      ts: Date.now(),
+      text: "The **auth** test passes now. See [src/auth.ts](src/auth.ts).\n\n| file | status |\n|---|---|\n| auth.ts | ok |\n\n```ts\nconst ok = true;\n```\n\n<img src=x onerror=alert(1)>",
+    },
+  ]);
+  const live = page.getByTestId("turn").last();
+  const agent = live.getByTestId("agent-block");
+  await expect(agent).toContainText("Agent");
+  await expect(agent.locator("strong")).toHaveText("auth");
+  await expect(agent.getByTestId("md-table")).toBeVisible();
+  await expect(agent.getByTestId("code-fence")).toHaveAttribute("data-lang", "ts");
+  await expect(agent.getByTestId("md-path")).toHaveText("src/auth.ts");
+  // 0 HTML from the model: the tag is text, not an element.
+  await expect(agent.locator("img")).toHaveCount(0);
+  await expect(agent).toContainText("<img src=x onerror=alert(1)>");
+  // Still live: no turn_end, no proof line, labels on both sides.
+  await expect(live).toHaveAttribute("data-live", "true");
+  await expect(live.getByTestId("proof-block")).toHaveCount(0);
+  await expect(live.getByTestId("you-block")).toContainText("You");
+  await expect(page.getByTestId("live-status")).toContainText("Working…");
+  // The path opens Changes.
+  await agent.getByTestId("md-path").click();
+  await expect(page.getByRole("tab", { name: /Changes/ })).toHaveAttribute("aria-selected", "true");
+});
+
 test("F3: an approval of this session sits inline in its conversation and the turn says so", async ({
   page,
 }) => {

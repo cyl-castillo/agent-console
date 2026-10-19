@@ -31,6 +31,7 @@ pub mod sponsor;
 pub mod teams;
 pub mod terminal;
 pub mod testigo;
+pub mod transcript;
 pub mod usage;
 pub mod vault;
 pub mod voice;

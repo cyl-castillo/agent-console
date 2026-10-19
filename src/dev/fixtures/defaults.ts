@@ -1004,6 +1004,8 @@ export const defaultFixtures: FixtureMap = {
     prUrl: "https://github.com/demo/demo-playground/pull/42",
     commit: "c3d4e5f6",
   },
+  transcript_watch: null,
+  transcript_unwatch: null,
   sponsor_get: {
     objective: "",
     owner: "",

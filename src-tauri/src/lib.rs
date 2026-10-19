@@ -266,6 +266,8 @@ pub fn run() {
             commands::identity::identity_verify,
             commands::sponsor::sponsor_get,
             commands::sponsor::sponsor_set,
+            commands::transcript::transcript_watch,
+            commands::transcript::transcript_unwatch,
             commands::harness_lab::harness_lab_get,
             commands::harness_lab::harness_lab_set_config,
             commands::harness_lab::harness_lab_set_heldout,

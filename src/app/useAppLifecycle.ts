@@ -9,6 +9,7 @@ import { attachInjectListener } from "../stores/injectStore";
 import { attachHooksHealthListeners } from "../stores/hooksHealthStore";
 import { attachLiveStatusListener } from "../stores/liveStatusStore";
 import { attachProofListeners } from "../stores/proofStore";
+import { attachTranscriptListeners } from "../stores/transcriptStore";
 import { attachWorkbenchListeners } from "../stores/workbenchStore";
 import { attachOverlayListeners } from "../stores/overlaysStore";
 import { attachConsoleMcpHost } from "../lib/consoleMcpHost";
@@ -65,6 +66,7 @@ export function useAppLifecycle(): void {
     adopt(attachHooksHealthListeners());
     adopt(attachLiveStatusListener());
     adopt(attachProofListeners());
+    adopt(attachTranscriptListeners());
     // The console as an MCP server: answer the Rust side's roundtrips.
     adopt(attachConsoleMcpHost());
     adopt(attachDeclineListener());
