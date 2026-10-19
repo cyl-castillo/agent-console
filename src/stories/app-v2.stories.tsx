@@ -177,6 +177,13 @@ export const SessionsDrawerOpen = scenario({
     if (!useShellStore.getState().drawerOpen) useShellStore.getState().toggleDrawer();
   },
 });
+/// The terminal as the whole stage: chat folded away.
+export const SessionsTerminalOnly = scenario({
+  destination: "sessions",
+  after: () => {
+    if (!useShellStore.getState().chatCollapsed) useShellStore.getState().toggleChat();
+  },
+});
 export const SessionsNoTurns = scenario({
   destination: "sessions",
   fixtures: { testigo_list: [] },
