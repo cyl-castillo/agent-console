@@ -61,7 +61,9 @@ export function InboxView() {
   const showOverlay = useOverlaysStore((s) => s.show);
 
   const openSession = (id: string) => {
-    setActive(id);
+    const s = useTerminalsStore.getState().sessions.find((x) => x.id === id);
+    if (s?.status === "stopped") useTerminalsStore.getState().resume(id);
+    else setActive(id);
     goTo("sessions");
     setCenterTab("terminal");
   };

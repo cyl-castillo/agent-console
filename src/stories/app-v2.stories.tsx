@@ -36,6 +36,8 @@ interface Opts {
   fixtures?: FixtureMap;
   theme?: "dark" | "light";
   destination?: Destination;
+  /// Let the shell land on its own (F4): no explicit goTo in play.
+  landing?: boolean;
   tab?: WorkbenchTab;
   centerTab?: "terminal" | "changes" | "preview";
   liveTerminal?: boolean;
@@ -67,7 +69,7 @@ function scenario(opts: Opts = {}): StoryObj {
         if (first) await st.resume(first.id);
       }
       if (opts.tab) useWorkbenchStore.getState().setTab(opts.tab);
-      useShellStore.getState().goTo(opts.destination ?? "inbox");
+      if (!opts.landing) useShellStore.getState().goTo(opts.destination ?? "inbox");
       if (opts.centerTab) useUIStore.getState().setTab(opts.centerTab);
       await opts.after?.();
       await settle();
@@ -207,6 +209,17 @@ export const SessionsBooting = scenario({
     term_spawn: (args: Record<string, unknown>) => `term-${String(args.termKey ?? "x")}`,
   },
   after: () => useTermSignalsStore.getState().markBooting("sess-auth"),
+});
+/// F4: coming back — every session stopped, the last active one selected.
+export const SessionsAllStopped = scenario({ destination: "sessions", liveTerminal: false });
+/// F4: first launch with nothing to decide lands in Sessions, not an empty Inbox.
+export const LandingFresh = scenario({
+  landing: true,
+  fixtures: {
+    sessions_list: [],
+    jobs_board: { project: ROOT, settings: { parallelJobs: 1 }, cards: [], pending: [], busy: 0 },
+  },
+  liveTerminal: false,
 });
 export const SessionsNoTurns = scenario({
   destination: "sessions",

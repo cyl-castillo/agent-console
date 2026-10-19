@@ -5,6 +5,7 @@ import type { TermInputDetail } from "../../../components/Terminal";
 import { useChangesStore } from "../../../stores/changesStore";
 import { ipc } from "../../../ipc/tauri";
 import { useSessionStore } from "../../../stores/sessionStore";
+import { useTerminalsStore } from "../../../stores/terminalsStore";
 import { useShellStore } from "../../../stores/shellStore";
 import { useToastStore } from "../../../stores/toastStore";
 import { useUIStore } from "../../../stores/uiStore";
@@ -159,9 +160,20 @@ export function ConversationView() {
     if (ok) setPending((p) => [...p, { text, ts: Date.now() }]);
     return ok;
   };
+  const resume = useTerminalsStore((s) => s.resume);
   const send = async () => {
     const text = draft.trim();
     if (!text) return;
+    if (session && !sessionLive) {
+      // F4: a stopped session resumes from the composer; the prompt waits
+      // for the CLI and goes out as its own turn.
+      resume(session.id);
+      enqueue(session.id, text);
+      setDraft("");
+      showToast("Resuming the session — your prompt goes out when the CLI is up", "info");
+      draftRef.current?.focus();
+      return;
+    }
     if (booting && session) {
       enqueue(session.id, text);
       setDraft("");
@@ -381,6 +393,21 @@ export function ConversationView() {
           </button>
         )}
       </div>
+      {!sessionLive && (
+        <div
+          className="flex shrink-0 items-center gap-3 border-t border-border bg-surface-1 px-3 py-2 font-sans text-small text-muted-foreground"
+          data-testid="resume-banner"
+          role="status"
+        >
+          <span>
+            This session is stopped. Resume relaunches its shell and agent with the saved
+            scrollback; sending a prompt resumes it too.
+          </span>
+          <Button size="sm" variant="primary" onClick={() => resume(session.id)}>
+            Resume session
+          </Button>
+        </div>
+      )}
       <form
         className="flex shrink-0 flex-col gap-2 border-t border-border bg-surface-1 p-3"
         onSubmit={(e) => {
@@ -393,9 +420,11 @@ export function ConversationView() {
           ref={draftRef}
           aria-label="Prompt for the agent"
           placeholder={
-            liveTurn
-              ? "The agent is working — queue the next prompt, or interrupt"
-              : "Tell the agent what to do next…"
+            !sessionLive
+              ? "Stopped — Enter resumes the session and sends"
+              : liveTurn
+                ? "The agent is working — queue the next prompt, or interrupt"
+                : "Tell the agent what to do next…"
           }
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -427,7 +456,7 @@ export function ConversationView() {
                   {i !== 0
                     ? `#${i + 1}`
                     : !sessionLive
-                      ? "waiting for the session"
+                      ? "waiting for the session to resume"
                       : liveTurn
                         ? "next, when this turn ends"
                         : queueHeld

@@ -129,6 +129,24 @@ interface TerminalsState {
   _persistNow: () => Promise<void>;
 }
 
+const ACTIVE_KEY = "agent-console:active-session:";
+function loadActive(root: string): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_KEY + root);
+  } catch {
+    return null;
+  }
+}
+function saveActive(root: string | null, id: string | null) {
+  if (!root) return;
+  try {
+    if (id) localStorage.setItem(ACTIVE_KEY + root, id);
+    else localStorage.removeItem(ACTIVE_KEY + root);
+  } catch {
+    /* ignore */
+  }
+}
+
 function genId(): string {
   return `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -194,7 +212,12 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
         archived: p.archived || now - lastActiveMs > AUTO_ARCHIVE_AFTER_MS,
       };
     });
-    set({ projectRoot, sessions, activeId: null, ready: true });
+    // F4: come back where you left — the last active session is selected
+    // again (stopped, with its history; Resume is one Enter away).
+    const remembered = loadActive(projectRoot);
+    const activeId =
+      remembered && sessions.some((s) => s.id === remembered && !s.archived) ? remembered : null;
+    set({ projectRoot, sessions, activeId, ready: true });
   },
 
   clear: () => {
@@ -224,6 +247,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       runsIn: worktree ? "worktree" : "local",
     };
     set({ sessions: [...sessions, session], activeId: id });
+    saveActive(get().projectRoot, id);
     return id;
   },
 
@@ -247,9 +271,13 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
       ),
       activeId: id,
     });
+    saveActive(get().projectRoot, id);
   },
 
-  setActive: (id) => set({ activeId: id }),
+  setActive: (id) => {
+    set({ activeId: id });
+    saveActive(get().projectRoot, id);
+  },
 
   rename: (id, name) => {
     const { sessions } = get();

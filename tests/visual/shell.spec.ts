@@ -572,6 +572,101 @@ test("F3: while the CLI boots, the thread says so and the composer queues instea
     .toEqual(["Start by running the tests", "\r"]);
 });
 
+test("F4: coming back — the last session is selected, a click resumes it with its history", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions-all-stopped");
+  // Every session stopped; nothing remembered yet → nothing selected.
+  await expect(page.getByTestId("resume-banner")).toHaveCount(0);
+  const stopped = page.getByTestId("sessions-list").getByText("fix auth test");
+  await stopped.click();
+  // Resume: the PTY spawns and the history is there without any prompt.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as { __fixtures: { invokeLog: { cmd: string }[] } }
+          ).__fixtures.invokeLog.filter((l) => l.cmd === "term_spawn").length,
+      ),
+    )
+    .toBeGreaterThan(0);
+  await expect(page.getByTestId("turn")).toHaveCount(3);
+  await expect(page.getByTestId("resume-banner")).toHaveCount(0);
+  // The choice is remembered for the next launch.
+  const remembered = await page.evaluate(() =>
+    localStorage.getItem("agent-console:active-session:/home/demo/code/demo-playground"),
+  );
+  expect(remembered).toBe("sess-auth");
+});
+
+test("F4: the composer on a stopped session resumes it and the prompt goes out when the CLI is up", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions-all-stopped");
+  await page.evaluate(() => {
+    (window as unknown as { __activate: () => void }).__activate = () => undefined;
+    const w = window as unknown as { __termInputs: { data: string }[] };
+    w.__termInputs = [];
+    window.addEventListener("ac:term-input", (e) =>
+      w.__termInputs.push((e as CustomEvent<{ data: string }>).detail),
+    );
+  });
+  // Select without resuming: the Inbox's "Open session" of a stopped one resumes,
+  // so pick it through the bridge state instead — the row click would resume.
+  await page.getByTestId("sessions-list").getByText("retry path regression").click();
+  await expect(page.getByTestId("resume-banner")).toHaveCount(0);
+  await page.evaluate(() => {
+    // Stop it again to stand in the "stopped, selected" state the user comes back to.
+    const w = window as unknown as {
+      __fixtures: { emit: (n: string, p: unknown) => Promise<void> };
+    };
+    return w.__fixtures.emit("term://exit", { id: "term-sess-retry", code: 0 });
+  });
+  await expect(page.getByTestId("resume-banner")).toBeVisible();
+  const prompt = page.getByLabel("Prompt for the agent");
+  await expect(prompt).toHaveAttribute("placeholder", /resumes the session/);
+  await prompt.fill("Pick up where we left off");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("prompt-queue")).toContainText("Pick up where we left off");
+  // The CLI comes back (the fixture's banner) and the prompt goes out on its own.
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as { __termInputs: { data: string }[] }).__termInputs.map((d) => d.data),
+      ),
+    )
+    .toEqual(["Pick up where we left off", "\r"]);
+  await expect(page.getByTestId("resume-banner")).toHaveCount(0);
+});
+
+test("F4: first launch with nothing to decide lands in Sessions", async ({ page }) => {
+  await openV2(page, "app-v2--landing-fresh");
+  await expect(page.getByTestId("shell-v2")).toHaveAttribute("data-destination", "sessions");
+});
+
+test("F4: the + and Ctrl+T open the same chooser; Enter starts with the last agent", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  await page.getByTestId("sessions-new").click();
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
+  // Ctrl+T from anywhere outside a field or the terminal.
+  await page.getByTestId("rail-inbox").click();
+  await page.locator("body").click({ position: { x: 5, y: 400 } });
+  await page.keyboard.press("Control+t");
+  await expect(page.getByTestId("shell-v2")).toHaveAttribute("data-destination", "sessions");
+  await expect(page.getByTestId("session-chooser")).toBeVisible();
+  const before = await page.evaluate(() => window.__agentConsole.state().sessions.length);
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(async () => page.evaluate(() => window.__agentConsole.state().sessions.length))
+    .toBe(before + 1);
+  await expect(page.getByTestId("session-chooser")).toHaveCount(0);
+});
+
 test("v2 parity: the terminal survives a trip to the Inbox", async ({ page }) => {
   await openV2(page, "app-v2--sessions-drawer-open");
   const drawer = page.getByTestId("terminal-drawer");

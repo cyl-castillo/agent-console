@@ -72,9 +72,17 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
       },
       {
         key: "talk-to-claude",
-        title: "Talk to Claude in the terminal",
-        description: "New terminals auto-run `claude`. Type a question and hit enter.",
+        title: "Send your first prompt",
+        description:
+          "Type what you want done and press Enter. The agent runs in the terminal below; each turn lands in the conversation with its tools, files and proof.",
         done: onboarding.promptedClaude || recentPromptsCount > 0,
+        action: {
+          label: "Write it →",
+          onClick: () => {
+            onClose();
+            window.dispatchEvent(new CustomEvent("ac:toggle-composer"));
+          },
+        },
       },
       {
         key: "permissions",

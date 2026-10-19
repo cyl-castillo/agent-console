@@ -11,6 +11,7 @@ import { useModelStore } from "../../stores/modelStore";
 import { DEFAULT_AGENT } from "../../agents/profiles";
 import { useProofStore } from "../../stores/proofStore";
 import { useSessionStore } from "../../stores/sessionStore";
+import { useShellStore } from "../../stores/shellStore";
 import { useTerminalsStore, type TerminalSession } from "../../stores/terminalsStore";
 import { Badge } from "../../ui/Chip";
 import { IconButton } from "../../ui/IconButton";
@@ -192,7 +193,9 @@ export function SessionsList() {
   const close = useTerminalsStore((s) => s.close);
   const requestHandoff = useHandoffStore((s) => s.request);
   const defaultAgentFor = useModelStore((s) => s.defaultAgentFor);
-  const [choosing, setChoosing] = useState(false);
+  const defaultFor = useModelStore((s) => s.defaultFor);
+  const choosing = useShellStore((s) => s.chooserOpen);
+  const setChoosing = useShellStore((s) => s.setChooserOpen);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
 
@@ -237,19 +240,35 @@ export function SessionsList() {
         </Tooltip>
         {needsYou > 0 && <span className="text-caption text-warn">{needsYou} need you</span>}
         <span className="ml-auto" />
-        <Tooltip content="New session — pick an agent and model">
+        <Tooltip content="New session · Ctrl+T — Enter starts with the last agent and model">
           <IconButton
             size="sm"
             label="New session"
             icon={<Plus size={14} />}
             active={choosing}
-            onClick={() => setChoosing((v) => !v)}
+            onClick={() => setChoosing(!choosing)}
             data-testid="sessions-new"
           />
         </Tooltip>
       </div>
       {choosing && project && (
-        <div className="border-b border-border px-2 pb-2">
+        <div
+          className="border-b border-border px-2 pb-2"
+          data-testid="session-chooser"
+          tabIndex={-1}
+          ref={(el) => el?.focus()}
+          onKeyDown={(e) => {
+            // One path, one key: Enter starts with what you used last.
+            if (e.key === "Enter" && e.target === e.currentTarget) {
+              e.preventDefault();
+              const agent = defaultAgentFor(project.root) ?? DEFAULT_AGENT;
+              void createSession(agent, defaultFor(project.root, agent)).then(
+                (ok) => ok && setChoosing(false),
+              );
+            }
+            if (e.key === "Escape") setChoosing(false);
+          }}
+        >
           <AgentModelChooser
             projectRoot={project.root}
             lastAgent={defaultAgentFor(project.root) ?? DEFAULT_AGENT}
