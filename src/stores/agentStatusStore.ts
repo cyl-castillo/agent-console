@@ -34,6 +34,11 @@ export interface WaitingOnHuman {
 interface AgentStatusState {
   /// Epoch ms until which the agent counts as "recently active".
   workingUntil: number;
+  /// The terminal whose hook event opened the window, when the event carried
+  /// one. Null = unknown (an old hook) — the active session owns the window
+  /// then, and only then. Without this the ✻ followed whatever row was
+  /// clicked.
+  workingTermId: string | null;
   /// When the current stretch of work started (first markActive after idle);
   /// drives the "working… 2m 34s" elapsed readout. 0 = not working.
   workingSince: number;
@@ -41,7 +46,7 @@ interface AgentStatusState {
   /// hook, T2) — the approvals bridge didn't answer, or isn't on. Cleared by
   /// any sign the agent moved on (prompt, tool result, approval decided).
   waiting: WaitingOnHuman | null;
-  markActive: () => void;
+  markActive: (termId?: string | null) => void;
   /// A turn finished (Stop hook) — drop to idle now, don't wait out the decay.
   markIdle: () => void;
   /// A Notification hook event. Sets `waiting` for the blocking kinds, treats
@@ -51,19 +56,23 @@ interface AgentStatusState {
 
 export const useAgentStatusStore = create<AgentStatusState>((set, get) => ({
   workingUntil: 0,
+  workingTermId: null,
   workingSince: 0,
   waiting: null,
-  markActive: () => {
+  markActive: (termId) => {
     const now = Date.now();
     const wasWorking = now < get().workingUntil;
     set({
       workingUntil: now + WORKING_WINDOW_MS,
+      // An event without a terminal keeps the attribution of the stretch it
+      // extends; it never hands the window to the active row mid-stretch.
+      workingTermId: termId ?? (wasWorking ? get().workingTermId : null),
       workingSince: wasWorking && get().workingSince > 0 ? get().workingSince : now,
       // Activity means the agent got past whatever it was waiting for.
       waiting: null,
     });
   },
-  markIdle: () => set({ workingUntil: 0, workingSince: 0, waiting: null }),
+  markIdle: () => set({ workingUntil: 0, workingTermId: null, workingSince: 0, waiting: null }),
   noteNotification: (kind, termId) => {
     if (!kind) return;
     if (WAITING_NOTIFICATIONS.has(kind)) {

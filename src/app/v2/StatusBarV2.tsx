@@ -70,7 +70,7 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
         <button
           type="button"
           onClick={() => goTo("inbox")}
-          className="inline-flex h-5 items-center gap-1 rounded-1 px-1.5 hover:bg-[var(--hover)] hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
+          className="unbutton inline-flex h-5 items-center gap-1 rounded-1 px-1.5 hover:bg-[var(--hover)] hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
           data-testid="sb-decisions"
         >
           <span>decisions</span>
@@ -87,7 +87,7 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
               goTo("sessions");
               setCenterTab("changes");
             }}
-            className="inline-flex h-5 items-center gap-1 rounded-1 px-1.5 font-code hover:bg-[var(--hover)] hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
+            className="unbutton inline-flex h-5 items-center gap-1 rounded-1 px-1.5 font-code hover:bg-[var(--hover)] hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-ring"
             data-testid="sb-branch"
           >
             <GitBranch size={12} aria-hidden />

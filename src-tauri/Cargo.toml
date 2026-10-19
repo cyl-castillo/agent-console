@@ -47,7 +47,7 @@ whisper-rs = { version = "0.16", features = ["tracing_backend"] }
 # Piper TTS is fetched as a release archive on first use (tar.gz / zip).
 tar = "0.4"
 flate2 = "1"
-zip = { version = "4", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 tauri-plugin-clipboard-manager = "2.3.2"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-single-instance = "2.4.3"

@@ -200,8 +200,9 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       useToastStore.getState().show("First prompt captured — the console's bridges work ✓", "info");
     }
     useOnboardingStore.getState().markPromptedClaude();
-    // A submitted prompt means a turn just started — light the "working" pill.
-    useAgentStatusStore.getState().markActive();
+    // A submitted prompt means a turn just started — light the "working" pill
+    // on the terminal that sent it.
+    useAgentStatusStore.getState().markActive(e.termId);
     // Feed the learning auto-trigger: enough new activity reflects on its own.
     useLearningStore.getState().noteActivity();
     // Notify scheduler jobs watching for prompts.
@@ -293,7 +294,11 @@ export async function attachSkillsListeners(): Promise<UnlistenFn> {
   // A tool finished ⇒ the agent is working (and past any prompt it sat at).
   // Without this the pill decayed to idle mid-turn during any tool longer
   // than 8 s.
-  offs.push(await listen("hook://tool_result", () => useAgentStatusStore.getState().markActive()));
+  offs.push(
+    await listen<{ termId?: string }>("hook://tool_result", (e) =>
+      useAgentStatusStore.getState().markActive(e.payload?.termId),
+    ),
+  );
   // A turn the API refused never fires Stop — Claude sends StopFailure instead
   // (2.1.78+). Without this the pill sat "working" until the decay window gave
   // up and the reason only existed as text scrolling past in the terminal.

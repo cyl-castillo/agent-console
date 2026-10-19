@@ -27,10 +27,11 @@ interface ApprovalState {
   resync: () => Promise<void>;
 }
 
-export const useApprovalStore = create<ApprovalState>((set) => ({
+export const useApprovalStore = create<ApprovalState>((set, get) => ({
   queue: [],
 
   decide: async (id, decision, reason, policy) => {
+    const termId = get().queue.find((r) => r.id === id)?.termId;
     try {
       await ipc.approvalRespond(id, decision, reason, policy);
     } catch (e) {
@@ -45,7 +46,7 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
     }
     set((s) => ({ queue: s.queue.filter((r) => r.id !== id) }));
     // Answering an approval means the agent resumes — keep "working" alive.
-    useAgentStatusStore.getState().markActive();
+    useAgentStatusStore.getState().markActive(termId);
     return true;
   },
 
@@ -56,7 +57,7 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
       added = true;
       return { queue: [...s.queue, req] };
     });
-    useAgentStatusStore.getState().markActive();
+    useAgentStatusStore.getState().markActive(req.termId);
     // You're in another window and the agent just blocked on you — the one
     // moment a system notification earns its interruption.
     if (added && !windowIsFocused()) {

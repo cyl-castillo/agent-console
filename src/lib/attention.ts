@@ -23,8 +23,7 @@ export interface AttentionInputs {
 
 /// The attention state of one session, in priority order: it needs you
 /// (approval or the agent's own prompt) → it is working → it stopped → idle
-/// ("done" in the five-state vocabulary: nothing is happening and nothing is
-/// asked).
+/// (nothing is happening and nothing is asked).
 export function sessionAttention(i: AttentionInputs): AgentState {
   const { session } = i;
   if (session.status === "stopped") return "stopped";
@@ -35,7 +34,7 @@ export function sessionAttention(i: AttentionInputs): AgentState {
   if (working && (i.workingTermId ? i.workingTermId === session.id : i.activeId === session.id)) {
     return "working";
   }
-  return "done";
+  return "idle";
 }
 
 export const ATTENTION_ORDER: AgentState[] = [
@@ -43,6 +42,7 @@ export const ATTENTION_ORDER: AgentState[] = [
   "review",
   "working",
   "done",
+  "idle",
   "failed",
   "stopped",
 ];

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import type { Project } from "../../types/domain";
 import { useJobsStore } from "../../stores/jobsStore";
 import { attachShellListeners, useShellStore } from "../../stores/shellStore";
-import { useTerminalsStore } from "../../stores/terminalsStore";
 import { useUIStore } from "../../stores/uiStore";
 import { cn } from "@/lib/cn";
 import { TooltipProvider } from "../../ui/Tooltip";
@@ -36,8 +35,7 @@ export function ShellV2({
   const listOpen = useShellStore((s) => s.listOpen);
   const rightOpen = useUIStore((s) => s.rightOpen);
   const centerTab = useUIStore((s) => s.tab);
-  const { decisions } = useInbox();
-  const sessions = useTerminalsStore((s) => s.sessions);
+  const { decisions, byState } = useInbox();
   const toggleList = useShellStore((s) => s.toggleList);
   const listWidth = useShellStore((s) => s.listWidth);
   const inspectorWidth = useShellStore((s) => s.inspectorWidth);
@@ -76,9 +74,11 @@ export function ShellV2({
     void loadJobs();
   }, [project.root, loadJobs, initJobListeners]);
 
+  // A badge is a call to act: the rail counts the sessions waiting on the
+  // human, not the live ones (those are the grey count in the list header).
   const counts = {
     inbox: decisions,
-    sessions: sessions.filter((s) => s.status === "live").length,
+    sessions: byState.get("needs-you")?.length ?? 0,
   };
   const hasList = destination !== "inbox" && (narrow ? narrowListOpen : listOpen);
   const selectedTurn = useShellStore((s) => s.selectedTurnId);

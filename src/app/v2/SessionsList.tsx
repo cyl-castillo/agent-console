@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Archive, ChevronRight, FileText, FolderTree, Plus, X } from "lucide-react";
+import { Archive, ChevronRight, FileText, FolderTree, Plus, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { AgentModelChooser } from "../../components/SessionList";
 import { FileTree } from "../../components/FileTree";
@@ -19,10 +19,13 @@ import { StatusGlyph, type AgentState } from "../../ui/StatusGlyph";
 import { Tooltip } from "../../ui/Tooltip";
 import { useInbox } from "./useInbox";
 
+/// The vocabulary of a session's state, in the order a glance should read
+/// it: ● needs you · ✻ working · ∙ idle · ○ stopped. Each group header
+/// carries its glyph, so the legend is the list itself.
 const GROUPS: { state: AgentState; title: string }[] = [
   { state: "needs-you", title: "Needs you" },
   { state: "working", title: "Working" },
-  { state: "done", title: "Idle" },
+  { state: "idle", title: "Idle" },
   { state: "stopped", title: "Stopped" },
 ];
 /// Live sessions beyond which attention measurably degrades (2–4 in focus).
@@ -36,6 +39,8 @@ function relative(ms: number, now: number): string {
   const h = Math.round(m / 60);
   return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 }
+const absolute = (ms: number) =>
+  new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 /// One line that says what the session is about: the last turn's summary,
 /// else its prompt, else where it runs.
@@ -60,10 +65,12 @@ function SessionRow({
   state,
   summary,
   cost,
-  age,
+  lastActive,
+  now,
   active,
   onActivate,
   onArchive,
+  onRestore,
   onClose,
   onHandoff,
 }: {
@@ -71,47 +78,61 @@ function SessionRow({
   state: AgentState;
   summary?: string;
   cost?: number;
-  age: string;
+  lastActive: number;
+  now: number;
   active: boolean;
   onActivate: () => void;
-  onArchive: () => void;
+  onArchive?: () => void;
+  onRestore?: () => void;
   onClose: () => void;
   onHandoff?: () => void;
 }) {
   return (
     <div
       className={cn(
-        "group relative flex items-center pr-1 transition-colors dur-1 hover:bg-[var(--hover)]",
+        "group relative transition-colors dur-1 hover:bg-[var(--hover)]",
         active && "bg-[var(--accent-12)]",
       )}
       data-testid={`session-${session.id}`}
+      data-state={state}
     >
       <button
         type="button"
         onClick={onActivate}
         aria-current={active ? "true" : undefined}
-        className="flex min-h-9 min-w-0 flex-1 items-center gap-2 px-3 py-1 text-left font-sans text-body text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        className="unbutton flex min-h-9 w-full items-center gap-2 px-3 py-1 text-left font-sans text-body text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
       >
         <StatusGlyph state={state} />
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="truncate">{session.name}</span>
-            {session.worktree && (
-              <span className="truncate font-code text-caption text-faint-foreground">
-                {session.worktree.branch}
-              </span>
-            )}
+          <span className="block truncate" data-testid="session-name">
+            {session.name}
           </span>
-          {summary && (
-            <span className="block truncate text-small text-muted-foreground">{summary}</span>
+          {(session.worktree || summary) && (
+            <span className="block truncate text-small text-muted-foreground">
+              {session.worktree && (
+                <span className="font-code text-caption text-faint-foreground">
+                  {session.worktree.branch}
+                </span>
+              )}
+              {session.worktree && summary && " · "}
+              {summary}
+            </span>
           )}
         </span>
-        <span className="shrink-0 text-right font-code text-caption text-muted-foreground tabular-nums">
+        <span
+          className="shrink-0 text-right font-code text-caption text-muted-foreground tabular-nums"
+          title={`Last activity ${absolute(lastActive)}`}
+        >
           {cost !== undefined && <span className="block">${cost.toFixed(2)}</span>}
-          <span className="block">{age}</span>
+          <span className="block">{relative(lastActive, now)}</span>
         </span>
       </button>
-      <span className="flex shrink-0 items-center opacity-0 transition-opacity dur-1 focus-within:opacity-100 group-hover:opacity-100">
+      {/* Out of the row's flow: the name keeps the whole width, and the
+          actions appear over the age on hover or keyboard focus. */}
+      <span
+        className="absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-1 bg-[var(--hover)] opacity-0 transition-opacity dur-1 focus-within:opacity-100 group-hover:opacity-100"
+        data-testid="session-actions"
+      >
         {onHandoff && (
           <Tooltip content="Ask the agent for a handoff note — saved as a memory when its turn ends">
             <IconButton
@@ -122,14 +143,26 @@ function SessionRow({
             />
           </Tooltip>
         )}
-        <Tooltip content="Archive — hide in History, resumable anytime">
-          <IconButton
-            size="sm"
-            label={`Archive ${session.name}`}
-            icon={<Archive size={14} />}
-            onClick={onArchive}
-          />
-        </Tooltip>
+        {onArchive && (
+          <Tooltip content="Archive — hide in History, resumable anytime">
+            <IconButton
+              size="sm"
+              label={`Archive ${session.name}`}
+              icon={<Archive size={14} />}
+              onClick={onArchive}
+            />
+          </Tooltip>
+        )}
+        {onRestore && (
+          <Tooltip content="Restore — back to the list, resumed">
+            <IconButton
+              size="sm"
+              label={`Restore ${session.name}`}
+              icon={<RotateCcw size={14} />}
+              onClick={onRestore}
+            />
+          </Tooltip>
+        )}
         <Tooltip content={session.status === "live" ? "Close — kills the process" : "Remove"}>
           <IconButton
             size="sm"
@@ -149,7 +182,7 @@ function SessionRow({
 export function SessionsList() {
   const project = useSessionStore((s) => s.project);
   const tree = useSessionStore((s) => s.tree);
-  const { byState, now, activeId } = useInbox();
+  const { byState, lastActive, now, activeId } = useInbox();
   const summaries = useSummaries();
   const byTerm = useLiveStatusStore((s) => s.byTerm);
   const sessions = useTerminalsStore((s) => s.sessions);
@@ -192,7 +225,7 @@ export function SessionsList() {
           content={
             overWip
               ? `${live} live sessions — past ${WIP_SOFT_LIMIT}, attention splits`
-              : `${live} live`
+              : `${live} live session${live === 1 ? "" : "s"}`
           }
         >
           <span>
@@ -232,8 +265,12 @@ export function SessionsList() {
           const list = byState.get(state) ?? [];
           if (list.length === 0) return null;
           return (
-            <section key={state}>
-              <SectionHeader title={title} count={list.length} />
+            <section key={state} data-testid={`sessions-${state}`}>
+              <SectionHeader
+                title={title}
+                count={list.length}
+                leading={<StatusGlyph state={state} />}
+              />
               {list.map((s) => (
                 <SessionRow
                   key={s.id}
@@ -241,10 +278,13 @@ export function SessionsList() {
                   state={state}
                   summary={summaries.get(s.id)}
                   cost={byTerm[s.id]?.costUsd}
-                  age={relative(s.lastActiveMs ?? s.createdAtMs, now)}
+                  lastActive={lastActive.get(s.id) ?? s.createdAtMs}
+                  now={now}
                   active={s.id === activeId}
                   onActivate={() => (s.status === "stopped" ? resume(s.id) : setActive(s.id))}
-                  onArchive={() => archive(s.id)}
+                  // A live session is closed, not archived: archiving hides
+                  // a process still running.
+                  onArchive={s.status === "live" ? undefined : () => archive(s.id)}
                   onClose={() => void closeSession(s)}
                   onHandoff={
                     s.status === "live" && s.agent ? () => requestHandoff(s.id) : undefined
@@ -260,7 +300,7 @@ export function SessionsList() {
               type="button"
               onClick={() => setHistoryOpen((v) => !v)}
               aria-expanded={historyOpen}
-              className="flex h-7 w-full items-center gap-1 px-3 text-left font-sans text-caption font-semibold uppercase tracking-wide text-faint-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+              className="unbutton flex h-7 w-full items-center gap-1 px-3 text-left font-sans text-caption font-semibold uppercase tracking-wide text-faint-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
             >
               <ChevronRight
                 size={12}
@@ -277,10 +317,11 @@ export function SessionsList() {
                   session={s}
                   state="stopped"
                   summary={summaries.get(s.id)}
-                  age={relative(s.lastActiveMs ?? s.createdAtMs, now)}
+                  lastActive={lastActive.get(s.id) ?? s.createdAtMs}
+                  now={now}
                   active={false}
                   onActivate={() => resume(s.id)}
-                  onArchive={() => resume(s.id)}
+                  onRestore={() => resume(s.id)}
                   onClose={() => void closeSession(s)}
                 />
               ))}
@@ -291,7 +332,7 @@ export function SessionsList() {
             type="button"
             onClick={() => setFilesOpen((v) => !v)}
             aria-expanded={filesOpen}
-            className="flex h-7 w-full items-center gap-1 px-3 text-left font-sans text-caption font-semibold uppercase tracking-wide text-faint-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+            className="unbutton flex h-7 w-full items-center gap-1 px-3 text-left font-sans text-caption font-semibold uppercase tracking-wide text-faint-foreground hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
           >
             <FolderTree size={12} aria-hidden />
             Files

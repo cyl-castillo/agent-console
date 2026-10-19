@@ -115,11 +115,11 @@ function Controls() {
         <Kbd>K</Kbd>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-4">
-        {(["needs-you", "working", "review", "done", "failed", "stopped"] as AgentState[]).map(
-          (s) => (
-            <StatusGlyph key={s} state={s} showLabel />
-          ),
-        )}
+        {(
+          ["needs-you", "working", "review", "done", "idle", "failed", "stopped"] as AgentState[]
+        ).map((s) => (
+          <StatusGlyph key={s} state={s} showLabel />
+        ))}
         <Spinner label="Loading sessions" />
       </div>
 
