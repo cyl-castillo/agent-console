@@ -58,6 +58,7 @@ palette registry and to this document.
 
 | id | does |
 | --- | --- |
+| `ui.focus_mode` | focus mode: the terminal alone (rail, lists, chat and top bar hidden; Ctrl+Shift+F) |
 | `ui.toggle_sidebar` | show/hide the list pane |
 | `ui.toggle_right_panel` | show/hide the right panel |
 | `ui.toggle_theme` | dark ↔ light |

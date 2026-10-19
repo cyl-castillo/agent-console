@@ -94,6 +94,14 @@ export function useKeyboardShortcuts({ setTab }: Args) {
           window.dispatchEvent(new CustomEvent("ac:new-session-chooser"));
           e.preventDefault();
           break;
+        case "f":
+        case "F":
+          // Ctrl+Shift+F: focus mode (the terminal alone). Plain Ctrl+F stays
+          // the terminal's / page's own search.
+          if (!e.shiftKey) return;
+          window.dispatchEvent(new CustomEvent("ac:toggle-focus"));
+          e.preventDefault();
+          break;
         case "e":
         case "E":
           // Ctrl+E is readline end-of-line inside the terminal — don't steal it

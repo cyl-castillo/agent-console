@@ -1,5 +1,5 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { PanelBottomClose, PanelBottomOpen } from "lucide-react";
+import { Maximize2, Minimize2, PanelBottomClose, PanelBottomOpen } from "lucide-react";
 import { Terminal } from "../../components/Terminal";
 import { WorktreeBar } from "../../components/WorktreeBar";
 import { cn } from "@/lib/cn";
@@ -32,7 +32,9 @@ export function TerminalDrawer({
 }) {
   const open = useShellStore((s) => s.drawerOpen);
   const pct = useShellStore((s) => s.drawerPct);
-  const chatCollapsed = useShellStore((s) => s.chatCollapsed);
+  const focus = useShellStore((s) => s.focus);
+  const toggleFocus = useShellStore((s) => s.toggleFocus);
+  const chatCollapsed = useShellStore((s) => s.chatCollapsed || s.focus);
   const toggleChat = useShellStore((s) => s.toggleChat);
   const setDrawerPct = useShellStore((s) => s.setDrawerPct);
   const activeId = useTerminalsStore((s) => s.activeId);
@@ -111,12 +113,31 @@ export function TerminalDrawer({
           <Button
             size="sm"
             variant="ghost"
+            disabled={focus}
             icon={chatCollapsed ? <PanelBottomClose size={14} /> : <PanelBottomOpen size={14} />}
             onClick={toggleChat}
             onPointerDown={(e) => e.stopPropagation()}
             data-testid="toggle-chat"
           >
             {chatCollapsed ? "Show chat" : "Hide chat"}
+          </Button>
+        </Tooltip>
+        <Tooltip
+          content={
+            focus
+              ? "Leave focus mode: bring the rail, lists and chat back"
+              : "Focus mode: the terminal alone — rail, lists, chat and top bar out of the way (Ctrl+Shift+F)"
+          }
+        >
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={focus ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            onClick={toggleFocus}
+            onPointerDown={(e) => e.stopPropagation()}
+            data-testid="toggle-focus"
+          >
+            {focus ? "Leave focus" : "Focus"}
           </Button>
         </Tooltip>
         <Tooltip content="Hide or show the terminal">

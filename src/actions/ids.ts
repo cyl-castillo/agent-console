@@ -40,6 +40,7 @@ export const ACTION_IDS = [
   "snapshot.restore_latest",
   "snapshot.undo_restore",
   // Shell and app
+  "ui.focus_mode",
   "ui.toggle_sidebar",
   "ui.toggle_right_panel",
   "ui.toggle_theme",

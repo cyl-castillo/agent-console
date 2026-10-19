@@ -667,6 +667,39 @@ test("F4: the + and Ctrl+T open the same chooser; Enter starts with the last age
   await expect(page.getByTestId("session-chooser")).toHaveCount(0);
 });
 
+test("focus mode: Ctrl+Shift+F leaves the terminal alone; the pill, the strip and the palette leave it", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--inbox");
+  await page.locator("body").click({ position: { x: 5, y: 400 } });
+  await page.keyboard.press("Control+Shift+f");
+  const shell = page.getByTestId("shell-v2");
+  await expect(shell).toHaveAttribute("data-focus", "true");
+  await expect(shell).toHaveAttribute("data-destination", "sessions");
+  await expect(page.getByTestId("rail")).toBeHidden();
+  await expect(page.getByTestId("sessions-list")).toBeHidden();
+  await expect(page.getByTestId("inspector")).toBeHidden();
+  await expect(page.getByTestId("conversation")).toBeHidden();
+  await expect(page.getByTestId("terminal-drawer")).toHaveAttribute("data-full", "true");
+  await expect(page.getByTestId("terminal-drawer")).toBeVisible();
+  // Nothing but the status bar around the terminal: the drawer spans the shell.
+  const shellBox = (await shell.boundingBox())!;
+  const drawerBox = (await page.getByTestId("terminal-drawer").boundingBox())!;
+  expect(drawerBox.height).toBeGreaterThan(shellBox.height * 0.9);
+  expect(drawerBox.width).toBeGreaterThan(shellBox.width * 0.98);
+
+  await page.getByTestId("exit-focus").click();
+  await expect(shell).not.toHaveAttribute("data-focus", "true");
+  await expect(page.getByTestId("rail")).toBeVisible();
+  await expect(page.getByTestId("conversation")).toBeVisible();
+
+  // The strip button and the action contract are the other ways in and out.
+  await page.getByTestId("toggle-focus").click();
+  await expect(shell).toHaveAttribute("data-focus", "true");
+  expect(await page.evaluate(() => window.__agentConsole.invoke("ui.focus_mode"))).toBe(true);
+  await expect(shell).not.toHaveAttribute("data-focus", "true");
+});
+
 test("v2 parity: the terminal survives a trip to the Inbox", async ({ page }) => {
   await openV2(page, "app-v2--sessions-drawer-open");
   const drawer = page.getByTestId("terminal-drawer");
