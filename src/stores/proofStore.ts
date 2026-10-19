@@ -51,6 +51,10 @@ export interface TimelineTurn {
   /// short. Not a failure (nothing refused it) and not a finish either; the
   /// diff still shows what it had changed by then.
   interrupted: boolean;
+  /// True when the turn never got its own close: the next prompt on the same
+  /// terminal ended it (Esc in Claude has no hook; a killed session fires
+  /// nothing). Always `interrupted` too.
+  superseded: boolean;
   /// Where the turn ran and what it left behind — everything "Rewind to this
   /// turn" needs: the terminal binding, the engine session to fork, the
   /// checkout (worktree sessions differ from the project root) and the
@@ -190,6 +194,10 @@ export function summarizeCases(events: ProofEvent[]): CaseSummary[] {
 export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
   const turns: TimelineTurn[] = [];
   const byId = new Map<string, TimelineTurn>();
+  // The turn still open on each terminal: a terminal runs one turn at a
+  // time, so a new prompt there ends whatever was open (older ledgers hold
+  // such turns without a close; newer ones close them on the Rust side).
+  const openByTerm = new Map<string, TimelineTurn>();
   const turnFor = (e: ProofEvent): TimelineTurn | null => {
     if (!e.turnId) return null;
     let t = byId.get(e.turnId);
@@ -207,6 +215,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         summaryTruncated: false,
         failed: false,
         interrupted: false,
+        superseded: false,
         rewound: false,
         checks: [],
         commits: [],
@@ -231,6 +240,15 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
     if (!t) continue;
     const p = e.payload as Record<string, unknown>;
     if (e.kind === "prompt") {
+      if (e.termId) {
+        const open = openByTerm.get(e.termId);
+        if (open && open !== t && open.endTs === null) {
+          open.endTs = e.ts;
+          open.interrupted = true;
+          open.superseded = true;
+        }
+        openByTerm.set(e.termId, t);
+      }
       t.ts = e.ts;
       t.caseId = e.caseId;
       t.prompt = typeof p.prompt === "string" ? p.prompt : "";
@@ -299,6 +317,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         newCapUsd: typeof p.newCapUsd === "number" ? p.newCapUsd : undefined,
       };
     } else if (e.kind === "turn_end") {
+      if (e.termId && openByTerm.get(e.termId) === t) openByTerm.delete(e.termId);
       t.endTs = e.ts;
       if (Array.isArray(p.filesChanged)) {
         t.files = (p.filesChanged as { status: string; path: string }[]).filter(
@@ -310,6 +329,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       t.summaryTruncated = p.summaryTruncated === true;
       t.failed = p.failed === true;
       t.interrupted = p.interrupted === true;
+      t.superseded = p.superseded === true;
       if (typeof p.error === "string") t.error = p.error;
       if (typeof p.errorDetails === "string") t.errorDetails = p.errorDetails;
       if (typeof p.postSha === "string" && p.postSha) t.postSha = p.postSha;

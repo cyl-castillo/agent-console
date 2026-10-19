@@ -8,10 +8,18 @@ import { MarkdownText } from "../../../ui/MarkdownText";
 import { StatusGlyph } from "../../../ui/StatusGlyph";
 import { Tooltip } from "../../../ui/Tooltip";
 
-const fmtTime = (ts: number) =>
-  new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+/// "10:58 AM" today, "yesterday 10:58 AM", else "Oct 15, 10:58 AM".
+const fmtTime = (ts: number, now: number) => {
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === new Date(now).toDateString()) return time;
+  if (d.toDateString() === new Date(now - 86_400_000).toDateString()) return `yesterday ${time}`;
+  return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${time}`;
+};
+/// Never negative (a clock behind the ledger's showed "-3s"), never "0s".
 const fmtDuration = (ms: number) => {
-  const s = Math.round(ms / 1000);
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s === 0) return "just now";
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 };
 
@@ -201,6 +209,7 @@ export function TurnBlock({
   onRerun,
   onLedger,
   onReview,
+  onMore,
 }: {
   turn: TimelineTurn;
   live: boolean;
@@ -210,6 +219,8 @@ export function TurnBlock({
   onRerun: () => void;
   onLedger: () => void;
   onReview?: () => void;
+  /// Where the rest of a cut summary lives (the terminal).
+  onMore?: () => void;
 }) {
   const state = turn.failed ? "failed" : turn.interrupted ? "stopped" : live ? "working" : "done";
   const duration = turn.endTs ? turn.endTs - turn.ts : now - turn.ts;
@@ -221,11 +232,24 @@ export function TurnBlock({
     >
       <header className="flex items-center gap-2 font-sans text-caption text-faint-foreground">
         <StatusGlyph state={state} />
-        <span className="font-code tabular-nums">{fmtTime(turn.ts)}</span>
+        <span className="font-code tabular-nums">{fmtTime(turn.ts, now)}</span>
         <span>·</span>
         <span className="font-code tabular-nums">{fmtDuration(duration)}</span>
         {turn.model && <Chip mono>{turn.model}</Chip>}
         {turn.skill && <Chip tone="accent" mono>{`/${turn.skill}`}</Chip>}
+        {turn.interrupted && (
+          <Tooltip
+            content={
+              turn.superseded
+                ? "Never closed on its own — the next prompt ended it"
+                : "Cut short by Interrupt"
+            }
+          >
+            <span>
+              <Chip tone="warn">interrupted</Chip>
+            </span>
+          </Tooltip>
+        )}
         {turn.rewound && <Chip tone="warn">rewound here</Chip>}
         {turn.approvals.length > 0 && (
           <span className="ml-auto">
@@ -244,6 +268,16 @@ export function TurnBlock({
       <ToolCallBlock tools={turn.tools} total={turn.toolResults} />
       <DiffBlock files={turn.files} truncated={turn.filesTruncated} onOpenFile={onOpenFile} />
       {turn.summary && <MarkdownText text={turn.summary} />}
+      {turn.summaryTruncated && (
+        <button
+          type="button"
+          onClick={onMore}
+          className="unbutton self-start font-sans text-small text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+          data-testid="summary-more"
+        >
+          … the agent said more — the full reply is in the terminal (Ctrl+`)
+        </button>
+      )}
       {turn.failed && (
         <div
           className="rounded-2 border border-danger/40 bg-[var(--danger-08)] px-2 py-1 font-sans text-small text-foreground"
