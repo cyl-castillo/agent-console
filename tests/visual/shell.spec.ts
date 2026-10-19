@@ -459,6 +459,119 @@ test("terminal first: open by default at 60 %, foldable chat, resizable and reme
   expect(await ratio()).toBeLessThan(0.65);
 });
 
+const termOut = (page: Page, id: string, data: string) =>
+  page.evaluate(
+    ([i, d]) =>
+      (
+        window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+      ).__fixtures.emit("term://output", { id: i, data: d }),
+    [id, data],
+  );
+
+test("F3: the trust question, a login ask and a missing CLI surface as cards with a way in", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  // The story's drawer is open by default; hide it so the cards' CTA is tested.
+  await page.keyboard.press("Control+`");
+  await expect(page.getByTestId("terminal-drawer")).not.toHaveAttribute("data-open", "true");
+
+  await termOut(
+    page,
+    "term-sess-auth",
+    "\x1b[1mQuick safety check:\x1b[0m Is this a project you created or one you trust?\r\n",
+  );
+  const trust = page.getByTestId("card-trust");
+  await expect(trust).toContainText("trust this folder");
+  await trust.getByRole("button", { name: "Answer in the terminal" }).click();
+  await expect(page.getByTestId("terminal-drawer")).toHaveAttribute("data-open", "true");
+  // The CLI comes up: the question is behind us.
+  await termOut(page, "term-sess-auth", "✻ Welcome to Claude Code\r\n❯ ");
+  await expect(trust).toHaveCount(0);
+
+  await termOut(page, "term-sess-auth", "Please run /login to continue\r\n");
+  await expect(page.getByTestId("card-login")).toContainText("log in");
+  await expect(
+    page.getByTestId("card-login").getByRole("button", { name: "Log in" }),
+  ).toBeVisible();
+
+  await termOut(page, "term-sess-auth", "bash: claude: command not found\r\n");
+  await expect(page.getByTestId("card-notfound")).toContainText("not installed");
+  await page.getByTestId("card-notfound").getByRole("button", { name: "Open setup" }).click();
+  await expect(page.getByText("Welcome to Agent Console")).toBeVisible();
+});
+
+test("F3: an approval of this session sits inline in its conversation and the turn says so", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  await expect(page.getByTestId("live-status")).toContainText("Working…");
+  await page.evaluate(() =>
+    (
+      window as unknown as { __fixtures: { emit: (n: string, p: unknown) => Promise<void> } }
+    ).__fixtures.emit("approval://request", {
+      id: "apr-7001",
+      ts: Date.now(),
+      sessionDir: "/home/demo/.claude",
+      cwd: "/home/demo/code/demo-playground",
+      tool: "Bash",
+      input: { command: "npm test -- --run", description: "Run the tests" },
+      termId: "sess-auth",
+      source: "permission_request",
+    }),
+  );
+  // Inline, in the thread; the live turn is waiting, not working; no modal.
+  const card = page.getByTestId("inline-approvals").locator("[data-testid='decision-apr-7001']");
+  await expect(card).toBeVisible();
+  await expect(page.getByTestId("live-status")).toContainText("Waiting for your approval");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await card.getByRole("button", { name: "Approve once" }).click();
+  await expect(card).toHaveCount(0);
+  await expect(page.getByTestId("live-status")).toContainText("Working…");
+  const decided = await page.evaluate(() => {
+    const log = (
+      window as unknown as {
+        __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+      }
+    ).__fixtures.invokeLog;
+    return log.find((l) => l.cmd === "approval_respond" && l.args.id === "apr-7001")?.args;
+  });
+  expect(decided).toMatchObject({ decision: "allow" });
+});
+
+test("F3: while the CLI boots, the thread says so and the composer queues instead of typing", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions-booting");
+  await expect(page.getByTestId("card-boot")).toContainText("Launching");
+  await page.evaluate(() => {
+    const w = window as unknown as { __termInputs: { data: string }[] };
+    w.__termInputs = [];
+    window.addEventListener("ac:term-input", (e) =>
+      w.__termInputs.push((e as CustomEvent<{ data: string }>).detail),
+    );
+  });
+  const prompt = page.getByLabel("Prompt for the agent");
+  await prompt.fill("Start by running the tests");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("prompt-queue")).toContainText("Start by running the tests");
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __termInputs: unknown[] }).__termInputs.length,
+    ),
+  ).toBe(0);
+  // The prompt comes up: the card goes and the queued prompt goes out.
+  await termOut(page, "term-sess-auth", "\x1b[38;5;215m✻ Welcome to Claude Code\x1b[0m\r\n❯ ");
+  await expect(page.getByTestId("card-boot")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as { __termInputs: { data: string }[] }).__termInputs.map((d) => d.data),
+      ),
+    )
+    .toEqual(["Start by running the tests", "\r"]);
+});
+
 test("v2 parity: the terminal survives a trip to the Inbox", async ({ page }) => {
   await openV2(page, "app-v2--sessions-drawer-open");
   const drawer = page.getByTestId("terminal-drawer");

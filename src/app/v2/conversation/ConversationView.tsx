@@ -20,6 +20,10 @@ import { newSession } from "../../actions";
 import { TurnBlock } from "./blocks";
 import { StatusGlyph } from "../../../ui/StatusGlyph";
 import { useSessionTimeline } from "./useSessionTimeline";
+import { SessionCards } from "./SessionCards";
+import { useApprovalStore } from "../../../stores/approvalStore";
+import { useHooksHealthStore } from "../../../stores/hooksHealthStore";
+import { isBooting, signalsFor, useTermSignalsStore } from "../../../stores/termSignalsStore";
 import {
   UNWITNESSED_GRACE_MS,
   holdsQueue,
@@ -158,6 +162,12 @@ export function ConversationView() {
   const send = async () => {
     const text = draft.trim();
     if (!text) return;
+    if (booting && session) {
+      enqueue(session.id, text);
+      setDraft("");
+      showToast("Queued — the CLI is still starting; it goes out at the prompt", "info");
+      return;
+    }
     // Sending is reading the latest: the echo lands in view.
     atBottom.current = true;
     const ok = await deliver(text);
@@ -172,6 +182,11 @@ export function ConversationView() {
   // removable, and goes out on its own when the session is live and has no
   // live turn — one at a time, so each lands as its own turn.
   const sessionLive = session?.status === "live";
+  // F3: while the CLI boots, nothing is typed at the shell — sends queue.
+  const sig = useTermSignalsStore((s) => signalsFor(s.bySession, session?.id));
+  const booting = sessionLive && isBooting(sig, now);
+  const waitingApproval = useApprovalStore((s) => s.queue.some((r) => r.termId === session?.id));
+  const hooksVerdict = useHooksHealthStore((s) => s.verdict.kind);
   const queued = usePromptQueueStore((s) => queueFor(s.bySession, session?.id));
   const enqueue = usePromptQueueStore((s) => s.enqueue);
   const removeQueued = usePromptQueueStore((s) => s.remove);
@@ -195,7 +210,7 @@ export function ConversationView() {
   const queueHeld = holdsQueue(pending, now);
   const sending = useRef(false);
   useEffect(() => {
-    if (!session || !sessionLive || liveTurn || queueHeld || sending.current) return;
+    if (!session || !sessionLive || booting || liveTurn || queueHeld || sending.current) return;
     const next = queued[0];
     if (!next) return;
     // The prompt leaves the queue only once it is in the PTY. A failed
@@ -211,7 +226,7 @@ export function ConversationView() {
     });
     // deliver/showToast are stable enough for this effect's purpose.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.id, sessionLive, liveTurn, queued, queueHeld]);
+  }, [session?.id, sessionLive, booting, liveTurn, queued, queueHeld]);
   const interrupt = () => {
     if (!session) return;
     const detail: TermInputDetail = { sessionId: session.id, data: "\x1b" };
@@ -267,7 +282,35 @@ export function ConversationView() {
               className="h-full"
               icon={<MessageSquare />}
               title="No turns yet"
-              description="Send a prompt below. Each turn lands here as it happens: prompt, tools, files, tests, proof. If prompts go by and nothing shows up, check the hooks pill in the status bar."
+              description={
+                hooksVerdict === "off"
+                  ? "The hooks are not installed, so nothing the agent does can land here. Install them, or work in the terminal."
+                  : "Send a prompt below. Each turn lands here as it happens: prompt, tools, files, tests, proof."
+              }
+              action={
+                <div className="flex items-center gap-2">
+                  {hooksVerdict === "off" && (
+                    <Button
+                      variant="primary"
+                      onClick={() =>
+                        void ipc
+                          .hooksInstall()
+                          .then(() => showToast("Hooks installed", "success"))
+                          .catch((e) => showToast(`Couldn't install hooks: ${String(e)}`, "error"))
+                      }
+                    >
+                      Install hooks
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    icon={<TerminalSquare size={14} />}
+                    onClick={openTerminal}
+                  >
+                    Open terminal
+                  </Button>
+                </div>
+              }
             />
           ) : (
             <div className="divide-y divide-border">
@@ -284,6 +327,7 @@ export function ConversationView() {
                     key={t.turnId ?? i}
                     turn={turn}
                     live={isLast && liveTurn}
+                    waitingApproval={isLast && liveTurn && waitingApproval}
                     now={now}
                     onOpenFile={openFile}
                     onCopy={() => copy(t.summary)}
@@ -296,6 +340,7 @@ export function ConversationView() {
               })}
             </div>
           )}
+          <SessionCards session={session} now={now} lastTurnTs={last?.ts ?? null} />
           {pending.map((p) => (
             <div
               key={p.ts}
@@ -307,10 +352,17 @@ export function ConversationView() {
                 <StatusGlyph state="working" />
                 <span>you · sent to the terminal</span>
                 {now - p.ts > UNWITNESSED_GRACE_MS && (
-                  <span className="text-warn">
-                    · not witnessed yet — open the terminal (Ctrl+`) to see what the agent did with
-                    it
-                  </span>
+                  <>
+                    <span className="text-warn">· not witnessed yet</span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={openTerminal}
+                      data-testid="echo-open-terminal"
+                    >
+                      Open terminal
+                    </Button>
+                  </>
                 )}
               </div>
               <div className="whitespace-pre-wrap text-foreground">{p.text}</div>

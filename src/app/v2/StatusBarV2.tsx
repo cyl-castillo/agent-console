@@ -64,6 +64,8 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
         onShowTerminal={() => {
           goTo("sessions");
           setCenterTab("terminal");
+          if (!useShellStore.getState().drawerOpen) useShellStore.getState().toggleDrawer();
+          window.dispatchEvent(new CustomEvent("ac:focus-terminal"));
         }}
       />
       <Tooltip content="Decisions waiting for you">

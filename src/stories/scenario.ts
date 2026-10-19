@@ -11,6 +11,7 @@ import { installAgentBridge } from "../lib/agentBridge";
 import { useDeclinesStore } from "../stores/declinesStore";
 import { useReviewsStore } from "../stores/reviewsStore";
 import { useSponsorStore } from "../stores/sponsorStore";
+import { useTermSignalsStore } from "../stores/termSignalsStore";
 
 export const READY_ATTR = "data-story-ready";
 
@@ -38,6 +39,7 @@ export function beginScenario(fixtures: FixtureMap = {}, theme: "dark" | "light"
   useDeclinesStore.setState({ items: [] });
   useReviewsStore.setState({ items: [] });
   useSponsorStore.setState({ project: null, sponsor: null, autoApproved: 0 });
+  useTermSignalsStore.setState({ bySession: {}, tails: {} });
   installAgentBridge();
   // Specs drive the backend side: push events the Rust side would emit and
   // read which commands the webview invoked in return.

@@ -10,7 +10,7 @@ export interface PendingPrompt {
 /// After this long without a witnessed prompt the echo keeps its note, and
 /// stops holding the queue back (the hooks may be off — then nothing would
 /// ever witness it, and a queued prompt must still go out).
-export const UNWITNESSED_GRACE_MS = 15_000;
+export const UNWITNESSED_GRACE_MS = 5_000;
 
 /// A prompt witnessed by the ledger counts for an echo only when it was
 /// recorded at or after the send (minus this slack, for clocks and the hook's
