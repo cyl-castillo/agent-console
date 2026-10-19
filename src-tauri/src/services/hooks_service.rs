@@ -539,6 +539,44 @@ impl HooksRuntime {
         Ok(())
     }
 
+    /// F3 (CHAT-2026-10): the approvals bridge is no longer opt-in. On a CLI
+    /// that supports PermissionRequest, install it once (own marker) so
+    /// "Allow Bash?" reaches the console — inline in the conversation and
+    /// in the Inbox — instead of waiting inside a terminal the user may not
+    /// be looking at. A deliberate `uninstall()` is respected: the marker is
+    /// written whether or not the hook was added, so it never comes back on
+    /// its own. Claude only: Codex keeps its PreToolUse bridge.
+    pub fn ensure_permissionrequest_autoinstalled(&self) -> AppResult<()> {
+        let marker = self
+            .script_path
+            .with_file_name(".permissionrequest-autoinstalled");
+        if marker.exists() || !permissionrequest_supported() {
+            return Ok(());
+        }
+        let settings_path = settings_path();
+        if let Some(parent) = settings_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut settings: Value = if settings_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
+        } else {
+            json!({})
+        };
+        if !settings.is_object() {
+            settings = json!({});
+        }
+        if autoinstall_permissionrequest(
+            &mut settings,
+            &self.permissionrequest_script_path,
+            self.binary_path.as_deref(),
+        ) {
+            write_settings_atomic(&settings_path, &settings)?;
+            tracing::info!("hooks: approvals bridge (PermissionRequest) auto-installed");
+        }
+        let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
     /// Existing installs carry the legacy PreToolUse approvals bridge on the
     /// Claude side. Once per install (marker), and only when the CLI is new
     /// enough, move it to PermissionRequest: same modal, same ledger, but it
@@ -1104,6 +1142,44 @@ fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path, binary: Op
 fn permissionrequest_supported() -> bool {
     crate::services::rewind_service::claude_version()
         .is_some_and(|v| v >= MIN_CLAUDE_PERMISSIONREQUEST_VERSION)
+}
+
+/// Add our PermissionRequest bridge entry when no bridge of ours is there
+/// yet (neither PermissionRequest nor the legacy PreToolUse one — that one
+/// migrates through `migrate_pretooluse_to_permissionrequest`). Pure on the
+/// settings value; returns whether anything was added.
+fn autoinstall_permissionrequest(
+    settings: &mut Value,
+    permissionrequest_script: &Path,
+    binary: Option<&Path>,
+) -> bool {
+    let has = |event: &str, mode: &str, script: &Path| {
+        settings
+            .pointer(&format!("/hooks/{event}"))
+            .and_then(Value::as_array)
+            .is_some_and(|arr| {
+                arr.iter()
+                    .any(|e| has_command_path(e, script) || has_bridge_command(e, mode))
+            })
+    };
+    if has(
+        "PermissionRequest",
+        "permissionrequest",
+        permissionrequest_script,
+    ) {
+        return false;
+    }
+    let legacy = permissionrequest_script.with_file_name("pretooluse-hook.cjs");
+    if has("PreToolUse", "pretooluse", &legacy) {
+        return false;
+    }
+    upsert_hook(
+        settings,
+        "PermissionRequest",
+        permissionrequest_script,
+        binary,
+    );
+    true
 }
 
 /// Replace OUR PreToolUse approvals entry with a PermissionRequest one. Pure
@@ -1928,6 +2004,52 @@ mod tests {
     /// prune removes stale per-PID dirs, keeps the current one regardless of
     /// age, and ignores files. Cutoff is injected so the test doesn't need to
     /// fake mtimes: a future cutoff makes everything (except `keep`) stale.
+    #[test]
+    fn approvals_bridge_autoinstalls_once_and_respects_an_existing_bridge() {
+        let pr = Path::new("/cache/permissionrequest-hook.cjs");
+        let bin = Path::new("/cache/bin/hook-bridge");
+        let mut settings = json!({ "hooks": { "PreToolUse": [
+            { "matcher": "Bash", "hooks": [{ "type": "command", "command": "/home/u/my-own-hook.sh" }] }
+        ]}});
+        assert!(autoinstall_permissionrequest(&mut settings, pr, Some(bin)));
+        let arr = settings
+            .pointer("/hooks/PermissionRequest")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(
+            arr[0]["hooks"][0]["command"],
+            "\"/cache/bin/hook-bridge\" permissionrequest"
+        );
+        // Idempotent, and the user's own PreToolUse hook is untouched.
+        assert!(!autoinstall_permissionrequest(&mut settings, pr, Some(bin)));
+        assert_eq!(
+            settings
+                .pointer("/hooks/PermissionRequest")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            settings
+                .pointer("/hooks/PreToolUse")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        // A legacy bridge of ours is the migration's job, not a second bridge.
+        let mut legacy = json!({ "hooks": { "PreToolUse": [
+            { "matcher": "*", "hooks": [{ "type": "command", "command": "\"/cache/bin/hook-bridge\" pretooluse" }] }
+        ]}});
+        assert!(!autoinstall_permissionrequest(&mut legacy, pr, Some(bin)));
+        assert!(legacy.pointer("/hooks/PermissionRequest").is_none());
+    }
+
     #[test]
     fn migration_swaps_only_our_pretooluse_entry_for_permissionrequest() {
         let pre = Path::new("/cache/pretooluse-hook.cjs");

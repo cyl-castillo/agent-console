@@ -210,6 +210,7 @@ export function TurnBlock({
   onLedger,
   onReview,
   onMore,
+  waitingApproval,
 }: {
   turn: TimelineTurn;
   live: boolean;
@@ -221,6 +222,9 @@ export function TurnBlock({
   onReview?: () => void;
   /// Where the rest of a cut summary lives (the terminal).
   onMore?: () => void;
+  /// F3: an approval of this session is pending — the agent is not working,
+  /// it is waiting for the human.
+  waitingApproval?: boolean;
 }) {
   const state = turn.failed ? "failed" : turn.interrupted ? "stopped" : live ? "working" : "done";
   const duration = turn.endTs ? turn.endTs - turn.ts : now - turn.ts;
@@ -290,8 +294,14 @@ export function TurnBlock({
         </div>
       )}
       {live && !turn.summary && (
-        <div className="font-sans text-small text-muted-foreground">
-          Working… {turn.toolResults} tool call{turn.toolResults === 1 ? "" : "s"} so far
+        <div className="font-sans text-small text-muted-foreground" data-testid="live-status">
+          {waitingApproval ? (
+            <span className="text-warn">Waiting for your approval below</span>
+          ) : (
+            <>
+              Working… {turn.toolResults} tool call{turn.toolResults === 1 ? "" : "s"} so far
+            </>
+          )}
         </div>
       )}
       {!live && (

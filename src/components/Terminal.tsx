@@ -9,6 +9,7 @@ import { ipc, type TermExit, type TermOutput } from "../ipc/tauri";
 import { useHooksHealthStore } from "../stores/hooksHealthStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
+import { useTermSignalsStore } from "../stores/termSignalsStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useToastStore } from "../stores/toastStore";
 import { profileFor } from "../agents/profiles";
@@ -221,6 +222,9 @@ export function Terminal({ session, visible }: Props) {
         if (e.payload.id === termId) {
           term.write(e.payload.data);
           appendOutput(session.id, e.payload.data);
+          // F3: the chat surfaces what only the terminal shows (trust,
+          // login, a missing CLI, the prompt coming up).
+          useTermSignalsStore.getState().note(session.id, e.payload.data);
         }
       });
       if (disposed) {
@@ -380,6 +384,7 @@ export function Terminal({ session, visible }: Props) {
           if (disposed) return;
           if (setup) term.write(`\x1b[90m── workspace setup: ${setup} ──\x1b[0m\r\n`);
           term.write(`\x1b[90m── ${launchNote} ${launchLabel} ──\x1b[0m\r\n`);
+          useTermSignalsStore.getState().markBooting(session.id);
           ipc.termWrite(tid, `${cmd}\r`).catch(() => {});
         }, 600);
 

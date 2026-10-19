@@ -82,6 +82,11 @@ pub fn run() {
             }
             // Approvals bridge, second generation: existing installs move their
             // PreToolUse entry to PermissionRequest once the CLI supports it.
+            // F3: the approvals bridge is on by default where the CLI
+            // supports PermissionRequest (own marker; uninstall sticks).
+            if let Err(e) = state.hooks.ensure_permissionrequest_autoinstalled() {
+                tracing::warn!("hooks: permissionrequest auto-install failed: {e}");
+            }
             if let Err(e) = state.hooks.ensure_permissionrequest_migrated() {
                 tracing::warn!("hooks: permissionrequest migration failed: {e}");
             }

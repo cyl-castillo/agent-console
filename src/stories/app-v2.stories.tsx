@@ -16,6 +16,7 @@ import { useDeclinesStore } from "../stores/declinesStore";
 import { useReviewsStore } from "../stores/reviewsStore";
 import { useSponsorStore } from "../stores/sponsorStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
+import { useTermSignalsStore } from "../stores/termSignalsStore";
 import type { FixtureMap } from "../dev/fixtures/registry";
 import { useApprovalStore } from "../stores/approvalStore";
 import { usePaletteStore } from "../stores/paletteStore";
@@ -183,6 +184,29 @@ export const SessionsTerminalOnly = scenario({
   after: () => {
     if (!useShellStore.getState().chatCollapsed) useShellStore.getState().toggleChat();
   },
+});
+/// F3: what only the terminal showed, as cards in the thread.
+export const SessionsTrustPrompt = scenario({
+  destination: "sessions",
+  after: () =>
+    useTermSignalsStore
+      .getState()
+      .note("sess-auth", "Quick safety check: Is this a project you created or one you trust?"),
+});
+export const SessionsApprovalInline = scenario({
+  destination: "sessions",
+  fixtures: { approvals_pending: [pendingApproval] },
+  after: () => useApprovalStore.setState({ queue: [pendingApproval] }),
+});
+export const SessionsBooting = scenario({
+  destination: "sessions",
+  // A fresh shell, no CLI banner yet: the launch was typed and nothing came
+  // back — the moment the boot card is for.
+  fixtures: {
+    testigo_list: [],
+    term_spawn: (args: Record<string, unknown>) => `term-${String(args.termKey ?? "x")}`,
+  },
+  after: () => useTermSignalsStore.getState().markBooting("sess-auth"),
 });
 export const SessionsNoTurns = scenario({
   destination: "sessions",
