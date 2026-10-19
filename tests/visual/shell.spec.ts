@@ -141,8 +141,12 @@ test("v2 sessions: the conversation is the stage, the terminal a drawer", async 
   await expect(page.getByTestId("turn")).toHaveCount(3);
   await expect(page.getByTestId("turn").last()).toHaveAttribute("data-live", "true");
 
-  // The drawer is closed but the PTY stays mounted.
+  // The drawer is open by default (terminal first); Ctrl+` hides it and
+  // the PTY stays mounted either way.
   const drawer = page.getByTestId("terminal-drawer");
+  await expect(drawer).toHaveAttribute("data-open", "true");
+  await expect(drawer.locator(".terminals-stack > *")).toHaveCount(1);
+  await page.keyboard.press("Control+`");
   await expect(drawer).not.toHaveAttribute("data-open", "true");
   await expect(drawer.locator(".terminals-stack > *")).toHaveCount(1);
   await page.keyboard.press("Control+`");
@@ -411,6 +415,48 @@ test("a queued prompt waits for a stopped session instead of looping", async ({ 
     ),
   ).toBe(0);
   await expect(page.getByTestId("prompt-queue").locator("li")).toHaveCount(1);
+});
+
+test("terminal first: open by default at 60 %, foldable chat, resizable and remembered", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions");
+  const centre = page.getByTestId("sessions-center");
+  const drawer = page.getByTestId("terminal-drawer");
+  await expect(drawer).toHaveAttribute("data-open", "true");
+  const ratio = async () => {
+    const c = (await centre.boundingBox())!;
+    const d = (await drawer.boundingBox())!;
+    return d.height / c.height;
+  };
+  expect(await ratio()).toBeGreaterThan(0.55);
+  expect(await ratio()).toBeLessThan(0.65);
+
+  // Hide the chat: the terminal takes the whole centre; show it back.
+  await page.getByTestId("toggle-chat").click();
+  await expect(drawer).toHaveAttribute("data-full", "true");
+  await expect(page.getByTestId("conversation")).toBeHidden();
+  expect(await ratio()).toBeGreaterThan(0.97);
+  await page.getByTestId("toggle-chat").click();
+  await expect(page.getByTestId("conversation")).toBeVisible();
+
+  // Drag the strip up by a quarter of the centre: the drawer grows and the
+  // new size is remembered; double-click resets.
+  const strip = page.getByTestId("drawer-strip");
+  const s = (await strip.boundingBox())!;
+  const c = (await centre.boundingBox())!;
+  await page.mouse.move(s.x + 40, s.y + s.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(s.x + 40, s.y + s.height / 2 - c.height * 0.2, { steps: 6 });
+  await page.mouse.up();
+  expect(await ratio()).toBeGreaterThan(0.75);
+  const saved = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("agent-console:shell-v2") ?? "{}").drawerPct,
+  );
+  expect(saved).toBeGreaterThan(75);
+  await strip.dblclick();
+  expect(await ratio()).toBeGreaterThan(0.55);
+  expect(await ratio()).toBeLessThan(0.65);
 });
 
 test("v2 parity: the terminal survives a trip to the Inbox", async ({ page }) => {

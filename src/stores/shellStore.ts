@@ -17,8 +17,16 @@ interface ShellState {
   lastTab: Partial<Record<Destination, WorkbenchTab>>;
   /// Whether the list pane (second column) is open.
   listOpen: boolean;
-  /// Whether the terminal drawer under the conversation is open.
+  /// Whether the terminal drawer under the conversation is open. Open by
+  /// default (2026-10-19, Carlos): the CLI is where trust, login, approvals
+  /// and the agent's words happen today; the rendered chat is the companion.
   drawerOpen: boolean;
+  /// Drawer height as a percentage of the Sessions centre (DRAWER_LIMITS).
+  drawerPct: number;
+  /// Hide the rendered conversation so the terminal takes the whole centre.
+  chatCollapsed: boolean;
+  setDrawerPct: (pct: number | null) => void;
+  toggleChat: () => void;
   /// Column widths in px (list pane, inspector), drag-resizable, persisted.
   listWidth: number;
   inspectorWidth: number;
@@ -32,11 +40,20 @@ interface ShellState {
 }
 
 export const COLUMN_DEFAULTS = { list: 240, inspector: 360 } as const;
+export const DRAWER_DEFAULT_PCT = 60;
+export const DRAWER_LIMITS = [25, 90] as const;
 export const COLUMN_LIMITS = { list: [200, 420], inspector: [280, 560] } as const;
 
 type Persisted = Pick<
   ShellState,
-  "destination" | "lastTab" | "listOpen" | "drawerOpen" | "listWidth" | "inspectorWidth"
+  | "destination"
+  | "lastTab"
+  | "listOpen"
+  | "drawerOpen"
+  | "drawerPct"
+  | "chatCollapsed"
+  | "listWidth"
+  | "inspectorWidth"
 >;
 
 function load(): Persisted {
@@ -48,7 +65,9 @@ function load(): Persisted {
         destination: p.destination ?? "inbox",
         lastTab: p.lastTab ?? {},
         listOpen: p.listOpen ?? true,
-        drawerOpen: p.drawerOpen ?? false,
+        drawerOpen: p.drawerOpen ?? true,
+        drawerPct: p.drawerPct ?? DRAWER_DEFAULT_PCT,
+        chatCollapsed: p.chatCollapsed ?? false,
         listWidth: p.listWidth ?? COLUMN_DEFAULTS.list,
         inspectorWidth: p.inspectorWidth ?? COLUMN_DEFAULTS.inspector,
       };
@@ -60,7 +79,9 @@ function load(): Persisted {
     destination: "inbox",
     lastTab: {},
     listOpen: true,
-    drawerOpen: false,
+    drawerOpen: true,
+    drawerPct: DRAWER_DEFAULT_PCT,
+    chatCollapsed: false,
     listWidth: COLUMN_DEFAULTS.list,
     inspectorWidth: COLUMN_DEFAULTS.inspector,
   };
@@ -100,6 +121,20 @@ export const useShellStore = create<ShellState>((set, get) => ({
   },
   toggleDrawer: () => {
     set((s) => ({ drawerOpen: !s.drawerOpen }));
+    save(get());
+  },
+  setDrawerPct: (pct) => {
+    const [min, max] = DRAWER_LIMITS;
+    const v = pct === null ? DRAWER_DEFAULT_PCT : Math.max(min, Math.min(max, Math.round(pct)));
+    set({ drawerPct: v });
+    save(get());
+  },
+  toggleChat: () => {
+    // Hiding the chat means the terminal is the stage: make sure it shows.
+    set((s) => ({
+      chatCollapsed: !s.chatCollapsed,
+      drawerOpen: s.chatCollapsed ? s.drawerOpen : true,
+    }));
     save(get());
   },
   setWidth: (col, px) => {
