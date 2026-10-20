@@ -507,23 +507,23 @@
           <div class="frame">
             <span class="ph">A full agent turn</span>
             <!-- shots/hero-session.png -->
-            <img src="shots/hero-session.png" alt="A full agent turn: the terminal shows the agent fixing a failing test and finding a second bug in the test runner, while the Proof panel shows the verified hash chain with 12 approvals and 38 events" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
+            <img src="shots/hero-session.png" alt="A full agent turn in Agent Console: the conversation shows the prompt, the tool calls and the agent's reply streaming in as markdown while the terminal underneath runs the CLI, and the Inspector holds the turn's detail" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
-          <figcaption>A full turn, witnessed — the agent fixes a failing test; the Proof panel keeps the verified chain</figcaption>
+          <figcaption>A full turn, witnessed — the agent's reply streams in as it is written, the terminal stays one keystroke away, the Inspector holds the turn's detail</figcaption>
         </figure>
         <figure>
           <div class="frame">
             <span class="ph">Approve before it lands</span>
             <!-- shots/approval-modal.png -->
-            <img src="shots/approval-modal.png" alt="Per-tool approval modal showing an Edit with its inline diff, Deny / Always / Approve once buttons, keyboard shortcuts and a live countdown" width="1213" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
+            <img src="shots/approval-modal.png" alt="The Inbox: four pending approvals as decision cards graded by risk — a read-only test run, an irreversible force-push that asks you to type approve, an Edit with its inline diff — each with Deny / Always / Approve once and a live countdown" width="1213" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
-          <figcaption>Approve before it lands — every command and edit stops at a modal with the diff inline</figcaption>
+          <figcaption>Approve before it lands — every command and edit stops at a decision card graded by risk, diff inline; the irreversible ones make you type it</figcaption>
         </figure>
         <figure>
           <div class="frame">
             <span class="ph">Review the diff</span>
             <!-- shots/changes-diff.png -->
-            <img src="shots/changes-diff.png" alt="Split git diff of the agent's edit with a file list, commit box and file inspector — review before merge" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
+            <img src="shots/changes-diff.png" alt="Split git diff of the agent's edit with the file list, commit box and file inspector — review before merge" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
           <figcaption>Review every diff before it merges — split view, per file, revert anytime</figcaption>
         </figure>
@@ -537,11 +537,11 @@
         </figure>
         <figure>
           <div class="frame">
-            <span class="ph">Multi-agent room</span>
-            <!-- shots/room-multi-agent.png -->
-            <img src="shots/room-multi-agent.png" alt="A room where Claude (Opus) and Codex hold one shared conversation about a geometry bug, with turn counter and live cost" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
+            <span class="ph">The ledger, as a map</span>
+            <!-- shots/ledger-map.png -->
+            <img src="shots/ledger-map.png" alt="The ledger map: one lane per session, one bar per turn, a tick per witnessed event; the selected turn's nine events — session start, prompt, tool results, an approval, a passing check, the turn's end — in the Inspector with the chain verified" width="1534" height="831" loading="lazy" onerror="this.closest('figure').remove()" />
           </div>
-          <figcaption>Multi-agent room — you and several agents (mixed engines) on one problem, one shared thread</figcaption>
+          <figcaption>The ledger, as a map — every session a lane, every turn a bar; click one to see exactly what was witnessed, hash by hash</figcaption>
         </figure>
       </div>
     </div>

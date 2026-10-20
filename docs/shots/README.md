@@ -8,37 +8,41 @@ its own `<figure>`; if *none* of the shots exist, the whole `#screens` band and 
 nav link hide on load. So you can swap, add, or remove shots freely — zero code
 change on capture.
 
-Shipped shots (August 2026 set, captured by Claude driving the live app — see below):
+Shipped shots (October 2026 set — the v2 shell, captured from the Storybook
+stories, see below):
 
-- `hero-session.png` — lead/hero: a full agent turn (failing test fixed, second
-  bug found in the test runner) with the Proof panel's verified chain (12
-  approvals · 38 events). Also the README's top image and the og-cover source.
-- `approval-modal.png` — per-tool approval: an Edit stopped with its inline diff,
-  Deny / Always / Approve once, keyboard hints, live countdown. Cropped to the
-  center pane (the workbench panel showed user-specific skills).
-- `changes-diff.png` — Changes tab: split diff, file list, commit box, inspector.
+- `hero-session.png` — lead/hero: Sessions with a live turn — prompt, tool
+  calls, the agent's reply streaming in as markdown (table included), the
+  running tool in the status line, the terminal in its drawer underneath, the
+  Inspector holding the turn's detail. Also the README's top image and the
+  og-cover source. Story `app-v2--sessions` + a `transcript://delta`.
+- `approval-modal.png` — the Inbox with four decision cards graded by risk
+  (read-only, irreversible with the typed "approve", an Edit with its inline
+  diff), live countdowns. Story `app-v2--inbox-decisions`. (The filename is
+  historical: the modal became cards in v0.88.)
+- `changes-diff.png` — Changes tab: split diff, file list, commit box, file
+  inspector; terminal drawer hidden. Story `app-v2--sessions-changes`.
 - `proof-verify.png` — the hosted Testigo verifier in Chrome validating the
-  public demo packet: Ed25519/DSSE signature ✓, hash chain ✓, redaction notes.
-- `room-multi-agent.png` — a Claude (Opus) + Codex room converging on a real
-  geometry question, turn 6/6 with live token/cost counters.
+  public demo packet: Ed25519/DSSE signature ✓, hash chain ✓, redaction notes
+  (August 2026 capture, unchanged — it is not the app's UI).
+- `ledger-map.png` — Proof › Ledger: the map (a lane per session, a bar per
+  turn, a tick per event) with the selected turn's events in the Inspector,
+  chain verified. Story `app-v2--proof-turn-selected`.
 - `og-cover.png` — 1200×630 social cover (wired into `og:image` /
-  `twitter:image`), generated from the hero with the wordmark baked in — see
-  the PIL snippet in the PR that shipped this set.
+  `twitter:image`), generated from the hero with the wordmark baked in (PIL:
+  resize to 1200 wide, crop to 630, dark gradient over the lower half,
+  DejaVu Sans Mono Bold wordmark + DejaVu Sans tagline).
 
-Capture spec (environment, sizing, dark theme, path-scrubbing): see
-`../LANDING_SHOTLIST.md`.
+Capture spec: see `../LANDING_SHOTLIST.md`.
 
-**How these were captured (August 2026).** Same technique as the June set, plus
-isolation so a second app instance can run while the daily instance is open:
-launch with a scratch profile and a private bus (`XDG_{CONFIG,DATA,CACHE}_HOME`
-+ `dbus-run-session` to dodge the single-instance plugin), `GDK_BACKEND=x11` to
-land on XWayland, `GTK_THEME=Adwaita:dark` for the dark theme, and `env -u
-CLAUDE*` so the spawned Claude CLI doesn't inherit a child-session marker. Drive
-with `xdotool` (clicks/keys via XTEST — synthetic `--window` key events never
-reach WebKit), capture with `xwd -id <wid> | ffmpeg`. Demo repo: a neutral
-`orbit-api` with a deliberately failing test; everything on screen is real agent
-work, not staged. Identity scrubbing (username/hostname/home paths in the shell
-prompt and inspector) is done post-capture with PIL by painting the background
-color over the affected line. Caveats: proof export can't run in the isolated
-instance (no keyring on the private bus) — the verifier shot uses the public
-demo packet from the `testigo` repo via Chrome + CDP `DOM.setFileInputFiles`.
+**How these were captured (October 2026).** From the built Storybook
+(`npm run build-storybook`, served on 127.0.0.1:6006) with Playwright's
+Chromium at the exact pixel size (1534×831, 1213×831; device scale 1), on the
+stories above — the same fixtures the visual sweep and the a11y gate run on, so
+everything on screen is the demo project (`demo-playground`, user `demo`) and
+nothing needs scrubbing. Details: the page clock is pinned to the fixtures'
+`NOW` + 25 s so countdowns and durations read sensibly; the hero's drawer is
+dragged down by a quarter of the centre so the thread and the terminal share
+the screen; the F5 transcript delta is emitted through `window.__fixtures`.
+The earlier sets (June/August 2026) were captured from the live app driven
+with xdotool; that recipe is in the git history of this file.
