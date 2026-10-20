@@ -17,7 +17,7 @@ protocol — prompts, human approvals, tool results and per-turn diffs land in a
 hash-chained evidence ledger, exportable as signed proof packets anyone can
 verify in a browser.
 
-![A full agent turn in Agent Console: the terminal shows the agent fixing a failing test and finding a second bug in the test runner, while the Proof panel shows the verified hash chain with 12 approvals and 38 events](docs/shots/hero-session.png)
+![A full agent turn in Agent Console: the conversation shows the prompt, the tool calls and the agent's reply streaming in as markdown while the terminal underneath runs the CLI, and the Inspector holds the turn's detail](docs/shots/hero-session.png)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -129,10 +129,10 @@ branch name; you'll see a one-line notice.
 
 | | |
 |:--:|:--:|
-| ![Per-tool approval modal showing an Edit with its inline diff, Deny / Always / Approve once buttons, keyboard shortcuts and a live countdown](docs/shots/approval-modal.png) | ![Changes tab: split git diff of the agent's edit with file list, commit box and file inspector](docs/shots/changes-diff.png) |
-| **Approve before it lands** — every command and edit stops at a modal with the diff inline, keyboard-first. | **Review every diff** — split view per file, revert anytime, commit when *you* decide. |
-| ![Testigo verifier page in a browser reporting a valid Ed25519/DSSE signature and an intact hash chain for an exported proof packet](docs/shots/proof-verify.png) | ![A room where Claude (Opus) and Codex hold one shared conversation about a geometry bug, with turn counter and live cost](docs/shots/room-multi-agent.png) |
-| **Proof packets verify in any browser** — signature, hash chain, and honest notes about what redaction does and doesn't prove. | **Rooms** — you + N agents (mixed engines) on one problem; here Opus and Codex converge on a fix. |
+| ![The Inbox: four pending approvals as decision cards graded by risk — a read-only test run, an irreversible force-push that asks you to type "approve", an Edit with its inline diff — each with Deny / Always / Approve once and a live countdown](docs/shots/approval-modal.png) | ![Changes tab: split git diff of the agent's edit with the file list, commit box and file inspector](docs/shots/changes-diff.png) |
+| **Approve before it lands** — every command and edit stops at a decision card graded by risk, diff inline, keyboard-first; the irreversible ones make you type it. | **Review every diff** — split view per file, revert anytime, commit when *you* decide. |
+| ![Testigo verifier page in a browser reporting a valid Ed25519/DSSE signature and an intact hash chain for an exported proof packet](docs/shots/proof-verify.png) | ![The ledger map: one lane per session, one bar per turn, a tick per witnessed event; the selected turn's nine events — session start, prompt, tool results, an approval, a passing check, the turn's end — in the Inspector with the chain verified](docs/shots/ledger-map.png) |
+| **Proof packets verify in any browser** — signature, hash chain, and honest notes about what redaction does and doesn't prove. | **The ledger, as a map** — every session a lane, every turn a bar; click one to see exactly what was witnessed, hash by hash. |
 
 ## Installing
 
