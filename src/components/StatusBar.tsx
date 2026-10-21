@@ -13,6 +13,7 @@ import { freshStatus, useLiveStatusStore } from "../stores/liveStatusStore";
 import { formatAge } from "../lib/hooksHealth";
 import { useInjectStore } from "../stores/injectStore";
 import { profileFor } from "../agents/profiles";
+import { useModelPresets } from "../agents/modelCatalog";
 import { ipc } from "../ipc/tauri";
 import type { TermInputDetail } from "./Terminal";
 import type { SessionUsage } from "../types/domain";
@@ -181,6 +182,7 @@ export function ModelPill({
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   const profile = profileFor(session.agent);
+  const presets = useModelPresets(session.agent);
 
   useEffect(() => {
     if (!open) return;
@@ -230,7 +232,7 @@ export function ModelPill({
           <div className="model-menu-head">
             {canLiveSwitch ? "Switch model" : "Model on resume"}
           </div>
-          {profile.models.map((p) => (
+          {presets.map((p) => (
             <button
               key={p.value}
               className={`model-menu-item ${session.model === p.value ? "current" : ""}`}

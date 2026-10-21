@@ -3264,11 +3264,13 @@ How to contribute:
 }
 
 fn is_safe_model(model: &str) -> bool {
+    // OpenCode ids are `provider/model`, optionally `#variant`; both are
+    // shell-safe characters that never reach a shell anyway (argv, no shell).
     !model.is_empty()
-        && model.len() <= 64
-        && model
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+        && model.len() <= 96
+        && model.chars().all(|c| {
+            c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' || c == '/' || c == '#'
+        })
 }
 
 // ----- Working-room worktrees (collaborative: one shared, isolated checkout) -----
@@ -3433,10 +3435,7 @@ fn render_transcript_md(
     let roster = participants
         .iter()
         .map(|p| {
-            let engine = match p.engine {
-                Engine::Claude => "claude",
-                Engine::Codex => "codex",
-            };
+            let engine = p.engine.bin_name();
             let role = if p.role.trim().is_empty() {
                 String::new()
             } else {
@@ -3451,8 +3450,7 @@ fn render_transcript_md(
         .iter()
         .map(|m| {
             let who = match m.engine {
-                Some(Engine::Claude) => format!("{} (claude/{})", m.author_name, m.model),
-                Some(Engine::Codex) => format!("{} (codex/{})", m.author_name, m.model),
+                Some(engine) => format!("{} ({}/{})", m.author_name, engine.bin_name(), m.model),
                 None => format!("{} (human)", m.author_name),
             };
             format!("### Turn {} — {}\n\n{}", m.turn, who, m.text.trim())

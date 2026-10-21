@@ -222,6 +222,11 @@ pub fn pick_reviewer(
     match producer_engine {
         Engine::Claude if codex_available => (Engine::Codex, None),
         Engine::Codex if claude_available => (Engine::Claude, None),
+        // An OpenCode producer is reviewed by one of the two engines with a
+        // known strong preset when installed; else by OpenCode's own default.
+        Engine::Opencode if claude_available => (Engine::Claude, Some("opus".to_string())),
+        Engine::Opencode if codex_available => (Engine::Codex, Some("high".to_string())),
+        Engine::Opencode => (Engine::Opencode, None),
         Engine::Claude => {
             let alias = producer_model.and_then(claude_cli::family_alias);
             let other = match alias {
@@ -278,10 +283,10 @@ pub fn scope_for(
                 model = Some(m.to_string());
             }
             if let Some(a) = p.get("agent").and_then(Value::as_str) {
-                scope.producer_engine = if a == "codex" {
-                    Engine::Codex
-                } else {
-                    Engine::Claude
+                scope.producer_engine = match a {
+                    "codex" => Engine::Codex,
+                    "opencode" => Engine::Opencode,
+                    _ => Engine::Claude,
                 };
             }
         }
@@ -507,6 +512,7 @@ pub fn review_with_runner(
         match engine {
             Engine::Claude => "claude",
             Engine::Codex => "codex",
+            Engine::Opencode => "opencode",
         }
     );
     let mut out = ReviewVerdict {
@@ -540,6 +546,7 @@ pub fn review_with_runner(
     let engine_name = match engine {
         Engine::Claude => "claude",
         Engine::Codex => "codex",
+        Engine::Opencode => "opencode",
     };
     let card = crate::services::identity_service::card_for_reviewer(
         engine_name,

@@ -277,7 +277,13 @@ export interface EngineSessionRef {
   id: string;
   cwd: string;
   status?: string;
-  agent?: "claude" | "codex";
+  agent?: "claude" | "codex" | "opencode";
+}
+
+/// Approvals come from the hooks, which only Claude and Codex have; a rule
+/// written for an OpenCode session can only land in Claude's store.
+function ruleEngine(agent: "claude" | "codex" | "opencode" | undefined): "claude" | "codex" {
+  return agent === "codex" ? "codex" : "claude";
 }
 
 export function resolveApprovalEngine(
@@ -285,9 +291,9 @@ export function resolveApprovalEngine(
   sessions: EngineSessionRef[],
 ): "claude" | "codex" {
   const byId = req.termId ? sessions.find((s) => s.id === req.termId) : undefined;
-  if (byId) return byId.agent ?? "claude";
+  if (byId) return ruleEngine(byId.agent);
   const live = sessions.filter((s) => s.status !== "stopped" && s.cwd === req.cwd);
-  if (live.length === 1) return live[0].agent ?? "claude";
+  if (live.length === 1) return ruleEngine(live[0].agent);
   return "claude";
 }
 

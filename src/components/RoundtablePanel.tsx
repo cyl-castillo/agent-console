@@ -6,6 +6,8 @@ import {
   CONNECTOR_ROLES,
   type RtParticipantDraft,
 } from "../stores/roundtableStore";
+import { engineGlyph, type AgentKind } from "../agents/profiles";
+import { useModelPresets } from "../agents/modelCatalog";
 import { useChangesStore } from "../stores/changesStore";
 import { AGENT_PROFILES } from "../agents/profiles";
 import { MarkdownText } from "./MarkdownText";
@@ -272,11 +274,11 @@ function ConfigForm() {
 function ParticipantRow({ p, canRemove }: { p: RtParticipantDraft; canRemove: boolean }) {
   const update = useRoundtableStore((s) => s.updateParticipant);
   const remove = useRoundtableStore((s) => s.removeParticipant);
-  const models = modelsFor(p.engine);
+  const models = useModelPresets(p.engine);
 
   // Claude and Codex expose different "model" values (aliases vs effort levels),
   // so switching engine resets the model to the new engine's first preset.
-  const setEngine = (engine: "claude" | "codex") => {
+  const setEngine = (engine: AgentKind) => {
     const firstModel = modelsFor(engine)[0]?.value ?? "";
     update(p.id, { engine, model: firstModel });
   };
@@ -290,10 +292,7 @@ function ParticipantRow({ p, canRemove }: { p: RtParticipantDraft; canRemove: bo
         </label>
         <label className="rt-field rt-field-sm">
           <span>engine</span>
-          <select
-            value={p.engine}
-            onChange={(e) => setEngine(e.target.value as "claude" | "codex")}
-          >
+          <select value={p.engine} onChange={(e) => setEngine(e.target.value as AgentKind)}>
             {AGENT_PROFILES.map((prof) => (
               <option key={prof.kind} value={prof.kind}>
                 {prof.icon} {prof.label}
@@ -659,7 +658,7 @@ function RosterChip({
       <span className="rt-dot" style={{ background: color }} />
       <span className="rt-roster-name">{name}</span>
       <span className="rt-roster-model">
-        {engine === "codex" ? "◆" : "✶"} {model}
+        {engineGlyph(engine)} {model}
       </span>
       {active && (
         <span className="rt-roster-turn">
@@ -731,7 +730,7 @@ function MessageBubble({
         <span className="rt-dot" style={{ background: color }} />
         <span className="rt-turn-name">{turn.authorName}</span>
         <span className="rt-turn-model">
-          {turn.engine === "codex" ? "◆" : "✶"} {turn.model}
+          {engineGlyph(turn.engine)} {turn.model}
         </span>
         {turn.kind && (
           <span className="rt-turn-kind" title={KIND_HINT[turn.kind] ?? turn.kind}>

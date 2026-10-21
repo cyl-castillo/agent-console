@@ -60,7 +60,10 @@ Principles:
 The center of the screen is deliberately small, and it hasn't grown since v0.1:
 
 - Open any local repository; a built-in PTY terminal that auto-runs your agent
-  (Claude Code or Codex, per session) and also runs `npm test`, `vim`, anything.
+  (Claude Code, Codex or OpenCode, per session) and also runs `npm test`, `vim`,
+  anything. OpenCode's model list is read live from the CLI (`provider/model`
+  ids for every provider you configured); it has no hooks, so its sessions are
+  not resumed by id and its turns are witnessed only at turn boundaries.
 - Git diff viewer with per-file revert; per-turn working-tree snapshots with
   one-click restore.
 - **Per-tool approval modal** with keyboard flow, live countdown, and durable
@@ -99,7 +102,7 @@ suggest-only, none of them able to block the core:
 ## Rooms & cowork
 
 A **room** is a shared conversation about one problem between you and N agents
-(Claude and/or Codex). In a **working room** (the "let them edit" toggle) the
+(Claude, Codex and/or OpenCode). In a **working room** (the "let them edit" toggle) the
 agents edit code in an isolated git worktree on a `room/<id>` branch, committing
 one checkpoint per turn — your own files stay untouched until you review and merge.
 

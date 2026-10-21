@@ -7,6 +7,7 @@ import { useUIStore } from "../stores/uiStore";
 import { useToastStore } from "../stores/toastStore";
 import { useModelStore, isValidModel, modelLabel } from "../stores/modelStore";
 import { AGENT_PROFILES, profileFor, DEFAULT_AGENT, type AgentKind } from "../agents/profiles";
+import { useModelPresets } from "../agents/modelCatalog";
 import { ipc } from "../ipc/tauri";
 import type { BranchInfo, LinkedFolder } from "../types/domain";
 import { confirmDialog } from "../stores/confirmStore";
@@ -287,7 +288,7 @@ export function AgentModelChooser({
   const [wtBase, setWtBase] = useState("");
   const [branches, setBranches] = useState<BranchInfo[] | null>(null);
 
-  const profile = profileFor(agent);
+  const presets = useModelPresets(agent);
   const lastModel = defaultFor(projectRoot, agent);
 
   // Load branches on first worktree opt-in; default the base to the current one.
@@ -370,7 +371,7 @@ export function AgentModelChooser({
         )}
       </div>
 
-      {profile.models.map((p) => (
+      {presets.map((p) => (
         <button
           key={p.value}
           className={`model-chooser-item ${lastModel === p.value ? "last" : ""}`}

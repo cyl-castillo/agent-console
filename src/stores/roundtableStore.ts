@@ -3,7 +3,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
 import { useChangesStore } from "./changesStore";
-import { profileFor } from "../agents/profiles";
+import { type AgentKind } from "../agents/profiles";
+import { presetsFor } from "../agents/modelCatalog";
 import type {
   ConnectorView,
   RoomSummary,
@@ -21,7 +22,7 @@ export type RtPhase = "config" | "running" | "paused" | "awaiting" | "done" | "s
 export interface RtParticipantDraft {
   id: string;
   name: string;
-  engine: "claude" | "codex";
+  engine: AgentKind;
   model: string;
   role: string;
   /// Connector roles (see CONNECTOR_ROLES). Empty = plain assistant.
@@ -656,8 +657,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
 }));
 
 /// Models for an engine — used by the config form's model picker.
-export function modelsFor(engine: "claude" | "codex") {
-  return profileFor(engine).models;
+export function modelsFor(engine: AgentKind) {
+  return presetsFor(engine);
 }
 
 async function bindListeners(

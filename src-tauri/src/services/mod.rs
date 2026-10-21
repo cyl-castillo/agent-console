@@ -27,6 +27,7 @@ pub mod linked_folders_service;
 pub mod mcp_service;
 pub mod memory_service;
 pub mod notes_service;
+pub mod opencode_service;
 pub mod palette_service;
 pub mod path_guard;
 pub mod permissions_service;

@@ -175,7 +175,7 @@ export interface PersistedSession {
   cwd: string;
   createdAtMs: number;
   scrollback: string;
-  /// Which agent this session launches ("claude" | "codex"). Undefined = Claude.
+  /// Which agent this session launches ("claude" | "codex" | "opencode"). Undefined = Claude.
   agent?: string;
   /// Agent-side session id (Claude or Codex) used to resume the conversation.
   /// The backend still reads the legacy `claudeSessionId` key from old files.
@@ -369,7 +369,7 @@ export interface ReviewVerdict {
   verdict: ReviewVerdictKind;
   findings: ReviewFinding[];
   reviewer: string;
-  reviewerEngine: "claude" | "codex";
+  reviewerEngine: "claude" | "codex" | "opencode";
   reviewerModel?: string | null;
   producerModel?: string | null;
   termId: string;
@@ -873,7 +873,7 @@ export interface RoundtableParticipant {
   /// Display name on this participant's messages.
   name: string;
   /// Which CLI backs this participant. Omitted = "claude" (backend default).
-  engine?: "claude" | "codex";
+  engine?: "claude" | "codex" | "opencode";
   /// Claude: model alias ("opus"|"sonnet"). Codex: reasoning effort
   /// ("low"|"medium"|"high").
   model: string;
@@ -935,7 +935,7 @@ export interface RoundtableTurn {
   authorId: string;
   authorName: string;
   /// null for the human.
-  engine: "claude" | "codex" | null;
+  engine: "claude" | "codex" | "opencode" | null;
   model: string;
   text: string;
   turn: number;
@@ -979,7 +979,7 @@ export interface PersistedMessage {
   authorId: string;
   authorName: string;
   /// null for the human.
-  engine: "claude" | "codex" | null;
+  engine: "claude" | "codex" | "opencode" | null;
   model: string;
   text: string;
   turn: number;
@@ -1147,6 +1147,15 @@ export interface ConnectorView {
   questions: ConnectorQuestion[];
   reviews: ConnectorReview[];
   pendingJobs: ConnectorPendingJob[];
+}
+
+/// One OpenCode model of the open project (live from the CLI).
+export interface OpencodeModel {
+  /// `provider/model` — what `--model` takes.
+  id: string;
+  name: string;
+  provider: string;
+  variants: string[];
 }
 
 /// Lightweight sidebar entry for a saved room (no transcript).

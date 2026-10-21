@@ -307,6 +307,7 @@ pub fn run() {
             commands::roundtable::job_move,
             commands::roundtable::jobs_set_parallel,
             commands::roundtable::job_confirm_landing,
+            commands::roundtable::opencode_models,
             commands::scheduler::scheduler_list,
             commands::scheduler::scheduler_create,
             commands::scheduler::scheduler_update,

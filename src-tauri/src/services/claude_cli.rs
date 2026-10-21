@@ -38,6 +38,10 @@ const CODEX: AgentBin = AgentBin {
     base: "codex",
     env_override: "AGENT_CONSOLE_CODEX_BIN",
 };
+const OPENCODE: AgentBin = AgentBin {
+    base: "opencode",
+    env_override: "AGENT_CONSOLE_OPENCODE_BIN",
+};
 
 /// Filenames to probe for `base` in each directory (Windows ships shims).
 #[cfg(windows)]
@@ -63,6 +67,26 @@ pub fn bin() -> String {
 /// Absolute path to the `codex` binary, resolved the same way as `claude`.
 pub fn codex_bin() -> String {
     resolve_cached(&CODEX)
+}
+
+/// Absolute path to the `opencode` binary, resolved the same way.
+pub fn opencode_bin() -> String {
+    resolve_cached(&OPENCODE)
+}
+
+/// An `opencode <args>` command run in `dir`, stdio piped and stdin nulled.
+/// OpenCode takes the prompt as a positional argument
+/// (`opencode run … "<prompt>"`), so nothing is fed over stdin.
+///
+/// `dir` is set twice on purpose: as the process cwd AND as `$PWD`. OpenCode
+/// (1.19) reads the project directory from `$PWD` when it is set, so a child
+/// spawned with a different `current_dir` but the parent's inherited `PWD`
+/// silently works in the parent's folder — wrong `opencode.json`, no
+/// connector, tools running elsewhere. Seen live before this was pinned.
+pub fn opencode_command_in(dir: &Path, args: &[&str]) -> Command {
+    let mut cmd = spawn_command(opencode_bin(), args, Stdio::null());
+    cmd.current_dir(dir).env("PWD", dir);
+    cmd
 }
 
 /// A `claude <args>` command with stdio piped, stdin nulled (so it can never

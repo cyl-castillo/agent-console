@@ -62,6 +62,7 @@ import type {
   ConnectorView,
   ConnectorPendingJob,
   JobsBoard,
+  OpencodeModel,
   RunRecord,
   ShareResult,
   SyncResult,
@@ -562,6 +563,7 @@ export const ipc = {
   jobMove: (id: string, up: boolean) => invoke<void>("job_move", { id, up }),
   jobsSetParallel: (parallelJobs: number) => invoke<void>("jobs_set_parallel", { parallelJobs }),
   jobConfirmLanding: (id: string) => invoke<void>("job_confirm_landing", { id }),
+  opencodeModels: () => invoke<OpencodeModel[]>("opencode_models"),
 
   voiceStatus: () => invoke<VoiceStatus>("voice_status"),
   voiceEnable: () => invoke<VoiceStatus>("voice_enable"),

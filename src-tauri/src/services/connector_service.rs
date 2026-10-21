@@ -1088,11 +1088,16 @@ pub struct McpCall {
     pub project: String,
     /// Room id.
     pub job: String,
-    /// Participant id of the agent making the call.
+    /// Participant id of the agent making the call. Empty when the bridge
+    /// could not know it (OpenCode shares one config per folder): then
+    /// `opencode_session` names the session and the app resolves the caller.
+    #[serde(default)]
     pub caller: String,
     pub name: String,
     #[serde(default)]
     pub arguments: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opencode_session: Option<String>,
 }
 
 fn arg_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, CallError> {
@@ -1251,6 +1256,7 @@ mod tests {
             caller: caller.into(),
             name: name.into(),
             arguments: args,
+            opencode_session: None,
         }
     }
 

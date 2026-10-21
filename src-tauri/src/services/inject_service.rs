@@ -544,23 +544,46 @@ fn serve_mcp(stream: &mut TcpStream, app: &tauri::AppHandle, body: &str) {
     use crate::services::connector_service::{CallError, McpCall};
     let answer = match serde_json::from_str::<McpCall>(body) {
         Err(e) => serde_json::json!({ "ok": false, "error": format!("Invalid arguments: {e}") }),
-        Ok(req) => match app.state::<AppState>().connector.call(&req) {
-            Ok(result) => {
-                let _ = app.emit(
-                    "connector://call",
-                    serde_json::json!({
-                        "project": req.project, "job": req.job,
-                        "caller": req.caller, "tool": req.name,
-                    }),
-                );
-                serde_json::json!({ "ok": true, "result": result })
+        Ok(mut req) => {
+            // OpenCode: one `opencode.json` entry serves every participant of a
+            // folder, so the call names its session and we look the caller up.
+            if req.caller.is_empty() {
+                match crate::services::engine_runner::opencode_identity(
+                    req.opencode_session.as_deref(),
+                    &req.job,
+                ) {
+                    Some(id) => {
+                        req.project = id.project;
+                        req.job = id.job;
+                        req.caller = id.caller;
+                    }
+                    None => {
+                        respond_json(
+                            stream,
+                            &serde_json::json!({ "ok": false, "error": "The connector does not know which participant is calling (no caller and no registered OpenCode session)" }).to_string(),
+                        );
+                        return;
+                    }
+                }
             }
-            Err(CallError::Tool(m)) => serde_json::json!({ "ok": false, "error": m }),
-            Err(CallError::Io(e)) => {
-                tracing::warn!("connector: {} failed: {e}", req.name);
-                serde_json::json!({ "ok": false, "error": format!("Connector unavailable: {e}") })
+            match app.state::<AppState>().connector.call(&req) {
+                Ok(result) => {
+                    let _ = app.emit(
+                        "connector://call",
+                        serde_json::json!({
+                            "project": req.project, "job": req.job,
+                            "caller": req.caller, "tool": req.name,
+                        }),
+                    );
+                    serde_json::json!({ "ok": true, "result": result })
+                }
+                Err(CallError::Tool(m)) => serde_json::json!({ "ok": false, "error": m }),
+                Err(CallError::Io(e)) => {
+                    tracing::warn!("connector: {} failed: {e}", req.name);
+                    serde_json::json!({ "ok": false, "error": format!("Connector unavailable: {e}") })
+                }
             }
-        },
+        }
     };
     respond_json(stream, &answer.to_string());
 }
