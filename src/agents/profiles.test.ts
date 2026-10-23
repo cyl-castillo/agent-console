@@ -4,6 +4,27 @@ import { profileFor, isSafeSessionId, reconcileSwitchedModel } from "./profiles"
 
 const UUID = "0198c2f2-8a25-7e11-b3a4-8d6a3d5c2f10";
 
+describe("OPENCODE buildLaunch", () => {
+  const opencode = profileFor("opencode");
+
+  it("resumes by the id the witness plugin reported, with the model", () => {
+    const { cmd, note } = opencode.buildLaunch({
+      agentSessionId: "ses_e95b4caa1ffeDKYZHm9HVqo7e7",
+      model: "opencode/big-pickle",
+      hasScrollback: true,
+    });
+    expect(cmd).toBe("opencode -s ses_e95b4caa1ffeDKYZHm9HVqo7e7 --model opencode/big-pickle");
+    expect(note).toBe("auto-resuming");
+  });
+
+  it("starts fresh without an id — never the global --continue", () => {
+    const { cmd, note } = opencode.buildLaunch({ hasScrollback: true });
+    expect(cmd).toBe("opencode");
+    expect(cmd).not.toContain("--continue");
+    expect(note).toContain("no session id");
+  });
+});
+
 describe("CODEX buildLaunch", () => {
   const codex = profileFor("codex");
 

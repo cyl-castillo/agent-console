@@ -207,6 +207,9 @@ export const hooksStatus: HooksStatus = {
   codexInstalled: true,
   codexPretooluseInstalled: true,
   codexHooksPath: "/home/demo/.codex/hooks.json",
+  opencodeAvailable: true,
+  opencodePluginInstalled: true,
+  opencodePluginPath: "/home/demo/.config/opencode/plugins/agent-console.js",
 };
 
 export const skills: Skill[] = [

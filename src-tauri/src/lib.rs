@@ -106,6 +106,12 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_interrupt_autoinstalled() {
                 eprintln!("hooks: interrupt auto-install failed: {e}");
             }
+            // OpenCode witness plugin (OpenCode has no hooks): tool results
+            // with exit codes, the prompt and the turn's end, as event lines
+            // the same watcher reads. Content-compared, refreshed on upgrade.
+            if let Err(e) = state.hooks.ensure_opencode_plugin_autoinstalled() {
+                tracing::warn!("hooks: opencode plugin auto-install failed: {e}");
+            }
             // Migrate legacy bare-path hook commands to `node "<path>"` on
             // installs that predate the format (on Windows the old format
             // never executed at all — no shebangs in cmd.exe, and the path

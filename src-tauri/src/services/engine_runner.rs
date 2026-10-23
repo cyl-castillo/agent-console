@@ -413,8 +413,28 @@ fn opencode_fold(turn: &mut OpencodeTurn, v: &Value, on_activity: &ActivitySink)
         Some("tool_use") => {
             turn.final_seen = false;
             let name = part.get("tool").and_then(Value::as_str).unwrap_or("tool");
-            let detail = summarize_tool_input(name, part.get("state").and_then(|s| s.get("input")));
-            on_activity("tool", name, &detail);
+            let state = part.get("state");
+            let detail = summarize_tool_input(name, state.and_then(|s| s.get("input")));
+            match state.and_then(|s| s.get("status")).and_then(Value::as_str) {
+                // The same part comes back once it finished: the bash tool
+                // reports its exit code in `metadata.exit` (OpenCode 1.19),
+                // an errored tool carries `error`. Surface the verdict as its
+                // own activity so a room shows "exit 1", not just "ran".
+                Some("completed") | Some("error") => {
+                    let exit = state
+                        .and_then(|s| s.pointer("/metadata/exit"))
+                        .and_then(Value::as_i64);
+                    let errored = state.and_then(|s| s.get("status")).and_then(Value::as_str)
+                        == Some("error");
+                    let verdict = match (exit, errored) {
+                        (Some(c), _) => format!(" · exit {c}"),
+                        (None, true) => " · error".to_string(),
+                        (None, false) => String::new(),
+                    };
+                    on_activity("tool_result", name, &format!("{detail}{verdict}"));
+                }
+                _ => on_activity("tool", name, &detail),
+            }
         }
         Some("text") => {
             if let Some(t) = part.get("text").and_then(Value::as_str) {

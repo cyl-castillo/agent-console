@@ -183,6 +183,9 @@ pub struct ToolResultIds<'a> {
     pub duration_ms: Option<u64>,
     /// The LAST lines of a long output (runners print their verdict there).
     pub excerpt_tail: Option<&'a str>,
+    /// Who saw it: `hook` (absent; Claude/Codex hooks), `plugin` (OpenCode's
+    /// witness plugin), `runner` (a headless room/job turn).
+    pub observed_via: Option<&'a str>,
 }
 
 /// One name per job across engines, so a rule written once reads every
@@ -845,6 +848,9 @@ impl TestigoService {
         }
         if let Some(t) = ids.excerpt_tail.filter(|s| !s.is_empty()) {
             payload["excerptTail"] = json!(t);
+        }
+        if let Some(v) = ids.observed_via.filter(|s| !s.is_empty()) {
+            payload["observedVia"] = json!(v);
         }
         let canonical = tool.map(canonical_tool);
         if let Some(c) = canonical {
