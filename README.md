@@ -65,7 +65,9 @@ The center of the screen is deliberately small, and it hasn't grown since v0.1:
   ids for every provider you configured). OpenCode has no hooks, so the
   console installs a small witness plugin into its config: each tool result
   with its exit code, the prompt and the end of the turn reach the ledger
-  the same way Claude's and Codex's do, and sessions resume by id.
+  the same way Claude's and Codex's do, and sessions resume by id.  Rooms
+  and jobs drive OpenCode over the Agent Client Protocol (`opencode acp`),
+  so every command it runs there arrives with its exit code.
 - Git diff viewer with per-file revert; per-turn working-tree snapshots with
   one-click restore.
 - **Per-tool approval modal** with keyboard flow, live countdown, and durable
