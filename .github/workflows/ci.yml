@@ -86,6 +86,7 @@ jobs:
           path: |
             screenshots/
             tests/visual/out/a11y/
+            tests/visual/out/results/
             tests/visual/out/missing-fixtures.txt
             tests/visual/out/external-requests.txt
           if-no-files-found: ignore

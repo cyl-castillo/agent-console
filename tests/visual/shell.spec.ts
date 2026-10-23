@@ -325,7 +325,9 @@ test("v2 proof: the ledger map selects a turn into the inspector", async ({ page
   await expect(page.getByTestId("turn-inspector")).toContainText("commit");
 });
 
-test("v2 sessions list: grouped by attention, WIP visible, files under Preview", async ({ page }) => {
+test("v2 sessions list: grouped by attention, WIP visible, files under Preview", async ({
+  page,
+}) => {
   await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
   await page.goto("/iframe.html?id=app-v2--sessions&viewMode=story");
   await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
@@ -475,6 +477,12 @@ test("F3: the trust question, a login ask and a missing CLI surface as cards wit
   page,
 }) => {
   await openV2(page, "app-v2--sessions");
+  // The fixture terminal has spawned and its banner is in: the output
+  // listener is wired before the spec starts feeding it (on a slow runner
+  // the first chunks otherwise raced the spawn).
+  await expect(page.getByTestId("terminal-drawer")).toContainText("Welcome back", {
+    timeout: 10_000,
+  });
   // The story's drawer is open by default; hide it so the cards' CTA is tested.
   await page.keyboard.press("Control+`");
   await expect(page.getByTestId("terminal-drawer")).not.toHaveAttribute("data-open", "true");
