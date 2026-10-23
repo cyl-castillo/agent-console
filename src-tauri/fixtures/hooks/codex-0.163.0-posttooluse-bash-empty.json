@@ -1,0 +1,15 @@
+{
+  "session_id": "01a169ad-0b10-7460-8134-ae7b7235b557",
+  "turn_id": "01a169ad-0d43-7fc3-b0f4-e56a32eb0cbe",
+  "transcript_path": "/home/u/.codex/sessions/2026/10/23/rollout-fixture.jsonl",
+  "cwd": "/home/u/proj",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-5.6-terra",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm run test:empty"
+  },
+  "tool_response": "\n> fixcap@0.0.1 test:empty\n> node -e \"console.log('No tests found, exiting with code 0'); process.exit(0)\"\n\nNo tests found, exiting with code 0\n",
+  "tool_use_id": "exec-f676aa0b-779b-4561-9bbb-5b32acdee4f5"
+}

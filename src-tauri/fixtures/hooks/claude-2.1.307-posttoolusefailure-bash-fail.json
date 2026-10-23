@@ -1,0 +1,18 @@
+{
+  "session_id": "990ec270-ec29-4df1-9a6b-7a3106641aad",
+  "transcript_path": "/home/u/.claude/projects/-home-u-proj/990ec270-ec29-4df1-9a6b-7a3106641aad.jsonl",
+  "cwd": "/home/u/proj",
+  "scratchpad_dir": "/home/u/scratch",
+  "prompt_id": "a0664b34-5066-40e2-9c4f-ece94f9dcdac",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm run test:fail",
+    "description": "Run npm run test:fail"
+  },
+  "tool_use_id": "toolu_01NkrHaVjk7rfqgsjnqoCNEm",
+  "error": "Exit code 1\n\n> fixcap@0.0.1 test:fail\n> node -e \"console.log('FAIL  src/b.test.js\\n  ● b › adds\\n\\nTests:       1 failed, 1 passed, 2 total'); process.exit(1)\"\n\nFAIL  src/b.test.js\n  ● b › adds\n\nTests:       1 failed, 1 passed, 2 total",
+  "is_interrupt": false,
+  "duration_ms": 179
+}

@@ -1,0 +1,23 @@
+{
+  "session_id": "990ec270-ec29-4df1-9a6b-7a3106641aad",
+  "transcript_path": "/home/u/.claude/projects/-home-u-proj/990ec270-ec29-4df1-9a6b-7a3106641aad.jsonl",
+  "cwd": "/home/u/proj",
+  "scratchpad_dir": "/home/u/scratch",
+  "prompt_id": "a0664b34-5066-40e2-9c4f-ece94f9dcdac",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm run test:empty",
+    "description": "Run npm run test:empty"
+  },
+  "tool_response": {
+    "stdout": "> fixcap@0.0.1 test:empty\n> node -e \"console.log('No tests found, exiting with code 0'); process.exit(0)\"\n\nNo tests found, exiting with code 0",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_01FJgYCTb43WSXfmzuqoozey",
+  "duration_ms": 234
+}

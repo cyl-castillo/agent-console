@@ -141,14 +141,28 @@ fn map_kind(e: &ProofEvent) -> Mapped {
             }
         }
         "tool_result" | "check_run" => {
+            let status = p.get("status").and_then(Value::as_str);
             let bad = failed
                 || p.get("exitCode")
                     .and_then(Value::as_i64)
                     .is_some_and(|c| c != 0)
-                || p.get("status").and_then(Value::as_str) == Some("failed");
+                || status == Some("failed");
+            // A check that ran nothing (`empty`) or whose exit the engine
+            // never showed (`unknown`) is not a success: it is `partial`
+            // evidence, and a verifier must not count it as green.
+            let partial = matches!(
+                status,
+                Some("empty") | Some("unknown") | Some("interrupted")
+            );
             Mapped {
                 action_type: "tool_response",
-                outcome: if bad { "failure" } else { "success" },
+                outcome: if bad {
+                    "failure"
+                } else if partial {
+                    "partial"
+                } else {
+                    "success"
+                },
                 phase: "post_execution",
             }
         }
@@ -633,7 +647,7 @@ Mapping from the Testigo ledger (the console's native chain):
 | prompt | decision | concurrent | success |
 | approval_request | escalation | pre_execution | escalated |
 | approval_decision | decision | pre_execution | success / denied |
-| tool_result, check_run | tool_response | post_execution | success / failure |
+| tool_result, check_run | tool_response | post_execution | success / failure / partial (check `empty`, `unknown`, `interrupted`) |
 | turn_end | lifecycle | post_execution | success / failure / timeout |
 | agent_action (MCP) | tool_call | post_execution | success / denied |
 | agent_declined (MCP) | escalation | post_execution | escalated |
@@ -688,6 +702,35 @@ mod tests {
             prev_hash: "0".repeat(64),
             hash: format!("{seq:064x}"),
         }
+    }
+
+    #[test]
+    fn a_check_that_ran_nothing_or_hid_its_exit_is_partial_not_success() {
+        let m = |payload: Value| map_kind(&ev(1, 1, "check_run", "t", "agent", payload));
+        assert_eq!(
+            m(json!({"status": "passed", "exitCode": 0})).outcome,
+            "success"
+        );
+        assert_eq!(
+            m(json!({"status": "failed", "exitCode": 1})).outcome,
+            "failure"
+        );
+        assert_eq!(
+            m(json!({"status": "empty", "exitCode": 0})).outcome,
+            "partial"
+        );
+        assert_eq!(m(json!({"status": "unknown"})).outcome, "partial");
+        assert_eq!(m(json!({"status": "interrupted"})).outcome, "partial");
+        // A plain tool_result with a stated non-zero exit is still a failure.
+        let r = map_kind(&ev(
+            2,
+            1,
+            "tool_result",
+            "t",
+            "agent",
+            json!({"exitCode": 2}),
+        ));
+        assert_eq!(r.outcome, "failure");
     }
 
     #[test]

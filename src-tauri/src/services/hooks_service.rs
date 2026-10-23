@@ -1780,6 +1780,8 @@ fn handle_event(v: &Value, app: &AppHandle) {
             let agent_id = str_field(v, "agentId");
             let command = str_field(v, "command");
             let output_sha256 = str_field(v, "outputSha256");
+            let exit_code_via = str_field(v, "exitCodeVia");
+            let excerpt_tail = str_field(v, "excerptTail");
             let _ = state.testigo.on_tool_result(
                 &root,
                 ts,
@@ -1795,10 +1797,15 @@ fn handle_event(v: &Value, app: &AppHandle) {
                     agent_id: agent_id.as_deref(),
                     command: command.as_deref(),
                     output_sha256: output_sha256.as_deref(),
-                    failed: kind == "tool_failed",
+                    // PostToolUseFailure, or a result whose stated exit was
+                    // non-zero (Codex has no failure event: the bridge flags it).
+                    failed: kind == "tool_failed"
+                        || v.get("failed").and_then(|f| f.as_bool()) == Some(true),
                     exit_code: v.get("exitCode").and_then(|c| c.as_i64()),
+                    exit_code_via: exit_code_via.as_deref(),
                     interrupted: v.get("interrupted").and_then(|i| i.as_bool()),
                     duration_ms: v.get("durationMs").and_then(|d| d.as_u64()),
+                    excerpt_tail: excerpt_tail.as_deref(),
                 },
             );
             // A successful `git commit` the agent ran in its terminal is a

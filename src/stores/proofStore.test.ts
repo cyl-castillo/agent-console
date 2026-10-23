@@ -371,6 +371,31 @@ describe("buildTimeline", () => {
     expect(turns[0].toolResults).toBe(1);
   });
 
+  it("keeps a check's kind and its honest verdict: empty and unknown are not passed (F1a)", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "fix" } }),
+      ev({
+        seq: 2,
+        ts: 11,
+        kind: "check_run",
+        turnId: "T1",
+        payload: { command: "npx vitest run", kind: "test", status: "empty", exitCode: 0 },
+      }),
+      ev({
+        seq: 3,
+        ts: 12,
+        kind: "check_run",
+        turnId: "T1",
+        payload: { command: "npm run lint", kind: "lint" },
+      }),
+      ev({ seq: 4, ts: 13, kind: "turn_end", turnId: "T1", payload: {} }),
+    ]);
+    expect(turns[0].checks.map((c) => [c.kind, c.status])).toEqual([
+      ["test", "empty"],
+      ["lint", "unknown"],
+    ]);
+  });
+
   it("lists tool calls, injected docs, model and case per turn (T5)", () => {
     const turns = buildTimeline([
       ev({

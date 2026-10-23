@@ -65,6 +65,7 @@ if (packets.length === 0) {
   const overrides = new Set(); // turnIds with a later review_decision override
   let checksPassed = 0;
   let checksFailed = 0;
+  let checksInconclusive = 0;
 
   for (const file of packets) {
     const pkt = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -92,8 +93,10 @@ if (packets.length === 0) {
       } else if (e.kind === "approval_decision") {
         approvals++;
       } else if (e.kind === "check_run") {
-        if (e.payload?.status === "passed") checksPassed++;
-        else checksFailed++;
+        const s = e.payload?.status;
+        if (s === "passed") checksPassed++;
+        else if (s === "failed") checksFailed++;
+        else checksInconclusive++; // empty (ran zero tests), unknown (no exit code), interrupted
       } else if (e.kind === "review_verdict") {
         if (e.payload?.verdict === "block" && e.turnId) {
           blocks.set(e.turnId, {
@@ -164,6 +167,7 @@ if (packets.length === 0) {
         `${approvals === 1 ? "" : "s"} · ${checksPassed} check run` +
         `${checksPassed === 1 ? "" : "s"} passed` +
         (checksFailed ? ` (${checksFailed} failed)` : "") +
+        (checksInconclusive ? ` (${checksInconclusive} inconclusive: ran zero tests or no exit code)` : "") +
         "**",
     );
     const diffFiles = changed.filter((f) => !f.startsWith(".testigo/"));

@@ -7,6 +7,7 @@ import { useChangesStore } from "../../../stores/changesStore";
 import { confirmDialog } from "../../../stores/confirmStore";
 import { freshStatus, useLiveStatusStore } from "../../../stores/liveStatusStore";
 import { useProofStore, type TimelineTurn } from "../../../stores/proofStore";
+import { checkGlyph, checkTitle, checkTone } from "./checkStatus";
 import { useShellStore } from "../../../stores/shellStore";
 import { useToastStore } from "../../../stores/toastStore";
 import { itemsFor, useTranscriptStore } from "../../../stores/transcriptStore";
@@ -197,13 +198,11 @@ export function TurnDetail() {
         <Section title="Checks">
           <div className="flex flex-wrap gap-1">
             {turn.checks.map((c, i) => (
-              <Chip
-                key={i}
-                mono
-                tone={c.status === "passed" ? "ok" : c.status === "failed" ? "danger" : "warn"}
-              >
-                check {c.status === "passed" ? "✓" : c.status === "failed" ? "✕" : "∙"} {c.command}
+              <Chip key={i} mono tone={checkTone(c.status)} title={checkTitle(c.status)}>
+                {c.kind ?? "check"} {checkGlyph(c.status)} {c.command}
                 {c.status === "failed" && c.exitCode !== undefined ? ` exit ${c.exitCode}` : ""}
+                {c.status === "empty" ? " · ran 0 tests" : ""}
+                {c.status === "unknown" ? " · exit unknown" : ""}
               </Chip>
             ))}
           </div>

@@ -298,7 +298,41 @@ export const proofEvents: ProofEvent[] = [
   ev(
     NOW - h(2) - min(35),
     "check_run",
-    { command: "npm test", status: "passed", exitCode: 0, durationMs: 4120 },
+    {
+      command: "npm test",
+      kind: "test",
+      status: "passed",
+      exitCode: 0,
+      exitCodeVia: "claude_success",
+      durationMs: 4120,
+    },
+    T1,
+  ),
+  // The ctest trap: exit 0 with zero tests run is `empty`, never green.
+  ev(
+    NOW - h(2) - min(35) + 20_000,
+    "tool_result",
+    {
+      tool: "Bash",
+      toolCanonical: "shell",
+      command: "npx vitest run src/legacy",
+      excerpt: "No test files found, exiting with code 0",
+      exitCode: 0,
+      exitCodeVia: "claude_success",
+    },
+    T1,
+  ),
+  ev(
+    NOW - h(2) - min(35) + 20_000,
+    "check_run",
+    {
+      command: "npx vitest run src/legacy",
+      kind: "test",
+      status: "empty",
+      exitCode: 0,
+      exitCodeVia: "claude_success",
+      durationMs: 610,
+    },
     T1,
   ),
   ev(

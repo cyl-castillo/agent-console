@@ -107,7 +107,10 @@ export const TIMELINE_TOOLS_CAP = 60;
 
 export interface TimelineCheck {
   command: string;
-  status: "passed" | "failed" | "interrupted" | string;
+  /** passed · failed · interrupted · empty (exit 0, ran nothing) · unknown (no exit code seen). */
+  status: "passed" | "failed" | "interrupted" | "empty" | "unknown" | string;
+  /** test · lint · typecheck · build · format (what the runner checks). */
+  kind?: string;
   exitCode?: number;
   durationMs?: number;
 }
@@ -285,7 +288,8 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
     } else if (e.kind === "check_run") {
       t.checks.push({
         command: typeof p.command === "string" ? p.command : "",
-        status: typeof p.status === "string" ? p.status : "passed",
+        status: typeof p.status === "string" ? p.status : "unknown",
+        kind: typeof p.kind === "string" ? p.kind : undefined,
         exitCode: typeof p.exitCode === "number" ? p.exitCode : undefined,
         durationMs: typeof p.durationMs === "number" ? p.durationMs : undefined,
       });

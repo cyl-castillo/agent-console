@@ -1,0 +1,15 @@
+{
+  "session_id": "01a169ad-0b10-7460-8134-ae7b7235b557",
+  "turn_id": "01a169ad-0d43-7fc3-b0f4-e56a32eb0cbe",
+  "transcript_path": "/home/u/.codex/sessions/2026/10/23/rollout-fixture.jsonl",
+  "cwd": "/home/u/proj",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-5.6-terra",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm test"
+  },
+  "tool_response": "\n> fixcap@0.0.1 test\n> node -e \"console.log('PASS  src/a.test.js\\n\\nTests:       2 passed, 2 total'); process.exit(0)\"\n\nPASS  src/a.test.js\n\nTests:       2 passed, 2 total\n",
+  "tool_use_id": "exec-d7874870-0873-43a4-842a-8e8cba8e3574"
+}
