@@ -37,8 +37,13 @@ import type {
 import { emit } from "../tauri-shim/event";
 import type { FixtureMap } from "./registry";
 
-/// Fixed "now": 2026-10-13 14:00:00 UTC. Relative ages in the UI stay put.
-export const NOW = 1792245600000;
+/// "Now" for every fixture timestamp, taken from the real clock once per
+/// load and floored to the minute: everything in the fixtures is relative to
+/// it, so ages read the same every day. (It used to be pinned to
+/// 2026-10-13 14:00 UTC, which made the stopped session's 25 h age grow a
+/// day per day until the 7-day auto-archive hid it from the list and three
+/// visual specs failed on 2026-10-23.)
+export const NOW = Date.now() - (Date.now() % 60_000);
 const min = (n: number) => n * 60_000;
 const h = (n: number) => n * 3_600_000;
 const d = (n: number) => n * 86_400_000;
