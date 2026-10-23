@@ -292,6 +292,10 @@ pub fn render(b: &DiagnosticsBundle) -> String {
             s.push_str(&format!("\n### {title}\n\n"));
             match dir {
                 Some(d) => s.push_str(&format!("`{d}`\n\n")),
+                None if title == "Cache dir" && b.data_dir.is_some() => {
+                    s.push_str("(same folder as the data dir on this OS)\n");
+                    return;
+                }
                 None => s.push_str("(unavailable)\n\n"),
             }
             let total: u64 = entries.iter().map(|e| e.bytes).sum();
@@ -452,7 +456,10 @@ mod tests {
         assert!(out.contains("\"installed\": true"));
         assert!(out.contains("- sessions.json — 1.4 MB"));
         assert!(out.contains("**total — 1.4 MB**"));
-        assert!(out.contains("### Cache dir\n\n(unavailable)"));
+        assert!(out.contains("### Cache dir\n\n(same folder as the data dir on this OS)"));
+        let mut no_data = b;
+        no_data.data_dir = None;
+        assert!(render(&no_data).contains("### Cache dir\n\n(unavailable)"));
         assert!(out.contains("(last 2 lines)"));
         assert!(out.contains("```\nl1\nl2\n```"));
         assert_eq!(human(0), "0 B");
