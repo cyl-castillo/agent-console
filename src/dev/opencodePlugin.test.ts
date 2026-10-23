@@ -148,6 +148,40 @@ describe("OpenCode witness plugin", () => {
         },
       },
     });
+    // F2: OpenCode reports cost and tokens per assistant message (cumulative
+    // per message; the latest update wins) — summed into the close.
+    await hooks.event?.({
+      event: {
+        type: "message.updated",
+        properties: {
+          sessionID: sid,
+          info: {
+            id: "msg_a",
+            role: "assistant",
+            providerID: "opencode",
+            modelID: "big-pickle",
+            cost: 0.0012,
+            tokens: { input: 480, output: 41, reasoning: 94, cache: { read: 12800, write: 0 } },
+          },
+        },
+      },
+    });
+    await hooks.event?.({
+      event: {
+        type: "message.updated",
+        properties: {
+          sessionID: sid,
+          info: {
+            id: "msg_b",
+            role: "assistant",
+            providerID: "opencode",
+            modelID: "big-pickle",
+            cost: 0.0008,
+            tokens: { input: 323, output: 33, reasoning: 0, cache: { read: 13568, write: 0 } },
+          },
+        },
+      },
+    });
     await hooks.event?.({ event: { type: "session.idle", properties: { sessionID: sid } } });
     // A second idle without a prompt in between is not another turn.
     await hooks.event?.({ event: { type: "session.idle", properties: { sessionID: sid } } });
@@ -161,5 +195,12 @@ describe("OpenCode witness plugin", () => {
     expect(tool.excerptTail?.endsWith("Tests:       0 total")).toBe(true);
     expect(out[2].summary).toBe("All tests pass.");
     expect(out[2].summaryTruncated).toBe(false);
+    expect(out[2].usage).toEqual({
+      engine: "opencode",
+      source: "plugin",
+      costUsd: 0.002,
+      tokens: { input: 803, output: 74, reasoning: 94, cacheRead: 26368, cacheWrite: 0 },
+      model: "opencode/big-pickle",
+    });
   });
 });

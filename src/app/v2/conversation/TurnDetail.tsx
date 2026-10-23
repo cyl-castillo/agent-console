@@ -6,6 +6,7 @@ import { typeIntoActiveSession } from "../../../lib/termInput";
 import { useChangesStore } from "../../../stores/changesStore";
 import { confirmDialog } from "../../../stores/confirmStore";
 import { freshStatus, useLiveStatusStore } from "../../../stores/liveStatusStore";
+import { fmtUsd } from "../../../lib/usageStats";
 import { useProofStore, type TimelineTurn } from "../../../stores/proofStore";
 import {
   checkGlyph,
@@ -129,6 +130,21 @@ export function TurnDetail() {
         {turn.interrupted && <Chip tone="warn">interrupted</Chip>}
         {turn.rewound && <Chip tone="warn">rewound here</Chip>}
         {turn.skill && <Chip tone="accent" mono>{`/${turn.skill}`}</Chip>}
+        {turn.usage && (
+          <Tooltip
+            content={`This turn, from ${turn.usage.engine}'s own ${turn.usage.source}${turn.usage.tokensOut !== undefined ? ` · ${turn.usage.tokensOut.toLocaleString()} output tokens` : ""}${turn.usage.tokensIn !== undefined ? ` · ${turn.usage.tokensIn.toLocaleString()} input` : ""}${turn.usage.costUsd !== undefined && turn.usage.engine === "claude" ? ` · session so far ${fmtUsd(turn.usage.costUsd)}` : ""}${turn.usage.quota?.sevenDayPct !== undefined ? ` · plan week ${Math.round(turn.usage.quota.sevenDayPct)}% used` : ""}`}
+          >
+            <span>
+              <Chip mono data-testid="turn-usage">
+                {turn.usage.costTurnUsd !== undefined
+                  ? `${fmtUsd(turn.usage.costTurnUsd)} this turn`
+                  : turn.usage.tokensOut !== undefined
+                    ? `${turn.usage.tokensOut.toLocaleString()} tok out`
+                    : turn.usage.engine}
+              </Chip>
+            </span>
+          </Tooltip>
+        )}
         {live?.costUsd !== undefined && (
           <Tooltip content="Session cost so far, from the CLI's status line">
             <span>

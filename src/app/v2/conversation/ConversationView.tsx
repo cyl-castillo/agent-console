@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import type { TermInputDetail } from "../../../components/Terminal";
 import { useChangesStore } from "../../../stores/changesStore";
 import { ipc } from "../../../ipc/tauri";
+import { useBudgetStore } from "../../../stores/budgetStore";
 import { useSessionStore } from "../../../stores/sessionStore";
 import { useTerminalsStore } from "../../../stores/terminalsStore";
 import { useShellStore } from "../../../stores/shellStore";
@@ -218,6 +219,10 @@ export function ConversationView() {
   };
   const resume = useTerminalsStore((s) => s.resume);
   const send = async () => {
+    if (budgetPaused) {
+      showToast("Budget reached — decide in the card before sending more", "error");
+      return;
+    }
     const text = draft.trim();
     if (!text) return;
     if (session && !sessionLive) {
@@ -250,6 +255,11 @@ export function ConversationView() {
   // removable, and goes out on its own when the session is live and has no
   // live turn — one at a time, so each lands as its own turn.
   const sessionLive = session?.status === "live";
+  // F2: a breached budget is a hard pause — the turn was interrupted and
+  // nothing more goes to the agent until the card's decision is recorded.
+  const budgetPaused = useBudgetStore((s) =>
+    session ? s.breached[session.id] !== undefined : false,
+  );
   // F3: while the CLI boots, nothing is typed at the shell — sends queue.
   const sig = useTermSignalsStore((s) => signalsFor(s.bySession, session?.id));
   const booting = sessionLive && isBooting(sig, now);
@@ -512,12 +522,15 @@ export function ConversationView() {
         <Textarea
           ref={draftRef}
           aria-label="Prompt for the agent"
+          disabled={budgetPaused}
           placeholder={
-            !sessionLive
-              ? "Stopped — Enter resumes the session and sends"
-              : liveTurn
-                ? "The agent is working — queue the next prompt, or interrupt"
-                : "Tell the agent what to do next…"
+            budgetPaused
+              ? "Budget reached — the turn was interrupted; decide in the card above before sending more"
+              : !sessionLive
+                ? "Stopped — Enter resumes the session and sends"
+                : liveTurn
+                  ? "The agent is working — queue the next prompt, or interrupt"
+                  : "Tell the agent what to do next…"
           }
           value={draft}
           onChange={(e) => setDraft(e.target.value)}

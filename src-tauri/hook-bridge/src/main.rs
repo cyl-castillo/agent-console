@@ -1167,6 +1167,44 @@ fn status_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
     if let Some(b) = input.get("exceeds_200k_tokens").and_then(|v| v.as_bool()) {
         e.insert("exceeds200k".into(), json!(b));
     }
+    // F2: the plan's quota, as the CLI reports it (claude.ai Pro/Max, after
+    // the first API response; each window may be absent on its own). The
+    // number nobody else shows next to the cost: how much of the week the
+    // agents have already burned.
+    if let Some(rl) = input.get("rate_limits") {
+        let pct = |w: &str| {
+            rl.pointer(&format!("/{w}/used_percentage"))
+                .and_then(Value::as_f64)
+        };
+        let resets = |w: &str| {
+            rl.pointer(&format!("/{w}/resets_at"))
+                .and_then(Value::as_i64)
+        };
+        if let Some(v) = pct("five_hour") {
+            e.insert("quota5hPct".into(), json!(v));
+        }
+        if let Some(v) = resets("five_hour") {
+            e.insert("quota5hResetsAt".into(), json!(v));
+        }
+        if let Some(v) = pct("seven_day") {
+            e.insert("quota7dPct".into(), json!(v));
+        }
+        if let Some(v) = resets("seven_day") {
+            e.insert("quota7dResetsAt".into(), json!(v));
+        }
+        if let Some(v) = pct("spend_limit") {
+            e.insert("spendPct".into(), json!(v));
+        }
+        if let Some(v) = resets("spend_limit") {
+            e.insert("spendResetsAt".into(), json!(v));
+        }
+        if let Some(v) = rl.pointer("/spend_limit/used_usd").and_then(Value::as_f64) {
+            e.insert("spendUsedUsd".into(), json!(v));
+        }
+        if let Some(v) = rl.pointer("/spend_limit/limit_usd").and_then(Value::as_f64) {
+            e.insert("spendLimitUsd".into(), json!(v));
+        }
+    }
     Value::Object(e)
 }
 
@@ -2357,6 +2395,38 @@ mod tests {
         assert!(bare.get("contextUsed").is_none());
         assert!(bare.get("costUsd").is_none());
         assert!(bare.get("termId").is_none());
+    }
+
+    #[test]
+    fn the_status_event_carries_the_plans_quota_windows_when_the_cli_reports_them() {
+        // Shape from the status line docs (2026-10): each window may be absent.
+        let e = status_event(
+            &json!({
+                "session_id": "s", "cost": {"total_cost_usd": 0.5},
+                "rate_limits": {
+                    "five_hour": {"used_percentage": 23.5, "resets_at": 1738425600},
+                    "seven_day": {"used_percentage": 41.2, "resets_at": 1738857600},
+                    "spend_limit": {"used_percentage": 62.8, "resets_at": 1740787200, "used_usd": 314.12, "limit_usd": 500}
+                }
+            }),
+            Some("t"),
+            1,
+        );
+        assert_eq!(e["quota5hPct"], 23.5);
+        assert_eq!(e["quota5hResetsAt"], 1738425600);
+        assert_eq!(e["quota7dPct"], 41.2);
+        assert_eq!(e["spendPct"], 62.8);
+        assert_eq!(e["spendUsedUsd"], 314.12);
+        assert_eq!(e["spendLimitUsd"], 500.0);
+        let partial = status_event(
+            &json!({"rate_limits": {"seven_day": {"used_percentage": 9.0}}}),
+            None,
+            1,
+        );
+        assert_eq!(partial["quota7dPct"], 9.0);
+        assert!(partial.get("quota5hPct").is_none());
+        let none = status_event(&json!({"cost": {"total_cost_usd": 1.0}}), None, 1);
+        assert!(none.get("quota7dPct").is_none());
     }
 
     #[test]

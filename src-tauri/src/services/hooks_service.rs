@@ -1,5 +1,5 @@
 use parking_lot::Mutex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -1829,6 +1829,14 @@ fn handle_event(v: &Value, app: &AppHandle) {
                         || summary.chars().count() > SUMMARY_MAX
                 );
             }
+            // F2: what the turn cost, from the engine's own numbers — the
+            // status line (Claude), the rollout (Codex) or the plugin
+            // (OpenCode) — never estimated here.
+            if let Some(usage) =
+                turn_usage(v, term_id.as_deref(), str_field(v, "sessionId").as_deref())
+            {
+                payload["usage"] = usage;
+            }
             let post = snapshot_service::create(&repo, &uuid::Uuid::new_v4().to_string())
                 .ok()
                 .flatten();
@@ -1983,6 +1991,11 @@ fn handle_event(v: &Value, app: &AppHandle) {
             );
         }
     } else if kind == "status" {
+        // F2: the latest render per terminal is what prices the turn when it
+        // closes (cost delta, tokens, the plan's quota).
+        if let Some(t) = str_field(v, "termId") {
+            usage_memory().lock().last_status.insert(t, v.clone());
+        }
         // The status line names the session's model on every render; one
         // `session_start` line per (session, model) is what the packet needs.
         let state = app.state::<AppState>();
@@ -2001,6 +2014,118 @@ fn handle_event(v: &Value, app: &AppHandle) {
             );
         }
     }
+}
+
+/// F2: what pricing a turn needs to remember between events, per terminal:
+/// the latest status-line render (Claude), the cost at the previous close
+/// (so a turn's delta is its own), and the previous Codex token totals.
+#[derive(Default)]
+struct UsageMemory {
+    last_status: HashMap<String, Value>,
+    last_turn_cost: HashMap<String, f64>,
+    last_codex_totals: HashMap<String, (u64, u64, u64)>,
+}
+
+fn usage_memory() -> &'static Mutex<UsageMemory> {
+    static MEM: std::sync::OnceLock<Mutex<UsageMemory>> = std::sync::OnceLock::new();
+    MEM.get_or_init(|| Mutex::new(UsageMemory::default()))
+}
+
+/// The `usage` block of a turn's close, from whichever engine signal exists:
+/// the plugin's own block (OpenCode), the status line (Claude: session cost
+/// so far and this turn's delta, tokens, the plan's quota windows), or the
+/// rollout's token totals (Codex: tokens only — Codex reports no dollars).
+/// None when nothing reported anything: the ledger says nothing rather than
+/// guessing.
+fn turn_usage(event: &Value, term_id: Option<&str>, session_id: Option<&str>) -> Option<Value> {
+    if let Some(u) = event.get("usage").filter(|u| u.is_object()) {
+        return Some(u.clone());
+    }
+    let term = term_id?;
+    let mut mem = usage_memory().lock();
+    if let Some(status) = mem.last_status.get(term).cloned() {
+        return Some(usage_from_status(&status, term, &mut mem));
+    }
+    let sid = session_id?;
+    let totals = crate::services::usage_service::read_codex_usage(sid)
+        .ok()
+        .flatten()?;
+    let now = (
+        totals.input_total,
+        totals.output_total,
+        totals.cache_read_total,
+    );
+    let prev = mem
+        .last_codex_totals
+        .insert(term.to_string(), now)
+        .unwrap_or((0, 0, 0));
+    Some(json!({
+        "engine": "codex",
+        "source": "rollout",
+        "tokens": {
+            "inputTotal": now.0, "outputTotal": now.1, "cacheReadTotal": now.2,
+            "input": now.0.saturating_sub(prev.0),
+            "output": now.1.saturating_sub(prev.1),
+            "cacheRead": now.2.saturating_sub(prev.2),
+        },
+        "contextTokens": totals.context_tokens,
+    }))
+}
+
+fn usage_from_status(status: &Value, term: &str, mem: &mut UsageMemory) -> Value {
+    let f = |k: &str| status.get(k).and_then(Value::as_f64);
+    let n = |k: &str| status.get(k).and_then(Value::as_u64);
+    let mut u = json!({ "engine": "claude", "source": "statusline" });
+    if let Some(cost) = f("costUsd") {
+        let prev = mem
+            .last_turn_cost
+            .insert(term.to_string(), cost)
+            .unwrap_or(0.0);
+        u["costUsd"] = json!(cost);
+        u["costDeltaUsd"] = json!(((cost - prev).max(0.0) * 1e6).round() / 1e6);
+    }
+    if let Some(m) = status.get("modelId").and_then(Value::as_str) {
+        u["model"] = json!(m);
+    }
+    let mut tokens = json!({});
+    for (from, to) in [
+        ("contextUsed", "context"),
+        ("outputTokens", "output"),
+        ("inputTotal", "inputTotal"),
+        ("outputTotal", "outputTotal"),
+    ] {
+        if let Some(v) = n(from) {
+            tokens[to] = json!(v);
+        }
+    }
+    if tokens.as_object().is_some_and(|o| !o.is_empty()) {
+        u["tokens"] = tokens;
+    }
+    let mut quota = json!({});
+    for (from, to) in [
+        ("quota5hPct", "fiveHourPct"),
+        ("quota7dPct", "sevenDayPct"),
+        ("spendPct", "spendPct"),
+        ("spendUsedUsd", "spendUsedUsd"),
+        ("spendLimitUsd", "spendLimitUsd"),
+    ] {
+        if let Some(v) = f(from) {
+            quota[to] = json!(v);
+        }
+    }
+    for (from, to) in [
+        ("quota5hResetsAt", "fiveHourResetsAt"),
+        ("quota7dResetsAt", "sevenDayResetsAt"),
+        ("spendResetsAt", "spendResetsAt"),
+    ] {
+        if let Some(v) = status.get(from).and_then(Value::as_i64) {
+            quota[to] = json!(v);
+        }
+    }
+    if quota.as_object().is_some_and(|o| !o.is_empty()) {
+        u["quota"] = quota;
+    }
+    u
 }
 
 /// Read an optional string field from a hook payload, treating empty strings as
@@ -2121,6 +2246,47 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_turns_usage_comes_from_the_engines_own_numbers_with_a_delta_per_turn() {
+        let _env = crate::test_support::lock_env();
+        // The plugin's block wins as is (OpenCode).
+        let plugin = turn_usage(
+            &json!({"usage": {"engine": "opencode", "costUsd": 0.02, "tokens": {"input": 10}}}),
+            Some("t-oc"),
+            Some("ses_1"),
+        )
+        .unwrap();
+        assert_eq!(plugin["engine"], "opencode");
+        assert_eq!(plugin["costUsd"], 0.02);
+        // Claude: the latest status line, cost delta against the previous close.
+        {
+            let mut mem = usage_memory().lock();
+            mem.last_status.insert(
+                "t-cl".into(),
+                json!({"costUsd": 1.25, "modelId": "claude-opus-5-5", "contextUsed": 42000, "outputTokens": 800,
+                       "quota5hPct": 23.5, "quota7dPct": 41.2, "quota7dResetsAt": 1738857600}),
+            );
+            mem.last_turn_cost.insert("t-cl".into(), 1.0);
+        }
+        let claude = turn_usage(&json!({}), Some("t-cl"), Some("sid")).unwrap();
+        assert_eq!(claude["engine"], "claude");
+        assert_eq!(claude["source"], "statusline");
+        assert_eq!(claude["costUsd"], 1.25);
+        assert_eq!(claude["costDeltaUsd"], 0.25);
+        assert_eq!(claude["model"], "claude-opus-5-5");
+        assert_eq!(claude["tokens"]["context"], 42000);
+        assert_eq!(claude["tokens"]["output"], 800);
+        assert_eq!(claude["quota"]["fiveHourPct"], 23.5);
+        assert_eq!(claude["quota"]["sevenDayResetsAt"], 1738857600);
+        // The next close on the same terminal starts from 1.25.
+        let again = turn_usage(&json!({}), Some("t-cl"), Some("sid")).unwrap();
+        assert_eq!(again["costDeltaUsd"], 0.0);
+        // No status line, no rollout for the session id ⇒ nothing, not a guess.
+        assert!(turn_usage(&json!({}), Some("t-none"), Some("no-such-rollout-id")).is_none());
+        assert!(turn_usage(&json!({}), None, Some("sid")).is_none());
+        usage_memory().lock().last_status.remove("t-cl");
+    }
 
     #[test]
     fn the_opencode_plugin_is_written_once_refreshed_on_change_and_inert_in_source() {

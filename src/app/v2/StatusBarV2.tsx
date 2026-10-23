@@ -81,6 +81,29 @@ export function StatusBarV2({ workspace }: { workspace?: WorkspaceContext | null
         </button>
       </Tooltip>
       <span className="flex-1" />
+      {active &&
+        (() => {
+          const q = byTerm[active.id];
+          const pct = q?.quota7dPct ?? q?.quota5hPct;
+          if (pct === undefined) return null;
+          const resets = q?.quota7dPct !== undefined ? q?.quota7dResetsAt : q?.quota5hResetsAt;
+          const hours =
+            resets !== undefined
+              ? Math.max(0, Math.round((resets * 1000 - Date.now()) / 3_600_000))
+              : null;
+          return (
+            <Tooltip
+              content={`Plan quota as the CLI reports it: ${q?.quota5hPct !== undefined ? `5-hour window ${Math.round(q.quota5hPct)}%` : ""}${q?.quota5hPct !== undefined && q?.quota7dPct !== undefined ? " · " : ""}${q?.quota7dPct !== undefined ? `7-day window ${Math.round(q.quota7dPct)}%` : ""}${hours !== null ? ` · resets in ~${hours} h` : ""}${q?.spendPct !== undefined ? ` · spend limit ${Math.round(q.spendPct)}%` : ""}`}
+            >
+              <span
+                className={`sb-item inline-flex items-center gap-1 font-code tabular-nums ${pct >= 80 ? "text-danger" : pct >= 50 ? "text-warn" : ""}`}
+                data-testid="sb-quota"
+              >
+                quota {Math.round(pct)}%
+              </span>
+            </Tooltip>
+          );
+        })()}
       {branch && (
         <Tooltip content="Open Changes">
           <button
