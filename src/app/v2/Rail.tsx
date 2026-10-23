@@ -7,7 +7,15 @@ import { DESTINATIONS, type Destination } from "./destinations";
 /// The five destinations, as a vertical nav. Each is a real link-like button
 /// with its label visible (no 8 px captions), aria-current on the active one,
 /// and a count where there is something to act on.
-export function Rail({ counts }: { counts: Partial<Record<Destination, number>> }) {
+export function Rail({
+  counts,
+  onPick,
+}: {
+  counts: Partial<Record<Destination, number>>;
+  /// Called after the destination changes (the shell opens the list pane on a
+  /// narrow window: with no room for it by default, the rail is how you ask).
+  onPick?: (d: Destination) => void;
+}) {
   const destination = useShellStore((s) => s.destination);
   const goTo = useShellStore((s) => s.goTo);
   return (
@@ -27,7 +35,10 @@ export function Rail({ counts }: { counts: Partial<Record<Destination, number>> 
               aria-current={active ? "page" : undefined}
               aria-label={count ? `${d.label} (${count})` : d.label}
               data-testid={`rail-${d.key}`}
-              onClick={() => goTo(d.key)}
+              onClick={() => {
+                goTo(d.key);
+                onPick?.(d.key);
+              }}
               className={cn(
                 "unbutton relative flex h-12 flex-col items-center justify-center gap-0.5 rounded-2 font-sans text-caption font-medium text-muted-foreground transition-colors dur-1",
                 "hover:bg-[var(--hover)] hover:text-foreground",

@@ -104,6 +104,16 @@ export function ShellV2({
     sessions: byState.get("needs-you")?.length ?? 0,
   };
   const hasList = !focus && destination !== "inbox" && (narrow ? narrowListOpen : listOpen);
+  // On a narrow window the list pane is hidden by default and nothing on
+  // screen says how to get it: a rail click opens it for that destination
+  // (a Windows laptop at 150 % scaling with the window snapped to half the
+  // screen is well under 900 CSS px — "only the icons show"). Clicking the
+  // active destination again hides it; the Inbox has no list.
+  const pickDestination = (d: string) => {
+    if (!narrow) return;
+    if (d === "inbox") setNarrowListOpen(false);
+    else setNarrowListOpen(d === destination ? !narrowListOpen : true);
+  };
   const selectedTurn = useShellStore((s) => s.selectedTurnId);
   const hasInspector =
     !focus && rightOpen && !narrow && inspectorFor(destination, centerTab, selectedTurn) !== null;
@@ -151,7 +161,7 @@ export function ShellV2({
           <TopBar project={project} />
         </div>
         <div className={cn("[grid-area:rail] min-h-0", focus && "hidden")}>
-          <Rail counts={counts} />
+          <Rail counts={counts} onPick={pickDestination} />
         </div>
         <div
           className={cn(
