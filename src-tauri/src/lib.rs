@@ -279,6 +279,7 @@ pub fn run() {
             commands::harness_lab::harness_lab_set_heldout,
             commands::harness_lab::harness_lab_run,
             commands::review::review_decide,
+            commands::review::verification_decide,
             commands::testigo::testigo_public_key,
             commands::testigo::testigo_get_settings,
             commands::testigo::testigo_set_settings,

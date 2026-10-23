@@ -38,6 +38,7 @@ pub const TOOL_NAMES: &[&str] = &[
     "ledger_verify",
     "decline",
     "request_review",
+    "verification_status",
 ];
 
 /// Tools the webview answers (stores are the truth); the rest are local.
@@ -261,6 +262,45 @@ impl ConsoleMcp {
                     .verify(&req.project)
                     .map_err(|e| e.to_string())?;
                 Ok(serde_json::to_value(report).unwrap_or(Value::Null))
+            }
+            // F1c/F1d: the console's own verdict on a turn's claims, so an
+            // agent can check its last turn before declaring it done — and
+            // run the gate it did not run instead of asserting green.
+            "verification_status" => {
+                let session = arg_str(&req.arguments, "session").ok_or("Missing session")?;
+                let turn = arg_str(&req.arguments, "turn");
+                let events = state
+                    .testigo
+                    .list(&req.project, None, None)
+                    .map_err(|e| e.to_string())?;
+                let found = events.iter().rev().find(|e| {
+                    e.kind == "verification"
+                        && e.term_id.as_deref() == Some(session)
+                        && turn.is_none_or(|t| e.turn_id.as_deref() == Some(t))
+                });
+                match found {
+                    Some(v) => {
+                        let decided = events.iter().any(|e| {
+                            e.kind == "verification_decision"
+                                && e.turn_id == v.turn_id
+                                && e.seq > v.seq
+                        });
+                        let mut out = v.payload.clone();
+                        if let Some(o) = out.as_object_mut() {
+                            o.insert("turn".into(), json!(v.turn_id));
+                            o.insert("seq".into(), json!(v.seq));
+                            o.insert("decidedByHuman".into(), json!(decided));
+                            o.insert("note".into(), json!(
+                                "Only `verified` means a check passed with exit 0 after the last edit. If a gate is not_run, run it and report the exit code instead of asserting green."
+                            ));
+                        }
+                        Ok(out)
+                    }
+                    None => Ok(json!({
+                        "status": "none",
+                        "note": "No finished turn with a verification line for this session yet."
+                    })),
+                }
             }
             other => Err(format!("Unknown tool {other}")),
         }

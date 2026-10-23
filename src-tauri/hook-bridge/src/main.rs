@@ -1391,6 +1391,15 @@ fn console_tools() -> Vec<Value> {
             }),
             &["session"],
         ),
+        mcp_tool(
+            "verification_status",
+            "The console's own verdict on a finished turn's claims, computed from witnessed tool results and check runs (never from the agent's words): verified | unverified_claim | claim_contradicted | stale_check | checked | no_claim | unwitnessed, with the reason, the checks seen and the project's gates that did or did not run. Call it on your last turn before declaring work done; if it is not `verified`, run the gate and report the exit code.",
+            json!({
+                "session": { "type": "string", "description": "The session whose turn to look at" },
+                "turn": { "type": "string", "description": "A specific turn id from session_events; default: the last finished turn" }
+            }),
+            &["session"],
+        ),
     ]
 }
 

@@ -8,6 +8,7 @@ import { ApprovalDecision } from "./ApprovalDecision";
 import { BudgetDecision } from "./BudgetDecision";
 import { DeclineDecision } from "./DeclineDecision";
 import { ReviewDecision } from "./ReviewDecision";
+import { VerificationDecision } from "./VerificationDecision";
 import { tierRates, useDecisionStatsStore } from "../../stores/decisionStatsStore";
 import { Tooltip } from "../../ui/Tooltip";
 import { Button } from "../../ui/Button";
@@ -47,6 +48,7 @@ export function InboxView() {
     breaches,
     declines,
     reviews,
+    verifications,
     decisions,
   } = useInbox();
   const records = useDecisionStatsStore((s) => s.records);
@@ -155,6 +157,15 @@ export function InboxView() {
           <SectionHeader title="Reviews" count={reviews.length} />
           {reviews.map((r) => (
             <ReviewDecision key={r.id} r={r} />
+          ))}
+        </section>
+      )}
+
+      {verifications.length > 0 && (
+        <section>
+          <SectionHeader title="Verification" count={verifications.length} />
+          {verifications.map((t) => (
+            <VerificationDecision key={t.turnId ?? t.ts} turn={t} />
           ))}
         </section>
       )}

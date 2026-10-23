@@ -6,7 +6,8 @@ import { useTerminalsStore, type TerminalSession } from "../../stores/terminalsS
 import { useSessionStore } from "../../stores/sessionStore";
 import { capFor, useBudgetStore } from "../../stores/budgetStore";
 import { useLiveStatusStore } from "../../stores/liveStatusStore";
-import { useProofStore } from "../../stores/proofStore";
+import { buildTimeline, useProofStore, type TimelineTurn } from "../../stores/proofStore";
+import { pendingVerifications } from "../../lib/verificationInbox";
 import { useDeclinesStore, type Decline } from "../../stores/declinesStore";
 import { useReviewsStore, type Review } from "../../stores/reviewsStore";
 import { sessionAttention } from "../../lib/attention";
@@ -30,6 +31,8 @@ export interface InboxData {
   /// Agents that declined or escalated, unacknowledged (D13).
   declines: Decline[];
   reviews: Review[];
+  /// F1d: closed turns whose verification verdict waits for a human word.
+  verifications: TimelineTurn[];
   /// Everything that waits for a human decision — the number on the rail
   /// and in the Inbox header are this same count.
   decisions: number;
@@ -122,9 +125,11 @@ export function useInbox(): InboxData {
     (d) => !d.resolved && (!project || d.project === project.root),
   );
   const reviews = allReviews.filter((r) => !r.resolved && (!project || r.project === project.root));
+  const verifications = pendingVerifications(buildTimeline(events));
   const decisions =
     queue.length +
     reviews.length +
+    verifications.length +
     jobsNeedingYou.length +
     pendingJobs.length +
     needsYouWithoutApproval +
@@ -143,6 +148,7 @@ export function useInbox(): InboxData {
     breaches,
     declines,
     reviews,
+    verifications,
     decisions,
   };
 }

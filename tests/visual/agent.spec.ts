@@ -382,3 +382,78 @@ test("closing a session can ask the agent for a handoff note saved as memory", a
     )
     .toMatchObject({ name: expect.stringMatching(/^handoff-fix auth test-/) });
 });
+
+test("F1d: an unverified claim is a decision — accept records it, ask-for-evidence types the gate", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox");
+  await expect(page.locator("[data-testid^='verification-']")).toHaveCount(0);
+  // The Rust side writes the turn's verification line when the turn closes
+  // and announces it; here the closed T1 turn gets an unverified verdict.
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __fixtures: {
+        setFixture: (c: string, v: unknown) => void;
+        getFixture: (c: string) => unknown;
+        emit: (n: string, p: unknown) => Promise<void>;
+        invokeLog: { cmd: string; args: Record<string, unknown> }[];
+      };
+    };
+    const base = w.__fixtures.getFixture("testigo_list") as {
+      seq: number;
+      turnId?: string;
+      termId?: string;
+      kind: string;
+      caseId: string;
+    }[];
+    const closed = base.find((e) => e.kind === "turn_end" && e.termId === "sess-auth");
+    const line = {
+      seq: 950,
+      ts: Date.now(),
+      caseId: closed?.caseId ?? "case-2026-10-13",
+      turnId: closed?.turnId,
+      kind: "verification",
+      termId: "sess-auth",
+      actor: "console",
+      payload: {
+        rulesVersion: 1,
+        status: "unverified_claim",
+        reason: '"all tests pass" but no check ran in this turn',
+        coverage: "per_tool",
+        commands: { total: 1, failed: 0 },
+        checks: { passed: 0, failed: 0, empty: 0, unknown: 0, interrupted: 0 },
+        claims: [{ phrase: "all tests pass", lang: "en", negated: false }],
+        gates: { test: { command: "npm test", status: "not_run" } },
+      },
+      prevHash: "",
+      hash: "",
+    };
+    w.__fixtures.setFixture("testigo_list", [...base, line]);
+    await w.__fixtures.emit("ledger://appended", {
+      projectRoot: "/home/demo/code/demo-playground",
+      seq: 950,
+      kind: "verification",
+      termId: "sess-auth",
+    });
+  });
+  const card = page.locator("[data-testid^='verification-']").first();
+  await expect(card).toBeVisible({ timeout: 3000 });
+  await expect(card).toContainText("Unverified claim");
+  await expect(card).toContainText("“all tests pass”");
+  await expect(card).toContainText("not run: test");
+  // Accept as is: no reason needed for an unverified (not contradicted) claim.
+  await card.getByRole("button", { name: "Accept as is" }).click();
+  const decided = await page.evaluate(() =>
+    (
+      window as unknown as {
+        __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+      }
+    ).__fixtures.invokeLog.filter((c) => c.cmd === "verification_decide"),
+  );
+  expect(decided).toHaveLength(1);
+  expect(decided[0].args).toMatchObject({
+    termId: "sess-auth",
+    verificationSeq: 950,
+    decision: "accept",
+  });
+});

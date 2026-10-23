@@ -100,6 +100,7 @@ the call names one — never as the human.
 | `memory_search` | semantic search over memories and skills |
 | `ledger_verify` | verify the ledger's hash chain |
 | `decline` | decline (won't / shouldn't) or escalate (can't without a human) a task, with the reason and a suggestion; witnessed as `agent_declined`, shown in the Inbox as a decision, never retried by the console |
+| `verification_status` | the console's own verdict on a session's finished turn (its last unless `turn` names one), computed from witnessed tool results and check runs, never from the agent's words: `verified` · `unverified_claim` · `claim_contradicted` · `stale_check` · `checked` · `no_claim` · `unwitnessed`, with the reason, the checks seen, the project's gates that did or did not run, and whether a human already decided on it (`verification_decision`) |
 | `request_review` | ask the reviewer agent (a different identity: the other engine when installed, else the other model family) to adversarially review a session's finished turn; the verdict (`approve` / `request_changes` / `block`, with findings) is witnessed as `review_verdict` under `agent:reviewer:<engine>` and shown in the Inbox; a block stands until a human overrides it with a reason (`review_decision`) |
 
 Identity (D14): every call is witnessed once per project as

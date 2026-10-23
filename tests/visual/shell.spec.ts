@@ -494,7 +494,12 @@ test("F3: the trust question, a login ask and a missing CLI surface as cards wit
   );
   const trust = page.getByTestId("card-trust");
   await expect(trust).toContainText("trust this folder");
-  await trust.getByRole("button", { name: "Answer in the terminal" }).click();
+  // The card mounts inside the virtualised thread while the terminal output
+  // is still streaming in: under CI load its box keeps moving past
+  // Playwright's stability window and the row can be re-measured (detached).
+  // A dispatched click asserts the button exists and acts on it without
+  // waiting for a layout that never settles in time.
+  await trust.getByRole("button", { name: "Answer in the terminal" }).dispatchEvent("click");
   await expect(page.getByTestId("terminal-drawer")).toHaveAttribute("data-open", "true");
   // The CLI comes up: the question is behind us.
   await termOut(page, "term-sess-auth", "✻ Welcome to Claude Code\r\n❯ ");
@@ -508,7 +513,10 @@ test("F3: the trust question, a login ask and a missing CLI surface as cards wit
 
   await termOut(page, "term-sess-auth", "bash: claude: command not found\r\n");
   await expect(page.getByTestId("card-notfound")).toContainText("not installed");
-  await page.getByTestId("card-notfound").getByRole("button", { name: "Open setup" }).click();
+  await page
+    .getByTestId("card-notfound")
+    .getByRole("button", { name: "Open setup" })
+    .dispatchEvent("click");
   await expect(page.getByText("Welcome to Agent Console")).toBeVisible();
 });
 

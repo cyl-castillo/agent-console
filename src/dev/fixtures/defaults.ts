@@ -1139,6 +1139,16 @@ export const defaultFixtures: FixtureMap = {
     prevHash: "",
     hash: "",
   },
+  verification_decide: {
+    seq: 779,
+    ts: NOW,
+    caseId: "case-2026-10-13",
+    kind: "verification_decision",
+    actor: "human",
+    payload: { decision: "accept", verificationSeq: 700 },
+    prevHash: "",
+    hash: "",
+  },
   testigo_budget_event: {
     seq: 999,
     ts: NOW,
