@@ -325,7 +325,9 @@ test("v2 proof: the ledger map selects a turn into the inspector", async ({ page
   await expect(page.getByTestId("turn-inspector")).toContainText("commit");
 });
 
-test("v2 sessions list: grouped by attention, WIP visible, files under Preview", async ({ page }) => {
+test("v2 sessions list: grouped by attention, WIP visible, files under Preview", async ({
+  page,
+}) => {
   await page.route(/^(?!http:\/\/127\.0\.0\.1)/, (route) => void route.abort());
   await page.goto("/iframe.html?id=app-v2--sessions&viewMode=story");
   await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
@@ -797,6 +799,20 @@ test("v2 parity: below 900 px the side columns collapse, the list can be summone
   await expect(page.getByTestId("sessions-list")).toBeHidden();
   await fire(page, "ac:toggle-sidebar");
   await expect(page.getByTestId("sessions-list")).toBeVisible();
+  await fire(page, "ac:toggle-sidebar");
+  await expect(page.getByTestId("sessions-list")).toBeHidden();
+  // The rail is the way in: a destination click opens its list, a second
+  // click on the same destination hides it, the Inbox has none.
+  await page.getByTestId("rail-work").click();
+  await expect(page.getByTestId("list-pane")).toBeVisible();
+  await expect(page.getByTestId("list-pane")).toContainText("Jobs");
+  await page.getByTestId("rail-work").click();
+  await expect(page.getByTestId("list-pane")).toBeHidden();
+  await page.getByTestId("rail-sessions").click();
+  await expect(page.getByTestId("sessions-list")).toBeVisible();
+  await page.getByTestId("rail-inbox").click();
+  await expect(page.getByTestId("list-pane")).toBeHidden();
+  await page.getByTestId("rail-sessions").click();
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(shell).not.toHaveAttribute("data-narrow", "true");
   await expect(page.getByTestId("inspector")).toBeVisible();
