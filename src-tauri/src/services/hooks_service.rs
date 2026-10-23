@@ -963,7 +963,10 @@ impl HooksRuntime {
         // The OpenCode witness plugin goes too, and a marker keeps the
         // startup auto-install from putting it back until the next install.
         let plugin = opencode_plugin_path();
-        if fs::read_to_string(&plugin).map(|c| c == OPENCODE_PLUGIN).unwrap_or(false) {
+        if fs::read_to_string(&plugin)
+            .map(|c| c == OPENCODE_PLUGIN)
+            .unwrap_or(false)
+        {
             let _ = fs::remove_file(&plugin);
         }
         if let Some(parent) = self.opencode_plugin_uninstalled_marker().parent() {
@@ -1429,7 +1432,10 @@ fn opencode_plugin_path() -> PathBuf {
 /// this build's copy. Atomic (temp + rename) so OpenCode never loads a half
 /// file. Returns whether anything was written.
 fn install_opencode_plugin_at(path: &Path) -> AppResult<bool> {
-    if fs::read_to_string(path).map(|c| c == OPENCODE_PLUGIN).unwrap_or(false) {
+    if fs::read_to_string(path)
+        .map(|c| c == OPENCODE_PLUGIN)
+        .unwrap_or(false)
+    {
         return Ok(false);
     }
     if let Some(parent) = path.parent() {
@@ -2123,12 +2129,21 @@ mod tests {
             std::process::id(),
             uuid::Uuid::new_v4().simple()
         ));
-        let path = dir.join("opencode").join("plugins").join(OPENCODE_PLUGIN_FILE);
+        let path = dir
+            .join("opencode")
+            .join("plugins")
+            .join(OPENCODE_PLUGIN_FILE);
         assert!(install_opencode_plugin_at(&path).unwrap(), "first write");
         assert_eq!(fs::read_to_string(&path).unwrap(), OPENCODE_PLUGIN);
-        assert!(!install_opencode_plugin_at(&path).unwrap(), "same content: untouched");
+        assert!(
+            !install_opencode_plugin_at(&path).unwrap(),
+            "same content: untouched"
+        );
         fs::write(&path, "stale").unwrap();
-        assert!(install_opencode_plugin_at(&path).unwrap(), "older copy refreshed");
+        assert!(
+            install_opencode_plugin_at(&path).unwrap(),
+            "older copy refreshed"
+        );
         assert_eq!(fs::read_to_string(&path).unwrap(), OPENCODE_PLUGIN);
         assert!(
             fs::read_dir(path.parent().unwrap()).unwrap().count() == 1,
@@ -2138,7 +2153,13 @@ mod tests {
         // nothing in it spawns, connects or reads beyond the plugin input.
         assert!(OPENCODE_PLUGIN.contains("AGENT_CONSOLE_SESSION_DIR"));
         assert!(OPENCODE_PLUGIN.contains("events.jsonl"));
-        for forbidden in ["child_process", "fetch(", "node:net", "node:http", "readFileSync"] {
+        for forbidden in [
+            "child_process",
+            "fetch(",
+            "node:net",
+            "node:http",
+            "readFileSync",
+        ] {
             assert!(!OPENCODE_PLUGIN.contains(forbidden), "{forbidden}");
         }
         // XDG_CONFIG_HOME decides the global plugins dir; HOME/.config otherwise.
@@ -2147,7 +2168,10 @@ mod tests {
         assert_eq!(opencode_plugin_path(), path);
         std::env::remove_var("XDG_CONFIG_HOME");
         assert!(opencode_plugin_path().ends_with(
-            Path::new(".config").join("opencode").join("plugins").join(OPENCODE_PLUGIN_FILE)
+            Path::new(".config")
+                .join("opencode")
+                .join("plugins")
+                .join(OPENCODE_PLUGIN_FILE)
         ));
         let _ = fs::remove_dir_all(&dir);
     }

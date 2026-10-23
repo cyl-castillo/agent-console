@@ -424,9 +424,7 @@ fn opencode_fold(turn: &mut OpencodeTurn, v: &Value, on_activity: &ActivitySink)
                     let exit = state
                         .and_then(|s| s.pointer("/metadata/exit"))
                         .and_then(Value::as_i64);
-                    let errored = state
-                        .and_then(|s| s.get("status"))
-                        .and_then(Value::as_str)
+                    let errored = state.and_then(|s| s.get("status")).and_then(Value::as_str)
                         == Some("error");
                     let verdict = match (exit, errored) {
                         (Some(c), _) => format!(" · exit {c}"),
