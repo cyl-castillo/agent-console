@@ -177,6 +177,19 @@ ProofEvent {
   Export IETF: `verification` → decision / success (verified, checked, no_claim) / failure
   (claim_contradicted) / partial (resto). UI: chip en el hilo e Inspector con sección
   "Verification" (veredicto, razón, gates que corrieron o no, claims).
+- **La decisión sobre el veredicto (F1d, 2026-10-23)**: un turno `unverified_claim`,
+  `stale_check` o `claim_contradicted` sin respuesta aparece en el Inbox como tarjeta
+  (tier medio si contradicho, bajo si no; nunca bloquea). Respuestas: **Ask for evidence** tipea en
+  el agente el gate que el proyecto nombra y no corrió (`evidencePrompt`, exige exit code) y registra
+  `verification_decision {decision: evidence_requested}` — el veredicto del turno siguiente
+  responde; **Request review** = `request_review` (la tarjeta del reviewer toma el relevo);
+  **Accept as is** registra `verification_decision {decision: accept, reason}` (razón obligatoria
+  si contradicho) — el gate de proof-on-PR y el verifier HTML degradan entonces el fail de
+  `claim_contradicted` a aviso "accepted by a human", como el override del reviewer. Export IETF:
+  accept → decision/success, evidence_requested → decision/escalated. Tool MCP
+  `verification_status(session, turn?)` para que el propio agente consulte su veredicto antes de
+  declarar el trabajo hecho. Métrica de hábito en la cabecera de Proof: `verified N/M` claims de
+  los últimos 7 días (+ contradichos).
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

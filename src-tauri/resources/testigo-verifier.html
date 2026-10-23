@@ -461,7 +461,8 @@ async function load(f) {
     if (d !== r.status) verif.mismatch.push(`${turnId.slice(0, 8)} declared ${d}, recomputed ${r.status}`);
     else {
       verif.agree++;
-      if (r.status === "claim_contradicted") verif.contradicted.push(`${turnId.slice(0, 8)}: ${declared.payload?.reason ?? ""}`);
+      const accepted = turnEvents.find((x) => x.kind === "verification_decision" && x.payload?.decision === "accept" && x.seq > declared.seq);
+      if (r.status === "claim_contradicted") verif.contradicted.push(`${turnId.slice(0, 8)}: ${declared.payload?.reason ?? ""}${accepted ? " — accepted by a human" + (accepted.payload?.reason ? ` (\"${accepted.payload.reason}\")` : "") : ""}`);
       else if (r.status === "unverified_claim" || r.status === "stale_check") verif.unverified++;
     }
   }
@@ -508,6 +509,7 @@ async function load(f) {
       else if (v.kind === "model_switch") detail = `${p.from ?? "?"} → ${p.to ?? "?"}`;
       else if (v.kind === "tool_call") detail = `tool=${p.tool ?? ""}`;
       else if (v.kind === "verification") detail = `${p.status ?? "?"} · ${p.reason ?? ""}${p.coverage === "turn_boundary" ? " · coverage: turn boundary" : ""}`;
+      else if (v.kind === "verification_decision") detail = `${p.decision ?? ""}${p.reason ? " — " + p.reason : ""}`;
       else if (v.kind === "check_run") detail = `${p.kind ? p.kind + " " : ""}${p.status ?? "?"}${p.exitCode != null ? " (exit " + p.exitCode + (p.exitCodeVia ? " via " + p.exitCodeVia : "") + ")" : " (no exit code)"} · ${p.command ?? ""}${p.outputSha256 ? " · output sha256 " + String(p.outputSha256).slice(0, 12) + "…" : ""}`;
       else if (v.kind === "commit") detail = `${String(p.sha ?? "").slice(0, 10)} ${p.subject ?? ""}${Array.isArray(p.files) ? " · " + p.files.length + " file(s)" : ""}${p.amend ? " · amend" : ""}`;
       else if (v.kind === "external_evidence") detail = `${p.source ?? "evidence"} · sha256 ${(p.sha256 || "").slice(0, 12)}… · ${p.uri ?? ""}${p.note ? " · " + p.note : ""}`;

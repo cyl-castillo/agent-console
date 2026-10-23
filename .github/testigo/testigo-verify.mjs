@@ -71,6 +71,10 @@ if (packets.length === 0) {
   // the turn's own tool/check/turn_end lines — a verdict the packet merely
   // declares is worth nothing; one a third party re-derives is.
   const verifications = []; // { turnId, declared, recomputed, reason, file }
+  // F1d: a human may accept a verdict on their word (`verification_decision`
+  // accept, with a reason) — recorded, and a contradicted claim then warns
+  // instead of failing, like a reviewer override.
+  const acceptedTurns = new Map(); // turnId → reason
 
   for (const file of packets) {
     const pkt = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -93,6 +97,13 @@ if (packets.length === 0) {
     for (const [turnId, turnEvents] of byTurn) {
       const declared = turnEvents.find((e) => e.kind === "verification");
       if (!declared) continue; // pre-F1c ledger: nothing to recompute against
+      const accept = turnEvents.find(
+        (e) =>
+          e.kind === "verification_decision" &&
+          e.payload?.decision === "accept" &&
+          e.seq > declared.seq,
+      );
+      if (accept) acceptedTurns.set(turnId, accept.payload?.reason ?? "");
       const r = recomputeVerification(
         turnEvents.filter((e) => e.kind !== "verification").sort((a, b) => a.seq - b.seq),
       );
@@ -179,6 +190,11 @@ if (packets.length === 0) {
       out(
         `- ✘ turn \`${t}\`: the packet declares verification **${v.declared}** but the ` +
           `turn's own lines recompute to **${v.recomputed}** — the verdict does not match its evidence`,
+      );
+    } else if (v.recomputed === "claim_contradicted" && acceptedTurns.has(v.turnId)) {
+      out(
+        `- ⚠ turn \`${t}\`: claim contradicted (recomputed) — ${v.reason}; ` +
+          `accepted by a human${acceptedTurns.get(v.turnId) ? ` ("${acceptedTurns.get(v.turnId)}")` : ""} — recorded`,
       );
     } else if (v.recomputed === "claim_contradicted") {
       failed = true;

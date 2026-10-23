@@ -94,6 +94,8 @@ export interface TimelineTurn {
 }
 
 export interface TimelineVerification {
+  /// Ledger seq of the verification line (a decision references it).
+  seq: number;
   /// verified · unverified_claim · claim_contradicted · stale_check ·
   /// checked · no_claim · unwitnessed
   status: string;
@@ -105,6 +107,10 @@ export interface TimelineVerification {
   claims: string[];
   /// kind → status (passed · failed · empty · unknown · interrupted · not_run).
   gates: Record<string, string>;
+  /// kind → the command the project's manifest names for it, when known.
+  gateCommands: Record<string, string>;
+  /// F1d: the human's answer (`verification_decision`), when any.
+  decision?: { decision: string; reason?: string };
 }
 
 export interface TimelineTool {
@@ -341,12 +347,17 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       const checks = (p.checks ?? {}) as Record<string, unknown>;
       const num = (k: string) => (typeof checks[k] === "number" ? (checks[k] as number) : 0);
       const gates: Record<string, string> = {};
+      const gateCommands: Record<string, string> = {};
       if (p.gates && typeof p.gates === "object") {
-        for (const [k, v] of Object.entries(p.gates as Record<string, { status?: unknown }>)) {
+        for (const [k, v] of Object.entries(
+          p.gates as Record<string, { status?: unknown; command?: unknown }>,
+        )) {
           if (typeof v?.status === "string") gates[k] = v.status;
+          if (typeof v?.command === "string") gateCommands[k] = v.command;
         }
       }
       t.verification = {
+        seq: e.seq,
         status: typeof p.status === "string" ? p.status : "no_claim",
         reason: typeof p.reason === "string" ? p.reason : "",
         coverage: typeof p.coverage === "string" ? p.coverage : "per_tool",
@@ -363,7 +374,15 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
               .map((c) => c.phrase as string)
           : [],
         gates,
+        gateCommands,
       };
+    } else if (e.kind === "verification_decision") {
+      if (t.verification) {
+        t.verification.decision = {
+          decision: typeof p.decision === "string" ? p.decision : "accept",
+          reason: typeof p.reason === "string" ? p.reason : undefined,
+        };
+      }
     } else if (e.kind === "turn_end") {
       if (e.termId && openByTerm.get(e.termId) === t) openByTerm.delete(e.termId);
       t.endTs = e.ts;

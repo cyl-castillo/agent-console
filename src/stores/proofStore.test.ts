@@ -401,12 +401,45 @@ describe("buildTimeline", () => {
       }),
     ]);
     expect(turns[0].verification).toEqual({
+      seq: 3,
       status: "unverified_claim",
       reason: '"all tests pass" but no check ran in this turn',
       coverage: "per_tool",
       checks: { passed: 0, failed: 0, empty: 0, unknown: 0, interrupted: 0 },
       claims: ["all tests pass"],
       gates: { test: "not_run" },
+      gateCommands: { test: "npm test" },
+    });
+    // F1d: the human's answer rides on the same turn.
+    const decided = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "fix" } }),
+      ev({
+        seq: 2,
+        ts: 12,
+        kind: "turn_end",
+        turnId: "T1",
+        payload: { summary: "All tests pass." },
+      }),
+      ev({
+        seq: 3,
+        ts: 12,
+        kind: "verification",
+        turnId: "T1",
+        actor: "console",
+        payload: { status: "claim_contradicted", reason: "x", coverage: "per_tool" },
+      }),
+      ev({
+        seq: 4,
+        ts: 13,
+        kind: "verification_decision",
+        turnId: "T1",
+        actor: "human",
+        payload: { decision: "accept", reason: "flaky suite, ran it by hand", verificationSeq: 3 },
+      }),
+    ]);
+    expect(decided[0].verification?.decision).toEqual({
+      decision: "accept",
+      reason: "flaky suite, ran it by hand",
     });
   });
 

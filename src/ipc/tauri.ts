@@ -470,6 +470,25 @@ export const ipc = {
       decision,
       reason: reason ?? null,
     }),
+  /// F1d: the human's answer to the console's verification verdict on a turn.
+  verificationDecide: (
+    projectRoot: string,
+    termId: string,
+    turnId: string,
+    caseId: string,
+    verificationSeq: number,
+    decision: "accept" | "evidence_requested",
+    reason?: string,
+  ) =>
+    invoke<ProofEvent>("verification_decide", {
+      projectRoot,
+      termId,
+      turnId,
+      caseId,
+      verificationSeq,
+      decision,
+      reason: reason ?? null,
+    }),
   testigoExportPreview: (projectRoot: string, caseId?: string) =>
     invoke<TestigoExportPreview>("testigo_export_preview", {
       projectRoot,
