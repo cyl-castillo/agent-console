@@ -41,6 +41,15 @@ const MAX_SUGGESTIONS: usize = 16;
 const NOTIFICATION_MAX: usize = 500;
 /// Cap on a recorded tool command line.
 const COMMAND_MAX: usize = 500;
+/// Tail of a long tool output kept beside the head excerpt: test runners put
+/// their verdict ("Tests: 0 total", "No tests found") on the LAST lines.
+const TAIL_MAX: usize = 400;
+/// How long to wait for Codex to flush the rollout line that carries the exit
+/// code of the command a PostToolUse describes (its payload has none).
+const ROLLOUT_RETRIES: u32 = 6;
+const ROLLOUT_RETRY_MS: u64 = 40;
+/// Only the end of the rollout is scanned: the item we want was just written.
+const ROLLOUT_TAIL_BYTES: u64 = 512 * 1024;
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -98,6 +107,170 @@ fn read_stdin_json() -> Value {
 
 // --- posttooluse -----------------------------------------------------------
 
+/// The text a tool produced: a bare string (Codex), Claude's Bash
+/// `{stdout, stderr, …}` as stdout followed by stderr (what a preserved log
+/// holds, which is what `outputSha256` is for), anything else as its JSON.
+fn output_text(resp: &Value) -> String {
+    match resp {
+        Value::String(s) => s.clone(),
+        Value::Object(o) if o.contains_key("stdout") => {
+            let out = o.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+            let err = o.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
+            if err.is_empty() {
+                out.to_string()
+            } else if out.is_empty() {
+                err.to_string()
+            } else {
+                format!("{out}\n{err}")
+            }
+        }
+        other => other.to_string(),
+    }
+}
+
+/// The last TAIL_MAX chars of an output that the head excerpt could not hold.
+fn cap_tail(text: &str, head_max: usize, tail_max: usize) -> Option<String> {
+    let n = text.chars().count();
+    if n <= head_max {
+        return None;
+    }
+    let skip = n.saturating_sub(tail_max);
+    Some(text.chars().skip(skip).collect())
+}
+
+/// `tool_input.command` as one line. Claude and Codex hooks send a string;
+/// Codex's rollout (and some tools) carry argv. `sh -c <script>` collapses to
+/// the script; anything else is joined with single-quote escaping so the line
+/// is what a reader would type.
+fn command_line(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        Value::Array(items) => {
+            let argv: Vec<&str> = items.iter().filter_map(|i| i.as_str()).collect();
+            if argv.is_empty() {
+                return None;
+            }
+            let line = match argv.as_slice() {
+                [sh, flag, script]
+                    if is_shell_bin(sh) && matches!(*flag, "-c" | "-lc" | "-ec" | "-lec") =>
+                {
+                    (*script).to_string()
+                }
+                _ => argv
+                    .iter()
+                    .map(|a| shell_quote(a))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            };
+            if line.is_empty() {
+                None
+            } else {
+                Some(line)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn is_shell_bin(s: &str) -> bool {
+    matches!(
+        s.rsplit('/').next().unwrap_or(s),
+        "sh" | "bash" | "zsh" | "dash" | "fish"
+    )
+}
+
+fn shell_quote(a: &str) -> String {
+    if !a.is_empty()
+        && a.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./=:@%+,".contains(c))
+    {
+        a.to_string()
+    } else {
+        format!("'{}'", a.replace('\'', "'\\''"))
+    }
+}
+
+/// An exit code a hook payload states outright (Claude's documented
+/// `tool_response.exit_code`, or any of the spellings a future CLI may use).
+fn exit_code_in(resp: &Value) -> Option<i64> {
+    ["exit_code", "exitCode", "exit", "returncode", "status_code"]
+        .iter()
+        .find_map(|k| resp.get(k).and_then(|v| v.as_i64()))
+}
+
+/// What Codex wrote to its rollout about the command this PostToolUse
+/// describes: its hook payload is the bare output text, so the exit code,
+/// the verdict and the duration live only in the `item_completed` line whose
+/// `item.id` is the hook's `tool_use_id`.
+#[derive(Debug, Default, PartialEq)]
+struct RolloutFacts {
+    exit_code: Option<i64>,
+    failed: bool,
+    duration_ms: Option<u64>,
+    argv: Option<Vec<String>>,
+}
+
+fn codex_rollout_facts(input: &Value, tool_use_id: &str) -> Option<RolloutFacts> {
+    // Codex marks its payloads with `turn_id`; Claude's carry `prompt_id`.
+    input.get("turn_id")?;
+    let path = str_field(input, "transcript_path", "transcriptPath")?;
+    let path = Path::new(&path);
+    for attempt in 0..ROLLOUT_RETRIES {
+        if let Some(f) = rollout_item_completed(path, tool_use_id) {
+            return Some(f);
+        }
+        if attempt + 1 < ROLLOUT_RETRIES {
+            std::thread::sleep(Duration::from_millis(ROLLOUT_RETRY_MS));
+        }
+    }
+    None
+}
+
+fn rollout_item_completed(path: &Path, tool_use_id: &str) -> Option<RolloutFacts> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let start = len.saturating_sub(ROLLOUT_TAIL_BYTES);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    let needle = format!("\"{tool_use_id}\"");
+    for line in text.lines().rev() {
+        if !line.contains(&needle) || !line.contains("item_completed") {
+            continue;
+        }
+        let v: Value = serde_json::from_str(line).ok()?;
+        let payload = v.get("payload")?;
+        if payload.get("type").and_then(|t| t.as_str()) != Some("item_completed") {
+            continue;
+        }
+        let item = payload.get("item")?;
+        if item.get("id").and_then(|i| i.as_str()) != Some(tool_use_id) {
+            continue;
+        }
+        let status = item.get("status").and_then(|s| s.as_str()).unwrap_or("");
+        let exit_code = item.get("exit_code").and_then(|c| c.as_i64());
+        let duration_ms = item.get("duration").and_then(|d| {
+            let secs = d.get("secs").and_then(|s| s.as_u64())?;
+            let nanos = d.get("nanos").and_then(|n| n.as_u64()).unwrap_or(0);
+            Some(secs * 1000 + nanos / 1_000_000)
+        });
+        let argv = item.get("command").and_then(|c| c.as_array()).map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        });
+        return Some(RolloutFacts {
+            exit_code,
+            failed: status == "failed" || exit_code.is_some_and(|c| c != 0),
+            duration_ms,
+            argv,
+        });
+    }
+    None
+}
+
 fn posttooluse_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
     let mut e = Map::new();
     e.insert("type".into(), json!("tool_result"));
@@ -108,30 +281,92 @@ fn posttooluse_event(input: &Value, term_id: Option<&str>, ts: u64) -> Value {
     let resp = input
         .get("tool_response")
         .or_else(|| input.get("toolResponse"));
+    let mut exit_code: Option<i64> = None;
+    let mut exit_via: Option<&str> = None;
+    let mut interrupted = false;
     if let Some(resp) = resp {
-        let text = match resp {
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        };
+        let text = output_text(resp);
         let (excerpt, truncated) = cap(&text, EXCERPT_MAX);
         e.insert("excerpt".into(), json!(excerpt));
         e.insert("truncated".into(), json!(truncated));
+        if let Some(tail) = cap_tail(&text, EXCERPT_MAX, TAIL_MAX) {
+            e.insert("excerptTail".into(), json!(tail));
+        }
         // Evidence by hash: the FULL output, which the excerpt can't carry.
         // A reviewer holding the packet can check a preserved log against it.
         e.insert("outputSha256".into(), json!(sha256_hex(text.as_bytes())));
         if let Some(i) = resp.get("interrupted").and_then(|v| v.as_bool()) {
             e.insert("interrupted".into(), json!(i));
+            interrupted = i;
+        }
+        if let Some(c) = exit_code_in(resp) {
+            exit_code = Some(c);
+            exit_via = Some("payload");
+        } else if resp.get("stdout").is_some() && !interrupted {
+            // Claude (verified on 2.1.307): a Bash PostToolUse carries
+            // stdout/stderr/interrupted and NO exit code — a non-zero exit
+            // fires PostToolUseFailure instead. Reaching here on a
+            // completed Bash call therefore means exit 0.
+            exit_code = Some(0);
+            exit_via = Some("claude_success");
         }
     }
     // What was run (Bash): the command is what makes a result a check run.
-    if let Some(cmd) = input
-        .pointer("/tool_input/command")
-        .and_then(|v| v.as_str())
-        .filter(|c| !c.is_empty())
-    {
-        e.insert("command".into(), json!(cap(cmd, COMMAND_MAX).0));
+    let mut argv_seen: Option<Vec<String>> = None;
+    if let Some(cmd) = input.pointer("/tool_input/command").and_then(command_line) {
+        e.insert("command".into(), json!(cap(&cmd, COMMAND_MAX).0));
+        if let Some(a) = input
+            .pointer("/tool_input/command")
+            .and_then(|v| v.as_array())
+        {
+            argv_seen = Some(
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect(),
+            );
+        }
     }
-    if let Some(d) = input.get("duration_ms").and_then(|v| v.as_u64()) {
+    let mut duration_ms = input.get("duration_ms").and_then(|v| v.as_u64());
+    // Codex (verified on 0.163.0): the payload is the bare output text with
+    // no exit code and no failure event; the rollout's `item_completed` for
+    // this tool_use_id has status, exit_code and duration.
+    if exit_code.is_none() {
+        if let Some(id) = str_field(input, "tool_use_id", "toolUseId") {
+            if let Some(facts) = codex_rollout_facts(input, &id) {
+                if let Some(c) = facts.exit_code {
+                    exit_code = Some(c);
+                    exit_via = Some("rollout");
+                }
+                if facts.failed {
+                    e.insert("failed".into(), json!(true));
+                }
+                if duration_ms.is_none() {
+                    duration_ms = facts.duration_ms;
+                }
+                if e.get("command").is_none() {
+                    if let Some(line) = facts.argv.as_ref().and_then(|a| command_line(&json!(a))) {
+                        e.insert("command".into(), json!(cap(&line, COMMAND_MAX).0));
+                    }
+                }
+                if argv_seen.is_none() {
+                    argv_seen = facts.argv;
+                }
+            }
+        }
+    }
+    if let Some(c) = exit_code {
+        e.insert("exitCode".into(), json!(c));
+        if c != 0 {
+            e.insert("failed".into(), json!(true));
+        }
+    }
+    if let Some(via) = exit_via {
+        e.insert("exitCodeVia".into(), json!(via));
+    }
+    if let Some(a) = argv_seen.filter(|a| !a.is_empty()) {
+        e.insert("commandArgv".into(), json!(a));
+    }
+    if let Some(d) = duration_ms {
         e.insert("durationMs".into(), json!(d));
     }
     if let Some(sid) = str_field(input, "session_id", "sessionId") {
@@ -169,12 +404,8 @@ fn posttoolusefailure_event(input: &Value, term_id: Option<&str>, ts: u64) -> Va
     if let Some(tool) = str_field(input, "tool_name", "toolName") {
         e.insert("tool".into(), json!(tool));
     }
-    if let Some(cmd) = input
-        .pointer("/tool_input/command")
-        .and_then(|v| v.as_str())
-        .filter(|c| !c.is_empty())
-    {
-        e.insert("command".into(), json!(cap(cmd, COMMAND_MAX).0));
+    if let Some(cmd) = input.pointer("/tool_input/command").and_then(command_line) {
+        e.insert("command".into(), json!(cap(&cmd, COMMAND_MAX).0));
     }
     if let Some(err) = input.get("error").and_then(|v| v.as_str()) {
         let (excerpt, truncated) = cap(err, EXCERPT_MAX);
@@ -1798,6 +2029,154 @@ mod tests {
         assert_eq!(parse_exit_code("Exit code 130 (interrupted)"), Some(130));
         assert_eq!(parse_exit_code("Something else"), None);
         assert_eq!(parse_exit_code(""), None);
+    }
+
+    // --- F1a: exit codes and argv, against payloads captured from the real CLIs ---
+
+    const CLAUDE_PASS: &str =
+        include_str!("../../fixtures/hooks/claude-2.1.307-posttooluse-bash-pass.json");
+    const CLAUDE_EMPTY: &str =
+        include_str!("../../fixtures/hooks/claude-2.1.307-posttooluse-bash-empty.json");
+    const CLAUDE_FAIL: &str =
+        include_str!("../../fixtures/hooks/claude-2.1.307-posttoolusefailure-bash-fail.json");
+    const CODEX_PASS: &str =
+        include_str!("../../fixtures/hooks/codex-0.163.0-posttooluse-bash-pass.json");
+    const CODEX_FAIL: &str =
+        include_str!("../../fixtures/hooks/codex-0.163.0-posttooluse-bash-fail.json");
+    const CODEX_ROLLOUT: &str =
+        include_str!("../../fixtures/hooks/codex-0.163.0-rollout-item-completed.jsonl");
+
+    #[test]
+    fn claude_bash_success_is_exit_zero_by_construction() {
+        // 2.1.307 sends no exit_code on PostToolUse; non-zero goes to
+        // PostToolUseFailure, so a completed Bash call IS exit 0.
+        let e = posttooluse_event(&serde_json::from_str(CLAUDE_PASS).unwrap(), Some("t"), 1);
+        assert_eq!(e["tool"], "Bash");
+        assert_eq!(e["command"], "npm test");
+        assert_eq!(e["exitCode"], 0);
+        assert_eq!(e["exitCodeVia"], "claude_success");
+        assert!(e.get("failed").is_none());
+        assert!(e.get("excerptTail").is_none(), "short output has no tail");
+        let empty = posttooluse_event(&serde_json::from_str(CLAUDE_EMPTY).unwrap(), None, 1);
+        assert_eq!(empty["exitCode"], 0);
+        assert!(empty["excerpt"]
+            .as_str()
+            .unwrap()
+            .contains("No tests found"));
+        // The failure twin still parses its documented first line.
+        let f = posttoolusefailure_event(&serde_json::from_str(CLAUDE_FAIL).unwrap(), None, 1);
+        assert_eq!(f["type"], "tool_failed");
+        assert_eq!(f["exitCode"], 1);
+        assert_eq!(f["command"], "npm run test:fail");
+    }
+
+    #[test]
+    fn a_stated_exit_code_wins_and_an_interrupted_call_is_not_assumed_zero() {
+        let e = posttooluse_event(
+            &json!({"tool_name": "Bash", "tool_input": {"command": "npm test"},
+                    "tool_response": {"stdout": "x", "stderr": "", "exit_code": 2, "interrupted": false}}),
+            None,
+            1,
+        );
+        assert_eq!(e["exitCode"], 2);
+        assert_eq!(e["exitCodeVia"], "payload");
+        assert_eq!(e["failed"], true);
+        let i = posttooluse_event(
+            &json!({"tool_name": "Bash", "tool_input": {"command": "npm test"},
+                    "tool_response": {"stdout": "x", "stderr": "", "interrupted": true}}),
+            None,
+            1,
+        );
+        assert!(i.get("exitCode").is_none());
+        assert_eq!(i["interrupted"], true);
+    }
+
+    /// Codex 0.163.0: the hook payload is bare output text; the verdict lives
+    /// in the rollout's item_completed line for the same tool_use_id.
+    fn codex_input_with_rollout(fixture: &str, dir: &Path) -> Value {
+        let mut v: Value = serde_json::from_str(fixture).unwrap();
+        let rollout = dir.join("rollout.jsonl");
+        std::fs::write(&rollout, CODEX_ROLLOUT).unwrap();
+        v["transcript_path"] = json!(rollout.to_string_lossy());
+        v
+    }
+
+    #[test]
+    fn codex_exit_code_and_failure_come_from_the_rollout() {
+        let dir = std::env::temp_dir().join(format!("hb-rollout-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pass = posttooluse_event(&codex_input_with_rollout(CODEX_PASS, &dir), Some("t"), 1);
+        assert_eq!(pass["tool"], "Bash");
+        assert_eq!(pass["command"], "npm test");
+        assert_eq!(pass["exitCode"], 0);
+        assert_eq!(pass["exitCodeVia"], "rollout");
+        assert!(pass.get("failed").is_none());
+        assert_eq!(pass["commandArgv"], json!(["/bin/bash", "-lc", "npm test"]));
+        assert_eq!(pass["durationMs"], 48);
+        let fail = posttooluse_event(&codex_input_with_rollout(CODEX_FAIL, &dir), Some("t"), 2);
+        assert_eq!(fail["exitCode"], 1);
+        assert_eq!(fail["failed"], true);
+        assert_eq!(fail["exitCodeVia"], "rollout");
+        assert_eq!(
+            fail["type"], "tool_result",
+            "still a result: the engine has no failure event"
+        );
+        // Without a rollout the verdict is honestly unknown — never assumed.
+        let mut orphan: Value = serde_json::from_str(CODEX_FAIL).unwrap();
+        orphan["transcript_path"] = json!(dir.join("missing.jsonl").to_string_lossy());
+        let e = posttooluse_event(&orphan, None, 3);
+        assert!(e.get("exitCode").is_none());
+        assert!(e.get("exitCodeVia").is_none());
+        assert!(e.get("failed").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn argv_commands_become_one_line_and_shell_wrappers_collapse() {
+        assert_eq!(
+            command_line(&json!(["/bin/bash", "-lc", "npm run test:fail"])).as_deref(),
+            Some("npm run test:fail")
+        );
+        assert_eq!(
+            command_line(&json!(["cargo", "test", "--", "--nocapture"])).as_deref(),
+            Some("cargo test -- --nocapture")
+        );
+        assert_eq!(
+            command_line(&json!(["git", "commit", "-m", "two words"])).as_deref(),
+            Some("git commit -m 'two words'")
+        );
+        assert_eq!(
+            command_line(&json!("npm test")).as_deref(),
+            Some("npm test")
+        );
+        assert_eq!(command_line(&json!("")), None);
+        assert_eq!(command_line(&json!([])), None);
+        assert_eq!(command_line(&json!({"x": 1})), None);
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        let e = posttooluse_event(
+            &json!({"tool_name": "Bash", "tool_input": {"command": ["npm", "test"]}, "tool_response": "ok"}),
+            None,
+            1,
+        );
+        assert_eq!(e["command"], "npm test");
+        assert_eq!(e["commandArgv"], json!(["npm", "test"]));
+    }
+
+    #[test]
+    fn a_long_output_keeps_its_tail_where_runners_print_the_verdict() {
+        let body = "x".repeat(EXCERPT_MAX + 50);
+        let text = format!("{body}\nTests:       0 total");
+        let e = posttooluse_event(
+            &json!({"tool_name": "Bash", "tool_input": {"command": "npm test"},
+                    "tool_response": {"stdout": text, "stderr": "", "interrupted": false}}),
+            None,
+            1,
+        );
+        assert_eq!(e["truncated"], true);
+        let tail = e["excerptTail"].as_str().unwrap();
+        assert!(tail.ends_with("Tests:       0 total"));
+        assert!(tail.chars().count() <= TAIL_MAX);
+        assert_eq!(cap_tail("short", EXCERPT_MAX, TAIL_MAX), None);
     }
 
     #[test]

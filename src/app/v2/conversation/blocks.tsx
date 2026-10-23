@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { checkGlyph, checkTitle, checkTone } from "./checkStatus";
 import {
   ChevronRight,
   Copy,
@@ -139,12 +140,8 @@ export function ProofBlock({
       data-testid="proof-block"
     >
       {turn.checks.map((c, i) => (
-        <Chip
-          key={i}
-          tone={c.status === "passed" ? "ok" : c.status === "failed" ? "danger" : "warn"}
-          mono
-        >
-          check {c.status === "passed" ? "✓" : c.status === "failed" ? "✕" : "∙"} {c.command}
+        <Chip key={i} tone={checkTone(c.status)} mono title={checkTitle(c.status)}>
+          check {checkGlyph(c.status)} {c.command}
         </Chip>
       ))}
       {turn.commits.map((c) => (

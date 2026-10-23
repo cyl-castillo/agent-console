@@ -172,11 +172,96 @@ pub struct ToolResultIds<'a> {
     pub command: Option<&'a str>,
     /// sha256 of the FULL output the excerpt was cut from.
     pub output_sha256: Option<&'a str>,
-    /// PostToolUseFailure: the tool ran and failed.
+    /// PostToolUseFailure, or a stated non-zero exit: the tool ran and failed.
     pub failed: bool,
     pub exit_code: Option<i64>,
+    /// Where the exit code came from: `payload` (the hook stated it),
+    /// `claude_success` (Claude's PostToolUse means exit 0 by construction),
+    /// `rollout` (Codex's item_completed line). Absent ⇒ no exit code known.
+    pub exit_code_via: Option<&'a str>,
     pub interrupted: Option<bool>,
     pub duration_ms: Option<u64>,
+    /// The LAST lines of a long output (runners print their verdict there).
+    pub excerpt_tail: Option<&'a str>,
+}
+
+/// One name per job across engines, so a rule written once reads every
+/// engine's events: Claude `Bash`, Codex `Bash`, OpenCode `bash` are all
+/// `shell`; `Edit`/`apply_patch`/`patch` are all `edit`. The raw name stays
+/// in the event; this is the key the ledger's own rules key on.
+pub fn canonical_tool(tool: &str) -> &'static str {
+    if tool.starts_with("mcp__") || tool.starts_with("mcp:") {
+        return "mcp";
+    }
+    match tool {
+        "Bash" | "bash" | "shell" | "Shell" | "exec_command" | "local_shell" | "unified_exec"
+        | "container.exec" | "run_terminal_cmd" => "shell",
+        "Edit"
+        | "Write"
+        | "MultiEdit"
+        | "NotebookEdit"
+        | "apply_patch"
+        | "edit"
+        | "write"
+        | "patch"
+        | "multiedit"
+        | "str_replace_editor"
+        | "str_replace_based_edit_tool" => "edit",
+        "Read" | "Glob" | "Grep" | "LS" | "read" | "glob" | "grep" | "list" | "ls" | "WebFetch"
+        | "WebSearch" | "webfetch" | "websearch" | "view_image" => "read",
+        "Task" | "Agent" | "task" | "spawn_agent" | "delegate_task" => "agent",
+        _ => "other",
+    }
+}
+
+/// What a recognized check command checks. Keyed on the runner, not the
+/// outcome: a reviewer asks "did the TESTS run?", not "did something pass?".
+pub fn check_kind(cmd: &str) -> &'static str {
+    static RE: std::sync::OnceLock<Vec<(regex::Regex, &'static str)>> = std::sync::OnceLock::new();
+    let rules = RE.get_or_init(|| {
+        [
+            (r"(?x)(^|[\s;&|(])(cargo\s+fmt|prettier|(npm|pnpm|yarn|bun)\s+run\s+format:check)(\s|$)", "format"),
+            (r"(?x)(^|[\s;&|(])(cargo\s+clippy|eslint|(npm|pnpm|yarn|bun)\s+run\s+lint|make\s+lint|go\s+vet)(\s|$)", "lint"),
+            (r"(?x)(^|[\s;&|(])(cargo\s+check|tsc|(npm|pnpm|yarn|bun)\s+run\s+(typecheck|check))(\s|$)", "typecheck"),
+            (r"(?x)(^|[\s;&|(])((npm|pnpm|yarn|bun)\s+run\s+build)(\s|$)", "build"),
+        ]
+        .into_iter()
+        .map(|(re, k)| (regex::Regex::new(re).expect("check-kind regex compiles"), k))
+        .collect()
+    });
+    for (re, kind) in rules {
+        if re.is_match(cmd) {
+            return kind;
+        }
+    }
+    "test"
+}
+
+/// A runner that exited 0 having run NOTHING: "ctest ran zero tests and
+/// exited 0, and the agent then told the user that all tests pass". Matched
+/// on the output's head and tail (the verdict line is the last one).
+pub fn is_zero_tests_output(text: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?xi)(
+                no\s+tests?\s+(were\s+)?found
+              | no\s+test\s+files\s+found
+              | no\s+tests?\s+(to\s+run|ran|collected|executed)
+              | ran\s+0\s+tests?\b
+              | 0\s+tests?\s+(ran|run|executed|completed)\b
+              | collected\s+0\s+items
+              | ^\s*tests:\s+0\s+total\s*$
+              | ^\s*tests:\s+\d+\s+skipped,\s+\d+\s+total\s*$
+              | test\s+result:\s+ok\.\s+0\s+passed;\s+0\s+failed
+              | ^\s*0\s+passing\s*$
+              | executed\s+0\s+of\s+0
+              | no\s+test\s+cases?\s+(were\s+)?found
+            )",
+        )
+        .expect("zero-tests regex compiles")
+    });
+    re.is_match(text)
 }
 
 /// Does this Bash command line run a test/check suite? Conservative
@@ -749,11 +834,21 @@ impl TestigoService {
         if let Some(code) = ids.exit_code {
             payload["exitCode"] = json!(code);
         }
+        if let Some(via) = ids.exit_code_via.filter(|s| !s.is_empty()) {
+            payload["exitCodeVia"] = json!(via);
+        }
         if let Some(i) = ids.interrupted {
             payload["interrupted"] = json!(i);
         }
         if let Some(d) = ids.duration_ms {
             payload["durationMs"] = json!(d);
+        }
+        if let Some(t) = ids.excerpt_tail.filter(|s| !s.is_empty()) {
+            payload["excerptTail"] = json!(t);
+        }
+        let canonical = tool.map(canonical_tool);
+        if let Some(c) = canonical {
+            payload["toolCanonical"] = json!(c);
         }
         let ev = Self::record(
             &mut inner,
@@ -768,13 +863,23 @@ impl TestigoService {
             payload,
         )?;
         // A recognized test/check runner also leaves a `check_run` line:
-        // command, verdict, exit code and the hash of its full output.
-        if tool == Some("Bash") {
+        // command, verdict, exit code and the hash of its full output. The
+        // verdict is honest about what the engine let us see: `passed` needs
+        // a known exit 0 (stated, or Claude's by-construction zero); a
+        // runner that exited 0 having run nothing is `empty`; no exit code
+        // at all is `unknown`, never `passed`.
+        if canonical == Some("shell") {
             if let Some(cmd) = ids.command.filter(|c| is_check_command(c)) {
                 let status = if ids.interrupted == Some(true) {
                     "interrupted"
-                } else if ids.failed {
+                } else if ids.failed || ids.exit_code.is_some_and(|c| c != 0) {
                     "failed"
+                } else if ids.exit_code.is_none() {
+                    "unknown"
+                } else if excerpt.is_some_and(is_zero_tests_output)
+                    || ids.excerpt_tail.is_some_and(is_zero_tests_output)
+                {
+                    "empty"
                 } else {
                     "passed"
                 };
@@ -790,8 +895,10 @@ impl TestigoService {
                     "agent",
                     json!({
                         "command": cmd,
+                        "kind": check_kind(cmd),
                         "status": status,
                         "exitCode": ids.exit_code,
+                        "exitCodeVia": ids.exit_code_via,
                         "outputSha256": ids.output_sha256,
                         "toolUseId": ids.tool_use_id,
                         "durationMs": ids.duration_ms,
@@ -1887,14 +1994,19 @@ mod tests {
                 ToolResultIds {
                     command: Some("cargo test --workspace"),
                     output_sha256: Some("ab".repeat(32).as_str()),
+                    exit_code: Some(0),
+                    exit_code_via: Some("claude_success"),
                     ..Default::default()
                 },
             )
             .unwrap();
         assert_eq!(ok.payload["command"], "cargo test --workspace");
+        assert_eq!(ok.payload["toolCanonical"], "shell");
         let evs = svc.list(a, None, None).unwrap();
         let cr = evs.iter().rev().find(|e| e.kind == "check_run").unwrap();
         assert_eq!(cr.payload["status"], "passed");
+        assert_eq!(cr.payload["kind"], "test");
+        assert_eq!(cr.payload["exitCodeVia"], "claude_success");
         assert_eq!(cr.payload["command"], "cargo test --workspace");
         assert_eq!(cr.turn_id, ok.turn_id);
         assert_eq!(cr.seq, ok.seq + 1);
@@ -2013,6 +2125,216 @@ mod tests {
         assert!(svc.verify(a).unwrap().ok);
         assert!(svc.verify(b).unwrap().ok);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_check_without_a_known_exit_is_unknown_and_zero_tests_is_empty() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-testigo-f1a-{}-{}", std::process::id(), nanos));
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let svc = TestigoService::new();
+        let root = base.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let a = root.to_str().unwrap();
+        svc.on_prompt(
+            a,
+            1,
+            Some("t1"),
+            Some("s1"),
+            Some("run the tests"),
+            None,
+            None,
+        )
+        .unwrap();
+        let status_of = |ts: i64, tool: &str, cmd: &str, excerpt: &str, ids: ToolResultIds<'_>| {
+            svc.on_tool_result(
+                a,
+                ts,
+                Some("t1"),
+                Some("s1"),
+                Some(tool),
+                Some(excerpt),
+                false,
+                ToolResultIds {
+                    command: Some(cmd),
+                    ..ids
+                },
+            )
+            .unwrap();
+            let evs = svc.list(a, None, None).unwrap();
+            let cr = evs.iter().rev().find(|e| e.kind == "check_run").unwrap();
+            (
+                cr.payload["status"].as_str().unwrap().to_string(),
+                cr.payload["kind"].clone(),
+            )
+        };
+        // Codex without its rollout line: no exit code ⇒ unknown, not passed.
+        assert_eq!(
+            status_of(
+                2,
+                "Bash",
+                "npm test",
+                "Tests: 2 passed",
+                ToolResultIds::default()
+            ),
+            ("unknown".into(), json!("test"))
+        );
+        // Exit 0 but the runner ran nothing ⇒ empty (the ctest trap).
+        let empty = ToolResultIds {
+            exit_code: Some(0),
+            exit_code_via: Some("rollout"),
+            ..Default::default()
+        };
+        assert_eq!(
+            status_of(
+                3,
+                "Bash",
+                "npm test",
+                "No tests found, exiting with code 0",
+                empty
+            )
+            .0,
+            "empty"
+        );
+        // The verdict on the TAIL counts: a long log ending in "0 total".
+        let tail = ToolResultIds {
+            exit_code: Some(0),
+            excerpt_tail: Some("\n\nTests:       0 total\n"),
+            ..Default::default()
+        };
+        assert_eq!(
+            status_of(4, "Bash", "npx jest", "PASS  src/x.test.js", tail).0,
+            "empty"
+        );
+        // A stated non-zero exit on a PostToolUse (Codex) is a failure even
+        // though the engine never sent a failure event.
+        let nonzero = ToolResultIds {
+            exit_code: Some(1),
+            exit_code_via: Some("rollout"),
+            ..Default::default()
+        };
+        assert_eq!(
+            status_of(5, "Bash", "npm test", "FAIL", nonzero).0,
+            "failed"
+        );
+        // Engine-specific shell names all count; lint/typecheck are classed.
+        assert_eq!(
+            status_of(
+                6,
+                "bash",
+                "npm run lint",
+                "ok",
+                ToolResultIds {
+                    exit_code: Some(0),
+                    ..Default::default()
+                }
+            ),
+            ("passed".into(), json!("lint"))
+        );
+        assert_eq!(
+            status_of(
+                7,
+                "shell",
+                "cargo clippy -- -D warnings",
+                "ok",
+                ToolResultIds {
+                    exit_code: Some(0),
+                    ..Default::default()
+                }
+            )
+            .1,
+            json!("lint")
+        );
+        assert_eq!(
+            status_of(
+                8,
+                "Bash",
+                "npx tsc --noEmit",
+                "ok",
+                ToolResultIds {
+                    exit_code: Some(0),
+                    ..Default::default()
+                }
+            )
+            .1,
+            json!("typecheck")
+        );
+        // An edit tool never yields a check_run, whatever its name.
+        let before = svc
+            .list(a, None, None)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "check_run")
+            .count();
+        svc.on_tool_result(
+            a,
+            9,
+            Some("t1"),
+            Some("s1"),
+            Some("apply_patch"),
+            Some("ok"),
+            false,
+            ToolResultIds {
+                command: Some("npm test"),
+                exit_code: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let evs = svc.list(a, None, None).unwrap();
+        assert_eq!(evs.iter().filter(|e| e.kind == "check_run").count(), before);
+        assert_eq!(evs.last().unwrap().payload["toolCanonical"], "edit");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn canonical_tool_names_and_zero_test_outputs() {
+        for (raw, want) in [
+            ("Bash", "shell"),
+            ("bash", "shell"),
+            ("exec_command", "shell"),
+            ("Edit", "edit"),
+            ("apply_patch", "edit"),
+            ("Write", "edit"),
+            ("Read", "read"),
+            ("Grep", "read"),
+            ("mcp__jira__search", "mcp"),
+            ("Task", "agent"),
+            ("SomethingNew", "other"),
+        ] {
+            assert_eq!(canonical_tool(raw), want, "{raw}");
+        }
+        for t in [
+            "No tests found, exiting with code 0",
+            "Tests:       0 total",
+            "collected 0 items",
+            "Ran 0 tests in 0.000s",
+            "test result: ok. 0 passed; 0 failed; 0 ignored",
+            "No test files found, exiting with code 0",
+            "Tests:       3 skipped, 3 total",
+            "No tests were found!!!",
+        ] {
+            assert!(is_zero_tests_output(t), "{t}");
+        }
+        for t in [
+            "Tests:       2 passed, 2 total",
+            "test result: ok. 10 passed; 0 failed",
+            "Ran 12 tests in 0.3s\n\nOK",
+            "collected 40 items",
+            "0 tests failed", // not an emptiness claim
+        ] {
+            assert!(!is_zero_tests_output(t), "{t}");
+        }
+        assert_eq!(check_kind("npm test"), "test");
+        assert_eq!(check_kind("npm run lint"), "lint");
+        assert_eq!(check_kind("npm run build"), "build");
+        assert_eq!(check_kind("cargo fmt --check"), "format");
+        assert_eq!(check_kind("cd app && npm run typecheck"), "typecheck");
     }
 
     #[test]
