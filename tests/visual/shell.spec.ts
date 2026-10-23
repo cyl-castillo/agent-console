@@ -477,6 +477,12 @@ test("F3: the trust question, a login ask and a missing CLI surface as cards wit
   page,
 }) => {
   await openV2(page, "app-v2--sessions");
+  // The fixture terminal has spawned and its banner is in: the output
+  // listener is wired before the spec starts feeding it (on a slow runner
+  // the first chunks otherwise raced the spawn).
+  await expect(page.getByTestId("terminal-drawer")).toContainText("Welcome back", {
+    timeout: 10_000,
+  });
   // The story's drawer is open by default; hide it so the cards' CTA is tested.
   await page.keyboard.press("Control+`");
   await expect(page.getByTestId("terminal-drawer")).not.toHaveAttribute("data-open", "true");

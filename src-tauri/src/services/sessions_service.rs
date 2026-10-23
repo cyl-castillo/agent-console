@@ -1,7 +1,7 @@
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -226,6 +226,16 @@ impl SessionsService {
         project_root: &str,
     ) -> AppResult<(Vec<PersistedSession>, Option<String>)> {
         let _g = self.lock.lock();
+        if let Ok(dir) = Self::dir() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let pruned = prune_quarantines(&dir, now);
+            if pruned > 0 {
+                tracing::info!("sessions: pruned {pruned} quarantined history file(s)");
+            }
+        }
         match Self::load_file() {
             Ok(file) => Ok((Self::pick(&file, project_root), None)),
             Err(_) => {
@@ -310,8 +320,57 @@ fn cap_scrollback(s: &mut String) {
     s.replace_range(..start, "");
 }
 
+/// A corrupt history is set aside as `sessions.json.corrupt-<epoch>` so it can
+/// be inspected; after this long nobody will, and the 165 KB files pile up.
+pub const QUARANTINE_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
+
+/// Delete `sessions.json.corrupt-<epoch>` files older than the max age (by
+/// the epoch in their name). Returns how many went.
+pub fn prune_quarantines(dir: &Path, now_secs: u64) -> usize {
+    let Ok(rd) = fs::read_dir(dir) else { return 0 };
+    let mut n = 0;
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(ts) = name.strip_prefix("sessions.json.corrupt-") else {
+            continue;
+        };
+        let Ok(ts) = ts.parse::<u64>() else { continue };
+        if now_secs.saturating_sub(ts) > QUARANTINE_MAX_AGE_SECS
+            && fs::remove_file(entry.path()).is_ok()
+        {
+            n += 1;
+        }
+    }
+    n
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn prune_quarantines_drops_only_old_corrupt_files() {
+        let dir = std::env::temp_dir().join(format!("ac-sess-q-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let now = 1_800_000_000u64;
+        let old = dir.join(format!(
+            "sessions.json.corrupt-{}",
+            now - QUARANTINE_MAX_AGE_SECS - 1
+        ));
+        let fresh = dir.join(format!("sessions.json.corrupt-{}", now - 3600));
+        let odd = dir.join("sessions.json.corrupt-notanumber");
+        let live = dir.join("sessions.json");
+        for p in [&old, &fresh, &odd, &live] {
+            fs::write(p, "{}").unwrap();
+        }
+        assert_eq!(prune_quarantines(&dir, now), 1);
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert!(odd.exists());
+        assert!(live.exists());
+        assert_eq!(prune_quarantines(&dir, now), 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 

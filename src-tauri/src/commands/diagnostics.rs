@@ -20,7 +20,10 @@ pub fn collect(state: &AppState) -> DiagnosticsBundle {
     )
     .branch;
     let data_dir = dirs::data_local_dir().map(|d| d.join("agent-console"));
-    let cache_dir = dirs::cache_dir().map(|d| d.join("agent-console"));
+    // On Windows both resolve to Local AppData: one folder, listed once.
+    let cache_dir = dirs::cache_dir()
+        .map(|d| d.join("agent-console"))
+        .filter(|c| Some(c) != data_dir.as_ref());
     let log_file = diagnostics::log_dir().and_then(|d| diagnostics::current_log_file(&d));
     let log_tail = log_file
         .as_deref()

@@ -6,10 +6,13 @@
 //! users) target Ubuntu 22.04 (glibc 2.35); candle removes native libraries
 //! from the equation entirely, on every platform.
 //!
-//! Model files (~470MB, fp32 safetensors) download once from the HF CDN into
-//! the app cache — the Whisper pattern. The model is loaded per operation from
-//! mmapped safetensors (fast, and it keeps resident memory low when idle)
-//! instead of living in RAM for the app's lifetime.
+//! Model files download once from the HF CDN into the app cache — the
+//! Whisper pattern. The hub ships fp32 safetensors (~470MB); right after the
+//! download the weights are rewritten as fp16 (~235MB) and the fp32 file is
+//! dropped — an fp16 copy of an embedding model is indistinguishable in
+//! retrieval and halves the biggest thing the app keeps on disk. The model
+//! is loaded per operation from the mmapped file (candle casts to f32 on
+//! load) instead of living in RAM for the app's lifetime.
 //!
 //! The `Embedder` trait exists so index logic is testable without the model:
 //! tests use a deterministic fake; production uses `CandleEmbedder`.
@@ -31,7 +34,11 @@ const PASSAGE_PREFIX: &str = "passage: ";
 const QUERY_PREFIX: &str = "query: ";
 
 const MODEL_REPO: &str = "intfloat/multilingual-e5-small";
+/// What the hub serves.
 const MODEL_FILES: &[&str] = &["config.json", "tokenizer.json", "model.safetensors"];
+/// The weights as the hub ships them (fp32) and as we keep them (fp16).
+const WEIGHTS_F32: &str = "model.safetensors";
+const WEIGHTS_F16: &str = "model.f16.safetensors";
 const MAX_TOKENS: usize = 512;
 
 /// Bump when the model (or prefixing/pooling scheme) changes — stored in the
@@ -57,12 +64,17 @@ fn model_dir() -> AppResult<PathBuf> {
 }
 
 /// Download any missing model file (temp + rename so a cut connection never
-/// leaves a truncated file behind to "succeed" later).
+/// leaves a truncated file behind to "succeed" later), then keep the weights
+/// as fp16 only.
 fn ensure_model_files() -> AppResult<PathBuf> {
     let dir = model_dir()?;
     for file in MODEL_FILES {
         let dest = dir.join(file);
         if dest.exists() {
+            continue;
+        }
+        // The fp32 weights are only needed when there is no fp16 copy yet.
+        if *file == WEIGHTS_F32 && dir.join(WEIGHTS_F16).exists() {
             continue;
         }
         let url = format!("https://huggingface.co/{MODEL_REPO}/resolve/main/{file}");
@@ -87,16 +99,46 @@ fn ensure_model_files() -> AppResult<PathBuf> {
         fs::write(&tmp, &bytes)?;
         fs::rename(&tmp, &dest)?;
     }
+    if !dir.join(WEIGHTS_F16).exists() {
+        shrink_to_f16(&dir.join(WEIGHTS_F32), &dir.join(WEIGHTS_F16))?;
+    }
     Ok(dir)
+}
+
+/// Rewrite fp32 safetensors as fp16 (temp + rename), then drop the fp32 file.
+/// Also the migration for installs that downloaded before this existed: the
+/// next load converts the 470MB file in place.
+pub fn shrink_to_f16(src: &std::path::Path, dst: &std::path::Path) -> AppResult<()> {
+    let tensors = candle_core::safetensors::load(src, &Device::Cpu)
+        .map_err(|e| AppError::Other(format!("model weights: {e}")))?;
+    let mut half = std::collections::HashMap::with_capacity(tensors.len());
+    for (name, t) in tensors {
+        let t = if t.dtype() == DType::F32 {
+            t.to_dtype(DType::F16)
+                .map_err(|e| AppError::Other(format!("model weights {name}: {e}")))?
+        } else {
+            t
+        };
+        half.insert(name, t);
+    }
+    let tmp = dst.with_extension("safetensors.part");
+    candle_core::safetensors::save(&half, &tmp)
+        .map_err(|e| AppError::Other(format!("model weights: {e}")))?;
+    fs::rename(&tmp, dst)?;
+    let _ = fs::remove_file(src);
+    Ok(())
 }
 
 /// Whether the embedding model is already on disk, without ever downloading.
 /// The memory-injection path runs on every prompt and must answer fast from
-/// local state only — the ~470MB download belongs to the explicit
-/// reindex/search flows, never to a prompt submission.
+/// local state only — the download belongs to the explicit reindex/search
+/// flows, never to a prompt submission. Either weights file counts: the fp32
+/// one is converted on the next load.
 pub fn model_ready() -> bool {
     let Ok(dir) = model_dir() else { return false };
-    MODEL_FILES.iter().all(|f| dir.join(f).exists())
+    dir.join("config.json").exists()
+        && dir.join("tokenizer.json").exists()
+        && (dir.join(WEIGHTS_F16).exists() || dir.join(WEIGHTS_F32).exists())
 }
 
 /// Pure-Rust embedder. Loads tokenizer + mmapped weights per instance; create
@@ -137,7 +179,7 @@ impl CandleEmbedder {
                 .map_err(|e| AppError::Other(format!("tokenizer: {e}")))?;
             let vb = unsafe {
                 VarBuilder::from_mmaped_safetensors(
-                    &[dir.join("model.safetensors")],
+                    &[dir.join(WEIGHTS_F16)],
                     DType::F32,
                     &Device::Cpu,
                 )
@@ -266,6 +308,49 @@ mod tests {
         assert_eq!(cosine(&[], &[]), 0.0);
         assert_eq!(cosine(&[1.0], &[1.0, 2.0]), 0.0);
         assert_eq!(cosine(&[0.0, 0.0], &[1.0, 1.0]), 0.0);
+    }
+
+    #[test]
+    fn shrink_to_f16_halves_the_file_and_keeps_the_values() {
+        let dir = std::env::temp_dir().join(format!("ac-emb-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("model.safetensors");
+        let dst = dir.join("model.f16.safetensors");
+        let mut tensors = std::collections::HashMap::new();
+        let w = Tensor::new(
+            &[[0.5f32, -1.25, 3.0e-3], [1024.0, 0.0, -7.5]],
+            &Device::Cpu,
+        )
+        .unwrap();
+        tensors.insert("layer.weight".to_string(), w.clone());
+        tensors.insert(
+            "layer.bias".to_string(),
+            Tensor::new(&[1.0f32, 2.0], &Device::Cpu).unwrap(),
+        );
+        candle_core::safetensors::save(&tensors, &src).unwrap();
+        let before = fs::metadata(&src).unwrap().len();
+        shrink_to_f16(&src, &dst).unwrap();
+        assert!(!src.exists(), "the fp32 file is dropped");
+        assert!(!dst.with_extension("safetensors.part").exists());
+        let after = fs::metadata(&dst).unwrap().len();
+        assert!(
+            after < before,
+            "fp16 {after} B should be smaller than fp32 {before} B"
+        );
+        let back = candle_core::safetensors::load(&dst, &Device::Cpu).unwrap();
+        assert_eq!(back["layer.weight"].dtype(), DType::F16);
+        let got: Vec<f32> = back["layer.weight"]
+            .to_dtype(DType::F32)
+            .unwrap()
+            .flatten_all()
+            .unwrap()
+            .to_vec1()
+            .unwrap();
+        let want: Vec<f32> = w.flatten_all().unwrap().to_vec1().unwrap();
+        for (g, w) in got.iter().zip(&want) {
+            assert!((g - w).abs() <= w.abs() * 1e-3 + 1e-6, "{g} vs {w}");
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// Real end-to-end smoke test: downloads the model (~470MB) on first run.
