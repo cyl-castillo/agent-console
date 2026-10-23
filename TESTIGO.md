@@ -190,6 +190,18 @@ ProofEvent {
   `verification_status(session, turn?)` para que el propio agente consulte su veredicto antes de
   declarar el trabajo hecho. Métrica de hábito en la cabecera de Proof: `verified N/M` claims de
   los últimos 7 días (+ contradichos).
+- **Coste y cuota por turno (COMPETENCIA-2026-10 F2, 2026-10-23)**: cada `turn_end` lleva `usage`
+  con los números del propio engine, nunca estimados por la consola: Claude desde el status line
+  (`costUsd` acumulado de la sesión, `costDeltaUsd` del turno, tokens, `quota{fiveHourPct,
+  sevenDayPct, spendPct, *ResetsAt}` de claude.ai Pro/Max), Codex desde el rollout (tokens
+  acumulados y del turno; Codex no reporta dólares), OpenCode desde el plugin (suma de `cost` y
+  `tokens` de los mensajes del asistente del turno, `model`). Sin señal → sin `usage`. En el AAT
+  viaja aplanado en `action_detail`. UI: chip "$x this turn" en el detalle del turno, chip
+  "$X · 7d" en la cabecera de Proof (por engine al hover; turnos sin dólares contados aparte),
+  `quota N%` en la status bar (ámbar ≥50 %, rojo ≥80 %), y el costo del ledger alimenta el mismo
+  store que vigila el presupuesto, así el tope también pausa sesiones de OpenCode. **Pausa dura**:
+  con el presupuesto cruzado el composer queda deshabilitado hasta que la tarjeta registre
+  `budget_decision`.
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

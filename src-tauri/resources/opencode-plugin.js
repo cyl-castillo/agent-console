@@ -51,7 +51,10 @@ export const AgentConsoleWitness = async ({ directory }) => {
   // the message ids OpenCode reported as assistant messages.
   const assistantMessages = new Set();
   const texts = new Map(); // messageID -> Map(partID -> text)
-  let lastAssistant = null;
+  // messageID -> {cost, tokens} as OpenCode last reported it (cumulative per
+  // message, so the latest update wins); summed per turn at session.idle.
+  const spend = new Map();
+  let lastModel = null;
   let turnOpen = false;
 
   return {
@@ -66,7 +69,7 @@ export const AgentConsoleWitness = async ({ directory }) => {
       turnOpen = true;
       assistantMessages.clear();
       texts.clear();
-      lastAssistant = null;
+      spend.clear();
       const e = { type: "user_prompt", ...base(input?.sessionID), prompt: text };
       if (input?.model?.providerID && input?.model?.modelID) {
         e.model = `${input.model.providerID}/${input.model.modelID}`;
@@ -109,8 +112,18 @@ export const AgentConsoleWitness = async ({ directory }) => {
       const type = event?.type;
       const props = event?.properties ?? {};
       if (type === "message.updated" && props.info?.role === "assistant") {
-        assistantMessages.add(props.info.id);
-        lastAssistant = props.info.id;
+        const info = props.info;
+        assistantMessages.add(info.id);
+        if (info.providerID && info.modelID) lastModel = `${info.providerID}/${info.modelID}`;
+        const t = info.tokens ?? {};
+        spend.set(info.id, {
+          cost: typeof info.cost === "number" ? info.cost : 0,
+          input: typeof t.input === "number" ? t.input : 0,
+          output: typeof t.output === "number" ? t.output : 0,
+          reasoning: typeof t.reasoning === "number" ? t.reasoning : 0,
+          cacheRead: typeof t.cache?.read === "number" ? t.cache.read : 0,
+          cacheWrite: typeof t.cache?.write === "number" ? t.cache.write : 0,
+        });
         return;
       }
       if (type === "message.part.updated") {
@@ -125,13 +138,36 @@ export const AgentConsoleWitness = async ({ directory }) => {
         if (!turnOpen) return;
         turnOpen = false;
         const e = { type: "turn_end", ...base(props.sessionID) };
-        const words = lastAssistant && texts.has(lastAssistant)
-          ? Array.from(texts.get(lastAssistant).values()).join("\n").trim()
-          : "";
+        // The agent's words: the LAST assistant message that has any text
+        // (tool-calling steps are assistant messages without text).
+        let words = "";
+        for (const id of Array.from(assistantMessages).reverse()) {
+          const parts = texts.get(id);
+          const joined = parts ? Array.from(parts.values()).join("\n").trim() : "";
+          if (joined) {
+            words = joined;
+            break;
+          }
+        }
         if (words) {
           const [summary, truncated] = cap(words, SUMMARY_MAX);
           e.summary = summary;
           e.summaryTruncated = truncated;
+        }
+        // F2: what the turn cost, as OpenCode reported it per assistant
+        // message — the console has no status line to read it from.
+        if (spend.size > 0) {
+          const sum = { cost: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+          for (const s of spend.values()) {
+            for (const k of Object.keys(sum)) sum[k] += s[k];
+          }
+          e.usage = {
+            engine: "opencode",
+            source: "plugin",
+            costUsd: Math.round(sum.cost * 1e6) / 1e6,
+            tokens: { input: sum.input, output: sum.output, reasoning: sum.reasoning, cacheRead: sum.cacheRead, cacheWrite: sum.cacheWrite },
+            ...(lastModel ? { model: lastModel } : {}),
+          };
         }
         append(e);
       }

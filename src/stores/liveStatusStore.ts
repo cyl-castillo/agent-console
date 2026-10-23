@@ -28,6 +28,19 @@ export interface LiveStatus {
   inputTotal?: number;
   outputTotal?: number;
   exceeds200k?: boolean;
+  /// F2: the plan's quota windows as the CLI reports them (claude.ai Pro/Max;
+  /// each may be absent), 0–100.
+  quota5hPct?: number;
+  quota5hResetsAt?: number;
+  quota7dPct?: number;
+  quota7dResetsAt?: number;
+  spendPct?: number;
+  spendResetsAt?: number;
+  spendUsedUsd?: number;
+  spendLimitUsd?: number;
+  /// F2: the cost came from the ledger's turn closes (engines without a
+  /// status line: OpenCode's plugin), not from a live render.
+  fromLedger?: boolean;
 }
 
 /// A render older than this is stale: the CLI re-renders on every assistant
@@ -38,6 +51,10 @@ export const LIVE_STATUS_FRESH_MS = 120_000;
 interface LiveStatusState {
   byTerm: Record<string, LiveStatus>;
   note: (s: LiveStatus) => void;
+  /// F2: a session's cumulative cost as summed from its ledger turn closes
+  /// (OpenCode reports per turn through the plugin; Codex reports no
+  /// dollars). Never overrides a live status-line render.
+  noteLedgerCost: (termId: string, costUsd: number, ts: number) => void;
 }
 
 export const useLiveStatusStore = create<LiveStatusState>((set) => ({
@@ -45,6 +62,14 @@ export const useLiveStatusStore = create<LiveStatusState>((set) => ({
   note: (s) => {
     if (!s.termId) return;
     set((st) => ({ byTerm: { ...st.byTerm, [s.termId as string]: s } }));
+  },
+  noteLedgerCost: (termId, costUsd, ts) => {
+    set((st) => {
+      const cur = st.byTerm[termId];
+      if (cur && !cur.fromLedger) return st;
+      if (cur && cur.costUsd === costUsd) return st;
+      return { byTerm: { ...st.byTerm, [termId]: { ts, termId, costUsd, fromLedger: true } } };
+    });
   },
 }));
 

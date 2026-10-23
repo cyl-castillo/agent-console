@@ -3,7 +3,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { profileFor } from "../agents/profiles";
 import { ipc } from "../ipc/tauri";
+import { sessionLedgerCost } from "../lib/usageStats";
 import { useChangesStore } from "./changesStore";
+import { useLiveStatusStore } from "./liveStatusStore";
 import { useTerminalsStore } from "./terminalsStore";
 import { useToastStore } from "./toastStore";
 import type {
@@ -91,6 +93,24 @@ export interface TimelineTurn {
   /// F1c: the console's verdict on the turn's own claims (`verification`),
   /// computed from witnessed lines the moment the turn closed.
   verification?: TimelineVerification;
+  /// F2: what the turn cost, from the engine's own numbers (turn_end.usage).
+  usage?: TimelineUsage;
+}
+
+export interface TimelineUsage {
+  /// claude · codex · opencode
+  engine: string;
+  /// statusline · rollout · plugin
+  source: string;
+  /// Session cost so far (Claude's status line) — cumulative.
+  costUsd?: number;
+  /// This turn's cost: the delta (Claude) or the turn's own sum (OpenCode).
+  costTurnUsd?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  cacheRead?: number;
+  model?: string;
+  quota?: { fiveHourPct?: number; sevenDayPct?: number; spendPct?: number };
 }
 
 export interface TimelineVerification {
@@ -400,6 +420,33 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
       if (typeof p.error === "string") t.error = p.error;
       if (typeof p.errorDetails === "string") t.errorDetails = p.errorDetails;
       if (typeof p.postSha === "string" && p.postSha) t.postSha = p.postSha;
+      if (p.usage && typeof p.usage === "object") {
+        const u = p.usage as Record<string, unknown>;
+        const tk = (u.tokens ?? {}) as Record<string, unknown>;
+        const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+        const q = (u.quota ?? {}) as Record<string, unknown>;
+        const quota = {
+          fiveHourPct: num(q.fiveHourPct),
+          sevenDayPct: num(q.sevenDayPct),
+          spendPct: num(q.spendPct),
+        };
+        t.usage = {
+          engine: typeof u.engine === "string" ? u.engine : "unknown",
+          source: typeof u.source === "string" ? u.source : "unknown",
+          costUsd: num(u.costUsd),
+          costTurnUsd: u.engine === "claude" ? num(u.costDeltaUsd) : num(u.costUsd),
+          tokensIn: num(tk.input),
+          tokensOut: num(tk.output),
+          cacheRead: num(tk.cacheRead),
+          model: typeof u.model === "string" ? u.model : undefined,
+          quota:
+            quota.fiveHourPct !== undefined ||
+            quota.sevenDayPct !== undefined ||
+            quota.spendPct !== undefined
+              ? quota
+              : undefined,
+        };
+      }
       // The close carries the binding too — keeps the turn actionable even
       // when the prompt event predates a hook that sent no ids.
       if (!t.termId && e.termId) t.termId = e.termId;
@@ -444,6 +491,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
       // A session switch while this was in flight wins.
       if (get().projectRoot !== projectRoot) return;
       set({ events, report, settings });
+      feedLedgerCosts(events);
     } catch (e) {
       if (get().projectRoot !== projectRoot) return;
       set({ error: String(e) });
@@ -475,6 +523,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
       const events = await ipc.testigoList(projectRoot);
       if (get().projectRoot !== projectRoot) return;
       set({ events });
+      feedLedgerCosts(events);
     } catch (e) {
       if (get().projectRoot !== projectRoot) return;
       set({ error: String(e) });
@@ -610,6 +659,21 @@ export const useProofStore = create<ProofState>((set, get) => ({
     }
   },
 }));
+
+/// F2: engines without a status line (OpenCode through its plugin) report
+/// cost per turn in the ledger; their sessions' running total feeds the same
+/// store the budget watch reads, so a cap pauses them too.
+function feedLedgerCosts(events: ProofEvent[]) {
+  const turns = buildTimeline(events);
+  const live = useLiveStatusStore.getState();
+  const seen = new Set<string>();
+  for (const t of turns) {
+    if (!t.termId || seen.has(t.termId) || t.usage?.engine === "claude") continue;
+    seen.add(t.termId);
+    const cost = sessionLedgerCost(turns, t.termId);
+    if (cost !== undefined) live.noteLedgerCost(t.termId, cost, t.endTs ?? t.ts);
+  }
+}
 
 /// Keep the ledger view live. The source of truth is `ledger://appended`,
 /// which the Rust side emits AFTER each line is on disk — the hook events

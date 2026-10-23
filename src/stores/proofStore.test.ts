@@ -443,6 +443,77 @@ describe("buildTimeline", () => {
     });
   });
 
+  it("reads what a turn cost from its close: Claude's delta, OpenCode's sum, Codex's tokens (F2)", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", termId: "a", payload: { prompt: "x" } }),
+      ev({
+        seq: 2,
+        ts: 11,
+        kind: "turn_end",
+        turnId: "T1",
+        termId: "a",
+        payload: {
+          usage: {
+            engine: "claude",
+            source: "statusline",
+            costUsd: 1.25,
+            costDeltaUsd: 0.25,
+            model: "claude-opus-5-5",
+            tokens: { context: 42000, output: 800 },
+            quota: { fiveHourPct: 23.5, sevenDayPct: 41.2 },
+          },
+        },
+      }),
+      ev({ seq: 3, ts: 12, kind: "prompt", turnId: "T2", termId: "b", payload: { prompt: "y" } }),
+      ev({
+        seq: 4,
+        ts: 13,
+        kind: "turn_end",
+        turnId: "T2",
+        termId: "b",
+        payload: {
+          usage: {
+            engine: "opencode",
+            source: "plugin",
+            costUsd: 0.002,
+            tokens: { input: 803, output: 74 },
+          },
+        },
+      }),
+      ev({ seq: 5, ts: 14, kind: "prompt", turnId: "T3", termId: "c", payload: { prompt: "z" } }),
+      ev({
+        seq: 6,
+        ts: 15,
+        kind: "turn_end",
+        turnId: "T3",
+        termId: "c",
+        payload: {
+          usage: {
+            engine: "codex",
+            source: "rollout",
+            tokens: { input: 480, output: 41, cacheRead: 12800 },
+          },
+        },
+      }),
+    ]);
+    expect(turns[0].usage).toEqual({
+      engine: "claude",
+      source: "statusline",
+      costUsd: 1.25,
+      costTurnUsd: 0.25,
+      tokensIn: undefined,
+      tokensOut: 800,
+      cacheRead: undefined,
+      model: "claude-opus-5-5",
+      quota: { fiveHourPct: 23.5, sevenDayPct: 41.2, spendPct: undefined },
+    });
+    expect(turns[1].usage?.costTurnUsd).toBe(0.002);
+    expect(turns[1].usage?.tokensIn).toBe(803);
+    expect(turns[2].usage?.costTurnUsd).toBeUndefined();
+    expect(turns[2].usage?.tokensOut).toBe(41);
+    expect(turns[2].usage?.cacheRead).toBe(12800);
+  });
+
   it("keeps a check's kind and its honest verdict: empty and unknown are not passed (F1a)", () => {
     const turns = buildTimeline([
       ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "fix" } }),

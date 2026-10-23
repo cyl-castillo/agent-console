@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { fmtUsd, usageWeek } from "../../../lib/usageStats";
 import { verificationStats } from "../../../lib/verificationInbox";
 import { buildTimeline, useProofStore } from "../../../stores/proofStore";
 import { useWorkbenchStore } from "../../../stores/workbenchStore";
@@ -7,6 +8,29 @@ import { Tooltip } from "../../../ui/Tooltip";
 import { WorkbenchPanel } from "../../panels";
 import { TAB_LABELS } from "../destinations";
 import { LedgerMinimap } from "./LedgerMinimap";
+
+/// F2: what the agents cost this week, from the ledger's turn closes — by
+/// engine on hover; Codex turns are counted but unpriced (tokens only).
+function UsageWeekChip() {
+  const events = useProofStore((s) => s.events);
+  const week = useMemo(() => usageWeek(buildTimeline(events)), [events]);
+  if (week.turns === 0) return null;
+  const parts = Object.entries(week.byEngine).map(
+    ([e, v]) =>
+      `${e}: ${v.turns} turn${v.turns === 1 ? "" : "s"}, ${v.costUsd > 0 ? fmtUsd(v.costUsd) : `${v.tokensOut.toLocaleString()} output tokens, unpriced`}`,
+  );
+  return (
+    <Tooltip
+      content={`Last 7 days, from the engines' own numbers — ${parts.join(" · ")}${week.unpricedTurns ? ` · ${week.unpricedTurns} turn${week.unpricedTurns === 1 ? "" : "s"} without a dollar figure` : ""}`}
+    >
+      <span className="ml-2 inline-flex items-center" data-testid="usage-week">
+        <Chip mono>
+          {fmtUsd(week.costUsd)} · 7d{week.unpricedTurns ? " +tokens" : ""}
+        </Chip>
+      </span>
+    </Tooltip>
+  );
+}
 
 /// F1d habit metric: of the week's green claims, how many a passing check
 /// after the last edit actually backed. The number to make go up.
@@ -44,6 +68,7 @@ export function ProofCenter() {
     >
       <div className="flex h-8 shrink-0 items-center border-b border-border px-3 font-sans text-small font-semibold text-foreground">
         {TAB_LABELS[tab]}
+        <UsageWeekChip />
         <VerificationHabit />
       </div>
       <LedgerMinimap />
