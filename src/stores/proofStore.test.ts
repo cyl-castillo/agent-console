@@ -371,6 +371,45 @@ describe("buildTimeline", () => {
     expect(turns[0].toolResults).toBe(1);
   });
 
+  it("carries the turn's verification verdict with its gates and live claims (F1c)", () => {
+    const turns = buildTimeline([
+      ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "fix" } }),
+      ev({
+        seq: 2,
+        ts: 12,
+        kind: "turn_end",
+        turnId: "T1",
+        payload: { summary: "All tests pass." },
+      }),
+      ev({
+        seq: 3,
+        ts: 12,
+        kind: "verification",
+        turnId: "T1",
+        actor: "console",
+        payload: {
+          status: "unverified_claim",
+          reason: '"all tests pass" but no check ran in this turn',
+          coverage: "per_tool",
+          checks: { passed: 0, failed: 0, empty: 0, unknown: 0, interrupted: 0 },
+          claims: [
+            { phrase: "all tests pass", lang: "en", negated: false },
+            { phrase: "lint passes", lang: "en", negated: true },
+          ],
+          gates: { test: { command: "npm test", status: "not_run" } },
+        },
+      }),
+    ]);
+    expect(turns[0].verification).toEqual({
+      status: "unverified_claim",
+      reason: '"all tests pass" but no check ran in this turn',
+      coverage: "per_tool",
+      checks: { passed: 0, failed: 0, empty: 0, unknown: 0, interrupted: 0 },
+      claims: ["all tests pass"],
+      gates: { test: "not_run" },
+    });
+  });
+
   it("keeps a check's kind and its honest verdict: empty and unknown are not passed (F1a)", () => {
     const turns = buildTimeline([
       ev({ seq: 1, ts: 10, kind: "prompt", turnId: "T1", payload: { prompt: "fix" } }),

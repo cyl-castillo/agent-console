@@ -149,13 +149,34 @@ ProofEvent {
   prompt lo pidiera → `block`; resumen que dice "tests pass" sin `check_run` **passed** → `high`;
   desde F1a (2026-10-23) un `check_run` solo es `passed` con exit 0 conocido — `empty` (exit 0 sin
   correr tests), `unknown` (sin exit code visible) e `interrupted` no cuentan; desde F1b OpenCode
-  también deja `tool_result` por tool call vía su plugin testigo, con `observedVia: "plugin"`) y el
+  también deja `tool_result` por tool call vía su plugin testigo, con `observedVia: "plugin"`; desde
+  **F1c** el reviewer lee el evento `verification` en vez de su propia lista de frases) y el
   veredicto del modelo, que solo puede endurecer. Se registra `review_verdict` (actor
   `agent:reviewer:<engine>`, pinneado al turno y al case) y la respuesta humana
   `review_decision` (`accept` | `override` con razón). Entradas: botón "Review this turn" en la
   conversación, tool MCP `request_review`. **Compuerta del estudio**: el check de proof-on-PR
   (`.github/testigo/testigo-verify.mjs`) falla si el packet contiene un `review_verdict` block sin
   un `review_decision` override posterior para ese turno — el bloqueo no se levanta solo.
+- **Contrato de verificación por turno (COMPETENCIA-2026-10 F1c, 2026-10-23)**: al cerrar cada
+  turno la consola escribe un evento `verification` (actor `console`, mismo `turn_id`) computado
+  SOLO desde las líneas presenciadas del turno — nunca del modelo. Reglas, en orden
+  (`verification_rules.rs`): sin claim → `checked` (hubo checks) / `no_claim`; con claim y
+  cobertura `turn_boundary` (turno superado sin ninguna línea de tool) → `unwitnessed`; algún
+  `check_run` `failed` o `empty` → `claim_contradicted`; ningún `check_run` `passed` →
+  `unverified_claim`; última edición después del último check passed → `stale_check`; si no →
+  `verified`. Claims = frases ES/EN/PT ("all tests pass", "todos los tests pasan", "tudo verde"…)
+  con guardas de negación/condicional en la misma oración ("no pude correr", "didn't run",
+  "should pass"). Payload: `status, reason, coverage, commands, checks{passed,failed,empty,
+  unknown,interrupted}, lastEditSeq, lastCheckSeq, claims[{phrase,lang,negated}], gates{kind:
+  {command,status|not_run}}` (los gates del proyecto salen de `gate_discovery.rs`: package.json,
+  Cargo.toml, pyproject, go.mod, Makefile). **Recomputable por terceros**: el mismo algoritmo vive
+  en `.github/testigo/verification-rules.mjs` (el gate de proof-on-PR recomputa cada turno del
+  packet y FALLA si el veredicto declarado no coincide o si es `claim_contradicted`; avisa en
+  `unverified_claim`/`stale_check`) y embebido byte-idéntico en `testigo-verifier.html`;
+  `fixtures/verification/cases.json` son los vectores compartidos que Rust y JS deben cumplir.
+  Export IETF: `verification` → decision / success (verified, checked, no_claim) / failure
+  (claim_contradicted) / partial (resto). UI: chip en el hilo e Inspector con sección
+  "Verification" (veredicto, razón, gates que corrieron o no, claims).
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

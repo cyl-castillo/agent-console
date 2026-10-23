@@ -220,6 +220,21 @@ fn map_kind(e: &ProofEvent) -> Mapped {
             outcome: "success",
             phase: "concurrent",
         },
+        // F1c: the console's verdict on the turn's own claims. Only a check
+        // that passed after the last edit is a success; a contradicted claim
+        // is a failure; everything in between is partial evidence.
+        "verification" => {
+            let status = p.get("status").and_then(Value::as_str).unwrap_or("");
+            Mapped {
+                action_type: "decision",
+                outcome: match status {
+                    "verified" | "checked" | "no_claim" => "success",
+                    "claim_contradicted" => "failure",
+                    _ => "partial",
+                },
+                phase: "post_execution",
+            }
+        }
         "turn_end" => {
             let interrupted = p.get("interrupted").and_then(Value::as_bool) == Some(true);
             Mapped {
@@ -648,6 +663,7 @@ Mapping from the Testigo ledger (the console's native chain):
 | approval_request | escalation | pre_execution | escalated |
 | approval_decision | decision | pre_execution | success / denied |
 | tool_result, check_run | tool_response | post_execution | success / failure / partial (check `empty`, `unknown`, `interrupted`) |
+| verification | decision | post_execution | success (verified / checked / no_claim) / failure (claim_contradicted) / partial (unverified_claim, stale_check, unwitnessed) |
 | turn_end | lifecycle | post_execution | success / failure / timeout |
 | agent_action (MCP) | tool_call | post_execution | success / denied |
 | agent_declined (MCP) | escalation | post_execution | escalated |
@@ -731,6 +747,22 @@ mod tests {
             json!({"exitCode": 2}),
         ));
         assert_eq!(r.outcome, "failure");
+        let v = |st: &str| {
+            map_kind(&ev(
+                3,
+                1,
+                "verification",
+                "t",
+                "console",
+                json!({"status": st}),
+            ))
+        };
+        assert_eq!(v("verified").outcome, "success");
+        assert_eq!(v("claim_contradicted").outcome, "failure");
+        assert_eq!(v("unverified_claim").outcome, "partial");
+        assert_eq!(v("stale_check").outcome, "partial");
+        assert_eq!(v("unwitnessed").outcome, "partial");
+        assert_eq!(v("verified").action_type, "decision");
     }
 
     #[test]

@@ -1,5 +1,12 @@
 import { memo, useState } from "react";
-import { checkGlyph, checkTitle, checkTone } from "./checkStatus";
+import {
+  checkGlyph,
+  checkTitle,
+  checkTone,
+  verificationGlyph,
+  verificationLabel,
+  verificationTone,
+} from "./checkStatus";
 import {
   ChevronRight,
   Copy,
@@ -154,6 +161,20 @@ export function ProofBlock({
           <span>
             <Chip tone="purple" mono>
               memory ×{turn.injected.length}
+            </Chip>
+          </span>
+        </Tooltip>
+      )}
+      {turn.verification && turn.verification.status !== "no_claim" && (
+        <Tooltip content={turn.verification.reason}>
+          <span>
+            <Chip
+              tone={verificationTone(turn.verification.status)}
+              mono
+              data-testid="verification-chip"
+            >
+              {verificationGlyph(turn.verification.status)}{" "}
+              {verificationLabel(turn.verification.status)}
             </Chip>
           </span>
         </Tooltip>

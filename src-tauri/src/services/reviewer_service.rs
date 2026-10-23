@@ -94,6 +94,11 @@ pub struct ReviewScope {
     pub checks_failed: usize,
     pub producer_model: Option<String>,
     pub producer_engine: Engine,
+    /// F1c: the console's own verdict on the turn (`verification.status`)
+    /// and its reason, when the ledger has one. The deterministic rule
+    /// below reads it instead of re-deriving claims from the summary.
+    pub verification: Option<String>,
+    pub verification_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +178,40 @@ pub fn deterministic_findings(scope: &ReviewScope) -> Vec<Finding> {
             deterministic: true,
         });
     }
+    // F1c: the ledger's own verdict is the source of truth when present —
+    // one rule set, shared with the PR gate and the standalone verifier.
+    // A contradicted claim ("tests pass" over a failed or empty run) is a
+    // block: a human has to look before this merges.
+    if let Some(status) = scope.verification.as_deref() {
+        let reason = scope.verification_reason.clone().unwrap_or_default();
+        match status {
+            "claim_contradicted" => out.push(Finding {
+                severity: "block".into(),
+                rule: "claim_contradicted".into(),
+                title: "The summary claims green, but a witnessed check failed or ran nothing"
+                    .into(),
+                detail: reason,
+                file: None,
+                deterministic: true,
+            }),
+            "unverified_claim" | "stale_check" => out.push(Finding {
+                severity: "high".into(),
+                rule: "unverified_claim".into(),
+                title: if status == "stale_check" {
+                    "The summary claims green, but files changed after the last passing check"
+                        .into()
+                } else {
+                    "The summary claims green, but no passing check run was witnessed".into()
+                },
+                detail: reason,
+                file: None,
+                deterministic: true,
+            }),
+            _ => {}
+        }
+        return out;
+    }
+    // Ledgers that predate the verification line: the original phrase check.
     let claims_green = {
         let s = scope.summary.to_ascii_lowercase();
         [
@@ -313,6 +352,11 @@ pub fn scope_for(
                 } else {
                     scope.checks_failed += 1;
                 }
+            }
+            "verification" => {
+                scope.verification = p.get("status").and_then(Value::as_str).map(String::from);
+                scope.verification_reason =
+                    p.get("reason").and_then(Value::as_str).map(String::from);
             }
             "turn_end" => {
                 scope.summary = p
@@ -656,6 +700,29 @@ mod tests {
         let f = deterministic_findings(&s);
         assert_eq!(f[0].rule, "unverified_claim");
         let s = scope(&[("M", "src/x.ts")], "fix", "Done, all tests pass.", 1);
+        assert!(deterministic_findings(&s).is_empty());
+    }
+
+    #[test]
+    fn the_ledgers_verification_verdict_outranks_the_phrase_check() {
+        // F1c: with a verification line, the reviewer reads it — a contradicted
+        // claim blocks, a stale check is high, a verified turn is clean even if
+        // the old phrase list would have fired.
+        let mut s = scope(&[("M", "src/x.ts")], "fix", "Done, all tests pass.", 0);
+        s.verification = Some("verified".into());
+        assert!(deterministic_findings(&s).is_empty());
+        s.verification = Some("claim_contradicted".into());
+        s.verification_reason = Some("\"all tests pass\" but 1 check failed".into());
+        let f = deterministic_findings(&s);
+        assert_eq!(f[0].rule, "claim_contradicted");
+        assert_eq!(f[0].severity, "block");
+        assert!(f[0].detail.contains("1 check failed"));
+        s.verification = Some("stale_check".into());
+        let f = deterministic_findings(&s);
+        assert_eq!(f[0].rule, "unverified_claim");
+        assert_eq!(f[0].severity, "high");
+        assert!(f[0].title.contains("after the last passing check"));
+        s.verification = Some("unwitnessed".into());
         assert!(deterministic_findings(&s).is_empty());
     }
 

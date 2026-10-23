@@ -14,6 +14,7 @@ const KIND_CLASS: Record<string, string> = {
   turn_end: "fill-ok",
   approval_decision: "fill-warn",
   check_run: "fill-ok",
+  verification: "fill-text-faint",
   commit: "fill-purple",
   rewind: "fill-warn",
   tool_result: "fill-text-faint",

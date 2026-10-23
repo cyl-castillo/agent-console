@@ -170,6 +170,102 @@ function checkStructure(st) {
   return null;
 }
 
+// F1c: the verification contract, recomputed here from the packet's own
+// lines (port of verification_rules.rs; identical to
+// .github/testigo/verification-rules.mjs between the markers — a test keeps
+// them byte-identical).
+/* verification-rules:begin */
+const VERIFICATION_RULES_VERSION = 1;
+
+const SHELL = new Set(["Bash", "bash", "shell", "Shell", "exec_command", "local_shell", "unified_exec", "container.exec", "run_terminal_cmd"]);
+const EDIT = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch", "edit", "write", "patch", "multiedit", "str_replace_editor", "str_replace_based_edit_tool"]);
+const canonicalTool = (t) => (SHELL.has(t) ? "shell" : EDIT.has(t) ? "edit" : "other");
+
+const CLAIM_PHRASES = [
+  ["all tests pass", "en"], ["tests pass", "en"], ["test passes", "en"], ["tests are passing", "en"],
+  ["tests passing", "en"], ["test suite passes", "en"], ["tests succeed", "en"], ["all checks pass", "en"],
+  ["checks pass", "en"], ["all green", "en"], ["ci is green", "en"], ["build passes", "en"],
+  ["build succeeds", "en"], ["lint passes", "en"], ["lint is clean", "en"], ["typecheck passes", "en"],
+  ["type checks pass", "en"],
+  ["todos los tests pasan", "es"], ["los tests pasan", "es"], ["pasan los tests", "es"], ["las pruebas pasan", "es"],
+  ["pasan las pruebas", "es"], ["pasan todos los tests", "es"], ["todo en verde", "es"], ["todo verde", "es"],
+  ["el build pasa", "es"], ["compila sin errores", "es"], ["lint limpio", "es"], ["el lint pasa", "es"],
+  ["typecheck pasa", "es"], ["sin errores de tipos", "es"], ["la suite pasa", "es"],
+  ["todos os testes passam", "pt"], ["os testes passam", "pt"], ["testes passando", "pt"], ["tudo verde", "pt"],
+  ["build passa", "pt"], ["lint limpo", "pt"],
+];
+const GUARDS = [
+  "not ", "n't", "never", "without", "unable", "couldn", "didn", "did not", "do not", "no longer",
+  "should", "would", "will", "once", "if ", "when ", "after you", "expect", "hopefully", "probably",
+  "no ", "sin ", "nunca", "no pude", "no corr", "deber", "podr", "cuando", "una vez", "espero",
+  "não", "nao ", "sem ", "nunca", "deveria", "deveriam", "poderia", "quando",
+];
+const RANK = { failed: 4, empty: 3, unknown: 2, interrupted: 1 };
+
+function foldTurn(events) {
+  const f = { toolResults: 0, commands: 0, failedCommands: 0,
+    checks: { passed: 0, failed: 0, empty: 0, unknown: 0, interrupted: 0 },
+    gatesRan: {}, lastEditSeq: null, lastCheckSeq: null, lastGoodCheckSeq: null, summary: "", superseded: false };
+  for (const e of events) {
+    const p = e.payload ?? {};
+    if (e.kind === "tool_result") {
+      f.toolResults++;
+      const canonical = typeof p.toolCanonical === "string" ? p.toolCanonical : canonicalTool(String(p.tool ?? ""));
+      if (canonical === "shell") {
+        f.commands++;
+        if (p.failed === true || (typeof p.exitCode === "number" && p.exitCode !== 0)) f.failedCommands++;
+      } else if (canonical === "edit") f.lastEditSeq = e.seq;
+    } else if (e.kind === "check_run") {
+      const status = typeof p.status === "string" ? p.status : "unknown";
+      if (status in f.checks) f.checks[status]++; else f.checks.unknown++;
+      f.lastCheckSeq = e.seq;
+      if (status === "passed") f.lastGoodCheckSeq = e.seq;
+      const kind = typeof p.kind === "string" ? p.kind : "test";
+      if (!(kind in f.gatesRan) || (RANK[status] ?? 0) > (RANK[f.gatesRan[kind]] ?? 0)) f.gatesRan[kind] = status;
+    } else if (e.kind === "turn_end") {
+      f.summary = typeof p.summary === "string" ? p.summary : "";
+      f.superseded = p.superseded === true;
+    }
+  }
+  return f;
+}
+const coverageOf = (f) => (f.superseded && f.toolResults === 0 ? "turn_boundary" : "per_tool");
+
+function findClaims(summary) {
+  const out = [];
+  const sentences = String(summary).toLowerCase().split(/[.\n;!?]/).map((s) => s.trim()).filter(Boolean);
+  for (const sentence of sentences) {
+    for (const [phrase, lang] of CLAIM_PHRASES) {
+      const at = sentence.indexOf(phrase);
+      if (at < 0) continue;
+      if (out.some((c) => c.phrase !== phrase && c.phrase.includes(phrase) && sentence.includes(c.phrase))) continue;
+      const before = sentence.slice(0, at);
+      out.push({ phrase, lang, negated: GUARDS.some((g) => before.includes(g)) });
+    }
+  }
+  return out;
+}
+
+function verdictOf(f, claims) {
+  const live = claims.filter((c) => !c.negated);
+  const c = f.checks;
+  const total = c.passed + c.failed + c.empty + c.unknown + c.interrupted;
+  if (live.length === 0) return total > 0 ? "checked" : "no_claim";
+  if (coverageOf(f) === "turn_boundary") return "unwitnessed";
+  if (c.failed > 0 || c.empty > 0) return "claim_contradicted";
+  if (f.lastGoodCheckSeq === null) return "unverified_claim";
+  if (f.lastEditSeq !== null && f.lastEditSeq > f.lastGoodCheckSeq) return "stale_check";
+  return "verified";
+}
+
+/// One turn's events → {status, coverage, claims, checks}.
+function recomputeVerification(events) {
+  const f = foldTurn(events);
+  const claims = findClaims(f.summary);
+  return { status: verdictOf(f, claims), coverage: coverageOf(f), claims, checks: f.checks };
+}
+/* verification-rules:end */
+
 async function load(f) {
   $("summary").textContent = ""; $("summary").className = "check"; $("oks").innerHTML = ""; $("notes").innerHTML = ""; $("meta").innerHTML = ""; $("events").innerHTML = ""; $("tsp").innerHTML = "";
   $("result").style.display = "block";
@@ -346,6 +442,33 @@ async function load(f) {
     }
     if (v.kind === "commit" && v.payload?.sha) outcome.commits.push(String(v.payload.sha).slice(0, 10));
   }
+  // F1c: recompute each turn's verification verdict and compare with the
+  // declared line — the one claim in the packet a verifier can re-derive.
+  const byTurn = new Map();
+  for (const e of events) {
+    if (e.stub) continue;
+    let v = {}; try { v = JSON.parse(e.line); } catch {}
+    if (!v.turnId) continue;
+    if (!byTurn.has(v.turnId)) byTurn.set(v.turnId, []);
+    byTurn.get(v.turnId).push(v);
+  }
+  const verif = { agree: 0, mismatch: [], contradicted: [], unverified: 0 };
+  for (const [turnId, turnEvents] of byTurn) {
+    const declared = turnEvents.find((x) => x.kind === "verification");
+    if (!declared) continue;
+    const r = recomputeVerification(turnEvents.filter((x) => x.kind !== "verification").sort((a, b) => a.seq - b.seq));
+    const d = declared.payload?.status ?? "?";
+    if (d !== r.status) verif.mismatch.push(`${turnId.slice(0, 8)} declared ${d}, recomputed ${r.status}`);
+    else {
+      verif.agree++;
+      if (r.status === "claim_contradicted") verif.contradicted.push(`${turnId.slice(0, 8)}: ${declared.payload?.reason ?? ""}`);
+      else if (r.status === "unverified_claim" || r.status === "stale_check") verif.unverified++;
+    }
+  }
+  if (verif.mismatch.length) check("fail", `Verification verdicts do NOT match their evidence: ${verif.mismatch.join("; ")}.`);
+  else if (verif.agree) check("ok", `Verification recomputed for ${verif.agree} turn${verif.agree === 1 ? "" : "s"} from their own lines — every declared verdict matches.`);
+  if (verif.contradicted.length) check("warn", `Claim contradicted by the evidence (recomputed): ${verif.contradicted.join("; ")}.`);
+  else if (verif.unverified) check("warn", `${verif.unverified} turn${verif.unverified === 1 ? "" : "s"} claimed green without a passing check after the last edit (recomputed).`);
   if (outcome.passed || outcome.failed || outcome.empty || outcome.unknown || outcome.commits.length) {
     const parts = [];
     if (outcome.passed || outcome.failed || outcome.empty || outcome.unknown) parts.push(`checks ${outcome.passed} passed, ${outcome.failed} failed${outcome.empty ? `, ${outcome.empty} ran zero tests` : ""}${outcome.unknown ? `, ${outcome.unknown} without exit code` : ""}`);
@@ -384,6 +507,7 @@ async function load(f) {
       else if (v.kind === "session_start") detail = `${p.engine ?? ""}${p.model ? " model=" + p.model : ""}`;
       else if (v.kind === "model_switch") detail = `${p.from ?? "?"} → ${p.to ?? "?"}`;
       else if (v.kind === "tool_call") detail = `tool=${p.tool ?? ""}`;
+      else if (v.kind === "verification") detail = `${p.status ?? "?"} · ${p.reason ?? ""}${p.coverage === "turn_boundary" ? " · coverage: turn boundary" : ""}`;
       else if (v.kind === "check_run") detail = `${p.kind ? p.kind + " " : ""}${p.status ?? "?"}${p.exitCode != null ? " (exit " + p.exitCode + (p.exitCodeVia ? " via " + p.exitCodeVia : "") + ")" : " (no exit code)"} · ${p.command ?? ""}${p.outputSha256 ? " · output sha256 " + String(p.outputSha256).slice(0, 12) + "…" : ""}`;
       else if (v.kind === "commit") detail = `${String(p.sha ?? "").slice(0, 10)} ${p.subject ?? ""}${Array.isArray(p.files) ? " · " + p.files.length + " file(s)" : ""}${p.amend ? " · amend" : ""}`;
       else if (v.kind === "external_evidence") detail = `${p.source ?? "evidence"} · sha256 ${(p.sha256 || "").slice(0, 12)}… · ${p.uri ?? ""}${p.note ? " · " + p.note : ""}`;

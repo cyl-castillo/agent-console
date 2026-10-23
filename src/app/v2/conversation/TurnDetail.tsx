@@ -7,7 +7,14 @@ import { useChangesStore } from "../../../stores/changesStore";
 import { confirmDialog } from "../../../stores/confirmStore";
 import { freshStatus, useLiveStatusStore } from "../../../stores/liveStatusStore";
 import { useProofStore, type TimelineTurn } from "../../../stores/proofStore";
-import { checkGlyph, checkTitle, checkTone } from "./checkStatus";
+import {
+  checkGlyph,
+  checkTitle,
+  checkTone,
+  verificationGlyph,
+  verificationLabel,
+  verificationTone,
+} from "./checkStatus";
 import { useShellStore } from "../../../stores/shellStore";
 import { useToastStore } from "../../../stores/toastStore";
 import { itemsFor, useTranscriptStore } from "../../../stores/transcriptStore";
@@ -137,6 +144,49 @@ export function TurnDetail() {
           </Tooltip>
         )}
       </div>
+      {turn.verification && (
+        <Section title="Verification" testId="detail-verification">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Chip tone={verificationTone(turn.verification.status)} mono>
+              {verificationGlyph(turn.verification.status)}{" "}
+              {verificationLabel(turn.verification.status)}
+            </Chip>
+            {turn.verification.coverage === "turn_boundary" && (
+              <Chip tone="warn">not witnessed per tool call</Chip>
+            )}
+          </div>
+          <div className="text-small text-foreground">{turn.verification.reason}</div>
+          {Object.keys(turn.verification.gates).length > 0 && (
+            <div className="flex flex-wrap gap-1 text-caption">
+              {Object.entries(turn.verification.gates).map(([kind, status]) => (
+                <Chip
+                  key={kind}
+                  mono
+                  tone={
+                    status === "passed"
+                      ? "ok"
+                      : status === "not_run"
+                        ? "neutral"
+                        : checkTone(status)
+                  }
+                  title={
+                    status === "not_run"
+                      ? "This project has this gate; the turn did not run it"
+                      : checkTitle(status)
+                  }
+                >
+                  {kind} {status === "not_run" ? "—" : checkGlyph(status)}
+                </Chip>
+              ))}
+            </div>
+          )}
+          {turn.verification.claims.length > 0 && (
+            <div className="text-caption text-muted-foreground">
+              claimed: {turn.verification.claims.map((c) => `“${c}”`).join(", ")}
+            </div>
+          )}
+        </Section>
+      )}
       <Section title="You" testId="detail-prompt">
         <div className="whitespace-pre-wrap break-words rounded-2 bg-surface-2 px-2 py-1.5 text-foreground">
           {turn.prompt || "(no prompt recorded)"}

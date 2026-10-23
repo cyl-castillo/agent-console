@@ -80,7 +80,12 @@ suggest-only, none of them able to block the core:
 
 - **Tasks** — your Jira queue as one-click seeded agent sessions, plus an
   agenda of due dates and scheduled runs.
-- **Proof** — every session witnessed into a hash-chained evidence ledger
+- **Proof** — every turn closes with a verdict the console computes from
+  what it witnessed, never from what the agent said: *verified* only when a
+  check passed with exit 0 after the last edit, *claim contradicted* when
+  "tests pass" sits over a failed or empty run, *unverified* when nothing
+  ran; the PR gate and the standalone verifier recompute it from the packet.
+  Every session witnessed into a hash-chained evidence ledger
   ([Testigo](https://github.com/cyl-castillo/testigo)); export signed proof
   packets anyone verifies in a browser, or the same ledger as an
   [IETF Agent Audit Trail](https://datatracker.ietf.org/doc/draft-sharif-agent-audit-trail/)
