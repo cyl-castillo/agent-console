@@ -281,6 +281,11 @@ export interface HooksStatus {
   codexInstalled: boolean;
   codexPretooluseInstalled: boolean;
   codexHooksPath: string;
+  /// OpenCode witness plugin (OpenCode has no hooks; the plugin writes the
+  /// same event lines into the session dir).
+  opencodeAvailable: boolean;
+  opencodePluginInstalled: boolean;
+  opencodePluginPath: string;
 }
 
 /// One link in the Testigo evidence chain (mirrors the Rust ProofEvent):

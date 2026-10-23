@@ -35,6 +35,11 @@ const POSTTOOLUSEFAILURE_HOOK: &str = include_str!("../../resources/posttoolusef
 /// checked. Verified on the CLI, not guessed from docs.
 const MIN_CLAUDE_PERMISSIONREQUEST_VERSION: (u64, u64, u64) = (2, 1, 248);
 const INTERRUPT_HOOK: &str = include_str!("../../resources/interrupt-hook.cjs");
+/// OpenCode has no hooks: this plugin, written to the user's OpenCode config,
+/// is what witnesses its sessions (tool results with exit codes, the prompt,
+/// the turn's end). Inert outside an Agent Console terminal.
+const OPENCODE_PLUGIN: &str = include_str!("../../resources/opencode-plugin.js");
+const OPENCODE_PLUGIN_FILE: &str = "agent-console.js";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +68,11 @@ pub struct HooksStatus {
     pub codex_installed: bool,
     pub codex_pretooluse_installed: bool,
     pub codex_hooks_path: PathBuf,
+    /// OpenCode witness plugin (OpenCode has no hooks; the plugin writes the
+    /// same event lines). opencode_available=false ⇒ the CLI isn't installed.
+    pub opencode_available: bool,
+    pub opencode_plugin_installed: bool,
+    pub opencode_plugin_path: PathBuf,
 }
 
 pub struct HooksRuntime {
@@ -255,6 +265,10 @@ impl HooksRuntime {
             &self.pretooluse_script_path,
         )
         .unwrap_or(false);
+        let opencode_plugin_path = opencode_plugin_path();
+        let opencode_plugin_installed = fs::read_to_string(&opencode_plugin_path)
+            .map(|c| c == OPENCODE_PLUGIN)
+            .unwrap_or(false);
         HooksStatus {
             session_dir: self.session_dir.clone(),
             script_path: self.script_path.clone(),
@@ -271,7 +285,29 @@ impl HooksRuntime {
             codex_installed,
             codex_pretooluse_installed,
             codex_hooks_path,
+            opencode_available: opencode_available(),
+            opencode_plugin_installed,
+            opencode_plugin_path,
         }
+    }
+
+    /// Auto-install the OpenCode witness plugin on every startup when the
+    /// `opencode` CLI is present. Content-compared, so an app upgrade that
+    /// ships a newer plugin refreshes the file and nothing is rewritten when
+    /// it already matches. The file is inert outside an Agent Console
+    /// terminal (it checks for the session env and returns no hooks), so the
+    /// user's own OpenCode sessions are untouched. `uninstall()` removes it
+    /// and leaves a marker so this stops re-adding it.
+    pub fn ensure_opencode_plugin_autoinstalled(&self) -> AppResult<bool> {
+        if self.opencode_plugin_uninstalled_marker().exists() || !opencode_available() {
+            return Ok(false);
+        }
+        install_opencode_plugin_at(&opencode_plugin_path())
+    }
+
+    fn opencode_plugin_uninstalled_marker(&self) -> PathBuf {
+        self.script_path
+            .with_file_name(".opencode-plugin-uninstalled")
     }
 
     /// Merge UserPromptSubmit + PreToolUse hooks into ~/.claude/settings.json —
@@ -374,6 +410,11 @@ impl HooksRuntime {
                 // is Codex's, and Claude has no turn-interrupted hook.
                 ("Interrupt", &self.interrupt_script_path),
             ])?;
+        }
+        // An explicit install re-enables the OpenCode plugin after an uninstall.
+        let _ = fs::remove_file(self.opencode_plugin_uninstalled_marker());
+        if opencode_available() {
+            install_opencode_plugin_at(&opencode_plugin_path())?;
         }
         Ok(self.status())
     }
@@ -919,6 +960,16 @@ impl HooksRuntime {
     /// Remove our hook entries from settings.json and ~/.codex/hooks.json.
     /// Other hooks/settings untouched.
     pub fn uninstall(&self) -> AppResult<HooksStatus> {
+        // The OpenCode witness plugin goes too, and a marker keeps the
+        // startup auto-install from putting it back until the next install.
+        let plugin = opencode_plugin_path();
+        if fs::read_to_string(&plugin).map(|c| c == OPENCODE_PLUGIN).unwrap_or(false) {
+            let _ = fs::remove_file(&plugin);
+        }
+        if let Some(parent) = self.opencode_plugin_uninstalled_marker().parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(self.opencode_plugin_uninstalled_marker(), b"1");
         for path in [settings_path(), codex_hooks_path()] {
             if !path.exists() {
                 continue;
@@ -1348,6 +1399,51 @@ fn codex_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Only wire the OpenCode plugin when the CLI is present — same reasoning
+/// as Codex: nothing lands in the config of a tool the user doesn't run.
+fn opencode_available() -> bool {
+    crate::services::claude_cli::opencode_command_in(&std::env::temp_dir(), &["--version"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Where OpenCode loads global plugins from: `$XDG_CONFIG_HOME/opencode/plugins`
+/// (OpenCode 1.19 uses the XDG layout on every platform; `~/.config` when the
+/// variable is unset).
+fn opencode_plugin_path() -> PathBuf {
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"));
+    config_home
+        .join("opencode")
+        .join("plugins")
+        .join(OPENCODE_PLUGIN_FILE)
+}
+
+/// Write the bundled plugin at `path` unless the file already holds exactly
+/// this build's copy. Atomic (temp + rename) so OpenCode never loads a half
+/// file. Returns whether anything was written.
+fn install_opencode_plugin_at(path: &Path) -> AppResult<bool> {
+    if fs::read_to_string(path).map(|c| c == OPENCODE_PLUGIN).unwrap_or(false) {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension(format!("js.{}.tmp", std::process::id()));
+    fs::write(&tmp, OPENCODE_PLUGIN)?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    Ok(true)
+}
+
 /// The native bridge binary's filename (with .exe on Windows).
 #[cfg(windows)]
 const BRIDGE_BIN_NAME: &str = "hook-bridge.exe";
@@ -1613,6 +1709,18 @@ fn handle_event(v: &Value, app: &AppHandle) {
                 }
             }
 
+            // OpenCode's plugin names the model with the prompt (it has no
+            // status line): record it once per session like Claude's.
+            if let (Some(sid), Some(model)) = (str_field(v, "sessionId"), str_field(v, "model")) {
+                let _ = state.testigo.on_session_model(
+                    root.as_ref(),
+                    ts,
+                    str_field(v, "termId").as_deref(),
+                    &sid,
+                    &model,
+                );
+            }
+
             // Auto-snapshot the working tree the prompt ran in. Worktree
             // sessions report their own cwd — snapshotting the project root
             // there would checkpoint the wrong checkout. Fall back to the
@@ -1782,6 +1890,7 @@ fn handle_event(v: &Value, app: &AppHandle) {
             let output_sha256 = str_field(v, "outputSha256");
             let exit_code_via = str_field(v, "exitCodeVia");
             let excerpt_tail = str_field(v, "excerptTail");
+            let observed_via = str_field(v, "observedVia");
             let _ = state.testigo.on_tool_result(
                 &root,
                 ts,
@@ -1806,6 +1915,7 @@ fn handle_event(v: &Value, app: &AppHandle) {
                     interrupted: v.get("interrupted").and_then(|i| i.as_bool()),
                     duration_ms: v.get("durationMs").and_then(|d| d.as_u64()),
                     excerpt_tail: excerpt_tail.as_deref(),
+                    observed_via: observed_via.as_deref(),
                 },
             );
             // A successful `git commit` the agent ran in its terminal is a
@@ -2005,6 +2115,42 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_opencode_plugin_is_written_once_refreshed_on_change_and_inert_in_source() {
+        let dir = std::env::temp_dir().join(format!(
+            "ac-oc-plugin-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let path = dir.join("opencode").join("plugins").join(OPENCODE_PLUGIN_FILE);
+        assert!(install_opencode_plugin_at(&path).unwrap(), "first write");
+        assert_eq!(fs::read_to_string(&path).unwrap(), OPENCODE_PLUGIN);
+        assert!(!install_opencode_plugin_at(&path).unwrap(), "same content: untouched");
+        fs::write(&path, "stale").unwrap();
+        assert!(install_opencode_plugin_at(&path).unwrap(), "older copy refreshed");
+        assert_eq!(fs::read_to_string(&path).unwrap(), OPENCODE_PLUGIN);
+        assert!(
+            fs::read_dir(path.parent().unwrap()).unwrap().count() == 1,
+            "no temp file left behind"
+        );
+        // The source guards on the session env and only appends JSON lines:
+        // nothing in it spawns, connects or reads beyond the plugin input.
+        assert!(OPENCODE_PLUGIN.contains("AGENT_CONSOLE_SESSION_DIR"));
+        assert!(OPENCODE_PLUGIN.contains("events.jsonl"));
+        for forbidden in ["child_process", "fetch(", "node:net", "node:http", "readFileSync"] {
+            assert!(!OPENCODE_PLUGIN.contains(forbidden), "{forbidden}");
+        }
+        // XDG_CONFIG_HOME decides the global plugins dir; HOME/.config otherwise.
+        let _env = crate::test_support::lock_env();
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+        assert_eq!(opencode_plugin_path(), path);
+        std::env::remove_var("XDG_CONFIG_HOME");
+        assert!(opencode_plugin_path().ends_with(
+            Path::new(".config").join("opencode").join("plugins").join(OPENCODE_PLUGIN_FILE)
+        ));
+        let _ = fs::remove_dir_all(&dir);
+    }
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
 

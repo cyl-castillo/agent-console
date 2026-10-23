@@ -148,7 +148,8 @@ ProofEvent {
   deterministas que el modelo no puede rebajar (test editado junto al código que cubre sin que el
   prompt lo pidiera → `block`; resumen que dice "tests pass" sin `check_run` **passed** → `high`;
   desde F1a (2026-10-23) un `check_run` solo es `passed` con exit 0 conocido — `empty` (exit 0 sin
-  correr tests), `unknown` (sin exit code visible) e `interrupted` no cuentan) y el
+  correr tests), `unknown` (sin exit code visible) e `interrupted` no cuentan; desde F1b OpenCode
+  también deja `tool_result` por tool call vía su plugin testigo, con `observedVia: "plugin"`) y el
   veredicto del modelo, que solo puede endurecer. Se registra `review_verdict` (actor
   `agent:reviewer:<engine>`, pinneado al turno y al case) y la respuesta humana
   `review_decision` (`accept` | `override` con razón). Entradas: botón "Review this turn" en la

@@ -186,6 +186,22 @@ export function SkillsPanel() {
                   it.
                 </p>
               )}
+              {hooks?.opencodeAvailable && hooks.opencodePluginInstalled && (
+                <p className="wb-hint">
+                  OpenCode too: it has no hooks, so a witness plugin at{" "}
+                  <code>{hooks.opencodePluginPath}</code> records each tool result with its exit
+                  code, the prompt and the end of the turn. Inert outside an Agent Console terminal.
+                </p>
+              )}
+              {hooks?.opencodeAvailable && !hooks.opencodePluginInstalled && (
+                <p className="wb-hint">
+                  OpenCode sessions are witnessed only at turn boundaries until its plugin is
+                  installed.
+                  <button className="wb-cta" onClick={install}>
+                    install OpenCode plugin
+                  </button>
+                </p>
+              )}
             </div>
           )}
         </section>

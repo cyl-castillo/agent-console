@@ -206,8 +206,9 @@ const CODEX: AgentProfile = {
 /// OpenCode: an open-source CLI over many providers. Models are
 /// `provider/model` ids read from the CLI per project (no static presets);
 /// `#variant` picks a reasoning variant where the model offers one. It has
-/// no hooks, so a terminal session's id is never captured and resume is not
-/// offered; rooms keep their own session ids through the headless runner.
+/// no hooks; the console's witness plugin (installed into OpenCode's config)
+/// reports the session id with the first prompt, so a terminal session
+/// resumes by id (`opencode -s <id>`) exactly like Claude and Codex.
 const OPENCODE: AgentProfile = {
   kind: "opencode",
   label: "OpenCode",
@@ -220,11 +221,19 @@ const OPENCODE: AgentProfile = {
   buildLaunch: (ctx) => {
     let cmd = "opencode";
     let label = "opencode";
+    let note = "starting";
+    // Precise resume by id, as for Claude and Codex: the id comes from our
+    // own plugin's prompt event (never `--continue`, which is global).
+    if (isSafeSessionId(ctx.agentSessionId)) {
+      cmd += ` -s ${ctx.agentSessionId}`;
+      note = "auto-resuming";
+    } else if (ctx.hasScrollback) {
+      note = "starting fresh (no session id captured — the plugin reports it on the first prompt)";
+    }
     if (isValidModel(ctx.model)) {
       cmd += ` --model ${ctx.model}`;
       label += ` · ${ctx.model}`;
     }
-    const note = ctx.hasScrollback ? "starting fresh (OpenCode has no resume by id)" : "starting";
     return { cmd, label, note };
   },
 };

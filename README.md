@@ -62,8 +62,10 @@ The center of the screen is deliberately small, and it hasn't grown since v0.1:
 - Open any local repository; a built-in PTY terminal that auto-runs your agent
   (Claude Code, Codex or OpenCode, per session) and also runs `npm test`, `vim`,
   anything. OpenCode's model list is read live from the CLI (`provider/model`
-  ids for every provider you configured); it has no hooks, so its sessions are
-  not resumed by id and its turns are witnessed only at turn boundaries.
+  ids for every provider you configured). OpenCode has no hooks, so the
+  console installs a small witness plugin into its config: each tool result
+  with its exit code, the prompt and the end of the turn reach the ledger
+  the same way Claude's and Codex's do, and sessions resume by id.
 - Git diff viewer with per-file revert; per-turn working-tree snapshots with
   one-click restore.
 - **Per-tool approval modal** with keyboard flow, live countdown, and durable
