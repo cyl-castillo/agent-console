@@ -1,0 +1,111 @@
+{
+  "_doc": "Shared vectors for the verification contract: the Rust rules (verification_rules.rs) and the JS port (.github/testigo/verification-rules.mjs, embedded in testigo-verifier.html) must agree on every case. Events are one turn's ledger lines in seq order; only kind and payload matter.",
+  "cases": [
+    {
+      "name": "a check that passed after the last edit verifies the claim",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Edit", "toolCanonical": "edit" } },
+        { "kind": "tool_result", "payload": { "tool": "Bash", "toolCanonical": "shell", "command": "npm test", "exitCode": 0 } },
+        { "kind": "check_run", "payload": { "command": "npm test", "kind": "test", "status": "passed", "exitCode": 0 } },
+        { "kind": "turn_end", "payload": { "summary": "Fixed the fixture. All tests pass." } }
+      ],
+      "expected": { "status": "verified", "coverage": "per_tool", "claims": 1 }
+    },
+    {
+      "name": "a claim with no check at all is unverified (Spanish)",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Edit", "toolCanonical": "edit" } },
+        { "kind": "turn_end", "payload": { "summary": "Listo. Todos los tests pasan." } }
+      ],
+      "expected": { "status": "unverified_claim", "coverage": "per_tool", "claims": 1 }
+    },
+    {
+      "name": "a failed check contradicts the claim",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Bash", "toolCanonical": "shell", "command": "npm test", "exitCode": 1, "failed": true } },
+        { "kind": "check_run", "payload": { "command": "npm test", "kind": "test", "status": "failed", "exitCode": 1 } },
+        { "kind": "turn_end", "payload": { "summary": "All tests pass." } }
+      ],
+      "expected": { "status": "claim_contradicted", "coverage": "per_tool", "claims": 1 }
+    },
+    {
+      "name": "a runner that ran zero tests contradicts the claim (the ctest trap)",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Bash", "toolCanonical": "shell", "command": "ctest", "exitCode": 0 } },
+        { "kind": "check_run", "payload": { "command": "ctest", "kind": "test", "status": "empty", "exitCode": 0 } },
+        { "kind": "turn_end", "payload": { "summary": "Done — the test suite passes." } }
+      ],
+      "expected": { "status": "claim_contradicted", "coverage": "per_tool", "claims": 1 }
+    },
+    {
+      "name": "a check that passed BEFORE the last edit is stale",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Bash", "toolCanonical": "shell", "command": "cargo test", "exitCode": 0 } },
+        { "kind": "check_run", "payload": { "command": "cargo test", "kind": "test", "status": "passed", "exitCode": 0 } },
+        { "kind": "tool_result", "payload": { "tool": "apply_patch", "toolCanonical": "edit" } },
+        { "kind": "turn_end", "payload": { "summary": "Refactored; tests pass." } }
+      ],
+      "expected": { "status": "stale_check", "coverage": "per_tool", "claims": 1 }
+    },
+    {
+      "name": "a check without a visible exit code does not verify",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Bash", "toolCanonical": "shell", "command": "npm test" } },
+        { "kind": "check_run", "payload": { "command": "npm test", "kind": "test", "status": "unknown" } },
+        { "kind": "turn_end", "payload": { "summary": "All green." } }
+      ],
+      "expected": { "status": "unverified_claim", "coverage": "per_tool", "claims": 1 }
+    },
+    {
+      "name": "a negated or conditional mention is not a claim",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Edit", "toolCanonical": "edit" } },
+        { "kind": "turn_end", "payload": { "summary": "No pude correr los tests; deberían pasar. The tests should pass once CI runs." } }
+      ],
+      "expected": { "status": "no_claim", "coverage": "per_tool", "claims": 0 }
+    },
+    {
+      "name": "checks without a claim are simply checked",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Bash", "toolCanonical": "shell", "command": "npm run lint", "exitCode": 0 } },
+        { "kind": "check_run", "payload": { "command": "npm run lint", "kind": "lint", "status": "passed", "exitCode": 0 } },
+        { "kind": "turn_end", "payload": { "summary": "Refactored the retry path." } }
+      ],
+      "expected": { "status": "checked", "coverage": "per_tool", "claims": 0 }
+    },
+    {
+      "name": "nothing claimed, nothing checked",
+      "events": [
+        { "kind": "turn_end", "payload": { "summary": "Done." } }
+      ],
+      "expected": { "status": "no_claim", "coverage": "per_tool", "claims": 0 }
+    },
+    {
+      "name": "a claim in a turn nobody witnessed per tool is unwitnessed, not judged",
+      "events": [
+        { "kind": "turn_end", "payload": { "summary": "All tests pass.", "interrupted": true, "superseded": true } }
+      ],
+      "expected": { "status": "unwitnessed", "coverage": "turn_boundary", "claims": 1 }
+    },
+    {
+      "name": "Portuguese claim verified by a later passing check",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "bash", "toolCanonical": "edit" } },
+        { "kind": "tool_result", "payload": { "tool": "bash", "toolCanonical": "shell", "command": "npm test", "exitCode": 0, "observedVia": "plugin" } },
+        { "kind": "check_run", "payload": { "command": "npm test", "kind": "test", "status": "passed", "exitCode": 0 } },
+        { "kind": "turn_end", "payload": { "summary": "Pronto. Todos os testes passam." } }
+      ],
+      "expected": { "status": "verified", "coverage": "per_tool", "claims": 1 }
+    },
+    {
+      "name": "old events without toolCanonical still classify by tool name",
+      "events": [
+        { "kind": "tool_result", "payload": { "tool": "Bash", "command": "npm test", "exitCode": 0 } },
+        { "kind": "check_run", "payload": { "command": "npm test", "status": "passed", "exitCode": 0 } },
+        { "kind": "tool_result", "payload": { "tool": "Write", "command": "src/x.ts" } },
+        { "kind": "turn_end", "payload": { "summary": "tests are passing" } }
+      ],
+      "expected": { "status": "stale_check", "coverage": "per_tool", "claims": 1 }
+    }
+  ]
+}

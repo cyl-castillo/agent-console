@@ -88,6 +88,23 @@ export interface TimelineTurn {
   /// D10: the reviewer agent's verdict on this turn (`review_verdict`) and
   /// the human's answer (`review_decision`), when any.
   review?: { verdict: string; findings: number; reviewer: string; decision?: string };
+  /// F1c: the console's verdict on the turn's own claims (`verification`),
+  /// computed from witnessed lines the moment the turn closed.
+  verification?: TimelineVerification;
+}
+
+export interface TimelineVerification {
+  /// verified · unverified_claim · claim_contradicted · stale_check ·
+  /// checked · no_claim · unwitnessed
+  status: string;
+  reason: string;
+  /// per_tool · turn_boundary
+  coverage: string;
+  checks: { passed: number; failed: number; empty: number; unknown: number; interrupted: number };
+  /// Green claims found in the closing words (negated ones excluded).
+  claims: string[];
+  /// kind → status (passed · failed · empty · unknown · interrupted · not_run).
+  gates: Record<string, string>;
 }
 
 export interface TimelineTool {
@@ -319,6 +336,33 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         capUsd: typeof p.capUsd === "number" ? p.capUsd : (t.budget?.capUsd ?? 0),
         decision: typeof p.decision === "string" ? p.decision : undefined,
         newCapUsd: typeof p.newCapUsd === "number" ? p.newCapUsd : undefined,
+      };
+    } else if (e.kind === "verification") {
+      const checks = (p.checks ?? {}) as Record<string, unknown>;
+      const num = (k: string) => (typeof checks[k] === "number" ? (checks[k] as number) : 0);
+      const gates: Record<string, string> = {};
+      if (p.gates && typeof p.gates === "object") {
+        for (const [k, v] of Object.entries(p.gates as Record<string, { status?: unknown }>)) {
+          if (typeof v?.status === "string") gates[k] = v.status;
+        }
+      }
+      t.verification = {
+        status: typeof p.status === "string" ? p.status : "no_claim",
+        reason: typeof p.reason === "string" ? p.reason : "",
+        coverage: typeof p.coverage === "string" ? p.coverage : "per_tool",
+        checks: {
+          passed: num("passed"),
+          failed: num("failed"),
+          empty: num("empty"),
+          unknown: num("unknown"),
+          interrupted: num("interrupted"),
+        },
+        claims: Array.isArray(p.claims)
+          ? (p.claims as { phrase?: unknown; negated?: unknown }[])
+              .filter((c) => c?.negated !== true && typeof c?.phrase === "string")
+              .map((c) => c.phrase as string)
+          : [],
+        gates,
       };
     } else if (e.kind === "turn_end") {
       if (e.termId && openByTerm.get(e.termId) === t) openByTerm.delete(e.termId);

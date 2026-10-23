@@ -711,8 +711,9 @@ mod tests {
             .unwrap();
 
         // The pre-sign review lists exactly what would be packed.
+        // F1c: closing the turn also writes its `verification` line.
         let pv = preview(&svc, root, Some("jira:FIXY-9")).unwrap();
-        assert_eq!(pv.entries.len(), 4);
+        assert_eq!(pv.entries.len(), 5);
         assert!(
             pv.entries[1].auto_redacted,
             "token prompt flagged in preview"
@@ -723,7 +724,10 @@ mod tests {
         let dest = base.join("out");
         let sum =
             export_with_seed(&svc, root, Some("jira:FIXY-9"), &dest, &seed, &[], None).unwrap();
-        assert_eq!(sum.event_count, 3, "case_link + prompt + turn_end");
+        assert_eq!(
+            sum.event_count, 4,
+            "case_link + prompt + turn_end + verification"
+        );
         assert_eq!(sum.stub_count, 1, "interleaved t2 prompt pruned to stub");
         assert!(sum.redaction_count >= 1, "github token redacted");
         assert!(sum.chain_ok);
@@ -751,7 +755,7 @@ mod tests {
         let statement: Value = serde_json::from_slice(&payload).unwrap();
         assert_eq!(statement["predicateType"], PREDICATE_TYPE);
         let events = statement["predicate"]["events"].as_array().unwrap();
-        assert_eq!(events.len(), 4);
+        assert_eq!(events.len(), 5);
 
         // §2.3: redactionCount is the number of redacted ENTRIES, not hits.
         let pred = &statement["predicate"];

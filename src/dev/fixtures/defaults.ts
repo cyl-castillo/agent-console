@@ -351,6 +351,28 @@ export const proofEvents: ProofEvent[] = [
     },
     T1,
   ),
+  // F1c: the console's verdict, written the moment the turn closed.
+  ev(
+    NOW - h(2) - min(34),
+    "verification",
+    {
+      rulesVersion: 1,
+      status: "checked",
+      reason: "no claim; 2 checks ran (1 passed)",
+      coverage: "per_tool",
+      commands: { total: 2, failed: 0 },
+      checks: { passed: 1, failed: 0, empty: 1, unknown: 0, interrupted: 0 },
+      lastEditSeq: 4,
+      lastCheckSeq: 8,
+      claims: [],
+      gates: {
+        test: { command: "npm test", status: "empty" },
+        lint: { command: "npm run lint", status: "not_run" },
+      },
+    },
+    T1,
+    "console",
+  ),
   ev(
     NOW - h(1) - min(50),
     "prompt",

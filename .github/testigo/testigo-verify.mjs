@@ -25,6 +25,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 import { verifyPacket } from "./verify-core.mjs";
+import { recomputeVerification } from "./verification-rules.mjs";
 
 const [base, head] = process.argv.slice(2);
 if (!base || !head) {
@@ -66,6 +67,10 @@ if (packets.length === 0) {
   let checksPassed = 0;
   let checksFailed = 0;
   let checksInconclusive = 0;
+  // F1c: the console's `verification` line per turn is recomputed here from
+  // the turn's own tool/check/turn_end lines — a verdict the packet merely
+  // declares is worth nothing; one a third party re-derives is.
+  const verifications = []; // { turnId, declared, recomputed, reason, file }
 
   for (const file of packets) {
     const pkt = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -78,6 +83,27 @@ if (packets.length === 0) {
     const st = JSON.parse(Buffer.from(pkt.envelope.payload, "base64").toString("utf8"));
     const events = st.predicate?.events ?? [];
     const parsed = events.filter((e) => typeof e.line === "string").map((e) => JSON.parse(e.line));
+
+    const byTurn = new Map();
+    for (const e of parsed) {
+      if (!e.turnId) continue;
+      if (!byTurn.has(e.turnId)) byTurn.set(e.turnId, []);
+      byTurn.get(e.turnId).push(e);
+    }
+    for (const [turnId, turnEvents] of byTurn) {
+      const declared = turnEvents.find((e) => e.kind === "verification");
+      if (!declared) continue; // pre-F1c ledger: nothing to recompute against
+      const r = recomputeVerification(
+        turnEvents.filter((e) => e.kind !== "verification").sort((a, b) => a.seq - b.seq),
+      );
+      verifications.push({
+        turnId,
+        declared: declared.payload?.status ?? "?",
+        recomputed: r.status,
+        reason: declared.payload?.reason ?? "",
+        file,
+      });
+    }
 
     for (const e of parsed) {
       // Manually redacted events lose their payload; if one of them was a
@@ -143,6 +169,24 @@ if (packets.length === 0) {
       }
     } else {
       out("- ⚠ no git subject in the packet (pre-P2 export?) — evidence not bound to the code");
+    }
+  }
+
+  for (const v of verifications) {
+    const t = v.turnId.slice(0, 8);
+    if (v.declared !== v.recomputed) {
+      failed = true;
+      out(
+        `- ✘ turn \`${t}\`: the packet declares verification **${v.declared}** but the ` +
+          `turn's own lines recompute to **${v.recomputed}** — the verdict does not match its evidence`,
+      );
+    } else if (v.recomputed === "claim_contradicted") {
+      failed = true;
+      out(`- ✘ turn \`${t}\`: **claim contradicted** (recomputed) — ${v.reason}`);
+    } else if (v.recomputed === "unverified_claim" || v.recomputed === "stale_check") {
+      out(`- ⚠ turn \`${t}\`: ${v.recomputed.replace("_", " ")} (recomputed) — ${v.reason}`);
+    } else if (v.recomputed === "verified") {
+      out(`- ✔ turn \`${t}\`: verified (recomputed) — ${v.reason}`);
     }
   }
 

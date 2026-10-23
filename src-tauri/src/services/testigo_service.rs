@@ -775,22 +775,90 @@ impl TestigoService {
         payload: Value,
     ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
-        let turn_id = term_id
-            .and_then(|t| inner.turns.remove(t))
-            .map(|s| s.turn_id);
+        let state = term_id.and_then(|t| inner.turns.remove(t));
+        let turn_id = state.as_ref().map(|s| s.turn_id.clone());
+        let cwd = state.and_then(|s| s.cwd);
         let case = Self::case_for(&inner, term_id);
-        Self::record(
+        let ev = Self::record(
             &mut inner,
             project_root,
             ts,
-            case,
-            turn_id,
+            case.clone(),
+            turn_id.clone(),
             "turn_end",
             term_id.map(String::from),
             session_id.map(String::from),
             "agent",
             payload,
+        )?;
+        // F1c: the verification contract, computed over the turn's own lines
+        // the moment it closes — "did the tests run, after the last edit, and
+        // did they pass?" — as a line of its own, by the console. Best-effort:
+        // a failed fold never undoes the close above.
+        if let Some(tid) = turn_id {
+            let _ = Self::record_verification(
+                &mut inner,
+                project_root,
+                ts,
+                case,
+                tid,
+                term_id,
+                session_id,
+                cwd.as_deref(),
+            );
+        }
+        Ok(ev)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_verification(
+        inner: &mut Inner,
+        project_root: &str,
+        ts: i64,
+        case: String,
+        turn_id: String,
+        term_id: Option<&str>,
+        session_id: Option<&str>,
+        cwd: Option<&str>,
+    ) -> AppResult<ProofEvent> {
+        use crate::services::{gate_discovery, verification_rules as rules};
+        let events = Self::read_events(project_root)?;
+        let facts = rules::fold(
+            events
+                .iter()
+                .filter(|e| e.turn_id.as_deref() == Some(&turn_id)),
+        );
+        let claims = rules::claims(&facts.summary);
+        let (status, reason) = rules::verdict(&facts, &claims);
+        let gates = gate_discovery::discover(Path::new(cwd.unwrap_or(project_root)));
+        let payload = rules::payload(&facts, &claims, status, &reason, &gates);
+        Self::record(
+            inner,
+            project_root,
+            ts,
+            case,
+            Some(turn_id),
+            "verification",
+            term_id.map(String::from),
+            session_id.map(String::from),
+            "console",
+            payload,
         )
+    }
+
+    /// Every line of a project's ledger, parsed. Callers hold (or don't need)
+    /// the lock; `list` is the locked public face.
+    fn read_events(project_root: &str) -> AppResult<Vec<ProofEvent>> {
+        let path = Self::ledger_path(project_root)?;
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = fs::read_to_string(&path)?;
+        Ok(content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| serde_json::from_str::<ProofEvent>(l).ok())
+            .collect())
     }
 
     /// Record what one tool call produced inside the open turn. The hook
@@ -1559,15 +1627,8 @@ impl TestigoService {
         limit: Option<usize>,
     ) -> AppResult<Vec<ProofEvent>> {
         let _g = self.inner.lock();
-        let path = Self::ledger_path(project_root)?;
-        if !path.exists() {
-            return Ok(Vec::new());
-        }
-        let content = fs::read_to_string(&path)?;
-        let mut events: Vec<ProofEvent> = content
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .filter_map(|l| serde_json::from_str::<ProofEvent>(l).ok())
+        let mut events: Vec<ProofEvent> = Self::read_events(project_root)?
+            .into_iter()
             .filter(|e| case_id.is_none_or(|c| e.case_id == c))
             .collect();
         if let Some(n) = limit {
@@ -2344,6 +2405,97 @@ mod tests {
     }
 
     #[test]
+    fn closing_a_turn_writes_its_verification_line_from_the_turns_own_evidence() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-testigo-f1c-{}-{}", std::process::id(), nanos));
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let svc = TestigoService::new();
+        let root = base.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"scripts":{"test":"vitest run","lint":"eslint ."}}"#,
+        )
+        .unwrap();
+        let a = root.to_str().unwrap();
+        // Turn 1: edit, then a passing check, then "all tests pass" → verified.
+        svc.on_prompt(a, 1, Some("t1"), Some("s1"), Some("fix it"), None, Some(a))
+            .unwrap();
+        svc.on_tool_result(
+            a,
+            2,
+            Some("t1"),
+            Some("s1"),
+            Some("Edit"),
+            Some("ok"),
+            false,
+            ToolResultIds {
+                command: Some("src/x.ts"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        svc.on_tool_result(
+            a,
+            3,
+            Some("t1"),
+            Some("s1"),
+            Some("Bash"),
+            Some("Tests: 2 passed"),
+            false,
+            ToolResultIds {
+                command: Some("npm test"),
+                exit_code: Some(0),
+                exit_code_via: Some("claude_success"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let end = svc
+            .on_turn_end(
+                a,
+                4,
+                Some("t1"),
+                Some("s1"),
+                json!({"summary": "Done. All tests pass."}),
+            )
+            .unwrap();
+        let evs = svc.list(a, None, None).unwrap();
+        let v = evs.last().unwrap();
+        assert_eq!(v.kind, "verification");
+        assert_eq!(v.actor, "console");
+        assert_eq!(v.turn_id, end.turn_id);
+        assert_eq!(v.seq, end.seq + 1);
+        assert_eq!(v.payload["status"], "verified");
+        assert_eq!(v.payload["coverage"], "per_tool");
+        assert_eq!(v.payload["checks"]["passed"], 1);
+        assert_eq!(v.payload["gates"]["test"]["status"], "passed");
+        assert_eq!(v.payload["gates"]["lint"]["status"], "not_run");
+        assert_eq!(v.payload["gates"]["lint"]["command"], "npm run lint");
+        assert_eq!(v.payload["claims"][0]["phrase"], "all tests pass");
+        // Turn 2: the same claim with no check → unverified; the chain still verifies.
+        svc.on_prompt(a, 5, Some("t1"), Some("s1"), Some("again"), None, Some(a))
+            .unwrap();
+        svc.on_turn_end(
+            a,
+            6,
+            Some("t1"),
+            Some("s1"),
+            json!({"summary": "Todos los tests pasan."}),
+        )
+        .unwrap();
+        let evs = svc.list(a, None, None).unwrap();
+        assert_eq!(evs.last().unwrap().payload["status"], "unverified_claim");
+        assert!(svc.verify(a).unwrap().ok);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn check_command_allowlist_matches_runners_not_plain_shell() {
         for c in [
             "cargo test",
@@ -2594,17 +2746,21 @@ mod tests {
 
         // list filters by case; limit keeps the most recent.
         let all = svc.list(root, None, None).unwrap();
-        assert_eq!(all.len(), 9);
+        assert_eq!(
+            all.len(),
+            10,
+            "F1c: the closed turn carries its verification line"
+        );
         let case = svc.list(root, Some("jira:FIXY-1"), None).unwrap();
-        assert_eq!(case.len(), 7);
+        assert_eq!(case.len(), 8);
         let last2 = svc.list(root, None, Some(2)).unwrap();
         assert_eq!(last2.len(), 2);
-        assert_eq!(last2[1].seq, 8);
+        assert_eq!(last2[1].seq, 9);
 
         // Chain verifies end to end; seq/prev_hash link up.
         let v = svc.verify(root).unwrap();
         assert!(v.ok, "fresh chain must verify");
-        assert_eq!(v.total, 9);
+        assert_eq!(v.total, 10);
         assert_eq!(all[3].prev_hash, all[2].hash);
 
         // case_link bindings survive a "restart" (fresh service re-reads them).
@@ -2613,12 +2769,12 @@ mod tests {
             .on_prompt(root, 10, Some("t1"), None, Some("again"), None, None)
             .unwrap();
         assert_eq!(p2.case_id, "jira:FIXY-1", "binding rebuilt from ledger");
-        assert_eq!(p2.seq, 9);
+        assert_eq!(p2.seq, 10);
         assert!(svc2.verify(root).unwrap().ok, "cross-restart chain intact");
 
         // head() reports this instance's tail (feeds the Testigo-Head trailer).
         let (hseq, hhash) = svc2.head(root).unwrap().expect("non-empty ledger");
-        assert_eq!(hseq, 9);
+        assert_eq!(hseq, 10);
         assert_eq!(hhash, p2.hash);
 
         // Retention keep-set: what snapshot pins must outlive their expiry.
