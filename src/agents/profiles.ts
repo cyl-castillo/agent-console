@@ -3,10 +3,11 @@
 /// the app stays agent-neutral: it carries an `agent` kind per session and asks
 /// the profile to build the launch command and supply the model presets.
 ///
-/// To add a third agent later, add one entry to PROFILES — nothing else in the
-/// UI hardcodes a specific CLI.
+/// To add an agent, add one entry to PROFILES — nothing else in the UI
+/// hardcodes a specific CLI. OpenCode is the third: its model list is live
+/// (`provider/model` ids per configured provider), see `modelCatalog.ts`.
 
-export type AgentKind = "claude" | "codex";
+export type AgentKind = "claude" | "codex" | "opencode";
 
 /// Default when a session predates the agent field (all old sessions were Claude).
 export const DEFAULT_AGENT: AgentKind = "claude";
@@ -202,13 +203,45 @@ const CODEX: AgentProfile = {
   },
 };
 
+/// OpenCode: an open-source CLI over many providers. Models are
+/// `provider/model` ids read from the CLI per project (no static presets);
+/// `#variant` picks a reasoning variant where the model offers one. It has
+/// no hooks, so a terminal session's id is never captured and resume is not
+/// offered; rooms keep their own session ids through the headless runner.
+const OPENCODE: AgentProfile = {
+  kind: "opencode",
+  label: "OpenCode",
+  icon: "⬡",
+  binName: "opencode",
+  loginCmd: "opencode auth login",
+  models: [],
+  supportsLiveModelSwitch: false,
+  supportsTranscriptFork: false,
+  buildLaunch: (ctx) => {
+    let cmd = "opencode";
+    let label = "opencode";
+    if (isValidModel(ctx.model)) {
+      cmd += ` --model ${ctx.model}`;
+      label += ` · ${ctx.model}`;
+    }
+    const note = ctx.hasScrollback ? "starting fresh (OpenCode has no resume by id)" : "starting";
+    return { cmd, label, note };
+  },
+};
+
 const PROFILES: Record<AgentKind, AgentProfile> = {
   claude: CLAUDE,
   codex: CODEX,
+  opencode: OPENCODE,
 };
 
 /// All profiles in display order (used by the agent chooser).
-export const AGENT_PROFILES: AgentProfile[] = [CLAUDE, CODEX];
+export const AGENT_PROFILES: AgentProfile[] = [CLAUDE, CODEX, OPENCODE];
+
+/// The glyph of an engine, for feeds that mark who spoke.
+export function engineGlyph(engine: AgentKind | string | null | undefined): string {
+  return profileFor(asAgentKind(engine ?? undefined)).icon;
+}
 
 /// Resolve a profile, falling back to the default agent for undefined/unknown.
 export function profileFor(agent: AgentKind | undefined): AgentProfile {
@@ -217,17 +250,19 @@ export function profileFor(agent: AgentKind | undefined): AgentProfile {
 
 /// Narrow a persisted/free-form string to a known AgentKind, or undefined.
 export function asAgentKind(s: string | undefined | null): AgentKind | undefined {
-  return s === "claude" || s === "codex" ? s : undefined;
+  return s === "claude" || s === "codex" || s === "opencode" ? s : undefined;
 }
 
 /// Model/tuning values are interpolated into a shell command written to the PTY,
-/// so they must be shell-safe. Presets and full ids are all `[A-Za-z0-9._-]+`;
-/// anything else is rejected (treated as "no model").
-const MODEL_RE = /^[A-Za-z0-9._-]+$/;
+/// so they must be shell-safe. Presets and full ids are `[A-Za-z0-9._-]+`;
+/// OpenCode ids add `/` (`provider/model`) and `#` (a reasoning variant),
+/// both inert to the shell inside a word. Anything else is rejected
+/// (treated as "no model").
+const MODEL_RE = /^[A-Za-z0-9._\-/#]+$/;
 
 export function isValidModel(model: string | undefined | null): model is string {
   return (
-    typeof model === "string" && model.length > 0 && model.length <= 64 && MODEL_RE.test(model)
+    typeof model === "string" && model.length > 0 && model.length <= 96 && MODEL_RE.test(model)
   );
 }
 

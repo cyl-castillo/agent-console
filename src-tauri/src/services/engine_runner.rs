@@ -8,17 +8,23 @@
 //!
 //! Normalized event mapping (confirmed empirically against both CLIs):
 //!
-//! | normalized   | Claude (`-p --output-format stream-json`) | Codex (`exec --json`)                   |
-//! |--------------|-------------------------------------------|-----------------------------------------|
-//! | resume id    | `result.session_id`                       | `thread.started.thread_id`              |
-//! | final text   | `result.result`                           | `item.completed{agent_message}.text`    |
-//! | tool call    | assistant `tool_use` block                | `item.started{command_execution}`       |
-//! | tokens       | `result.usage` (sans cache reads)         | `turn.completed.usage` (sans cache)     |
-//! | live pulse   | `text_delta` (per token)                  | `item.started` (per item — coarser)     |
-//! | cost (USD)   | `result.total_cost_usd`                   | not reported → 0.0                       |
+//! | normalized   | Claude (`-p --output-format stream-json`) | Codex (`exec --json`)                   | OpenCode (`run --format json`)            |
+//! |--------------|-------------------------------------------|-----------------------------------------|-------------------------------------------|
+//! | resume id    | `result.session_id`                       | `thread.started.thread_id`              | `sessionID` on every event; text mode: `session list` by title |
+//! | final text   | `result.result`                           | `item.completed{agent_message}.text`    | concatenated `text` parts (`part.time.end` set) |
+//! | tool call    | assistant `tool_use` block                | `item.started{command_execution}`       | `tool_use` part (`part.tool`)              |
+//! | tokens       | `result.usage` (sans cache reads)         | `turn.completed.usage` (sans cache)     | `step_finish.part.tokens.{input,output}`  |
+//! | live pulse   | `text_delta` (per token)                  | `item.started` (per item — coarser)     | `step_start`/`tool_use`/`text` (per part) |
+//! | cost (USD)   | `result.total_cost_usd`                   | not reported → 0.0                       | `step_finish.part.cost`, summed           |
+//!
+//! OpenCode has no hooks, so a turn of it leaves in the ledger only what this
+//! runner reports — no per-tool witness. Its MCP entry lives in
+//! `opencode.json` of the working folder (see `opencode_service`), shared by
+//! every participant there, so the connector identifies an OpenCode caller by
+//! its session id (`opencode_identity`) rather than by `--caller`.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,6 +40,18 @@ pub enum Engine {
     #[default]
     Claude,
     Codex,
+    Opencode,
+}
+
+impl Engine {
+    /// Binary base name, as typed on a terminal.
+    pub fn bin_name(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Opencode => "opencode",
+        }
+    }
 }
 
 /// How much the agent is allowed to do during a turn. Maps to each CLI's
@@ -189,6 +207,383 @@ pub fn runner_for(engine: Engine) -> &'static dyn EngineRunner {
     match engine {
         Engine::Claude => &ClaudeRunner,
         Engine::Codex => &CodexRunner,
+        Engine::Opencode => &OpencodeRunner,
+    }
+}
+
+// ---------------- OpenCode ----------------
+
+pub struct OpencodeRunner;
+
+/// Who an OpenCode session speaks for. Filled when the runner creates or
+/// resumes a session with a connector attached; the loopback `/mcp` route
+/// resolves a call that carries `_meta["ai.opencode/sessionID"]` through it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpencodeIdentity {
+    pub project: String,
+    pub job: String,
+    pub caller: String,
+}
+
+type IdentityMap = std::collections::HashMap<String, OpencodeIdentity>;
+
+fn opencode_sessions() -> &'static parking_lot::Mutex<IdentityMap> {
+    static MAP: std::sync::OnceLock<parking_lot::Mutex<IdentityMap>> = std::sync::OnceLock::new();
+    MAP.get_or_init(|| parking_lot::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// The participant whose OpenCode turn is running in each room right now,
+/// keyed by room id. A fresh session's id is only known once its first
+/// event arrives, and the agent may call the connector before that; the
+/// room's turn in flight is the answer then (rooms run one turn at a time).
+fn opencode_turns() -> &'static parking_lot::Mutex<IdentityMap> {
+    static MAP: std::sync::OnceLock<parking_lot::Mutex<IdentityMap>> = std::sync::OnceLock::new();
+    MAP.get_or_init(|| parking_lot::Mutex::new(std::collections::HashMap::new()))
+}
+
+pub fn register_opencode_session(session_id: &str, identity: OpencodeIdentity) {
+    opencode_sessions()
+        .lock()
+        .insert(session_id.to_string(), identity);
+}
+
+/// Resolve an OpenCode caller: by its session id when registered, else by
+/// the turn in flight for `job`.
+pub fn opencode_identity(session_id: Option<&str>, job: &str) -> Option<OpencodeIdentity> {
+    if let Some(sid) = session_id {
+        if let Some(id) = opencode_sessions().lock().get(sid) {
+            return Some(id.clone());
+        }
+    }
+    opencode_turns().lock().get(job).cloned()
+}
+
+fn begin_opencode_turn(identity: &OpencodeIdentity) {
+    opencode_turns()
+        .lock()
+        .insert(identity.job.clone(), identity.clone());
+}
+
+fn end_opencode_turn(job: &str) {
+    opencode_turns().lock().remove(job);
+}
+
+/// `opencode run` argv for one turn. A first turn creates the session
+/// (`--title` names it; a JSON run reports its id on the first event, a text
+/// run is looked up by title afterwards); a later turn continues it with
+/// `--session`. `json` asks for `--format json`: OpenCode V1 (1.19.x) stalls
+/// forever in that mode whenever an MCP server is configured (verified: even
+/// a `/bin/false` server; the default format runs fine), so a turn with the
+/// connector attached runs in the default format unless
+/// `AGENT_CONSOLE_OPENCODE_JSON_MCP` is set (V2 users). The prompt travels as
+/// the positional argument: `opencode run` takes no stdin prompt, which caps a
+/// turn at the Windows 32 KiB command line (the room prompt stays well under
+/// it). A model value `provider/model#variant` splits into `--model` +
+/// `--variant`.
+fn opencode_run_args(
+    ctx: &RunCtx,
+    session_id: Option<&str>,
+    title: &str,
+    json: bool,
+) -> Vec<String> {
+    let mut args: Vec<String> = vec!["run".into()];
+    if json {
+        args.push("--format".into());
+        args.push("json".into());
+    }
+    match session_id {
+        Some(id) => {
+            args.push("--session".into());
+            args.push(id.into());
+        }
+        None => {
+            args.push("--title".into());
+            args.push(title.into());
+        }
+    }
+    match ctx.tools {
+        // OpenCode's built-in `plan` agent is read-only by design; `build`
+        // with `--auto` approves its own tool calls, since nobody is at the
+        // prompt.
+        ToolPolicy::ReadOnly | ToolPolicy::Plan => {
+            args.push("--agent".into());
+            args.push("plan".into());
+        }
+        ToolPolicy::AcceptEdits | ToolPolicy::Full => {
+            args.push("--agent".into());
+            args.push("build".into());
+            args.push("--auto".into());
+        }
+    }
+    if !ctx.model.is_empty() {
+        let (model, variant) = match ctx.model.split_once('#') {
+            Some((m, v)) if !v.is_empty() => (m, Some(v)),
+            _ => (ctx.model, None),
+        };
+        args.push("--model".into());
+        args.push(model.into());
+        if let Some(v) = variant {
+            args.push("--variant".into());
+            args.push(v.into());
+        }
+    }
+    args.push(ctx.prompt.into());
+    args
+}
+
+/// Whether a turn may use `--format json`: always without the connector;
+/// with it only when the user vouches for a CLI that streams JSON alongside
+/// MCP servers (see `opencode_run_args`).
+fn opencode_json_mode(with_mcp: bool) -> bool {
+    !with_mcp || std::env::var_os("AGENT_CONSOLE_OPENCODE_JSON_MCP").is_some()
+}
+
+/// Drop ANSI escape sequences from a default-format line.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for d in chars.by_ref() {
+                    if d.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if c != '\r' {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The newest session titled `title` in `cwd`, from `opencode session list
+/// --format json` (`[{id, title, created, directory}]`).
+fn pick_session_by_title(raw: &str, title: &str, cwd: &Path) -> Option<String> {
+    let rows: Vec<Value> = serde_json::from_str(raw).ok()?;
+    let here = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    rows.iter()
+        .filter(|r| r.get("title").and_then(Value::as_str) == Some(title))
+        .filter(|r| {
+            r.get("directory")
+                .and_then(Value::as_str)
+                .map(|d| std::fs::canonicalize(d).unwrap_or_else(|_| PathBuf::from(d)) == here)
+                .unwrap_or(false)
+        })
+        .max_by_key(|r| r.get("created").and_then(Value::as_u64).unwrap_or(0))
+        .and_then(|r| r.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+}
+
+fn lookup_opencode_session(cwd: &Path, title: &str) -> Option<String> {
+    let mut cmd =
+        claude_cli::opencode_command_in(cwd, &["session", "list", "--format", "json", "-n", "50"]);
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    pick_session_by_title(&String::from_utf8_lossy(&out.stdout), title, cwd)
+}
+
+/// What one `--format json` line contributes to the turn.
+#[derive(Debug, Default)]
+struct OpencodeTurn {
+    text: String,
+    tokens: u64,
+    cost_usd: f64,
+    /// Every `sessionID` seen; must be exactly the session we ran.
+    sessions: std::collections::HashSet<String>,
+    /// The last generation ended with a stop (`step_finish.reason == stop`)
+    /// or a finished text part — earlier text does not prove completion.
+    final_seen: bool,
+    error: bool,
+}
+
+fn opencode_fold(turn: &mut OpencodeTurn, v: &Value, on_activity: &ActivitySink) {
+    if let Some(sid) = v.get("sessionID").and_then(Value::as_str) {
+        turn.sessions.insert(sid.to_string());
+    }
+    let part = v.get("part").cloned().unwrap_or(Value::Null);
+    match v.get("type").and_then(Value::as_str) {
+        Some("step_start") => turn.final_seen = false,
+        Some("tool_use") => {
+            turn.final_seen = false;
+            let name = part.get("tool").and_then(Value::as_str).unwrap_or("tool");
+            let detail = summarize_tool_input(name, part.get("state").and_then(|s| s.get("input")));
+            on_activity("tool", name, &detail);
+        }
+        Some("text") => {
+            if let Some(t) = part.get("text").and_then(Value::as_str) {
+                if !t.is_empty() {
+                    turn.text.push_str(t);
+                    on_activity("text", "", t);
+                }
+            }
+            turn.final_seen = part.pointer("/time/end").is_some_and(|e| !e.is_null());
+        }
+        Some("reasoning") => {
+            if let Some(t) = part.get("text").and_then(Value::as_str) {
+                on_activity("thinking", "", &truncate(t, 280));
+            }
+        }
+        Some("step_finish") => {
+            turn.final_seen = part.get("reason").and_then(Value::as_str) == Some("stop");
+            let tokens = part.get("tokens");
+            let get = |k: &str| {
+                tokens
+                    .and_then(|t| t.get(k))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+            };
+            turn.tokens = turn.tokens.saturating_add(get("input") + get("output"));
+            turn.cost_usd += part.get("cost").and_then(Value::as_f64).unwrap_or(0.0);
+        }
+        Some("error") => turn.error = true,
+        _ => {}
+    }
+}
+
+impl EngineRunner for OpencodeRunner {
+    fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
+        // The connector rides on `opencode.json` of the working folder, not
+        // on argv; written before the run so a fresh OpenCode picks it up.
+        let identity = ctx.mcp.as_ref().map(|mcp| OpencodeIdentity {
+            project: mcp.project.to_string(),
+            job: mcp.job.to_string(),
+            caller: mcp.caller.to_string(),
+        });
+        if let Some(mcp) = &ctx.mcp {
+            crate::services::opencode_service::ensure_config_entry(
+                ctx.cwd,
+                mcp.bridge,
+                mcp.project,
+                mcp.job,
+            )
+            .map_err(|e| AppError::Other(format!("opencode connector config: {e}")))?;
+        }
+        if let Some(id) = &identity {
+            if let Some(sid) = ctx.resume {
+                register_opencode_session(sid, id.clone());
+            }
+            begin_opencode_turn(id);
+        }
+        // Unique per turn so a text-mode run can be found again by title.
+        let title = format!(
+            "Agent Console · {} · {}",
+            ctx.mcp.as_ref().map(|m| m.job).unwrap_or("room"),
+            uuid::Uuid::new_v4().simple()
+        );
+        let json = opencode_json_mode(ctx.mcp.is_some());
+        let args = opencode_run_args(ctx, ctx.resume, &title, json);
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let mut cmd = claude_cli::opencode_command_in(ctx.cwd, &arg_refs);
+        let result = (|| {
+            let mut child = cmd.spawn().map_err(|e| {
+                AppError::Other(format!("failed to spawn `opencode`: {e}. Is it on PATH?"))
+            })?;
+            let stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| AppError::Other("opencode produced no stdout pipe".into()))?;
+            let err_handle = drain_stderr(child.stderr.take());
+            let local = ChildSlot::default();
+            let slot = park(ctx.child_slot, &local, child);
+
+            let mut turn = OpencodeTurn::default();
+            let mut text_lines: Vec<String> = Vec::new();
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if json {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let Ok(v) = serde_json::from_str::<Value>(line) else {
+                        continue;
+                    };
+                    // A fresh session names itself on its first event: bind it to
+                    // the participant now, so a connector call mid-turn resolves
+                    // by session id and a resumed turn later finds it too.
+                    if ctx.resume.is_none() && turn.sessions.is_empty() {
+                        if let (Some(sid), Some(id)) =
+                            (v.get("sessionID").and_then(Value::as_str), &identity)
+                        {
+                            register_opencode_session(sid, id.clone());
+                        }
+                    }
+                    opencode_fold(&mut turn, &v, on_activity);
+                } else {
+                    // Default format: the agent's text, one line at a time —
+                    // no tokens, no tool events (the V1 JSON stream is not
+                    // available with MCP, see `opencode_run_args`).
+                    let clean = strip_ansi(&line);
+                    if std::env::var_os("AGENT_CONSOLE_OPENCODE_DEBUG").is_some() {
+                        eprintln!("opencode stdout: {line:?} -> {clean:?}");
+                    }
+                    if !clean.trim().is_empty() {
+                        on_activity("text", "", &format!("{clean}\n"));
+                    }
+                    text_lines.push(clean);
+                }
+            }
+            // Keep stderr: a default-format run that says nothing on stdout
+            // explains itself there (a refused model, a dead MCP server, a
+            // login prompt), and the error below quotes it.
+            let stderr_text = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+            finish_with_stderr(unpark(slot)?.wait(), &stderr_text, "opencode")?;
+            if json {
+                let session_id = match ctx.resume {
+                    Some(id) => id.to_string(),
+                    None => turn.sessions.iter().next().cloned().unwrap_or_default(),
+                };
+                let foreign = turn.sessions.iter().any(|s| s != &session_id);
+                if session_id.is_empty()
+                    || foreign
+                    || turn.text.is_empty()
+                    || !turn.final_seen
+                    || turn.error
+                {
+                    return Err(AppError::Other(
+                        "OpenCode did not complete the correct turn (no final text, an error, or another session's events)".into(),
+                    ));
+                }
+                return Ok(TurnOutput {
+                    text: turn.text,
+                    session_id: Some(session_id),
+                    tokens: turn.tokens,
+                    cost_usd: turn.cost_usd,
+                });
+            }
+            let text = text_lines.join("\n").trim().to_string();
+            if text.is_empty() {
+                return Err(AppError::Other(format!(
+                    "OpenCode produced no reply (default-format run of `{}`; stderr: {})",
+                    claude_cli::opencode_bin(),
+                    truncate(strip_ansi(&stderr_text).trim(), 600)
+                )));
+            }
+            let session_id = match ctx.resume {
+                Some(id) => Some(id.to_string()),
+                None => lookup_opencode_session(ctx.cwd, &title),
+            };
+            if let (Some(sid), Some(id)) = (&session_id, &identity) {
+                register_opencode_session(sid, id.clone());
+            }
+            Ok(TurnOutput {
+                text,
+                session_id,
+                tokens: 0,
+                cost_usd: 0.0,
+            })
+        })();
+        if let Some(id) = &identity {
+            end_opencode_turn(&id.job);
+        }
+        result
     }
 }
 
@@ -563,8 +958,17 @@ fn finish(
     err_handle: Option<std::thread::JoinHandle<String>>,
     bin: &str,
 ) -> AppResult<()> {
-    let status = status?;
     let err = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+    finish_with_stderr(status, &err, bin)
+}
+
+/// `finish` for a caller that already drained stderr (and wants to keep it).
+fn finish_with_stderr(
+    status: std::io::Result<std::process::ExitStatus>,
+    err: &str,
+    bin: &str,
+) -> AppResult<()> {
+    let status = status?;
     if !status.success() {
         let mut msg = format!(
             "{bin} exited with status {status}: {}",
@@ -576,7 +980,7 @@ fn finish(
         if bin == "claude" {
             if let Some(hint) = crate::services::claude_cli::logged_out_hint() {
                 msg.push_str(&hint);
-            } else if let Some(hint) = crate::services::claude_cli::failure_hint(&err) {
+            } else if let Some(hint) = crate::services::claude_cli::failure_hint(err) {
                 // Text heuristics second: an expired login the probe missed,
                 // or a configured model newer than this CLI.
                 msg.push_str(&hint);
@@ -860,6 +1264,204 @@ mod tests {
         assert!(over.ends_with(r#"required=true,default_tools_approval_mode="approve"}"#));
         // Still reads the prompt from stdin.
         assert_eq!(args.last().map(String::as_str), Some("-"));
+    }
+
+    #[test]
+    fn opencode_run_args_map_policy_model_and_prompt() {
+        let ctx = RunCtx {
+            cwd: Path::new("."),
+            model: "anthropic/claude-sonnet-4",
+            tools: ToolPolicy::ReadOnly,
+            prompt: "Read the README\nand report its title",
+            resume: None,
+            child_slot: None,
+            mcp: None,
+        };
+        // A first turn creates the session by title; a later one continues it.
+        let args = opencode_run_args(&ctx, None, "Agent Console · room-1", true);
+        assert_eq!(args[..3], ["run", "--format", "json"]);
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--title", "Agent Console · room-1"]));
+        assert!(!args.iter().any(|a| a == "--session"));
+        assert!(args.windows(2).any(|w| w == ["--agent", "plan"]));
+        assert!(
+            !args.iter().any(|a| a == "--auto"),
+            "plan turns never auto-approve"
+        );
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--model", "anthropic/claude-sonnet-4"]));
+        assert!(!args.iter().any(|a| a == "--variant"));
+        assert_eq!(args.last().map(String::as_str), Some(ctx.prompt));
+        let edits = RunCtx {
+            tools: ToolPolicy::AcceptEdits,
+            model: "openai/gpt-5#high",
+            ..ctx
+        };
+        // Text mode (the connector attached on V1): no `--format json`.
+        let args = opencode_run_args(&edits, Some("ses_1"), "ignored", false);
+        assert_eq!(args[0], "run");
+        assert!(!args.iter().any(|a| a == "--format"));
+        assert!(args.windows(2).any(|w| w == ["--session", "ses_1"]));
+        assert!(!args.iter().any(|a| a == "--title"));
+        assert!(args.windows(3).any(|w| w == ["--agent", "build", "--auto"]));
+        assert!(args.windows(2).any(|w| w == ["--model", "openai/gpt-5"]));
+        assert!(args.windows(2).any(|w| w == ["--variant", "high"]));
+        assert!(opencode_json_mode(false));
+    }
+
+    #[test]
+    fn opencode_text_mode_helpers_strip_ansi_and_find_the_session_by_title() {
+        assert_eq!(strip_ansi("\u{1b}[32mPONG\u{1b}[0m\r"), "PONG");
+        assert_eq!(strip_ansi("plain"), "plain");
+        let cwd = std::env::temp_dir();
+        let here = cwd.to_string_lossy();
+        let raw = serde_json::json!([
+            { "id": "ses_old", "title": "Agent Console · r · a", "created": 1, "directory": here },
+            { "id": "ses_new", "title": "Agent Console · r · a", "created": 2, "directory": here },
+            { "id": "ses_other", "title": "Agent Console · r · a", "created": 3, "directory": "/definitely/elsewhere" },
+            { "id": "ses_x", "title": "something else", "created": 4, "directory": here }
+        ])
+        .to_string();
+        assert_eq!(
+            pick_session_by_title(&raw, "Agent Console · r · a", &cwd).as_deref(),
+            Some("ses_new")
+        );
+        assert_eq!(pick_session_by_title(&raw, "nope", &cwd), None);
+        assert_eq!(pick_session_by_title("not json", "x", &cwd), None);
+    }
+
+    // Live end-to-end through the real `opencode` CLI with the connector
+    // attached (the app is not running, so the tool answers "not reachable"
+    // — which proves OpenCode → opencode.json → hook-bridge → loopback).
+    // Ignored by default: needs opencode on PATH and spends a free-model turn.
+    //   cargo test --lib engine_runner -- --ignored --nocapture opencode_runner_live
+    #[test]
+    #[ignore]
+    fn opencode_runner_live_round_trip() {
+        let dir = std::env::temp_dir().join(format!(
+            "engine-runner-opencode-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bridge = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/hook-bridge");
+        assert!(
+            bridge.is_file(),
+            "build the bridge first: cargo build -p hook-bridge"
+        );
+        let attach = McpAttach {
+            bridge: &bridge,
+            project: &dir.to_string_lossy(),
+            job: "room-live-test",
+            caller: "p1",
+        };
+        let ctx = RunCtx {
+            cwd: &dir,
+            model: "",
+            tools: ToolPolicy::ReadOnly,
+            prompt: "Call the tool agent_console_list_participants once and reply with ONLY the exact text it returned, quoted verbatim.",
+            resume: None,
+            child_slot: None,
+            mcp: Some(attach),
+        };
+        let seen = std::cell::RefCell::new(Vec::<String>::new());
+        let sink =
+            |kind: &str, _label: &str, text: &str| seen.borrow_mut().push(format!("{kind}:{text}"));
+        let out = OpencodeRunner
+            .run(&ctx, &sink)
+            .expect("opencode turn should succeed");
+        eprintln!(
+            "text={:?} session={:?} activity={:?}",
+            out.text,
+            out.session_id,
+            seen.borrow()
+        );
+        assert!(
+            out.text.contains("not reachable") || out.text.contains("Unknown job"),
+            "the connector answered through the bridge: {}",
+            out.text
+        );
+        assert!(
+            out.session_id
+                .as_deref()
+                .is_some_and(|s| s.starts_with("ses_")),
+            "session found by title"
+        );
+        assert_eq!(
+            opencode_identity(out.session_id.as_deref(), "room-live-test").map(|i| i.caller),
+            Some("p1".into())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn opencode_events_fold_into_text_tokens_cost_and_completion() {
+        let lines = [
+            r#"{"type":"step_start","sessionID":"ses_1","part":{}}"#,
+            r#"{"type":"tool_use","sessionID":"ses_1","part":{"tool":"read","state":{"input":{"filePath":"README.md"}}}}"#,
+            r#"{"type":"text","sessionID":"ses_1","part":{"text":"The title is ","time":{"start":1}}}"#,
+            r#"{"type":"text","sessionID":"ses_1","part":{"text":"Demo.","time":{"start":1,"end":2}}}"#,
+            r#"{"type":"step_finish","sessionID":"ses_1","part":{"reason":"stop","tokens":{"input":120,"output":30,"cache":{"read":500}},"cost":0.0012}}"#,
+        ];
+        let seen = std::cell::RefCell::new(Vec::<(String, String)>::new());
+        let sink = |kind: &str, label: &str, _text: &str| {
+            seen.borrow_mut().push((kind.into(), label.into()))
+        };
+        let mut turn = OpencodeTurn::default();
+        for l in lines {
+            opencode_fold(&mut turn, &serde_json::from_str(l).unwrap(), &sink);
+        }
+        assert_eq!(turn.text, "The title is Demo.");
+        assert_eq!(turn.tokens, 150, "cache reads are not new tokens");
+        assert!((turn.cost_usd - 0.0012).abs() < 1e-9);
+        assert!(turn.final_seen && !turn.error);
+        assert_eq!(turn.sessions.len(), 1);
+        assert_eq!(seen.borrow()[0], ("tool".to_string(), "read".to_string()));
+        // A new step after the text means the generation is not final.
+        opencode_fold(
+            &mut turn,
+            &serde_json::from_str(r#"{"type":"step_start","sessionID":"ses_1","part":{}}"#)
+                .unwrap(),
+            &sink,
+        );
+        assert!(!turn.final_seen);
+        // Events of another session are a failed turn; so is an error event.
+        opencode_fold(
+            &mut turn,
+            &serde_json::from_str(r#"{"type":"error","sessionID":"ses_2","part":{}}"#).unwrap(),
+            &sink,
+        );
+        assert!(turn.error && turn.sessions.len() == 2);
+    }
+
+    #[test]
+    fn opencode_callers_resolve_by_session_then_by_the_turn_in_flight() {
+        let id = OpencodeIdentity {
+            project: "/p".into(),
+            job: "r-oc".into(),
+            caller: "p2".into(),
+        };
+        assert!(opencode_identity(Some("ses_x"), "r-oc").is_none());
+        // Turn started, session id not yet seen: the room's turn answers.
+        begin_opencode_turn(&id);
+        assert_eq!(
+            opencode_identity(None, "r-oc").map(|i| i.caller),
+            Some("p2".into())
+        );
+        assert_eq!(
+            opencode_identity(Some("ses_unknown"), "r-oc").map(|i| i.caller),
+            Some("p2".into())
+        );
+        assert!(opencode_identity(None, "other-room").is_none());
+        // First event named the session: bound for good, even after the turn ends.
+        register_opencode_session("ses_9", id.clone());
+        end_opencode_turn("r-oc");
+        assert!(opencode_identity(None, "r-oc").is_none());
+        assert_eq!(
+            opencode_identity(Some("ses_9"), "r-oc").map(|i| i.caller),
+            Some("p2".into())
+        );
     }
 
     #[test]

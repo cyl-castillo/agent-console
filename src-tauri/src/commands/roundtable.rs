@@ -186,6 +186,15 @@ pub fn roundtable_resolve_pending(
     state.connector.resolve_pending(&root, &pending_id, None)
 }
 
+/// OpenCode's live model catalog for the open project (`provider/model` ids).
+#[tauri::command(async)]
+pub fn opencode_models(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::services::opencode_service::OpencodeModel>> {
+    let root = project_root(&state)?;
+    crate::services::opencode_service::list_models(std::path::Path::new(&root))
+}
+
 // ----- Jobs board (port of ai-connector's job manager) -----
 
 /// The project's jobs board: every job room with its column, plus the

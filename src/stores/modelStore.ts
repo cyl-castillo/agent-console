@@ -25,7 +25,7 @@ const AGENT_KEY_PREFIX = "agent-console:agent:";
 function readAgent(root: string): AgentKind | undefined {
   try {
     const v = localStorage.getItem(AGENT_KEY_PREFIX + root);
-    return v === "claude" || v === "codex" ? v : undefined;
+    return v === "claude" || v === "codex" || v === "opencode" ? v : undefined;
   } catch {
     return undefined;
   }

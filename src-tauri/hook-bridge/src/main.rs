@@ -1490,12 +1490,16 @@ struct McpIdentity {
     project: String,
     /// The room, for the connector; the console server has none.
     job: Option<String>,
+    /// Empty for a connector entry OpenCode reads from `opencode.json` (one
+    /// file per folder serves every participant): each call then carries
+    /// OpenCode's session id and the app resolves the participant from it.
     caller: String,
 }
 
 impl McpIdentity {
-    /// `--project P --job J --caller C` in any order; all three required for
-    /// the connector, `--job` absent for the console server.
+    /// `--project P --job J --caller C` in any order; `--job` required for
+    /// the connector (absent for the console server), `--caller` optional
+    /// only for the connector.
     fn from_args(server: McpServer, args: &[String]) -> Option<Self> {
         let mut project = None;
         let mut job = None;
@@ -1519,11 +1523,15 @@ impl McpIdentity {
                 None
             }
         };
+        let caller = match server {
+            McpServer::Connector => caller.unwrap_or_default(),
+            McpServer::Console => caller?,
+        };
         Some(Self {
             server,
             project: project?,
             job,
-            caller: caller?,
+            caller,
         })
     }
 }
@@ -1628,6 +1636,16 @@ fn mcp_call(identity: &McpIdentity, relay: &dyn McpRelay, params: &Value) -> Val
     if let Some(job) = &identity.job {
         body["job"] = json!(job);
     }
+    if identity.caller.is_empty() {
+        // OpenCode names its session on every call: `_meta["ai.opencode/sessionID"]`.
+        if let Some(sid) = params
+            .get("_meta")
+            .and_then(|m| m.get("ai.opencode/sessionID"))
+            .and_then(Value::as_str)
+        {
+            body["opencodeSession"] = Value::String(sid.to_string());
+        }
+    }
     let body = body.to_string();
     match relay.relay(&body) {
         None => mcp_text_result(
@@ -1690,7 +1708,7 @@ fn run_mcp(server: McpServer, args: &[String]) {
     let Some(identity) = McpIdentity::from_args(server, args) else {
         match server {
             McpServer::Connector => eprintln!(
-                "hook-bridge mcp: usage: mcp --project <root> --job <room id> --caller <participant id>"
+                "hook-bridge mcp: usage: mcp --project <root> --job <room id> [--caller <participant id>]"
             ),
             McpServer::Console => eprintln!(
                 "hook-bridge console-mcp: usage: console-mcp --project <root> --caller <agent name>"
@@ -2404,7 +2422,13 @@ mod tests {
             McpIdentity::from_args(McpServer::Connector, &ok),
             Some(identity())
         );
-        let missing = ["--project", "/proj", "--job", "room-1"].map(String::from);
+        // No --caller on the connector: an OpenCode entry; the caller comes with each call.
+        let no_caller = ["--project", "/proj", "--job", "room-1"].map(String::from);
+        assert_eq!(
+            McpIdentity::from_args(McpServer::Connector, &no_caller).map(|i| i.caller),
+            Some(String::new())
+        );
+        let missing = ["--project", "/proj"].map(String::from);
         assert_eq!(McpIdentity::from_args(McpServer::Connector, &missing), None);
         let unknown = [
             "--project",
