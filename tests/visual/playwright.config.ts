@@ -13,7 +13,11 @@ export default defineConfig({
   outputDir: webkit ? "out/results-webkit" : "out/results",
   fullyParallel: true,
   workers: process.env.CI ? 2 : 4,
-  retries: 0,
+  // One retry on CI only: the F3 cards spec flaked three times on unrelated
+  // PRs (the card vanished mid-click under runner load) and passes locally
+  // every time. The retry keeps a trace (see `use.trace`) so the next flake
+  // leaves evidence in the uploaded results instead of a red check.
+  retries: process.env.CI ? 1 : 0,
   reporter: [
     ["list"],
     // Argos uploads the screenshots for cross-run comparison when ARGOS_TOKEN
@@ -21,6 +25,7 @@ export default defineConfig({
     ["@argos-ci/playwright/reporter", { uploadToArgos: Boolean(process.env.ARGOS_TOKEN) }],
   ],
   use: {
+    trace: "on-first-retry",
     baseURL: `http://127.0.0.1:${port}`,
     ...(webkit ? devices["Desktop Safari"] : devices["Desktop Chrome"]),
     // Argos' recommended flags: no subpixel AA or hinting differences between
