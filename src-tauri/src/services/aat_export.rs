@@ -233,6 +233,17 @@ fn map_kind(e: &ProofEvent) -> Mapped {
         // success — the packet shows the gate was not met by evidence).
         // F8: who may answer from a paired device, and from where the desktop
         // listens — both the human's acts, before any remote decision.
+        // F9: the fan-out's comparison is an observation; the pick is a decision.
+        "fanout_result" => Mapped {
+            action_type: "lifecycle",
+            outcome: "success",
+            phase: "post_execution",
+        },
+        "fanout_decision" => Mapped {
+            action_type: "decision",
+            outcome: "success",
+            phase: "post_execution",
+        },
         "remote_device" | "remote_listener" => Mapped {
             action_type: "decision",
             outcome: "success",
@@ -717,6 +728,8 @@ Mapping from the Testigo ledger (the console's native chain):
 | trust_decision | decision | pre_execution | success (trusted) / denied (declined) |
 | policy_set | decision | pre_execution | success (the approval policy in force; its hash rides on later approval_decision lines) |
 | pr_link | lifecycle | post_execution | success (the PR bound to the branch's commits, turns and verdicts) |
+| fanout_result | lifecycle | post_execution | success (N agents on the same prompt in twin worktrees: each one's diff, checks and verdict) |
+| fanout_decision | decision | post_execution | success (the human applied one candidate, or discarded all) |
 | remote_device | decision | pre_execution | success (a device paired, re-scoped or revoked by the human) |
 | remote_listener | decision | pre_execution | success (the remote-decisions listener started or stopped, with its bind) |
 | pr_autofix | decision | post_execution | success (review comments handed to the agent as a prompt) |

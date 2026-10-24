@@ -36,6 +36,8 @@ pub struct AppState {
     pub remote_server: Mutex<Option<crate::services::transport::ServerHandle>>,
     pub git_watcher: GitWatcher,
     pub roundtable: RoundtableService,
+    /// F9: fan-outs (N agents, one prompt, twin worktrees).
+    pub fanout: crate::services::fanout_service::FanOutService,
     pub scheduler: SchedulerService,
     pub voice: VoiceService,
     pub tts: TtsService,
@@ -77,6 +79,7 @@ impl AppState {
             remote_server: Mutex::new(None),
             git_watcher: GitWatcher::new(),
             roundtable: RoundtableService::new(),
+            fanout: crate::services::fanout_service::FanOutService::new(),
             scheduler: SchedulerService::new(),
             voice: VoiceService::default(),
             tts: TtsService::default(),

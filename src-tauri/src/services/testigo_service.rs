@@ -1655,6 +1655,33 @@ impl TestigoService {
         )
     }
 
+    /// F9: a fan-out's outcome (`fanout_result`, actor console: every
+    /// candidate's diff, checks and verdict) and the human's pick
+    /// (`fanout_decision`). `unbound`: a fan-out is not a session's turn.
+    pub fn on_fanout(
+        &self,
+        project_root: &str,
+        ts: i64,
+        kind: &str,
+        actor: &str,
+        payload: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            "unbound".into(),
+            None,
+            kind,
+            None,
+            None,
+            actor,
+            payload,
+        )
+    }
+
     /// F8: a remote device paired, re-scoped or revoked (`remote_device`) and
     /// the listener started or stopped with its bind (`remote_listener`) —
     /// the human's acts that decide who can answer from afar. `unbound`.

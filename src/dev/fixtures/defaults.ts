@@ -37,6 +37,7 @@ import type {
   PrComment,
   PrOverview,
   RemoteStatus,
+  FanOut,
 } from "../../types/domain";
 import { emit } from "../tauri-shim/event";
 import type { FixtureMap } from "./registry";
@@ -858,6 +859,61 @@ export const runHistory: RunRecord[] = [
   },
 ];
 
+/// F9: a finished fan-out — the same prompt, two agents, two different
+/// outcomes to compare.
+export const fanoutDemo: FanOut = {
+  id: "fo-demo-1",
+  project: ROOT,
+  problem: "Add a retry to the token refresh and cover it with a test",
+  baseBranch: "main",
+  startedAtMs: NOW - min(42),
+  finishedAtMs: NOW - min(31),
+  closed: false,
+  candidates: [
+    {
+      participant: { id: "p1", name: "Opus", engine: "claude", model: "opus", role: "", roles: [] },
+      branch: "fanout/fo-demo-1/p1",
+      worktree: "/tmp/agent-console-fanouts/fo-demo-1/p1",
+      status: "done",
+      summary: "Added retryOnce() in src/auth/refresh.ts and a test; npm test exits 0 (15 passed).",
+      files: ["src/auth/refresh.ts", "tests/refresh.test.ts"],
+      insertions: 41,
+      deletions: 3,
+      commands: 2,
+      checks: { passed: 1, failed: 0, unknown: 0 },
+      verification: "verified",
+      verificationReason: "npm test exit 0 after the last edit",
+      tokens: 18_400,
+      costUsd: 0.31,
+      durationMs: 410_000,
+    },
+    {
+      participant: {
+        id: "p2",
+        name: "Codex",
+        engine: "codex",
+        model: "medium",
+        role: "",
+        roles: [],
+      },
+      branch: "fanout/fo-demo-1/p2",
+      worktree: "/tmp/agent-console-fanouts/fo-demo-1/p2",
+      status: "done",
+      summary: "Wrapped refresh() in a retry loop. All tests pass.",
+      files: ["src/auth/refresh.ts"],
+      insertions: 12,
+      deletions: 1,
+      commands: 1,
+      checks: { passed: 0, failed: 1, unknown: 0 },
+      verification: "claim_contradicted",
+      verificationReason: '"all tests pass" but npm test exited 1',
+      tokens: 9_900,
+      costUsd: 0,
+      durationMs: 220_000,
+    },
+  ],
+};
+
 export const rooms: RoomSummary[] = [
   {
     id: "room-backoff",
@@ -1484,6 +1540,12 @@ export const defaultFixtures: FixtureMap = {
   scheduler_is_paused: false,
   // rooms & jobs
   roundtable_list_rooms: rooms,
+  // F9: one finished fan-out to compare, nothing running.
+  fanout_list: [fanoutDemo],
+  fanout_get: fanoutDemo,
+  fanout_start: "fo-demo-2",
+  fanout_apply: { merged: true, mergeCommit: "abc1234", conflictFiles: [], detail: "" },
+  fanout_discard: undefined,
   roundtable_get_room: null,
   roundtable_connector_state: {
     team: null,

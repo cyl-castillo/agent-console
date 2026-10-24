@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import { ipc } from "../ipc/tauri";
 import { useChangesStore } from "./changesStore";
+import { useFanOutStore } from "./fanoutStore";
 import { type AgentKind } from "../agents/profiles";
 import { presetsFor } from "../agents/modelCatalog";
 import type {
@@ -55,6 +56,9 @@ export interface RtDraft {
   maxCorrections: number;
   /// Working-room jobs: wait for your confirmation before landing (default).
   confirmLanding: boolean;
+  /// F9: fan-out — each participant alone on the same prompt in its own
+  /// worktree, one turn, then a comparison. Needs `allowEdits`.
+  fanOut: boolean;
 }
 
 const DEFAULT_DRAFT: RtDraft = {
@@ -73,6 +77,7 @@ const DEFAULT_DRAFT: RtDraft = {
   reviewRequired: false,
   maxCorrections: 2,
   confirmLanding: true,
+  fanOut: false,
 };
 
 interface RoundtableState {
@@ -275,6 +280,17 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
     // and the backend's `allow_edits = branch.is_some()`, so we never light up
     // the CoworkBar (Share) on a room that silently degraded to read-only.
     const allowEdits = d.allowEdits && useChangesStore.getState().status?.isRepo !== false;
+    // F9: a fan-out is not a conversation — it starts its own twin
+    // worktrees and reports into the fan-outs list; the form stays.
+    if (d.fanOut && allowEdits) {
+      try {
+        await useFanOutStore.getState().start({ problem: d.problem.trim(), participants });
+        set({ message: null });
+      } catch (e) {
+        set({ message: `Couldn't start the fan-out: ${String(e)}` });
+      }
+      return;
+    }
     const config: RoundtableConfig = {
       problem: d.problem.trim(),
       participants,

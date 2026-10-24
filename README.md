@@ -96,7 +96,11 @@ suggest-only, none of them able to block the core:
 - **Coach** — the agent's playbook: skills generated from your project
   (Advisor), curated from your actual usage (Learning).
 - **Room** — you plus N agents (mixed engines) on one problem; working rooms
-  edit on an isolated branch you review and merge (see below).
+  edit on an isolated branch you review and merge (see below). Fan out
+  instead: each agent alone on the same prompt in its own worktree, then a
+  comparison (diff, checks with exit codes, the console's verdict on its
+  words) and you apply one. A review is never by the agent that produced
+  the work — another engine or model family, whoever picks the reviewer.
 - **Schedule** — agentic jobs on a clock, physically restricted to plan mode.
 - **Trust** — permissions + secrets vault: what the agent can touch, and
   the approval policy as one versioned file in the repo compiled into what
