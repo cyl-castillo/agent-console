@@ -27,7 +27,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
 use crate::services::claude_cli;
@@ -467,8 +467,11 @@ fn opencode_fold(turn: &mut OpencodeTurn, v: &Value, on_activity: &ActivitySink)
     }
 }
 
-impl EngineRunner for OpencodeRunner {
-    fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
+impl OpencodeRunner {
+    /// The pre-ACP path (`opencode run --format json`, or plain text when an
+    /// MCP server is attached): kept for `AGENT_CONSOLE_OPENCODE_LEGACY=1`
+    /// and as the fallback when `opencode acp` cannot be spawned.
+    fn run_legacy(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
         // The connector rides on `opencode.json` of the working folder, not
         // on argv; written before the run so a fresh OpenCode picks it up.
         let identity = ctx.mcp.as_ref().map(|mcp| OpencodeIdentity {
@@ -887,6 +890,117 @@ impl EngineRunner for CodexRunner {
             session_id,
             tokens,
             cost_usd: 0.0,
+        })
+    }
+}
+
+impl EngineRunner for OpencodeRunner {
+    /// F3a: one turn over the Agent Client Protocol (`opencode acp`, verified
+    /// on 1.19.3). Tool calls arrive as `tool_call_update` with the command,
+    /// the output and the exit code — the per-tool witness the JSON stream
+    /// never gave — and the connector's MCP server travels in `session/new`
+    /// instead of being written into the folder's `opencode.json`.
+    fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
+        if std::env::var_os("AGENT_CONSOLE_OPENCODE_LEGACY").is_some() {
+            return self.run_legacy(ctx, on_activity);
+        }
+        let identity = ctx.mcp.as_ref().map(|mcp| OpencodeIdentity {
+            project: mcp.project.to_string(),
+            job: mcp.job.to_string(),
+            caller: mcp.caller.to_string(),
+        });
+        if let (Some(id), Some(sid)) = (&identity, ctx.resume) {
+            register_opencode_session(sid, id.clone());
+        }
+        let mcp_servers: Vec<Value> = ctx
+            .mcp
+            .as_ref()
+            .map(|mcp| {
+                vec![json!({
+                    "name": MCP_SERVER_NAME,
+                    "command": mcp.bridge.to_string_lossy(),
+                    "args": mcp.bridge_args(),
+                    "env": []
+                })]
+            })
+            .unwrap_or_default();
+        let mut cmd = claude_cli::opencode_command_in(ctx.cwd, &["acp"]);
+        cmd.stdin(std::process::Stdio::piped());
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    "opencode acp could not be spawned ({e}); falling back to `opencode run`"
+                );
+                return self.run_legacy(ctx, on_activity);
+            }
+        };
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Other("opencode acp has no stdin pipe".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| AppError::Other("opencode acp has no stdout pipe".into()))?;
+        let err_handle = drain_stderr(child.stderr.take());
+        let local = ChildSlot::default();
+        let slot = park(ctx.child_slot, &local, child);
+        let req = crate::services::acp_client::AcpPrompt {
+            cwd: &ctx.cwd.to_string_lossy(),
+            prompt: ctx.prompt,
+            resume: ctx.resume,
+            model: if ctx.model.is_empty() {
+                None
+            } else {
+                Some(ctx.model)
+            },
+            policy: ctx.tools,
+            mcp_servers,
+        };
+        let on_session = |sid: &str| {
+            if let Some(id) = &identity {
+                register_opencode_session(sid, id.clone());
+            }
+        };
+        let result = crate::services::acp_client::run_turn(
+            BufReader::new(stdout),
+            stdin,
+            &req,
+            on_activity,
+            &on_session,
+        );
+        // The ACP server lives as long as the client: the turn is over, so is it.
+        if let Ok(mut c) = unpark(slot) {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        let stderr_text = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+        let turn = result.map_err(|e| {
+            AppError::Other(format!(
+                "{e}{}",
+                if stderr_text.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", truncate(stderr_text.trim(), 600))
+                }
+            ))
+        })?;
+        if turn.text.is_empty() && turn.stop_reason != "end_turn" {
+            return Err(AppError::Other(format!(
+                "OpenCode did not finish the turn (stop reason: {})",
+                if turn.stop_reason.is_empty() {
+                    "none"
+                } else {
+                    &turn.stop_reason
+                }
+            )));
+        }
+        Ok(TurnOutput {
+            text: turn.text,
+            session_id: Some(turn.session_id),
+            tokens: turn.tokens,
+            cost_usd: turn.cost_usd,
         })
     }
 }
