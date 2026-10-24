@@ -1403,6 +1403,32 @@ impl TestigoService {
         )
     }
 
+    /// F4: the human's word on a folder's agent surface (hooks, MCP, plugins,
+    /// rules, instructions, skills, setup), pinned to its digest so the
+    /// packet shows what exactly was trusted. Not a turn's event: `unbound`.
+    pub fn on_trust_decision(
+        &self,
+        project_root: &str,
+        ts: i64,
+        decision: &str,
+        digest: &str,
+        counts: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            "unbound".into(),
+            None,
+            "trust_decision",
+            None,
+            None,
+            "human",
+            json!({ "decision": decision, "digest": digest, "surface": counts }),
+        )
+    }
+
     /// Record a turn rewind: the working tree was restored to a snapshot and
     /// (when the fork succeeded) the conversation transcript was forked to a
     /// new session id. A rewind rewrites what the checkout contains, so it is

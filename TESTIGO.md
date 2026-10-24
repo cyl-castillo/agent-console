@@ -202,6 +202,18 @@ ProofEvent {
   store que vigila el presupuesto, así el tope también pausa sesiones de OpenCode. **Pausa dura**:
   con el presupuesto cruzado el composer queda deshabilitado hasta que la tarjeta registre
   `budget_decision`.
+- **Trust de workspace (COMPETENCIA-2026-10 F4, 2026-10-23)**: antes de auto-lanzar un agente en una
+  carpeta, la consola lista y hashea lo que esa carpeta inyecta en los agentes — hooks (`.claude/
+  settings*.json` con `hooks`, `.claude/hooks/`, `.codex/hooks.json`, `[hooks]` de `.codex/config.toml`),
+  comando de setup (`.claude/worktree-setup.json`), plugins (`.opencode/plugins/`), MCP (`.mcp.json`,
+  `opencode.json(c)`, `mcp_servers` de Codex), rules (`.codex/rules/*.rules`), skills
+  (`.claude/skills/*/SKILL.md`), instrucciones (`CLAUDE.md`, `AGENTS.md`) — y pide la palabra del humano
+  en el Inbox (tier alto si hay archivos que ejecutan, medio si sólo instrucciones). Ambas respuestas
+  se registran como `trust_decision {decision, digest, surface}` (actor `human`, `unbound`); el digest
+  cambia → vuelve a preguntar (`changed`). Sin "trusted" el terminal no tipea el comando del agente:
+  espera la decisión (o, si fue "declined", deja el lanzamiento en manos del humano). Export IETF:
+  decision / success (trusted) / denied (declined), fase pre_execution. Código: `trust_service.rs`,
+  `commands/trust.rs`, `trustStore.ts`, `TrustDecision.tsx`, sección "workspace trust" en Permissions.
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

@@ -10,6 +10,8 @@ import { useHooksHealthStore } from "../stores/hooksHealthStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useTermSignalsStore } from "../stores/termSignalsStore";
+import { useTrustStore } from "../stores/trustStore";
+import { trustAllowsLaunch } from "../lib/trust";
 import { useThemeStore } from "../stores/themeStore";
 import { useToastStore } from "../stores/toastStore";
 import { profileFor } from "../agents/profiles";
@@ -402,12 +404,48 @@ export function Terminal({ session, visible }: Props) {
         // runs visibly in this terminal and the agent only starts if it succeeds.
         const setup = session.setupCmd?.trim();
         const cmd = setup ? `${setup} && ${launchCmd}` : launchCmd;
-        setTimeout(() => {
+        const launch = () => {
           if (disposed) return;
           if (setup) term.write(`\x1b[90m── workspace setup: ${setup} ──\x1b[0m\r\n`);
           term.write(`\x1b[90m── ${launchNote} ${launchLabel} ──\x1b[0m\r\n`);
           useTermSignalsStore.getState().markBooting(session.id);
           ipc.termWrite(tid, `${cmd}\r`).catch(() => {});
+        };
+        // F4: the folder's hooks, plugins and setup commands run the moment
+        // the CLI starts. Until the human trusts the folder (Inbox card),
+        // the agent is not launched; a declined folder leaves the launch
+        // to the human's own keystrokes.
+        setTimeout(() => {
+          if (disposed) return;
+          const trust = useTrustStore.getState().status;
+          if (trustAllowsLaunch(trust)) {
+            launch();
+            return;
+          }
+          if (trust?.state === "declined") {
+            term.write(
+              `\x1b[90m── folder not trusted: run ${launchLabel} yourself if you mean to ──\x1b[0m\r\n`,
+            );
+            return;
+          }
+          term.write(
+            `\x1b[90m── waiting for your trust decision on this folder (Inbox) before launching ${launchLabel} ──\x1b[0m\r\n`,
+          );
+          const unsub = useTrustStore.subscribe((s) => {
+            if (disposed) {
+              unsub();
+              return;
+            }
+            if (trustAllowsLaunch(s.status)) {
+              unsub();
+              launch();
+            } else if (s.status?.state === "declined") {
+              unsub();
+              term.write(
+                `\x1b[90m── folder not trusted: run ${launchLabel} yourself if you mean to ──\x1b[0m\r\n`,
+              );
+            }
+          });
         }, 600);
 
         // First-spawn prompt seed (e.g. a Jira ticket): typed into the agent's

@@ -54,6 +54,7 @@ pub mod testigo_export;
 pub mod testigo_service;
 pub mod testigo_timestamp;
 pub mod transcript_service;
+pub mod trust_service;
 pub mod tts_service;
 pub mod usage_service;
 pub mod vault_service;

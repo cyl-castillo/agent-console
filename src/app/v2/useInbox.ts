@@ -8,6 +8,9 @@ import { capFor, useBudgetStore } from "../../stores/budgetStore";
 import { useLiveStatusStore } from "../../stores/liveStatusStore";
 import { buildTimeline, useProofStore, type TimelineTurn } from "../../stores/proofStore";
 import { pendingVerifications } from "../../lib/verificationInbox";
+import { trustNeedsDecision } from "../../lib/trust";
+import { useTrustStore } from "../../stores/trustStore";
+import type { TrustStatus } from "../../types/domain";
 import { useDeclinesStore, type Decline } from "../../stores/declinesStore";
 import { useReviewsStore, type Review } from "../../stores/reviewsStore";
 import { sessionAttention } from "../../lib/attention";
@@ -33,6 +36,8 @@ export interface InboxData {
   reviews: Review[];
   /// F1d: closed turns whose verification verdict waits for a human word.
   verifications: TimelineTurn[];
+  /// F4: the open folder waits for the human's word before agents launch.
+  trust: TrustStatus | null;
   /// Everything that waits for a human decision — the number on the rail
   /// and in the Inbox header are this same count.
   decisions: number;
@@ -54,6 +59,7 @@ export function useInbox(): InboxData {
   const project = useSessionStore((s) => s.project);
   const allDeclines = useDeclinesStore((s) => s.items);
   const allReviews = useReviewsStore((s) => s.items);
+  const trustStatus = useTrustStore((s) => s.status);
   // A clock so relative ages move without a store write; the working window
   // needs it too.
   const [now, setNow] = useState(() => Date.now());
@@ -126,10 +132,12 @@ export function useInbox(): InboxData {
   );
   const reviews = allReviews.filter((r) => !r.resolved && (!project || r.project === project.root));
   const verifications = pendingVerifications(buildTimeline(events));
+  const trust = trustNeedsDecision(trustStatus) ? trustStatus : null;
   const decisions =
     queue.length +
     reviews.length +
     verifications.length +
+    (trust ? 1 : 0) +
     jobsNeedingYou.length +
     pendingJobs.length +
     needsYouWithoutApproval +
@@ -149,6 +157,7 @@ export function useInbox(): InboxData {
     declines,
     reviews,
     verifications,
+    trust,
     decisions,
   };
 }

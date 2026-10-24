@@ -457,3 +457,75 @@ test("F1d: an unverified claim is a decision — accept records it, ask-for-evid
     decision: "accept",
   });
 });
+
+test("F4: a folder that would run hooks waits for trust — the card lists them and the answer is recorded", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox");
+  await expect(page.getByTestId("trust-decision")).toHaveCount(0);
+  // The folder changed since it was trusted: a hook file appeared.
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __fixtures: {
+        setFixture: (c: string, v: unknown) => void;
+        emit: (n: string, p: unknown) => Promise<void>;
+      };
+    };
+    w.__fixtures.setFixture("trust_status", {
+      state: "changed",
+      decision: {
+        decision: "trusted",
+        digest: "abc",
+        ts: Date.now() - 86_400_000,
+        counts: { hooks: 0, mcp: 1, plugins: 0, rules: 0, instructions: 1, skills: 1, setup: 0 },
+      },
+      surface: {
+        digest: "def",
+        executes: true,
+        counts: { hooks: 1, mcp: 1, plugins: 0, rules: 0, instructions: 1, skills: 1, setup: 1 },
+        files: [
+          {
+            path: ".claude/hooks/post-commit.sh",
+            sha256: "9f9f9f9f9f9f9f9f",
+            bytes: 120,
+            category: "hooks",
+          },
+          {
+            path: ".claude/worktree-setup.json",
+            sha256: "8e8e8e8e8e8e8e8e",
+            bytes: 60,
+            category: "setup",
+          },
+          { path: ".mcp.json", sha256: "1a2b3c4d5e6f", bytes: 212, category: "mcp" },
+          { path: "CLAUDE.md", sha256: "2b3c4d5e6f7a", bytes: 1800, category: "instructions" },
+          {
+            path: ".claude/skills/vitest-focus/SKILL.md",
+            sha256: "3c4d5e6f7a8b",
+            bytes: 640,
+            category: "skills",
+          },
+        ],
+      },
+    });
+    await w.__fixtures.emit("console://trust", {
+      project: "/home/demo/code/demo-playground",
+      state: "changed",
+    });
+  });
+  const card = page.getByTestId("trust-decision");
+  await expect(card).toBeVisible({ timeout: 3000 });
+  await expect(card).toContainText("Folder changed since you trusted it");
+  await expect(card).toContainText("1 hook file · 1 setup command · 1 MCP config");
+  await expect(card).toContainText(".claude/hooks/post-commit.sh");
+  await card.getByRole("button", { name: "Trust this folder" }).click();
+  const decided = await page.evaluate(() =>
+    (
+      window as unknown as {
+        __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+      }
+    ).__fixtures.invokeLog.filter((c) => c.cmd === "trust_decide"),
+  );
+  expect(decided).toHaveLength(1);
+  expect(decided[0].args).toMatchObject({ decision: "trusted" });
+  await expect(page.getByTestId("trust-decision")).toHaveCount(0);
+});
