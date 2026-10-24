@@ -84,8 +84,12 @@ pub enum ClientMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     Pong,
+    /// Newest first, at most `remote_decisions::PENDING_CAP`; `truncated`
+    /// says more wait on the desktop.
     Decisions {
         items: Vec<RemoteDecision>,
+        #[serde(default)]
+        truncated: bool,
     },
     /// The answer reached the hook and the ledger.
     Decided {
@@ -248,7 +252,7 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
                 let h = handler.clone();
                 let dev = device.clone();
                 match tokio::task::spawn_blocking(move || h.pending(&dev)).await {
-                    Ok(Ok(items)) => ServerMessage::Decisions { items },
+                    Ok(Ok((items, truncated))) => ServerMessage::Decisions { items, truncated },
                     Ok(Err(e)) => ServerMessage::Error {
                         message: e.to_string(),
                     },
@@ -269,6 +273,7 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
                     // never the tier the device claims.
                     let item = h
                         .pending(&dev)?
+                        .0
                         .into_iter()
                         .find(|d| d.id == id)
                         .ok_or_else(|| {
@@ -590,19 +595,22 @@ mod tests {
         }
     }
     impl DecisionHandler for StubHandler {
-        fn pending(&self, _device: &PairedDevice) -> AppResult<Vec<RemoteDecision>> {
-            Ok(vec![
-                decision_from(
-                    &json!({ "id": "a-low", "ts": 1, "tool": "Bash", "input": {"command": "npm test"}, "cwd": "/p", "termId": "t1" }),
-                    Some("auth".into()),
-                    &[],
-                ),
-                decision_from(
-                    &json!({ "id": "a-high", "ts": 2, "tool": "Bash", "input": {"command": "git push --force"}, "cwd": "/p", "termId": "t1" }),
-                    Some("auth".into()),
-                    &[],
-                ),
-            ])
+        fn pending(&self, _device: &PairedDevice) -> AppResult<(Vec<RemoteDecision>, bool)> {
+            Ok((
+                vec![
+                    decision_from(
+                        &json!({ "id": "a-low", "ts": 1, "tool": "Bash", "input": {"command": "npm test"}, "cwd": "/p", "termId": "t1" }),
+                        Some("auth".into()),
+                        &[],
+                    ),
+                    decision_from(
+                        &json!({ "id": "a-high", "ts": 2, "tool": "Bash", "input": {"command": "git push --force"}, "cwd": "/p", "termId": "t1" }),
+                        Some("auth".into()),
+                        &[],
+                    ),
+                ],
+                false,
+            ))
         }
         fn decide(
             &self,
@@ -662,7 +670,8 @@ mod tests {
             }
         );
         match reply.unwrap() {
-            ServerMessage::Decisions { items } => {
+            ServerMessage::Decisions { items, truncated } => {
+                assert!(!truncated);
                 assert_eq!(items.len(), 2);
                 assert_eq!(items[0].tier, "low");
                 assert!(items[0].remote_allow);
@@ -794,7 +803,7 @@ mod tests {
         let connect = || tokio::net::TcpStream::connect(addr);
         let reply = phone.pending(connect().await.unwrap()).await.unwrap();
         let items = match reply {
-            ServerMessage::Decisions { items } => items,
+            ServerMessage::Decisions { items, .. } => items,
             other => panic!("expected decisions, got {other:?}"),
         };
         assert_eq!(

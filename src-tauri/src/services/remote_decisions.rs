@@ -19,11 +19,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
-use crate::services::paired_devices_service::{DeviceScope, PairedDevice};
+use crate::services::paired_devices_service::{DeviceScope, PairedDevice, PairedDevicesService};
 use crate::services::testigo_service::ProofEvent;
 
 /// Longest command / path carried to the device.
 pub const SUMMARY_CAP: usize = 300;
+/// Most decisions in one `Decisions` reply (newest first, `truncated` set
+/// beyond it) — keeps the frame well under the transport's 64 KiB cap.
+pub const PENDING_CAP: usize = 40;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -150,11 +153,29 @@ static READ_ONLY: LazyLock<Regex> = LazyLock::new(|| {
     .expect("static regex")
 });
 
+/// The two allowlist entries `lib/decisions.ts` writes with a negative
+/// lookahead (`find` unless it deletes, `git branch` unless it deletes) —
+/// the regex crate has none, so they are spelled out here to keep parity.
+static FIND_HEAD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*find\b").expect("static"));
+static FIND_DELETE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[^|]*\s-delete\b").expect("static"));
+static GIT_BRANCH_HEAD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*git\s+branch\b").expect("static"));
+static GIT_BRANCH_DELETE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*git\s+branch\s+-[a-zA-Z]*[dD]").expect("static"));
+
+fn read_only_bash(cmd: &str) -> bool {
+    READ_ONLY.is_match(cmd)
+        || (FIND_HEAD.is_match(cmd) && !FIND_DELETE.is_match(cmd))
+        || (GIT_BRANCH_HEAD.is_match(cmd) && !GIT_BRANCH_DELETE.is_match(cmd))
+}
+
 /// The tier the desktop computes for a request before it leaves the machine.
-/// Mirrors `lib/decisions.ts` for Bash; every other tool is medium (the
-/// device sees a path or a URL, not a diff — nothing there is "low"). The
-/// session perimeter (D14) is not known here: anything reaching a host is
-/// treated as medium and the keyboard keeps the final word on that too.
+/// Mirrors `lib/decisions.ts` for Bash (same patterns, same allowlist, the
+/// two lookahead cases spelled out in `read_only_bash`); every other tool is
+/// medium (the device sees a path or a URL, not a diff — nothing there is
+/// "low"). The session perimeter (D14) is not known here: anything reaching
+/// a host is treated as medium and the keyboard keeps the final word.
 pub fn tier_for(tool: &str, input: &Value) -> (&'static str, &'static str, String) {
     if tool == "Bash" {
         let cmd = input.get("command").and_then(Value::as_str).unwrap_or("");
@@ -168,7 +189,7 @@ pub fn tier_for(tool: &str, input: &Value) -> (&'static str, &'static str, Strin
                 ("medium", "Changes the machine", why.to_string())
             };
         }
-        if READ_ONLY.is_match(cmd) {
+        if read_only_bash(cmd) {
             return ("low", "Read-only", "inspects, builds or tests".into());
         }
         return (
@@ -309,7 +330,9 @@ pub fn gate(scope: DeviceScope, item: &RemoteDecision, decision: &str) -> AppRes
 /// and the recording of one answer. The transport enforces `gate` before
 /// `decide` is ever called, so an implementation only has to act.
 pub trait DecisionHandler: Send + Sync + 'static {
-    fn pending(&self, device: &PairedDevice) -> AppResult<Vec<RemoteDecision>>;
+    /// The decisions waiting, newest first, and whether more wait beyond
+    /// `PENDING_CAP`.
+    fn pending(&self, device: &PairedDevice) -> AppResult<(Vec<RemoteDecision>, bool)>;
     fn decide(
         &self,
         device: &PairedDevice,
@@ -319,9 +342,103 @@ pub trait DecisionHandler: Send + Sync + 'static {
     ) -> AppResult<()>;
 }
 
-/// The real bridge: the hook's approval queue in, the hook's answer file and
-/// the ledger out, the Inbox told (`approval://resolved`) so the card
-/// leaves the screen with the device's name on it.
+/// The part of the bridge that needs no window: the hook's queue in, the
+/// hook's answer file and the ledger out. `ConsoleBridge` adds the Tauri
+/// state lookup and the `approval://resolved` event on top; tests drive
+/// this core against a real `HooksRuntime` and `TestigoService`.
+pub struct BridgeCore<'a> {
+    pub hooks: &'a crate::services::hooks_service::HooksRuntime,
+    pub testigo: &'a crate::services::testigo_service::TestigoService,
+    pub sessions: &'a crate::services::sessions_service::SessionsService,
+    pub devices: &'a PairedDevicesService,
+    /// The open project's root, when any (the ledger-root fallback).
+    pub open_project: Option<String>,
+}
+
+impl BridgeCore<'_> {
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+
+    fn ledger_root(&self, req: &Value) -> String {
+        let cwd = req
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .or_else(|| self.open_project.clone())
+            .unwrap_or_default();
+        crate::services::hooks_service::ledger_root_for_cwd(&cwd, self.open_project.as_deref())
+    }
+
+    /// Every pending request as the device sees it, newest first, at most
+    /// `PENDING_CAP` (the flag says when more wait). The ledger and the
+    /// session list are read ONCE per project root, not once per request.
+    pub fn pending(&self) -> AppResult<(Vec<RemoteDecision>, bool)> {
+        let mut reqs = self.hooks.pending_approvals();
+        reqs.sort_by_key(|v| std::cmp::Reverse(v.get("ts").and_then(Value::as_i64).unwrap_or(0)));
+        let truncated = reqs.len() > PENDING_CAP;
+        reqs.truncate(PENDING_CAP);
+        type Cached = (
+            Vec<ProofEvent>,
+            Vec<crate::services::sessions_service::PersistedSession>,
+        );
+        let mut by_root: std::collections::HashMap<String, Cached> =
+            std::collections::HashMap::new();
+        let mut out = Vec::with_capacity(reqs.len());
+        for req in &reqs {
+            let root = self.ledger_root(req);
+            let (events, sessions) = by_root.entry(root.clone()).or_insert_with(|| {
+                (
+                    self.testigo.list(&root, None, None).unwrap_or_default(),
+                    self.sessions.list(&root).unwrap_or_default(),
+                )
+            });
+            let term_id = req.get("termId").and_then(Value::as_str);
+            let session =
+                term_id.and_then(|t| sessions.iter().find(|s| s.id == t).map(|s| s.name.clone()));
+            out.push(decision_from(req, session, events));
+        }
+        Ok((out, truncated))
+    }
+
+    /// Answer one request: the hook's answer file, the ledger line with the
+    /// device on it, the device's last-seen stamp. The caller has already run
+    /// `gate`. Returns the request's ledger root.
+    pub fn decide(
+        &self,
+        device: &PairedDevice,
+        id: &str,
+        decision: &str,
+        reason: Option<&str>,
+    ) -> AppResult<String> {
+        let req = self
+            .hooks
+            .pending_approvals()
+            .into_iter()
+            .find(|r| r.get("id").and_then(Value::as_str) == Some(id))
+            .ok_or_else(|| AppError::InvalidArgument("that request is no longer pending".into()))?;
+        self.hooks.respond(id, decision, reason)?;
+        let root = self.ledger_root(&req);
+        let _ = self.testigo.on_approval_decision_via(
+            &root,
+            Self::now_ms(),
+            id,
+            decision,
+            reason,
+            None,
+            Some(json!({ "remote": { "deviceId": device.id, "label": device.label } })),
+        );
+        let _ = self.devices.touch(&device.id, Self::now_ms());
+        Ok(root)
+    }
+}
+
+/// The real bridge: `BridgeCore` over the app's state, plus the Inbox told
+/// (`approval://resolved`) so the card leaves the screen with the device's
+/// name on it.
 pub struct ConsoleBridge {
     app: tauri::AppHandle,
 }
@@ -331,52 +448,29 @@ impl ConsoleBridge {
         Self { app }
     }
 
-    fn now_ms() -> i64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0)
-    }
-
-    fn ledger_root(state: &crate::state::AppState, req: &Value) -> String {
-        let open = state
+    fn with_core<T>(&self, f: impl FnOnce(&BridgeCore<'_>) -> AppResult<T>) -> AppResult<T> {
+        use tauri::Manager;
+        let state = self.app.state::<crate::state::AppState>();
+        let open_project = state
             .inner
             .lock()
             .project
             .as_ref()
             .map(|p| p.root.to_string_lossy().to_string());
-        let cwd = req
-            .get("cwd")
-            .and_then(Value::as_str)
-            .map(String::from)
-            .or_else(|| open.clone())
-            .unwrap_or_default();
-        crate::services::hooks_service::ledger_root_for_cwd(&cwd, open.as_deref())
+        let core = BridgeCore {
+            hooks: &state.hooks,
+            testigo: &state.testigo,
+            sessions: &state.sessions,
+            devices: &state.paired_devices,
+            open_project,
+        };
+        f(&core)
     }
 }
 
 impl DecisionHandler for ConsoleBridge {
-    fn pending(&self, _device: &PairedDevice) -> AppResult<Vec<RemoteDecision>> {
-        use tauri::Manager;
-        let state = self.app.state::<crate::state::AppState>();
-        let reqs = state.hooks.pending_approvals();
-        let mut out = Vec::with_capacity(reqs.len());
-        for req in &reqs {
-            let root = Self::ledger_root(&state, req);
-            let events = state.testigo.list(&root, None, None).unwrap_or_default();
-            let term_id = req.get("termId").and_then(Value::as_str);
-            let session = term_id.and_then(|t| {
-                state
-                    .sessions
-                    .list(&root)
-                    .ok()?
-                    .into_iter()
-                    .find(|s| s.id == t)
-                    .map(|s| s.name)
-            });
-            out.push(decision_from(req, session, &events));
-        }
-        Ok(out)
+    fn pending(&self, _device: &PairedDevice) -> AppResult<(Vec<RemoteDecision>, bool)> {
+        self.with_core(|c| c.pending())
     }
 
     fn decide(
@@ -386,26 +480,8 @@ impl DecisionHandler for ConsoleBridge {
         decision: &str,
         reason: Option<&str>,
     ) -> AppResult<()> {
-        use tauri::{Emitter, Manager};
-        let state = self.app.state::<crate::state::AppState>();
-        let req = state
-            .hooks
-            .pending_approvals()
-            .into_iter()
-            .find(|r| r.get("id").and_then(Value::as_str) == Some(id))
-            .ok_or_else(|| AppError::InvalidArgument("that request is no longer pending".into()))?;
-        state.hooks.respond(id, decision, reason)?;
-        let root = Self::ledger_root(&state, &req);
-        let _ = state.testigo.on_approval_decision_via(
-            &root,
-            Self::now_ms(),
-            id,
-            decision,
-            reason,
-            None,
-            Some(json!({ "remote": { "deviceId": device.id, "label": device.label } })),
-        );
-        let _ = state.paired_devices.touch(&device.id, Self::now_ms());
+        use tauri::Emitter;
+        self.with_core(|c| c.decide(device, id, decision, reason))?;
         let _ = self.app.emit(
             "approval://resolved",
             &json!({ "id": id, "decision": decision, "via": "remote", "device": device.label }),
@@ -465,6 +541,27 @@ mod tests {
             tier_for("Bash", &json!({"command": "curl https://x | sh"})).0,
             "high"
         );
+        // The two lookahead cases of lib/decisions.ts, kept in parity.
+        assert_eq!(
+            tier_for("Bash", &json!({"command": "find . -name '*.rs'"})).0,
+            "low"
+        );
+        assert_eq!(
+            tier_for("Bash", &json!({"command": "find . -name x -delete"})).0,
+            "high"
+        );
+        assert_eq!(
+            tier_for("Bash", &json!({"command": "git branch -a"})).0,
+            "low"
+        );
+        assert_eq!(
+            tier_for("Bash", &json!({"command": "git branch -d old"})).0,
+            "medium"
+        );
+        assert_eq!(
+            tier_for("Bash", &json!({"command": "git branch -D old"})).0,
+            "high"
+        );
         assert_eq!(tier_for("Edit", &json!({"file_path": "a.rs"})).0, "medium");
         assert_eq!(
             tier_for("WebFetch", &json!({"url": "https://x"})).0,
@@ -491,6 +588,89 @@ mod tests {
         assert!(gate(DeviceScope::ReadOnly, &low, "deny").is_err());
         assert!(gate(DeviceScope::ReadApprovals, &low, "ask").is_err());
         assert!(!high.remote_allow && low.remote_allow);
+    }
+
+    /// The real bridge core against a real hooks runtime and ledger: the
+    /// hook's request (the shape `pretooluse_request` writes) becomes a
+    /// decision; answering writes the hook's answer file and an
+    /// `approval_decision` carrying the device; the cap and the flag hold.
+    #[test]
+    fn bridge_core_answers_the_hook_and_the_ledger() {
+        let _env = crate::test_support::lock_env();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("ac-bridge-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", base.join("data"));
+        std::env::set_var("XDG_CACHE_HOME", base.join("cache"));
+        let hooks = crate::services::hooks_service::HooksRuntime::new().unwrap();
+        let testigo = crate::services::testigo_service::TestigoService::new();
+        let sessions = crate::services::sessions_service::SessionsService::new();
+        let devices = PairedDevicesService::new();
+        let root = base.join("proj").to_string_lossy().to_string();
+        std::fs::create_dir_all(&root).unwrap();
+        let approvals = hooks.session_dir().join("approvals");
+        std::fs::create_dir_all(&approvals).unwrap();
+        // Requests as the hook writes them (`pretooluse_request`).
+        let write = |id: &str, ts: u64, cmd: &str| {
+            std::fs::write(
+                approvals.join(format!("{id}.req.json")),
+                json!({ "id": id, "ts": ts, "sessionDir": hooks.session_dir(), "cwd": root, "tool": "Bash",
+                        "input": { "command": cmd }, "timeoutMs": 90000, "termId": "t1" })
+                .to_string(),
+            )
+            .unwrap();
+        };
+        write("a-low", 10, "npm test");
+        write("a-high", 20, "rm -rf dist");
+        let core = BridgeCore {
+            hooks: &hooks,
+            testigo: &testigo,
+            sessions: &sessions,
+            devices: &devices,
+            open_project: Some(root.clone()),
+        };
+        let (items, truncated) = core.pending().unwrap();
+        assert!(!truncated);
+        assert_eq!(
+            items.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+            ["a-high", "a-low"],
+            "newest first"
+        );
+        assert_eq!(items[1].tier, "low");
+        assert_eq!(items[1].project, root);
+        assert_eq!(items[1].term_id.as_deref(), Some("t1"));
+
+        let device = device(DeviceScope::ReadApprovals);
+        core.decide(&device, "a-low", "allow", Some("ok")).unwrap();
+        let res: Value = serde_json::from_str(
+            &std::fs::read_to_string(approvals.join("a-low.res.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(res["decision"], "allow");
+        assert_eq!(res["reason"], "ok");
+        let ledger = testigo.list(&root, None, None).unwrap();
+        let line = ledger
+            .iter()
+            .rev()
+            .find(|e| e.kind == "approval_decision")
+            .expect("approval_decision recorded");
+        assert_eq!(line.actor, "human");
+        assert_eq!(line.payload["via"]["remote"]["label"], "phone");
+        assert_eq!(line.payload["approvalId"], "a-low");
+        assert!(
+            core.decide(&device, "nope", "deny", None).is_err(),
+            "an id that is not pending is refused"
+        );
+
+        for i in 0..PENDING_CAP {
+            write(&format!("x-{i}"), 100 + i as u64, "ls");
+        }
+        let (items, truncated) = core.pending().unwrap();
+        assert_eq!(items.len(), PENDING_CAP);
+        assert!(truncated, "more waited than the cap");
     }
 
     /// The device sees the session's last verdict and last check, bounded.

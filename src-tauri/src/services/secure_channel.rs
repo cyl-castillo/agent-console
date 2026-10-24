@@ -101,33 +101,71 @@ pub enum IdentityStore {
 const KEYRING_SERVICE: &str = "agent-console.remote";
 const KEYRING_KEY: &str = "device-identity";
 
+/// The public half of the identity the keystore holds — not a secret. Its
+/// presence says "an identity lives in the keystore": when the keystore is
+/// then unavailable (locked, prompt denied) we refuse rather than mint a
+/// second identity that would break every paired device's pinned key.
+fn keyring_marker_path() -> AppResult<PathBuf> {
+    Ok(identity_path()?.with_file_name("device-identity.pub"))
+}
+
+fn identity_json(kp: &StaticKeypair) -> AppResult<String> {
+    let f = IdentityFile {
+        private: BASE64URL_NOPAD.encode(&kp.private),
+        public: BASE64URL_NOPAD.encode(&kp.public),
+    };
+    serde_json::to_string(&f).map_err(|e| AppError::Other(format!("serialize: {e}")))
+}
+
+fn keystore_unavailable(e: impl std::fmt::Display) -> AppError {
+    AppError::Other(format!(
+        "the OS keystore holds the pairing identity but is unavailable ({e}); unlock it and retry"
+    ))
+}
+
 /// Load the desktop's long-term identity from the OS keystore, creating it
-/// once; fall back to the 0600 file when the keystore is unavailable. The
-/// store that answered is returned so the UI can say which. An identity
-/// already in the file is migrated into the keystore on first success.
+/// once. The store that answered is returned so the UI can say which.
+///
+/// Rules, in order: a readable keystore entry wins; an entry that does not
+/// parse is corrupt (nothing can reconnect to it) and is replaced; no entry
+/// = first run → the file's identity (pre-keystore installs) or a fresh one
+/// goes into the keystore and the file copy is removed; a keystore that
+/// errors (locked, no secret service) is a hard error when the marker says
+/// it holds our identity, and the plain file otherwise — the identity never
+/// changes behind the user's back.
 pub fn load_or_create_identity_keyring() -> AppResult<(StaticKeypair, IdentityStore)> {
+    let marker = keyring_marker_path()?;
+    let keystore_has_it = marker.exists();
     let entry = match keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY) {
         Ok(e) => e,
+        Err(e) if keystore_has_it => return Err(keystore_unavailable(e)),
         Err(_) => return Ok((load_or_create_identity()?, IdentityStore::File)),
     };
     match entry.get_password() {
-        Ok(txt) => {
-            let f: IdentityFile = serde_json::from_str(&txt)
-                .map_err(|e| AppError::Other(format!("parse keyring identity: {e}")))?;
-            Ok((decode_identity(&f)?, IdentityStore::Keyring))
-        }
+        Ok(txt) => match serde_json::from_str::<IdentityFile>(&txt)
+            .map_err(|e| AppError::Other(format!("parse keyring identity: {e}")))
+            .and_then(|f| decode_identity(&f))
+        {
+            Ok(kp) => Ok((kp, IdentityStore::Keyring)),
+            Err(_) => {
+                let kp = generate_static()?;
+                entry
+                    .set_password(&identity_json(&kp)?)
+                    .map_err(|e| AppError::Other(format!("keyring set: {e}")))?;
+                let _ = fs::write(&marker, BASE64URL_NOPAD.encode(&kp.public));
+                Ok((kp, IdentityStore::Keyring))
+            }
+        },
+        Err(keyring::Error::NoEntry) if keystore_has_it => Err(AppError::Other(
+            "the OS keystore lost the pairing identity; revoke and re-pair devices (remove device-identity.pub to start over)".into(),
+        )),
         Err(keyring::Error::NoEntry) => {
             // First run (or a pre-keyring install): take the file's identity if
             // there is one so paired devices keep working, else mint one.
             let kp = load_or_create_identity()?;
-            let f = IdentityFile {
-                private: BASE64URL_NOPAD.encode(&kp.private),
-                public: BASE64URL_NOPAD.encode(&kp.public),
-            };
-            let json = serde_json::to_string(&f)
-                .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-            match entry.set_password(&json) {
+            match entry.set_password(&identity_json(&kp)?) {
                 Ok(()) => {
+                    let _ = fs::write(&marker, BASE64URL_NOPAD.encode(&kp.public));
                     // The keystore holds it now; the file copy is removed.
                     if let Ok(p) = identity_path() {
                         let _ = fs::remove_file(p);
@@ -137,6 +175,7 @@ pub fn load_or_create_identity_keyring() -> AppResult<(StaticKeypair, IdentitySt
                 Err(_) => Ok((kp, IdentityStore::File)),
             }
         }
+        Err(e) if keystore_has_it => Err(keystore_unavailable(e)),
         Err(_) => Ok((load_or_create_identity()?, IdentityStore::File)),
     }
 }

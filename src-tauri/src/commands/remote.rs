@@ -5,7 +5,7 @@
 //! The default bind is loopback; the LAN is an explicit choice in the UI
 //! (typed confirmation) recorded as `remote_listener {bind: "lan"}`.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -59,39 +59,41 @@ pub struct RemoteStatus {
     /// loopback · lan
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bind: Option<String>,
-    pub identity_store: IdentityStore,
+    /// None when the keystore could not be read (see `identity_error`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_store: Option<IdentityStore>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_error: Option<String>,
     pub devices: Vec<PairedDevice>,
     pub pending: Vec<PendingPairing>,
 }
 
 fn status_of(state: &AppState) -> AppResult<RemoteStatus> {
     let guard = state.remote_server.lock();
+    // The identity is loaded on first use; a locked keystore shows up here
+    // as `identity_error`, not as a crash and not as a second identity.
+    let (identity_store, identity_error) = match state.pairing() {
+        Ok(p) => (Some(p.identity_store()), None),
+        Err(e) => (None, Some(e.to_string())),
+    };
     Ok(RemoteStatus {
         running: guard.is_some(),
-        addr: guard.as_ref().map(|h| dial_addr(h.addr(), h.bind())),
+        addr: guard.as_ref().map(|h| h.addr().to_string()),
         bind: guard.as_ref().map(|h| h.bind().to_string()),
-        identity_store: state.pairing.identity_store(),
+        identity_store,
+        identity_error,
         devices: state.paired_devices.list_devices()?,
         pending: state.paired_devices.pending(),
     })
 }
 
-/// The address a device dials: the LAN IP when bound to all interfaces.
-fn dial_addr(bound: SocketAddr, bind: &str) -> String {
-    if bind == "lan" {
-        if let Some(ip) = lan_ip() {
-            return format!("{ip}:{}", bound.port());
-        }
-    }
-    bound.to_string()
-}
-
 /// The machine's LAN address, found by the route a UDP socket would take
-/// (no packet is sent).
+/// (no packet is sent). Loopback never counts as a LAN address.
 fn lan_ip() -> Option<IpAddr> {
     let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     s.connect("10.255.255.255:1").ok()?;
-    s.local_addr().ok().map(|a| a.ip())
+    let ip = s.local_addr().ok()?.ip();
+    (!ip.is_loopback() && !ip.is_unspecified()).then_some(ip)
 }
 
 #[tauri::command(async)]
@@ -119,13 +121,13 @@ pub fn remote_pairing_start(state: State<'_, AppState>) -> AppResult<PairingStar
         let guard = state.remote_server.lock();
         guard
             .as_ref()
-            .map(|h| dial_addr(h.addr(), h.bind()))
+            .map(|h| h.addr().to_string())
             .ok_or_else(|| {
                 AppError::InvalidArgument("start the listener before pairing a device".into())
             })?
     };
     let now = now_ms();
-    let offer = state.pairing.start_pairing(now, PAIRING_TTL_SECS);
+    let offer = state.pairing()?.start_pairing(now, PAIRING_TTL_SECS);
     let json = serde_json::to_string(&offer)
         .map_err(|e| AppError::Other(format!("serialize offer: {e}")))?;
     let uri = format!(
@@ -254,26 +256,40 @@ pub async fn remote_server_start(
     state: State<'_, AppState>,
 ) -> AppResult<RemoteStatus> {
     let bind = bind.unwrap_or_else(|| "loopback".into());
-    let host = match bind.as_str() {
-        "loopback" => "127.0.0.1",
-        "lan" => "0.0.0.0",
+    // `lan` binds the ONE address the LAN route uses — never 0.0.0.0, which
+    // would also listen on a public, hotspot or VPN interface the human did
+    // not confirm.
+    let host: IpAddr = match bind.as_str() {
+        "loopback" => IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        "lan" => lan_ip().ok_or_else(|| {
+            AppError::Other("no LAN address found on this machine (is it on a network?)".into())
+        })?,
         other => {
             return Err(AppError::InvalidArgument(format!(
                 "unknown bind `{other}` (loopback | lan)"
             )))
         }
     };
-    {
+    // The identity is needed before anything listens; a locked keystore is
+    // an error here, not a crash at launch.
+    let pairing = state.pairing()?;
+    let previous = {
         let mut guard = state.remote_server.lock();
         match guard.as_ref() {
             Some(h) if h.bind() == bind => return status_of(&state),
-            Some(_) => {
-                if let Some(h) = guard.take() {
-                    h.stop();
-                }
-            }
-            None => {}
+            Some(_) => guard.take(),
+            None => None,
         }
+    };
+    if let Some(h) = previous {
+        // A bind switch is a stop and a start: both go to the ledger.
+        let old = h.bind().to_string();
+        h.stop();
+        witness(
+            &state,
+            "remote_listener",
+            json!({ "action": "stop", "bind": old, "reason": "bind_changed" }),
+        );
     }
     let listener = tokio::net::TcpListener::bind((host, port.unwrap_or(0)))
         .await
@@ -281,7 +297,6 @@ pub async fn remote_server_start(
     let addr = listener
         .local_addr()
         .map_err(|e| AppError::Other(format!("local_addr: {e}")))?;
-    let pairing = state.pairing.clone();
     let devices = state.paired_devices.clone();
     let handler: Arc<dyn DecisionHandler> = Arc::new(ConsoleBridge::new(app.clone()));
     let notify = app.clone();
@@ -299,7 +314,7 @@ pub async fn remote_server_start(
     witness(
         &state,
         "remote_listener",
-        json!({ "action": "start", "bind": bind, "addr": dial_addr(addr, &bind) }),
+        json!({ "action": "start", "bind": bind, "addr": addr.to_string() }),
     );
     let _ = app.emit("remote://changed", ());
     status_of(&state)

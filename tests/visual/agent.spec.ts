@@ -621,8 +621,11 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   );
   expect(started).toMatchObject({ bind: "loopback" });
   // The QR is one-time and carries the dial address.
-  await section.getByTestId("remote-pair").click();
+  const pair = section.getByTestId("remote-pair");
+  await expect(pair).toHaveText("pair a device on this machine");
+  await pair.click();
   await expect(section.getByTestId("remote-offer")).toBeVisible({ timeout: 3000 });
+  await expect(section.getByTestId("remote-offer")).toContainText("listen on the LAN");
   await expect(section.getByRole("textbox", { name: "Pairing link" })).toHaveValue(
     /agentconsole:\/\/pair\?d=.*&a=127\.0\.0\.1:4870/,
   );

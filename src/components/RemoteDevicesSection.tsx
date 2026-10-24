@@ -80,9 +80,14 @@ export function RemoteDevicesSection() {
         <Chip tone={running ? "ok" : "neutral"} mono data-testid="remote-state">
           {running ? `listening · ${status?.bind}` : "off"}
         </Chip>
-        {status && (
+        {status?.identityStore && (
           <Chip tone={status.identityStore === "keyring" ? "neutral" : "warn"} mono>
             identity in {status.identityStore}
+          </Chip>
+        )}
+        {status?.identityError && (
+          <Chip tone="danger" mono title={status.identityError}>
+            keystore unavailable
           </Chip>
         )}
       </div>
@@ -96,6 +101,7 @@ export function RemoteDevicesSection() {
           </>
         )}
         {error && <> · {error}</>}
+        {status?.identityError && <> · {status.identityError}</>}
       </p>
       <div className="flex flex-wrap gap-2">
         {!running && (
@@ -120,8 +126,13 @@ export function RemoteDevicesSection() {
               disabled={busy || offer !== null}
               onClick={() => void run("Couldn't start pairing", startPairing)}
               data-testid="remote-pair"
+              title={
+                status?.bind === "loopback"
+                  ? "The listener is on this machine only: a phone needs the LAN listener or a tunnel to this port"
+                  : undefined
+              }
             >
-              pair a device
+              {status?.bind === "loopback" ? "pair a device on this machine" : "pair a device"}
             </button>
             <button
               className="wb-cta"
@@ -151,6 +162,14 @@ export function RemoteDevicesSection() {
               Scan from the device, or paste the link into it. The offer is one-time and expires in{" "}
               <span className="font-code tabular-nums">{secondsLeft}s</span>; the device then shows
               up below for your approval.
+              {status?.bind === "loopback" && (
+                <>
+                  {" "}
+                  The link dials <span className="font-code">{status.addr}</span>: only a client on
+                  this machine (or a tunnel to this port) can reach it — a phone on the Wi-Fi needs
+                  "listen on the LAN".
+                </>
+              )}
             </p>
             <textarea
               readOnly

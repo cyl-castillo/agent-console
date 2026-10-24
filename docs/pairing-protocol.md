@@ -53,8 +53,11 @@ where the JSON is:
 }
 ```
 
-`a` is the address the device dials (the listener's; the LAN IP when the
-human chose to listen on the LAN). The offer is **one-time** and
+`a` is the address the device dials — the listener's bound address:
+`127.0.0.1:<port>` by default (only a client on the same machine, or a
+tunnel to that port, can reach it) or the machine's LAN address when the
+human chose to listen on the LAN (the console binds that one address, never
+every interface). The offer is **one-time** and
 **short-lived** (TTL). The device pins `responderStatic` and uses `psk` as the
 Noise PSK.
 
@@ -113,7 +116,7 @@ Desktop → device (`ServerMessage`):
 
 ```json
 { "type": "pong" }
-{ "type": "decisions", "items": [ <RemoteDecision>, … ] }
+{ "type": "decisions", "items": [ <RemoteDecision>, … ], "truncated": false }
 { "type": "decided", "id": "<approval id>" }
 { "type": "error", "message": "..." }
 ```
@@ -140,6 +143,8 @@ A `RemoteDecision`:
 }
 ```
 
+- `items` is newest first and holds at most 40 decisions; `truncated: true`
+  says more wait on the desktop (ask again after answering some).
 - `tier` is computed on the **desktop** from the request (`remote_decisions::tier_for`,
   the same rules as the Inbox card for Bash; every other tool is medium). The
   device must render what it receives and may not raise or lower it.

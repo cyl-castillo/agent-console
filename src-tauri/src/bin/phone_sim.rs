@@ -55,8 +55,11 @@ fn save(client: &PhoneClient, addr: &str) -> Result<()> {
 
 fn print_reply(r: ServerMessage) {
     match r {
-        ServerMessage::Decisions { items } if items.is_empty() => println!("nothing pending"),
-        ServerMessage::Decisions { items } => {
+        ServerMessage::Decisions { items, .. } if items.is_empty() => println!("nothing pending"),
+        ServerMessage::Decisions { items, truncated } => {
+            if truncated {
+                println!("(more wait on the desktop — showing the newest)");
+            }
             for d in items {
                 let allow = if d.remote_allow {
                     "allow|deny"

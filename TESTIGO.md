@@ -258,8 +258,13 @@ ProofEvent {
   = {deviceId, label}`, contesta al hook y saca la tarjeta del Inbox (`approval://resolved`, toast con
   el nombre del dispositivo). Actos del humano al ledger (`unbound`): `remote_device {action:
   paired|scope|revoked}` y `remote_listener {action: start|stop, bind: loopback|lan, addr}` —
-  loopback por defecto, LAN sólo con confirmación tipeada en Trust → Remote devices. Identidad del
-  escritorio en el keystore del SO (`keyring`), archivo 0600 sólo de respaldo y la UI dice cuál.
+  loopback por defecto, LAN sólo con confirmación tipeada en Trust → Remote devices y ligando LA
+  dirección LAN descubierta (nunca 0.0.0.0); cambiar de bind registra stop + start. Identidad del
+  escritorio en el keystore del SO (`keyring`), cargada al primer uso (nunca al arrancar) con un
+  marcador `device-identity.pub` que impide acuñar otra identidad si el keystore está bloqueado
+  (la UI muestra `keystore unavailable`); archivo 0600 sólo si nunca hubo identidad en keystore.
+  La respuesta `decisions` va de más nueva a más vieja con tope 40 y flag `truncated`; el puente lee
+  ledger y sesiones una vez por root.
   Export IETF: `remote_device`/`remote_listener` → decision / success / pre_execution. Cliente de
   referencia `phone-sim` (pair / pending / decide sobre TCP real); test E2E sobre loopback real:
   pair → aprobar → pending → allow bajo (registrado con razón) → allow alto RECHAZADO → deny alto →

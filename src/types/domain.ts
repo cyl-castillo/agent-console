@@ -543,8 +543,10 @@ export interface RemoteStatus {
   addr?: string;
   /// loopback · lan
   bind?: string;
-  /// keyring · file — where the desktop's pairing identity lives.
-  identityStore: "keyring" | "file";
+  /// keyring · file — where the desktop's pairing identity lives; absent
+  /// (with `identityError`) when the keystore holds it but could not be read.
+  identityStore?: "keyring" | "file";
+  identityError?: string;
   devices: PairedDevice[];
   pending: PendingPairing[];
 }
