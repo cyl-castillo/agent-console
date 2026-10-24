@@ -92,6 +92,7 @@ import type {
   LabConfig,
   LabSummary,
   TrustStatus,
+  PolicyStatus,
 } from "../types/domain";
 
 export const ipc = {
@@ -402,6 +403,11 @@ export const ipc = {
       { projectRoot, issueKey, dayStartMs, dayEndMs },
     ),
 
+  /// F6: the project's approval policy, its hash and what it compiles to.
+  policyStatus: (projectRoot: string) => invoke<PolicyStatus>("policy_status", { projectRoot }),
+  policySave: (projectRoot: string, policyJson: string) =>
+    invoke<PolicyStatus>("policy_save", { projectRoot, policyJson }),
+  policyApply: (projectRoot: string) => invoke<PolicyStatus>("policy_apply", { projectRoot }),
   /// F4: the folder's agent surface and the human's word on it.
   trustStatus: (projectRoot: string) => invoke<TrustStatus>("trust_status", { projectRoot }),
   trustDecide: (projectRoot: string, decision: "trusted" | "declined") =>

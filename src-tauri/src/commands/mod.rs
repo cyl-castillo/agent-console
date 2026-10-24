@@ -15,6 +15,7 @@ pub mod notes;
 pub mod palette;
 pub mod permissions;
 pub mod plugins;
+pub mod policy;
 pub mod preflight;
 pub mod project;
 pub mod projects;

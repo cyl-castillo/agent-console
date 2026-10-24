@@ -1403,6 +1403,30 @@ impl TestigoService {
         )
     }
 
+    /// F6: the approval policy in force from now on — its hash is what later
+    /// approval decisions carry, so a packet says which policy was live.
+    pub fn on_policy_set(
+        &self,
+        project_root: &str,
+        ts: i64,
+        hash: &str,
+        summary: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            "unbound".into(),
+            None,
+            "policy_set",
+            None,
+            None,
+            "human",
+            json!({ "hash": hash, "summary": summary }),
+        )
+    }
+
     /// F4: the human's word on a folder's agent surface (hooks, MCP, plugins,
     /// rules, instructions, skills, setup), pinned to its digest so the
     /// packet shows what exactly was trusted. Not a turn's event: `unbound`.
@@ -1559,6 +1583,13 @@ impl TestigoService {
             .and_then(|t| inner.turns.get(t))
             .map(|s| s.turn_id.clone());
         let case = Self::case_for(&inner, term_id.as_deref());
+        // F6: the approval policy in force when this was decided — the
+        // packet names which `policy_set` covered the decision. Best-effort:
+        // no policy file, no hash.
+        let policy_hash = crate::services::policy_service::load(Path::new(project_root))
+            .ok()
+            .flatten()
+            .map(|p| crate::services::policy_service::hash(&p));
         Self::record(
             &mut inner,
             project_root,
@@ -1571,7 +1602,7 @@ impl TestigoService {
             // D11: a decision the sponsor policy took is the policy's act,
             // never the human's — the ledger shows what nobody looked at.
             if policy.is_some() { "sponsor" } else { "human" },
-            json!({ "approvalId": id, "tool": tool, "decision": decision, "reason": reason, "policy": policy }),
+            json!({ "approvalId": id, "tool": tool, "decision": decision, "reason": reason, "policy": policy, "policyHash": policy_hash }),
         )
     }
 

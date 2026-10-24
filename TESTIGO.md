@@ -214,6 +214,17 @@ ProofEvent {
   espera la decisión (o, si fue "declined", deja el lanzamiento en manos del humano). Export IETF:
   decision / success (trusted) / denied (declined), fase pre_execution. Código: `trust_service.rs`,
   `commands/trust.rs`, `trustStore.ts`, `TrustDecision.tsx`, sección "workspace trust" en Permissions.
+- **Política de aprobaciones como código (COMPETENCIA-2026-10 F6, 2026-10-23)**: un archivo versionado
+  en el repo, `.agent-console/policy.json` (`{version:1, rules:[{effect: allow|ask|block, tool: shell|
+  edit|read|fetch|mcp, pattern}]}`), compilado a lo que cada engine aplica — Claude `permissions.
+  {allow,ask,deny}` en `.claude/settings.json` (`Bash(prefijo:*)`, `Edit/Write/MultiEdit(glob)`,
+  `Read(glob)`, `WebFetch(domain:x)`, `mcp__server`), Codex `prefix_rule(pattern=[tokens],
+  decision=allow|prompt|forbidden)` en `.codex/rules/agent-console.rules` (sólo shell: execpolicy no
+  tiene reglas por path), OpenCode `permission.{bash,edit,read,webfetch}.{patrón: allow|ask|deny}` en
+  `opencode.json`. Al aplicar se registra `policy_set {hash, summary}` (hash = sha256 del JSON
+  canónico) y desde entonces cada `approval_decision` lleva `policyHash`: el packet dice qué política
+  estaba viva cuando se decidió. Lo que un engine no puede expresar queda listado como `skipped`, no se
+  inventa. Export IETF: `policy_set` → decision / success / pre_execution.
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

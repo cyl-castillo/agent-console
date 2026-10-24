@@ -98,7 +98,10 @@ suggest-only, none of them able to block the core:
 - **Room** — you plus N agents (mixed engines) on one problem; working rooms
   edit on an isolated branch you review and merge (see below).
 - **Schedule** — agentic jobs on a clock, physically restricted to plan mode.
-- **Trust** — permissions + secrets vault: what the agent can touch; and
+- **Trust** — permissions + secrets vault: what the agent can touch, and
+  the approval policy as one versioned file in the repo compiled into what
+  Claude, Codex and OpenCode each enforce (its hash rides on every approval
+  in the ledger); and
   the folder itself: what it would inject into the agents (hooks, setup
   commands, plugins, MCP servers, rules, skills, instructions), hashed and
   decided on before any agent is launched there, asked again when it
