@@ -794,7 +794,98 @@ impl EngineRunner for ClaudeRunner {
 pub struct CodexRunner;
 
 impl EngineRunner for CodexRunner {
+    /// F5: one turn over `codex app-server` (JSONL JSON-RPC on stdio, verified
+    /// on 0.163.0): every command arrives as `item/completed` with its exit
+    /// code and output, approvals are answered by the turn's policy, token
+    /// usage and the account's quota come from their notifications. The
+    /// connector's MCP server travels as a `-c mcp_servers…` override, as it
+    /// did for `exec`. `AGENT_CONSOLE_CODEX_LEGACY=1` or a failed spawn falls
+    /// back to `codex exec --json`.
     fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
+        if std::env::var_os("AGENT_CONSOLE_CODEX_LEGACY").is_some() {
+            return self.run_exec(ctx, on_activity);
+        }
+        let mut args: Vec<String> = vec!["app-server".into()];
+        if let Some(mcp) = &ctx.mcp {
+            args.push("-c".into());
+            args.push(mcp.codex_config_override());
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let mut cmd = claude_cli::codex_command_with_stdin(&arg_refs);
+        cmd.current_dir(ctx.cwd);
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    "codex app-server could not be spawned ({e}); falling back to `codex exec`"
+                );
+                return self.run_exec(ctx, on_activity);
+            }
+        };
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Other("codex app-server has no stdin pipe".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| AppError::Other("codex app-server has no stdout pipe".into()))?;
+        let err_handle = drain_stderr(child.stderr.take());
+        let local = ChildSlot::default();
+        let slot = park(ctx.child_slot, &local, child);
+        let req = crate::services::codex_app_server::AppServerPrompt {
+            cwd: &ctx.cwd.to_string_lossy(),
+            prompt: ctx.prompt,
+            resume: ctx.resume,
+            effort: ctx.model,
+            policy: ctx.tools,
+        };
+        let result = crate::services::codex_app_server::run_turn(
+            BufReader::new(stdout),
+            stdin,
+            &req,
+            on_activity,
+        );
+        if let Ok(mut c) = unpark(slot) {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        let stderr_text = err_handle.and_then(|h| h.join().ok()).unwrap_or_default();
+        let turn = result.map_err(|e| {
+            let mut msg = e.to_string();
+            if !stderr_text.trim().is_empty() {
+                msg.push_str(": ");
+                msg.push_str(&truncate(stderr_text.trim(), 600));
+            }
+            if let Some(hint) = crate::services::claude_cli::failure_hint(&stderr_text) {
+                msg.push_str(&hint);
+            }
+            AppError::Other(msg)
+        })?;
+        if turn.status != "completed" {
+            return Err(AppError::Other(format!(
+                "Codex did not complete the turn (status: {})",
+                if turn.status.is_empty() {
+                    "none"
+                } else {
+                    &turn.status
+                }
+            )));
+        }
+        // Codex reports no dollars — only tokens (and its quota, kept by the
+        // caller's activity feed for now).
+        Ok(TurnOutput {
+            text: turn.text,
+            session_id: Some(turn.thread_id),
+            tokens: turn.tokens,
+            cost_usd: 0.0,
+        })
+    }
+}
+
+impl CodexRunner {
+    /// The pre-app-server path (`codex exec --json`), kept as the fallback.
+    fn run_exec(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
         let args = codex_exec_args(ctx);
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let mut cmd = claude_cli::codex_command_with_stdin(&arg_refs);
