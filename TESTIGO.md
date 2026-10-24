@@ -245,6 +245,25 @@ ProofEvent {
   `pr_decision` → decision / success (gate verified) / escalated (gate human). Código: `pr_service.rs`,
   `commands/pr.rs`, `prStore.ts`, `lib/prInbox.ts`, `PrDecision.tsx`; fixtures reales de gh 2.46 en
   `src-tauri/fixtures/pr/`.
+- **Decisiones desde un dispositivo emparejado (COMPETENCIA-2026-10 F8, 2026-10-23)**: la rama
+  `feat/secure-pairing` (jun-2026, Noise XXpsk3/KK vía `snow`, QR de un solo uso, dispositivos
+  fijados con scope, listener loopback) entra a main con la capa de voz **reemplazada** por un
+  protocolo de decisiones (`docs/pairing-protocol.md` v2): el dispositivo pide `pending` y recibe
+  `RemoteDecision` (tool, resumen acotado, sesión, tier calculado en el escritorio, `remoteAllow`,
+  evidencia = último `verification` y último `check_run` de esa sesión) y responde `decide`. La
+  compuerta vive en `remote_decisions::gate`: un tier alto (`rm -rf`, `git push`, `sudo`, curl|sh…)
+  nunca se aprueba desde un dispositivo — `deny` siempre, `allow` sólo bajo/medio — y `readOnly`
+  sólo mira; el escritorio relee el request como está AHORA, no el tier que el dispositivo muestra.
+  Cada respuesta remota es un `approval_decision` normal (actor `human`) con `via.remote
+  = {deviceId, label}`, contesta al hook y saca la tarjeta del Inbox (`approval://resolved`, toast con
+  el nombre del dispositivo). Actos del humano al ledger (`unbound`): `remote_device {action:
+  paired|scope|revoked}` y `remote_listener {action: start|stop, bind: loopback|lan, addr}` —
+  loopback por defecto, LAN sólo con confirmación tipeada en Trust → Remote devices. Identidad del
+  escritorio en el keystore del SO (`keyring`), archivo 0600 sólo de respaldo y la UI dice cuál.
+  Export IETF: `remote_device`/`remote_listener` → decision / success / pre_execution. Cliente de
+  referencia `phone-sim` (pair / pending / decide sobre TCP real); test E2E sobre loopback real:
+  pair → aprobar → pending → allow bajo (registrado con razón) → allow alto RECHAZADO → deny alto →
+  readOnly no decide. La app del dispositivo vive en otro repo; voz diferida hasta segundo factor.
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

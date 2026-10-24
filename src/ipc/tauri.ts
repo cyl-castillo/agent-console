@@ -93,6 +93,10 @@ import type {
   LabSummary,
   TrustStatus,
   PrOverview,
+  RemoteStatus,
+  PairingStartResult,
+  PairedDevice,
+  DeviceScope,
   PolicyStatus,
 } from "../types/domain";
 
@@ -419,6 +423,18 @@ export const ipc = {
     invoke<void>("pr_autofix", { number, commentIds }),
   prMerge: (number: number, gate: "verified" | "human", reason?: string) =>
     invoke<string>("pr_merge", { number, gate, reason }),
+  /// F8: the remote-decisions listener and the paired devices.
+  remoteStatus: () => invoke<RemoteStatus>("remote_status"),
+  remoteServerStart: (bind: "loopback" | "lan", port?: number) =>
+    invoke<RemoteStatus>("remote_server_start", { bind, port }),
+  remoteServerStop: () => invoke<RemoteStatus>("remote_server_stop"),
+  remotePairingStart: () => invoke<PairingStartResult>("remote_pairing_start"),
+  remoteApprove: (pendingId: string, scope?: DeviceScope) =>
+    invoke<PairedDevice>("remote_approve", { pendingId, scope }),
+  remoteReject: (pendingId: string) => invoke<void>("remote_reject", { pendingId }),
+  remoteRevoke: (id: string) => invoke<void>("remote_revoke", { id }),
+  remoteSetScope: (id: string, scope: DeviceScope) =>
+    invoke<void>("remote_set_scope", { id, scope }),
   notesList: (projectRoot: string) => invoke<StickyNote[]>("notes_list", { projectRoot }),
   notesSave: (projectRoot: string, notes: StickyNote[]) =>
     invoke<void>("notes_save", { projectRoot, notes }),

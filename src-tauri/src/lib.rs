@@ -266,6 +266,16 @@ pub fn run() {
             commands::pr::pr_status,
             commands::pr::pr_autofix,
             commands::pr::pr_merge,
+            commands::remote::remote_status,
+            commands::remote::remote_pairing_start,
+            commands::remote::remote_pending,
+            commands::remote::remote_approve,
+            commands::remote::remote_reject,
+            commands::remote::remote_devices,
+            commands::remote::remote_revoke,
+            commands::remote::remote_set_scope,
+            commands::remote::remote_server_start,
+            commands::remote::remote_server_stop,
             commands::hooks::approvals_pending,
             commands::testigo::testigo_list,
             commands::testigo::testigo_verify,
@@ -351,6 +361,12 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+// Public surface for the reference phone client (`phone-sim`) and any external
+// implementation of the remote-decisions protocol (docs/pairing-protocol.md).
+pub use crate::services::remote_decisions::RemoteDecision;
+pub use crate::services::transport::client as phone_protocol;
+pub use crate::services::transport::{ClientMessage, ServerMessage};
 
 /// Test-only support shared across modules. Placed at the end of the crate so it
 /// doesn't trip clippy's `items_after_test_module` (a cfg(test) module followed

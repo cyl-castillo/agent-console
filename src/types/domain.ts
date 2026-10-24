@@ -515,6 +515,40 @@ export interface PrOverview {
   error?: string;
 }
 
+/// F8: a paired device that may answer decisions from afar (mirrors Rust).
+export type DeviceScope = "readOnly" | "readApprovals" | "full";
+export interface PairedDevice {
+  id: string;
+  label: string;
+  publicKey: string;
+  scope: DeviceScope;
+  pairedAtMs: number;
+  lastSeenMs?: number;
+}
+export interface PendingPairing {
+  id: string;
+  label: string;
+  publicKey: string;
+  proposedScope: DeviceScope;
+  createdMs: number;
+}
+export interface PairingStartResult {
+  uri: string;
+  qrSvg: string;
+  ttlSecs: number;
+  expiresAtMs: number;
+}
+export interface RemoteStatus {
+  running: boolean;
+  addr?: string;
+  /// loopback · lan
+  bind?: string;
+  /// keyring · file — where the desktop's pairing identity lives.
+  identityStore: "keyring" | "file";
+  devices: PairedDevice[];
+  pending: PendingPairing[];
+}
+
 /// F6: the project's approval policy as code (mirrors the Rust PolicyStatus).
 export interface PolicyRule {
   effect: "allow" | "ask" | "block" | string;

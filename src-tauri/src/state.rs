@@ -3,6 +3,8 @@ use parking_lot::Mutex;
 use crate::services::activity_service::ActivityService;
 use crate::services::git_watcher::GitWatcher;
 use crate::services::hooks_service::HooksRuntime;
+use crate::services::paired_devices_service::PairedDevicesService;
+use crate::services::pairing_service::PairingService;
 use crate::services::project_manager::Project;
 use crate::services::roundtable_service::RoundtableService;
 use crate::services::scheduler_service::SchedulerService;
@@ -24,6 +26,12 @@ pub struct AppState {
     /// snapshots, turn boundaries) — evidence, unlike `activity` which is a
     /// trimmed learning substrate.
     pub testigo: TestigoService,
+    /// F8: the desktop's pairing identity (Noise static key) and the devices
+    /// a human approved — shared with the listener's per-connection tasks.
+    pub pairing: std::sync::Arc<PairingService>,
+    pub paired_devices: std::sync::Arc<PairedDevicesService>,
+    /// The remote-decisions listener, when started. None = stopped.
+    pub remote_server: Mutex<Option<crate::services::transport::ServerHandle>>,
     pub git_watcher: GitWatcher,
     pub roundtable: RoundtableService,
     pub scheduler: SchedulerService,
@@ -52,6 +60,11 @@ impl AppState {
             trust: crate::services::trust_service::TrustService::new(),
             activity: ActivityService::new(),
             testigo: TestigoService::new(),
+            pairing: std::sync::Arc::new(
+                PairingService::load_keyring().expect("failed to load the device pairing identity"),
+            ),
+            paired_devices: std::sync::Arc::new(PairedDevicesService::new()),
+            remote_server: Mutex::new(None),
             git_watcher: GitWatcher::new(),
             roundtable: RoundtableService::new(),
             scheduler: SchedulerService::new(),
