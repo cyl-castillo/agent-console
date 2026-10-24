@@ -11,6 +11,9 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore, type TerminalSession } from "../stores/terminalsStore";
 import { useTermSignalsStore } from "../stores/termSignalsStore";
 import { useTrustStore } from "../stores/trustStore";
+import { useAgentStatusStore } from "../stores/agentStatusStore";
+import { useProgramStatusStore } from "../stores/programStatusStore";
+import { OSC_7501_PROBE, OSC_7501_REPLY, parseProgramStatus } from "../lib/programStatus";
 import { trustAllowsLaunch } from "../lib/trust";
 import { useThemeStore } from "../stores/themeStore";
 import { useToastStore } from "../stores/toastStore";
@@ -183,6 +186,29 @@ export function Terminal({ session, visible }: Props) {
 
     const fit = new FitAddon();
     fitRef.current = fit;
+    // F5: OSC 7501 (Program Status Protocol). The CLI probes with
+    // `OSC 7501 ; ?` on startup; answering with an OSC 7501 that starts with
+    // `?` is what makes Claude Code (2.1.295+) report working / blocked /
+    // done for this session — a fact from the program, with no hook in the
+    // way. `termId` is assigned once the PTY spawns, before any output.
+    term.parser.registerOscHandler(7501, (data) => {
+      if (data.startsWith(OSC_7501_PROBE)) {
+        if (termId) ipc.termWrite(termId, OSC_7501_REPLY).catch(() => {});
+        return true;
+      }
+      const status = parseProgramStatus(data);
+      if (!status) return true;
+      useProgramStatusStore.getState().note(session.id, status);
+      const agent = useAgentStatusStore.getState();
+      if (status.state === "working") agent.markActive(session.id);
+      else if (status.state === "blocked") agent.noteNotification("permission_prompt", session.id);
+      else if (
+        (status.state === "done" || status.state === "idle") &&
+        agent.workingTermId === session.id
+      )
+        agent.markIdle();
+      return true;
+    });
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
