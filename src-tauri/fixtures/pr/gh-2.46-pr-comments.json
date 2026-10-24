@@ -1,0 +1,50 @@
+[
+ {
+  "id": 4365342426,
+  "path": "src-tauri/src/services/testigo_service.rs",
+  "line": 1592,
+  "original_line": 1592,
+  "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Record the hash of the applied policy**\n\nAfter the user saves a changed policy but before applying it, this reads and hashes the new",
+  "html_url": "https://github.com/cyl-castillo/agent-console/pull/269#discussion_r4365342426",
+  "created_at": "2026-10-24T00:37:03Z",
+  "in_reply_to_id": null,
+  "commit_id": "e09354a72a0893d643e71ec7af53ad44a7b0dab6",
+  "pull_request_review_id": 5635860815,
+  "user": {
+   "login": "reviewer-bot[bot]",
+   "type": "Bot"
+  }
+ },
+ {
+  "id": 4365342431,
+  "path": "src-tauri/src/services/policy_service.rs",
+  "line": 439,
+  "original_line": 439,
+  "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Preserve non-policy Codex rules when applying**\n\nWhen the project already has Codex rules created through the existing Permissions U",
+  "html_url": "https://github.com/cyl-castillo/agent-console/pull/269#discussion_r4365342431",
+  "created_at": "2026-10-24T00:37:03Z",
+  "in_reply_to_id": null,
+  "commit_id": "e09354a72a0893d643e71ec7af53ad44a7b0dab6",
+  "pull_request_review_id": 5635860815,
+  "user": {
+   "login": "reviewer-bot[bot]",
+   "type": "Bot"
+  }
+ },
+ {
+  "id": 4365342432,
+  "path": "src-tauri/src/services/policy_service.rs",
+  "line": 410,
+  "original_line": 410,
+  "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Remove rules deleted from the source policy**\n\nWhen a rule is removed from `policy.json` and the policy is reapplied, it is absent f",
+  "html_url": "https://github.com/cyl-castillo/agent-console/pull/269#discussion_r4365342432",
+  "created_at": "2026-10-24T00:37:03Z",
+  "in_reply_to_id": null,
+  "commit_id": "e09354a72a0893d643e71ec7af53ad44a7b0dab6",
+  "pull_request_review_id": 5635860815,
+  "user": {
+   "login": "reviewer-bot[bot]",
+   "type": "Bot"
+  }
+ }
+]

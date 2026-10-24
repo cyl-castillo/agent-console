@@ -11,6 +11,7 @@ import { DeclineDecision } from "./DeclineDecision";
 import { ReviewDecision } from "./ReviewDecision";
 import { VerificationDecision } from "./VerificationDecision";
 import { TrustDecision } from "./TrustDecision";
+import { PrDecision } from "./PrDecision";
 import { tierRates, useDecisionStatsStore } from "../../stores/decisionStatsStore";
 import { Tooltip } from "../../ui/Tooltip";
 import { Button } from "../../ui/Button";
@@ -51,6 +52,7 @@ export function InboxView() {
     declines,
     reviews,
     verifications,
+    pr,
     trust,
     decisions,
   } = useInbox();
@@ -151,6 +153,13 @@ export function InboxView() {
         <section>
           <SectionHeader title="Trust" count={1} />
           <TrustDecision status={trust} projectName={project?.name ?? "this folder"} />
+        </section>
+      )}
+
+      {pr && (
+        <section>
+          <SectionHeader title="Pull request" count={1} />
+          <PrDecision ov={pr.overview} why={pr.why} />
         </section>
       )}
 

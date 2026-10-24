@@ -529,3 +529,71 @@ test("F4: a folder that would run hooks waits for trust — the card lists them 
   expect(decided[0].args).toMatchObject({ decision: "trusted" });
   await expect(page.getByTestId("trust-decision")).toHaveCount(0);
 });
+
+test("F7: the PR is a decision — Auto-fix hands the comments to the agent, merging without full evidence needs a reason", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox-pull-request");
+  const card = page.getByTestId("pr-41");
+  await expect(card).toBeVisible({ timeout: 5000 });
+  await expect(card.getByTestId("pr-ci")).toHaveText("CI red");
+  await expect(card.getByTestId("pr-evidence")).toHaveText("verified 1/2");
+  await expect(card.getByTestId("pr-gate")).toContainText("1 commit the ledger never saw");
+  await expect(card).toContainText("src/policy.ts:439");
+  // Auto-fix: the comments go into the agent as a prompt (not sent), and
+  // the ledger names which ones.
+  await card.getByRole("button", { name: "Auto-fix" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+            }
+          ).__fixtures.invokeLog.find((l) => l.cmd === "pr_autofix")?.args ?? null,
+      ),
+    )
+    .toMatchObject({ number: 41, commentIds: [4365342431, 4365342447] });
+  // Merge: one commit is unbound, so the automatic gate is closed; the
+  // human's word needs a reason before the button enables.
+  await page.goto("/iframe.html?id=app-v2--inbox-pull-request&viewMode=story");
+  await page.locator("body[data-story-ready='1']").waitFor({ timeout: 15_000 });
+  const again = page.getByTestId("pr-41");
+  await expect(again).toBeVisible({ timeout: 5000 });
+  await expect(again.getByRole("button", { name: /^Merge$|^Merge when green$/ })).toHaveCount(0);
+  await again.getByRole("button", { name: "Merge needs your word" }).click();
+  const word = again.getByRole("button", { name: "Merge when green, on my word" });
+  await expect(word).toBeDisabled();
+  await again
+    .getByRole("textbox", { name: /why you merge/i })
+    .fill("Hand tweak reviewed line by line with Carla.");
+  await expect(word).toBeEnabled();
+  await word.click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+            }
+          ).__fixtures.invokeLog.find((l) => l.cmd === "pr_merge")?.args ?? null,
+      ),
+    )
+    .toMatchObject({
+      number: 41,
+      gate: "human",
+      reason: "Hand tweak reviewed line by line with Carla.",
+    });
+});
+
+test("F7: the session that produced the branch carries the PR and its CI on its row", async ({
+  page,
+}) => {
+  await open(page, "app-v2--sessions");
+  const chip = page.getByTestId("session-sess-auth").getByTestId("session-pr");
+  await expect(chip).toBeVisible({ timeout: 5000 });
+  await expect(chip).toHaveText("#41 · CI running");
+  await expect(page.getByTestId("session-sess-retry").getByTestId("session-pr")).toHaveCount(0);
+});

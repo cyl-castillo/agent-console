@@ -446,6 +446,75 @@ export interface TrustStatus {
   state: string;
 }
 
+/// F7: the checked-out branch's pull request as the ledger sees it (mirrors
+/// the Rust PrOverview): CI and comments through the user's own `gh`, and
+/// the evidence behind every commit of the branch.
+export interface PrCheck {
+  name: string;
+  /// pending · success · failure · skipped
+  status: string;
+  url?: string;
+}
+export interface PrComment {
+  id: number;
+  author: string;
+  bot: boolean;
+  /// inline · review · issue
+  kind: string;
+  body: string;
+  path?: string;
+  line?: number;
+  url?: string;
+  createdAt: string;
+}
+export interface PrInfo {
+  number: number;
+  url: string;
+  title: string;
+  /// OPEN · MERGED · CLOSED
+  state: string;
+  isDraft: boolean;
+  headRef: string;
+  baseRef: string;
+  headSha: string;
+  mergeState: string;
+  reviewDecision: string;
+  checks: PrCheck[];
+  /// none · pending · green · red
+  ci: string;
+  comments: PrComment[];
+}
+export interface CommitEvidence {
+  sha: string;
+  subject: string;
+  caseId?: string;
+  turnId?: string;
+  termId?: string;
+  actor?: string;
+  /// verified · checked · no_claim · accepted · unverified_claim · stale_check ·
+  /// claim_contradicted · unverified · unbound
+  verification: string;
+}
+export interface BranchEvidence {
+  branch: string;
+  base: string;
+  commits: CommitEvidence[];
+  verified: number;
+  accepted: number;
+  unverified: number;
+  contradicted: number;
+  unbound: number;
+  allVerified: boolean;
+}
+export interface PrOverview {
+  branch: string;
+  pr?: PrInfo;
+  evidence: BranchEvidence;
+  /// ok · no_pr · missing · error
+  gh: string;
+  error?: string;
+}
+
 /// F6: the project's approval policy as code (mirrors the Rust PolicyStatus).
 export interface PolicyRule {
   effect: "allow" | "ask" | "block" | string;

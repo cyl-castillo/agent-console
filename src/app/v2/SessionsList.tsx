@@ -28,7 +28,9 @@ import { useProofStore } from "../../stores/proofStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useShellStore } from "../../stores/shellStore";
 import { useTerminalsStore, type TerminalSession } from "../../stores/terminalsStore";
-import { Badge } from "../../ui/Chip";
+import { Badge, Chip } from "../../ui/Chip";
+import { ciLabel, ciTone, prTermIds } from "../../lib/prInbox";
+import { usePrStore } from "../../stores/prStore";
 import { IconButton } from "../../ui/IconButton";
 import { SectionHeader } from "../../ui/SectionHeader";
 import { StatusGlyph, type AgentState } from "../../ui/StatusGlyph";
@@ -83,6 +85,7 @@ function SessionRow({
   state,
   summary,
   cost,
+  pr,
   lastActive,
   now,
   active,
@@ -101,6 +104,8 @@ function SessionRow({
   state: AgentState;
   summary?: string;
   cost?: number;
+  /// F7: the PR this session's commits are on, with its CI word.
+  pr?: { number: number; ci: string };
   lastActive: number;
   now: number;
   active: boolean;
@@ -179,8 +184,30 @@ function SessionRow({
               {session.name}
             </span>
           )}
-          {(session.worktree || summary) && (
+          {(session.worktree || summary || pr) && (
             <span className="block truncate text-small text-muted-foreground">
+              {pr && (
+                // Neutral text, coloured dot: a tinted chip over the active
+                // row's wash fails contrast in the light theme (axe).
+                <Chip
+                  mono
+                  className="mr-1 inline-flex items-center gap-1 align-middle"
+                  data-testid="session-pr"
+                  title={`PR #${pr.number} · ${ciLabel(pr.ci)}`}
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "inline-block size-1.5 rounded-full",
+                      ciTone(pr.ci) === "ok" && "bg-ok",
+                      ciTone(pr.ci) === "warn" && "bg-warn",
+                      ciTone(pr.ci) === "danger" && "bg-danger",
+                      ciTone(pr.ci) === "neutral" && "bg-muted-foreground",
+                    )}
+                  />
+                  #{pr.number} · {ciLabel(pr.ci)}
+                </Chip>
+              )}
               {session.worktree && (
                 <span className="font-code text-caption text-faint-foreground">
                   {session.worktree.branch}
@@ -272,6 +299,13 @@ export function SessionsList() {
   const { byState, lastActive, now, activeId } = useInbox();
   const summaries = useSummaries();
   const byTerm = useLiveStatusStore((s) => s.byTerm);
+  const prOverview = usePrStore((s) => s.overview);
+  // F7: the sessions whose commits are on the branch's PR carry its CI.
+  const prTerms = useMemo(() => prTermIds(prOverview), [prOverview]);
+  const prChip = (id: string) =>
+    prOverview?.pr && prTerms.has(id)
+      ? { number: prOverview.pr.number, ci: prOverview.pr.ci }
+      : undefined;
   const sessions = useTerminalsStore((s) => s.sessions);
   const setActive = useTerminalsStore((s) => s.setActive);
   const archive = useTerminalsStore((s) => s.archive);
@@ -511,6 +545,7 @@ export function SessionsList() {
                   state={state}
                   summary={summaries.get(s.id)}
                   cost={byTerm[s.id]?.costUsd}
+                  pr={prChip(s.id)}
                   lastActive={lastActive.get(s.id) ?? s.createdAtMs}
                   now={now}
                   active={s.id === activeId}

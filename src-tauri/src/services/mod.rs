@@ -37,6 +37,7 @@ pub mod permissions_service;
 pub mod persistence;
 pub mod plugins_service;
 pub mod policy_service;
+pub mod pr_service;
 pub mod proc;
 pub mod project_manager;
 pub mod projects_service;

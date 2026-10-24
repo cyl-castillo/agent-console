@@ -33,6 +33,9 @@ import type {
   VaultEntryView,
   VoiceStatus,
   WorkspaceContext,
+  PrCheck,
+  PrComment,
+  PrOverview,
 } from "../../types/domain";
 import { emit } from "../tauri-shim/event";
 import type { FixtureMap } from "./registry";
@@ -273,6 +276,89 @@ function ev(
 const T1 = "turn-001";
 const T2 = "turn-002";
 const T3 = "turn-003";
+/// F7: the demo branch's PR as `pr_status` returns it, with the evidence
+/// binding its first commit to the auth session's turn.
+export function prOverview(ci: "pending" | "green" | "red", comments: PrComment[]): PrOverview {
+  const checks: PrCheck[] = [
+    { name: "backend", status: "success", url: "https://ci.example.test/1" },
+    { name: "dco", status: "success" },
+    {
+      name: "frontend",
+      status: ci === "red" ? "failure" : ci === "pending" ? "pending" : "success",
+      url: "https://ci.example.test/2",
+    },
+  ];
+  return {
+    branch: "ac/retry-path",
+    gh: "ok",
+    pr: {
+      number: 41,
+      url: "https://github.com/demo/demo-playground/pull/41",
+      title: "Retry path for the auth token refresh",
+      state: "OPEN",
+      isDraft: false,
+      headRef: "ac/retry-path",
+      baseRef: "main",
+      headSha: "9f3c2a1b7e5d4c6a8b0f1e2d3c4b5a69788796a5",
+      mergeState: ci === "green" ? "CLEAN" : "BLOCKED",
+      reviewDecision: "",
+      checks,
+      ci,
+      comments,
+    },
+    evidence: {
+      branch: "ac/retry-path",
+      base: "main",
+      commits: [
+        {
+          sha: "9f3c2a1b7e5d4c6a8b0f1e2d3c4b5a69788796a5",
+          subject: "Retry the token refresh once before failing",
+          caseId: "case-2026-10-13",
+          turnId: "turn-001",
+          termId: "sess-auth",
+          actor: "agent",
+          verification: "verified",
+        },
+        {
+          sha: "1e2d3c4b5a69788796a59f3c2a1b7e5d4c6a8b0f",
+          subject: "Tweak the retry delay by hand",
+          verification: "unbound",
+        },
+      ],
+      verified: 1,
+      accepted: 0,
+      unverified: 0,
+      contradicted: 0,
+      unbound: 1,
+      allVerified: false,
+    },
+  };
+}
+
+/// F7: the decision variant — CI red and two review comments waiting.
+export const prOpenRed: PrOverview = prOverview("red", [
+  {
+    id: 4365342431,
+    author: "reviewer-bot",
+    bot: true,
+    kind: "inline",
+    body: "**P1** Preserve non-policy rules when applying — the existing rules file is rewritten wholesale, so rules the Permissions UI created are lost.",
+    path: "src/policy.ts",
+    line: 439,
+    url: "https://github.com/demo/demo-playground/pull/41#discussion_r1",
+    createdAt: "2026-10-13T10:12:00Z",
+  },
+  {
+    id: 4365342447,
+    author: "carla",
+    bot: false,
+    kind: "review",
+    body: "The retry delay should come from config, not a literal.",
+    url: "https://github.com/demo/demo-playground/pull/41#pullrequestreview-1",
+    createdAt: "2026-10-13T10:20:00Z",
+  },
+]);
+
 export const proofEvents: ProofEvent[] = [
   ev(NOW - h(2) - min(40), "session_start", { model: "claude-opus-5-5" }, T1),
   ev(
@@ -1286,6 +1372,12 @@ export const defaultFixtures: FixtureMap = {
   },
   policy_save: undefined,
   policy_apply: undefined,
+  // F7: the branch's PR. By default CI is still running and nobody has
+  // commented: a chip on the session row, no card. `prOpenRed` (below)
+  // is the decision variant stories and specs layer on top.
+  pr_status: prOverview("pending", []),
+  pr_autofix: undefined,
+  pr_merge: "✓ Pull request #41 will be automatically merged when all requirements are met",
   trust_status: {
     state: "trusted",
     decision: {

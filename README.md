@@ -106,6 +106,11 @@ suggest-only, none of them able to block the core:
   commands, plugins, MCP servers, rules, skills, instructions), hashed and
   decided on before any agent is launched there, asked again when it
   changes.
+- **Pull request** — the branch's PR as the ledger sees it (through your
+  own `gh`, no bot): CI state on the session's row, review comments typed
+  into the agent as a prompt you send, and merge-when-green that needs no
+  word only when every turn behind the branch is verified — otherwise it
+  needs yours, with a reason, in the ledger.
 - **Add-ons** — plugins + MCP servers.
 - **Notes** and **Context** (CLAUDE.md & memories); export/import lives in
   the command palette.
