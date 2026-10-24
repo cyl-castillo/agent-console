@@ -87,6 +87,22 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
 }));
 
 export async function attachApprovalListener(): Promise<UnlistenFn> {
+  // F8: a decision taken on a paired device — the card leaves, named.
+  const unResolved = await listen<{ id: string; decision: string; device?: string }>(
+    "approval://resolved",
+    (e) => {
+      const { id, decision, device } = e.payload;
+      const termId = useApprovalStore.getState().queue.find((r) => r.id === id)?.termId;
+      useApprovalStore.setState((s) => ({ queue: s.queue.filter((r) => r.id !== id) }));
+      if (termId) useAgentStatusStore.getState().markActive(termId);
+      useToastStore
+        .getState()
+        .show(
+          `${decision === "allow" ? "Allowed" : "Denied"} from ${device ?? "a device"}`,
+          "info",
+        );
+    },
+  );
   const un = await listen<ApprovalRequest>("approval://request", (e) => {
     useApprovalStore.getState()._enqueue(e.payload);
   });
@@ -124,6 +140,7 @@ export async function attachApprovalListener(): Promise<UnlistenFn> {
     window.removeEventListener("focus", onFocus);
     un();
     unDeferred();
+    unResolved();
   };
 }
 

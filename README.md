@@ -111,6 +111,11 @@ suggest-only, none of them able to block the core:
   into the agent as a prompt you send, and merge-when-green that needs no
   word only when every turn behind the branch is verified — otherwise it
   needs yours, with a reason, in the ledger.
+- **Remote decisions** — pair a device by QR (Noise, keys pinned, your
+  click on the desktop) and answer the decisions waiting here from it, with
+  their evidence. Dangerous actions are never approved from a device; every
+  pairing, scope and answer is in the ledger. Loopback by default, the LAN
+  only when you say so.
 - **Add-ons** — plugins + MCP servers.
 - **Notes** and **Context** (CLAUDE.md & memories); export/import lives in
   the command palette.

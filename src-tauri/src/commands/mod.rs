@@ -20,6 +20,7 @@ pub mod pr;
 pub mod preflight;
 pub mod project;
 pub mod projects;
+pub mod remote;
 pub mod review;
 pub mod rewind;
 pub mod roundtable;

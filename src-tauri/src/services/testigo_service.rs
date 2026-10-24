@@ -1600,6 +1600,23 @@ impl TestigoService {
         reason: Option<&str>,
         policy: Option<&str>,
     ) -> AppResult<ProofEvent> {
+        self.on_approval_decision_via(project_root, ts, id, decision, reason, policy, None)
+    }
+
+    /// F8: the same decision, taken on a paired device. The actor is still the
+    /// human (the device is theirs); `via` names the device so the packet
+    /// shows the answer did not come from the keyboard.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_approval_decision_via(
+        &self,
+        project_root: &str,
+        ts: i64,
+        id: &str,
+        decision: &str,
+        reason: Option<&str>,
+        policy: Option<&str>,
+        via: Option<Value>,
+    ) -> AppResult<ProofEvent> {
         let mut inner = self.inner.lock();
         // remove(): one decision closes one request. A post-restart decision
         // (empty map) still records, just without tool/term context — and in
@@ -1634,7 +1651,33 @@ impl TestigoService {
             // D11: a decision the sponsor policy took is the policy's act,
             // never the human's — the ledger shows what nobody looked at.
             if policy.is_some() { "sponsor" } else { "human" },
-            json!({ "approvalId": id, "tool": tool, "decision": decision, "reason": reason, "policy": policy, "policyHash": policy_hash }),
+            json!({ "approvalId": id, "tool": tool, "decision": decision, "reason": reason, "policy": policy, "policyHash": policy_hash, "via": via }),
+        )
+    }
+
+    /// F8: a remote device paired, re-scoped or revoked (`remote_device`) and
+    /// the listener started or stopped with its bind (`remote_listener`) —
+    /// the human's acts that decide who can answer from afar. `unbound`.
+    pub fn on_remote(
+        &self,
+        project_root: &str,
+        ts: i64,
+        kind: &str,
+        payload: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            "unbound".into(),
+            None,
+            kind,
+            None,
+            None,
+            "human",
+            payload,
         )
     }
 

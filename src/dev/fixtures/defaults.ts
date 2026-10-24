@@ -36,6 +36,7 @@ import type {
   PrCheck,
   PrComment,
   PrOverview,
+  RemoteStatus,
 } from "../../types/domain";
 import { emit } from "../tauri-shim/event";
 import type { FixtureMap } from "./registry";
@@ -332,6 +333,28 @@ export function prOverview(ci: "pending" | "green" | "red", comments: PrComment[
       unbound: 1,
       allVerified: false,
     },
+  };
+}
+
+/// F8: the remote listener as `remote_status` returns it, with one device
+/// already paired (read-only) and nothing pending.
+export function remoteStatus(running: boolean): RemoteStatus {
+  return {
+    running,
+    addr: running ? "127.0.0.1:4870" : undefined,
+    bind: running ? "loopback" : undefined,
+    identityStore: "keyring",
+    devices: [
+      {
+        id: "dev-demo-1",
+        label: "Pixel (kitchen)",
+        publicKey: "cGl4ZWwta2V5LWRlbW8",
+        scope: "readOnly",
+        pairedAtMs: NOW - d(12),
+        lastSeenMs: NOW - h(5),
+      },
+    ],
+    pending: [],
   };
 }
 
@@ -1377,6 +1400,34 @@ export const defaultFixtures: FixtureMap = {
   // is the decision variant stories and specs layer on top.
   pr_status: prOverview("pending", []),
   pr_autofix: undefined,
+  // F8: the remote-decisions listener. Off by default; the spec starts it and
+  // drives a pending pairing through `remote://changed`.
+  remote_status: remoteStatus(false),
+  remote_server_start: (args: Record<string, unknown>) => ({
+    ...remoteStatus(true),
+    bind: (args.bind as string) ?? "loopback",
+    addr: args.bind === "lan" ? "192.168.1.9:4870" : "127.0.0.1:4870",
+  }),
+  remote_server_stop: remoteStatus(false),
+  remote_pairing_start: {
+    uri: "agentconsole://pair?d=eyJkZW1vIjp0cnVlfQ&a=127.0.0.1:4870",
+    qrSvg:
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" shape-rendering="crispEdges"><rect width="10" height="10" fill="#fff"/><path d="M1 1h3v3H1zM6 1h3v3H6zM1 6h3v3H1zM6 6h1v1H6zM8 6h1v1H8zM7 7h1v1H7zM6 8h1v1H6zM8 8h1v1H8z"/></svg>',
+    ttlSecs: 120,
+    expiresAtMs: NOW + 120_000,
+  },
+  remote_approve: {
+    id: "dev-demo-2",
+    label: "Carlos iPhone",
+    publicKey: "Zm9vYmFyYmF6cXV4",
+    scope: "readApprovals",
+    pairedAtMs: NOW,
+  },
+  remote_reject: undefined,
+  remote_revoke: undefined,
+  remote_set_scope: undefined,
+  remote_pending: [],
+  remote_devices: [],
   pr_merge: "✓ Pull request #41 will be automatically merged when all requirements are met",
   trust_status: {
     state: "trusted",

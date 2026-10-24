@@ -597,3 +597,80 @@ test("F7: the session that produced the branch carries the PR and its CI on its 
   await expect(chip).toHaveText("#41 · CI running");
   await expect(page.getByTestId("session-sess-retry").getByTestId("session-pr")).toHaveCount(0);
 });
+
+test("F8: remote devices — the listener starts on this machine, a pairing waits for the click here and is approved with a scope", async ({
+  page,
+}) => {
+  await open(page, "app-v2--settings-permissions");
+  const section = page.getByTestId("remote-devices");
+  await expect(section).toBeVisible({ timeout: 5000 });
+  await expect(section.getByTestId("remote-state")).toHaveText("off");
+  await expect(section).toContainText("Pixel (kitchen)");
+  await section.getByTestId("remote-start-loopback").click();
+  await expect(section.getByTestId("remote-state")).toHaveText("listening · loopback", {
+    timeout: 3000,
+  });
+  await expect(section).toContainText("127.0.0.1:4870");
+  const started = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+        }
+      ).__fixtures.invokeLog.find((l) => l.cmd === "remote_server_start")?.args ?? null,
+  );
+  expect(started).toMatchObject({ bind: "loopback" });
+  // The QR is one-time and carries the dial address.
+  const pair = section.getByTestId("remote-pair");
+  await expect(pair).toHaveText("pair a device on this machine");
+  await pair.click();
+  await expect(section.getByTestId("remote-offer")).toBeVisible({ timeout: 3000 });
+  await expect(section.getByTestId("remote-offer")).toContainText("listen on the LAN");
+  await expect(section.getByRole("textbox", { name: "Pairing link" })).toHaveValue(
+    /agentconsole:\/\/pair\?d=.*&a=127\.0\.0\.1:4870/,
+  );
+  // A device dialled in: the Rust side announces it, the row waits for the human.
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __fixtures: {
+        setFixture: (c: string, v: unknown) => void;
+        getFixture: (c: string) => unknown;
+        emit: (n: string, p: unknown) => Promise<void>;
+      };
+    };
+    const base = w.__fixtures.getFixture("remote_server_start") as (
+      a: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    const st = base({ bind: "loopback" });
+    w.__fixtures.setFixture("remote_status", {
+      ...st,
+      pending: [
+        {
+          id: "pend-1",
+          label: "Carlos iPhone",
+          publicKey: "aXBob25lLWtleS1kZW1v",
+          proposedScope: "readApprovals",
+          createdMs: Date.now(),
+        },
+      ],
+    });
+    await w.__fixtures.emit("remote://changed", null);
+  });
+  const row = section.getByTestId("remote-pending-row");
+  await expect(row).toBeVisible({ timeout: 3000 });
+  await expect(row).toContainText("Carlos iPhone");
+  await row.getByRole("combobox", { name: /scope for Carlos iPhone/i }).selectOption("readOnly");
+  await row.getByRole("button", { name: "approve as read only" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+            }
+          ).__fixtures.invokeLog.find((l) => l.cmd === "remote_approve")?.args ?? null,
+      ),
+    )
+    .toMatchObject({ pendingId: "pend-1", scope: "readOnly" });
+});

@@ -3,6 +3,8 @@ use parking_lot::Mutex;
 use crate::services::activity_service::ActivityService;
 use crate::services::git_watcher::GitWatcher;
 use crate::services::hooks_service::HooksRuntime;
+use crate::services::paired_devices_service::PairedDevicesService;
+use crate::services::pairing_service::PairingService;
 use crate::services::project_manager::Project;
 use crate::services::roundtable_service::RoundtableService;
 use crate::services::scheduler_service::SchedulerService;
@@ -24,6 +26,14 @@ pub struct AppState {
     /// snapshots, turn boundaries) — evidence, unlike `activity` which is a
     /// trimmed learning substrate.
     pub testigo: TestigoService,
+    /// F8: the desktop's pairing identity (Noise static key), loaded from the
+    /// OS keystore on FIRST USE — never at startup, so a locked keystore or a
+    /// prompt cannot stall or crash the launch — and the devices a human
+    /// approved. Both shared with the listener's per-connection tasks.
+    pub pairing: std::sync::OnceLock<std::sync::Arc<PairingService>>,
+    pub paired_devices: std::sync::Arc<PairedDevicesService>,
+    /// The remote-decisions listener, when started. None = stopped.
+    pub remote_server: Mutex<Option<crate::services::transport::ServerHandle>>,
     pub git_watcher: GitWatcher,
     pub roundtable: RoundtableService,
     pub scheduler: SchedulerService,
@@ -41,6 +51,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// The pairing identity, loaded on first use (see the field doc).
+    pub fn pairing(&self) -> crate::error::AppResult<std::sync::Arc<PairingService>> {
+        if let Some(p) = self.pairing.get() {
+            return Ok(p.clone());
+        }
+        let loaded = std::sync::Arc::new(PairingService::load_keyring()?);
+        let _ = self.pairing.set(loaded);
+        Ok(self.pairing.get().expect("just set").clone())
+    }
+
     pub fn new() -> Self {
         let hooks = HooksRuntime::new().expect("failed to initialize hooks runtime");
         Self {
@@ -52,6 +72,9 @@ impl AppState {
             trust: crate::services::trust_service::TrustService::new(),
             activity: ActivityService::new(),
             testigo: TestigoService::new(),
+            pairing: std::sync::OnceLock::new(),
+            paired_devices: std::sync::Arc::new(PairedDevicesService::new()),
+            remote_server: Mutex::new(None),
             git_watcher: GitWatcher::new(),
             roundtable: RoundtableService::new(),
             scheduler: SchedulerService::new(),

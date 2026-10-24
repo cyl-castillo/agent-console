@@ -5,10 +5,16 @@ description = "Agent Console — minimalist AI-native console IDE"
 authors = ["Carlos Castillo"]
 license = "AGPL-3.0-only"
 edition = "2021"
+# Two binaries (the app and the `phone-sim` reference client): name the app.
+default-run = "agent-console"
 
 [lib]
 name = "agent_console_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "phone-sim"
+path = "src/bin/phone_sim.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -33,7 +39,7 @@ anyhow = "1"
 thiserror = "1"
 parking_lot = "0.12"
 walkdir = "2"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "io-util", "net"] }
 portable-pty = "0.8"
 dirs = "5"
 notify = "6"
@@ -41,6 +47,13 @@ notify-debouncer-mini = "0.4"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
 cpal = "0.18"
+# F8 remote decisions: Noise E2E channel to a paired device. snow = the vetted
+# Rust implementation of the Noise Protocol Framework — never our own crypto.
+snow = "0.9"
+rand = "0.8"
+data-encoding = "2"
+# QR rendering for the pairing offer (SVG only; image backend disabled).
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # tracing_backend: whisper.cpp/ggml log lines go to tracing (debug level)
 # instead of flooding stderr with per-token decode traces.
 whisper-rs = { version = "0.16", features = ["tracing_backend"] }
