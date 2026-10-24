@@ -1,4 +1,5 @@
 import { Inbox as InboxIcon } from "lucide-react";
+import { useSessionStore } from "../../stores/sessionStore";
 import { useShellStore } from "../../stores/shellStore";
 import { useTerminalsStore } from "../../stores/terminalsStore";
 import { useUIStore } from "../../stores/uiStore";
@@ -9,6 +10,7 @@ import { BudgetDecision } from "./BudgetDecision";
 import { DeclineDecision } from "./DeclineDecision";
 import { ReviewDecision } from "./ReviewDecision";
 import { VerificationDecision } from "./VerificationDecision";
+import { TrustDecision } from "./TrustDecision";
 import { tierRates, useDecisionStatsStore } from "../../stores/decisionStatsStore";
 import { Tooltip } from "../../ui/Tooltip";
 import { Button } from "../../ui/Button";
@@ -49,8 +51,10 @@ export function InboxView() {
     declines,
     reviews,
     verifications,
+    trust,
     decisions,
   } = useInbox();
+  const project = useSessionStore((s) => s.project);
   const records = useDecisionStatsStore((s) => s.records);
   const rates = tierRates(records, now).filter((r) => r.total > 0);
   const setActive = useTerminalsStore((s) => s.setActive);
@@ -142,6 +146,13 @@ export function InboxView() {
           New session
         </Button>
       </div>
+
+      {trust && (
+        <section>
+          <SectionHeader title="Trust" count={1} />
+          <TrustDecision status={trust} projectName={project?.name ?? "this folder"} />
+        </section>
+      )}
 
       {queue.length > 0 && (
         <section>

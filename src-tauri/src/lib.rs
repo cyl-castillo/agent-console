@@ -258,6 +258,8 @@ pub fn run() {
             commands::teams::teams_list_messages,
             commands::notes::notes_list,
             commands::notes::notes_save,
+            commands::trust::trust_status,
+            commands::trust::trust_decide,
             commands::hooks::approvals_pending,
             commands::testigo::testigo_list,
             commands::testigo::testigo_verify,

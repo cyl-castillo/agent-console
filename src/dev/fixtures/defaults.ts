@@ -1247,6 +1247,54 @@ export const defaultFixtures: FixtureMap = {
   jira_status: { configured: false, siteUrl: "", email: "" },
   jira_daily_digest: [],
   teams_status: { configured: false, clientId: "", tenant: "", account: "" },
+  trust_status: {
+    state: "trusted",
+    decision: {
+      decision: "trusted",
+      digest: "abc",
+      ts: NOW - d(3),
+      counts: { hooks: 0, mcp: 1, plugins: 0, rules: 0, instructions: 1, skills: 1, setup: 0 },
+    },
+    surface: {
+      digest: "abc",
+      executes: true,
+      counts: { hooks: 0, mcp: 1, plugins: 0, rules: 0, instructions: 1, skills: 1, setup: 0 },
+      files: [
+        {
+          path: ".mcp.json",
+          sha256: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b",
+          bytes: 212,
+          category: "mcp",
+        },
+        {
+          path: "CLAUDE.md",
+          sha256: "2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c",
+          bytes: 1800,
+          category: "instructions",
+        },
+        {
+          path: ".claude/skills/vitest-focus/SKILL.md",
+          sha256: "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d",
+          bytes: 640,
+          category: "skills",
+        },
+      ],
+    },
+  },
+  trust_decide: {
+    state: "trusted",
+    decision: {
+      decision: "trusted",
+      digest: "abc",
+      ts: NOW,
+      counts: { hooks: 0, mcp: 1, plugins: 0, rules: 0, instructions: 1, skills: 1, setup: 0 },
+    },
+    surface: {
+      digest: "abc",
+      counts: { hooks: 0, mcp: 1, plugins: 0, rules: 0, instructions: 1, skills: 1, setup: 0 },
+      files: [],
+    },
+  },
   notes_list: notes,
   notes_save: undefined,
   scheduler_list: jobs,

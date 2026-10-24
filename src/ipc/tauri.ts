@@ -91,6 +91,7 @@ import type {
   HeldOutTask,
   LabConfig,
   LabSummary,
+  TrustStatus,
 } from "../types/domain";
 
 export const ipc = {
@@ -401,6 +402,10 @@ export const ipc = {
       { projectRoot, issueKey, dayStartMs, dayEndMs },
     ),
 
+  /// F4: the folder's agent surface and the human's word on it.
+  trustStatus: (projectRoot: string) => invoke<TrustStatus>("trust_status", { projectRoot }),
+  trustDecide: (projectRoot: string, decision: "trusted" | "declined") =>
+    invoke<TrustStatus>("trust_decide", { projectRoot, decision }),
   notesList: (projectRoot: string) => invoke<StickyNote[]>("notes_list", { projectRoot }),
   notesSave: (projectRoot: string, notes: StickyNote[]) =>
     invoke<void>("notes_save", { projectRoot, notes }),

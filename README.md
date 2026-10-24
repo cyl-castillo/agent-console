@@ -98,7 +98,11 @@ suggest-only, none of them able to block the core:
 - **Room** — you plus N agents (mixed engines) on one problem; working rooms
   edit on an isolated branch you review and merge (see below).
 - **Schedule** — agentic jobs on a clock, physically restricted to plan mode.
-- **Trust** — permissions + secrets vault: what the agent can touch.
+- **Trust** — permissions + secrets vault: what the agent can touch; and
+  the folder itself: what it would inject into the agents (hooks, setup
+  commands, plugins, MCP servers, rules, skills, instructions), hashed and
+  decided on before any agent is launched there, asked again when it
+  changes.
 - **Add-ons** — plugins + MCP servers.
 - **Notes** and **Context** (CLAUDE.md & memories); export/import lives in
   the command palette.

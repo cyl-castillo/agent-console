@@ -415,6 +415,37 @@ export interface TestigoExportPreview {
 }
 
 /// One per-project sticky note (mirrors the Rust Note).
+/// F4: what a folder would inject into the agents launched in it, hashed,
+/// and the human's last word on it (mirrors the Rust TrustStatus).
+export interface TrustSurfaceFile {
+  path: string;
+  sha256: string;
+  bytes: number;
+  /// hooks · mcp · plugins · rules · instructions · skills · setup
+  category: string;
+}
+export interface TrustSurfaceCounts {
+  hooks: number;
+  mcp: number;
+  plugins: number;
+  rules: number;
+  instructions: number;
+  skills: number;
+  setup: number;
+}
+export interface TrustStatus {
+  surface: {
+    files: TrustSurfaceFile[];
+    counts: TrustSurfaceCounts;
+    digest: string;
+    /// Hooks, plugins, setup or MCP present: runs code when an agent starts.
+    executes: boolean;
+  };
+  decision: { decision: string; digest: string; ts: number; counts: TrustSurfaceCounts } | null;
+  /// undecided · trusted · declined · changed
+  state: string;
+}
+
 export interface StickyNote {
   id: string;
   text: string;

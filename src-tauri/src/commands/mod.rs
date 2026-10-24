@@ -32,6 +32,7 @@ pub mod teams;
 pub mod terminal;
 pub mod testigo;
 pub mod transcript;
+pub mod trust;
 pub mod usage;
 pub mod vault;
 pub mod voice;

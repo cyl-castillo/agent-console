@@ -18,6 +18,7 @@ pub struct AppState {
     pub hooks: HooksRuntime,
     pub sessions: SessionsService,
     pub notes: crate::services::notes_service::NotesService,
+    pub trust: crate::services::trust_service::TrustService,
     pub activity: ActivityService,
     /// Testigo: the hash-chained intent-to-proof ledger (prompts, approvals,
     /// snapshots, turn boundaries) — evidence, unlike `activity` which is a
@@ -48,6 +49,7 @@ impl AppState {
             hooks,
             sessions: SessionsService::new(),
             notes: crate::services::notes_service::NotesService::new(),
+            trust: crate::services::trust_service::TrustService::new(),
             activity: ActivityService::new(),
             testigo: TestigoService::new(),
             git_watcher: GitWatcher::new(),
