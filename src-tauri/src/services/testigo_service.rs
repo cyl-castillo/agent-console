@@ -1427,6 +1427,38 @@ impl TestigoService {
         )
     }
 
+    /// F7: the pull request side of the ledger. `pr_link` (actor console)
+    /// binds a PR to the branch's commits, turns and verdicts as they stood;
+    /// `pr_autofix` (human) says which review comments were handed to the
+    /// agent as a prompt; `pr_decision` (human) is the merge-when-green
+    /// word with its gate — `verified` when every turn behind the branch
+    /// was, `human` with a reason otherwise. `case` is the HEAD commit's
+    /// case when the ledger knows it, else `unbound`.
+    pub fn on_pr(
+        &self,
+        project_root: &str,
+        ts: i64,
+        case: &str,
+        kind: &str,
+        actor: &str,
+        payload: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::ensure_tail(&mut inner, project_root)?;
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case.to_string(),
+            None,
+            kind,
+            None,
+            None,
+            actor,
+            payload,
+        )
+    }
+
     /// F4: the human's word on a folder's agent surface (hooks, MCP, plugins,
     /// rules, instructions, skills, setup), pinned to its digest so the
     /// packet shows what exactly was trusted. Not a turn's event: `unbound`.

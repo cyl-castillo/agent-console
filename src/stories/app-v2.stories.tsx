@@ -9,6 +9,7 @@ import {
   approvalHigh,
   pendingApproval,
   ROOT,
+  prOpenRed,
 } from "../dev/fixtures/defaults";
 import { useBudgetStore } from "../stores/budgetStore";
 import { useLiveStatusStore } from "../stores/liveStatusStore";
@@ -148,6 +149,12 @@ export const InboxDecisions = scenario({
       project: ROOT,
     });
   },
+});
+/// F7: the PR as a decision — CI red, two review comments, one commit the
+/// ledger never saw: Auto-fix hands the comments to the agent, the merge
+/// needs the human's word.
+export const InboxPullRequest = scenario({
+  fixtures: { pr_status: prOpenRed },
 });
 export const InboxEmpty = scenario({
   fixtures: {

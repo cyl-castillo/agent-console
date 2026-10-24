@@ -92,6 +92,7 @@ import type {
   LabConfig,
   LabSummary,
   TrustStatus,
+  PrOverview,
   PolicyStatus,
 } from "../types/domain";
 
@@ -412,6 +413,12 @@ export const ipc = {
   trustStatus: (projectRoot: string) => invoke<TrustStatus>("trust_status", { projectRoot }),
   trustDecide: (projectRoot: string, decision: "trusted" | "declined") =>
     invoke<TrustStatus>("trust_decide", { projectRoot, decision }),
+  /// F7: the checked-out branch's PR, its CI and the evidence behind it.
+  prStatus: () => invoke<PrOverview>("pr_status"),
+  prAutofix: (number: number, commentIds: number[]) =>
+    invoke<void>("pr_autofix", { number, commentIds }),
+  prMerge: (number: number, gate: "verified" | "human", reason?: string) =>
+    invoke<string>("pr_merge", { number, gate, reason }),
   notesList: (projectRoot: string) => invoke<StickyNote[]>("notes_list", { projectRoot }),
   notesSave: (projectRoot: string, notes: StickyNote[]) =>
     invoke<void>("notes_save", { projectRoot, notes }),

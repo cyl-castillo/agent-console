@@ -16,6 +16,7 @@ pub mod palette;
 pub mod permissions;
 pub mod plugins;
 pub mod policy;
+pub mod pr;
 pub mod preflight;
 pub mod project;
 pub mod projects;

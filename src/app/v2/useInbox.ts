@@ -10,7 +10,9 @@ import { buildTimeline, useProofStore, type TimelineTurn } from "../../stores/pr
 import { pendingVerifications } from "../../lib/verificationInbox";
 import { trustNeedsDecision } from "../../lib/trust";
 import { useTrustStore } from "../../stores/trustStore";
-import type { TrustStatus } from "../../types/domain";
+import type { PrOverview, TrustStatus } from "../../types/domain";
+import { prNeedsYou } from "../../lib/prInbox";
+import { usePrStore } from "../../stores/prStore";
 import { useDeclinesStore, type Decline } from "../../stores/declinesStore";
 import { useReviewsStore, type Review } from "../../stores/reviewsStore";
 import { sessionAttention } from "../../lib/attention";
@@ -38,6 +40,9 @@ export interface InboxData {
   verifications: TimelineTurn[];
   /// F4: the open folder waits for the human's word before agents launch.
   trust: TrustStatus | null;
+  /// F7: the branch's PR when it is a decision (CI red, fresh review
+  /// comments, or green and waiting for the merge word).
+  pr: { overview: PrOverview; why: "ci_red" | "comments" | "ready" } | null;
   /// Everything that waits for a human decision — the number on the rail
   /// and in the Inbox header are this same count.
   decisions: number;
@@ -60,6 +65,8 @@ export function useInbox(): InboxData {
   const allDeclines = useDeclinesStore((s) => s.items);
   const allReviews = useReviewsStore((s) => s.items);
   const trustStatus = useTrustStore((s) => s.status);
+  const prOverview = usePrStore((s) => s.overview);
+  const prDismissed = usePrStore((s) => s.dismissed);
   // A clock so relative ages move without a store write; the working window
   // needs it too.
   const [now, setNow] = useState(() => Date.now());
@@ -133,8 +140,11 @@ export function useInbox(): InboxData {
   const reviews = allReviews.filter((r) => !r.resolved && (!project || r.project === project.root));
   const verifications = pendingVerifications(buildTimeline(events));
   const trust = trustNeedsDecision(trustStatus) ? trustStatus : null;
+  const prWhy = prNeedsYou(prOverview, events, prDismissed);
+  const pr = prWhy && prOverview ? { overview: prOverview, why: prWhy } : null;
   const decisions =
     queue.length +
+    (pr ? 1 : 0) +
     reviews.length +
     verifications.length +
     (trust ? 1 : 0) +
@@ -158,6 +168,7 @@ export function useInbox(): InboxData {
     reviews,
     verifications,
     trust,
+    pr,
     decisions,
   };
 }

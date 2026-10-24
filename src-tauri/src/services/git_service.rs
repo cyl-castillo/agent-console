@@ -900,6 +900,34 @@ pub fn pr_url_current(repo: &Path) -> AppResult<Option<String>> {
     Ok(remote_url(repo, &remote).and_then(|u| pr_url_for(&u, &branch)))
 }
 
+/// F7: the checked-out branch for callers outside this module.
+pub fn current_branch_name(repo: &Path) -> AppResult<String> {
+    current_branch(repo)
+}
+
+/// F7: the remote's default branch (`main`), when the clone recorded it.
+pub fn default_branch_name(repo: &Path, remote: &str) -> Option<String> {
+    default_branch(repo, remote)
+}
+
+/// F7: `owner/repo` of a remote, for `gh api repos/{slug}/…`.
+pub fn remote_slug(repo: &Path, remote: &str) -> Option<String> {
+    let url = remote_url(repo, remote)?;
+    let (_, path) = parse_remote(&url)?;
+    Some(
+        path.trim_end_matches('/')
+            .trim_end_matches(".git")
+            .to_string(),
+    )
+}
+
+/// F7: whether a full ref (`refs/remotes/origin/main`) exists.
+pub fn ref_exists(repo: &Path, full_ref: &str) -> bool {
+    git(repo, &["show-ref", "--verify", "--quiet", full_ref])
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 fn current_branch(repo: &Path) -> AppResult<String> {
     let out = git(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
     let b = String::from_utf8_lossy(&out.stdout).trim().to_string();

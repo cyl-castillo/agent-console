@@ -228,6 +228,27 @@ fn map_kind(e: &ProofEvent) -> Mapped {
             outcome: "success",
             phase: "pre_execution",
         },
+        // F7: the PR link is an observation; the auto-fix hand-off and the
+        // merge word are decisions (a human override is escalated, not
+        // success — the packet shows the gate was not met by evidence).
+        "pr_link" => Mapped {
+            action_type: "lifecycle",
+            outcome: "success",
+            phase: "post_execution",
+        },
+        "pr_autofix" => Mapped {
+            action_type: "decision",
+            outcome: "success",
+            phase: "post_execution",
+        },
+        "pr_decision" => {
+            let by_evidence = p.get("gate").and_then(Value::as_str) == Some("verified");
+            Mapped {
+                action_type: "decision",
+                outcome: if by_evidence { "success" } else { "escalated" },
+                phase: "post_execution",
+            }
+        }
         "trust_decision" => {
             let trusted = p.get("decision").and_then(Value::as_str) == Some("trusted");
             Mapped {
@@ -688,6 +709,9 @@ Mapping from the Testigo ledger (the console's native chain):
 | verification_decision | decision | post_execution | success (accept) / escalated (evidence_requested) |
 | trust_decision | decision | pre_execution | success (trusted) / denied (declined) |
 | policy_set | decision | pre_execution | success (the approval policy in force; its hash rides on later approval_decision lines) |
+| pr_link | lifecycle | post_execution | success (the PR bound to the branch's commits, turns and verdicts) |
+| pr_autofix | decision | post_execution | success (review comments handed to the agent as a prompt) |
+| pr_decision | decision | post_execution | success (gate = verified) / escalated (gate = human, with reason) |
 | turn_end | lifecycle | post_execution | success / failure / timeout |
 | agent_action (MCP) | tool_call | post_execution | success / denied |
 | agent_declined (MCP) | escalation | post_execution | escalated |

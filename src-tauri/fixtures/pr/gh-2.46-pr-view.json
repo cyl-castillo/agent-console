@@ -1,0 +1,106 @@
+{
+ "baseRefName": "main",
+ "comments": [
+  {
+   "id": "IC_kwDOSkIl5s8AAAABfCJKPw",
+   "author": {
+    "login": "reviewer-bot"
+   },
+   "authorAssociation": "NONE",
+   "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 {\"code_review\":{\"commit_sha\":\"e09354a72a0893d643e71ec7af53ad44a7b0dab6\",\"has_any_findings\"",
+   "createdAt": "2026-10-24T00:34:29Z",
+   "includesCreatedEdit": true,
+   "isMinimized": false,
+   "minimizedReason": "",
+   "reactionGroups": [],
+   "url": "https://github.com/cyl-castillo/agent-console/pull/269#issuecomment-6377589311",
+   "viewerDidAuthor": false
+  }
+ ],
+ "headRefName": "feat/policy-f6",
+ "headRefOid": "e09354a72a0893d643e71ec7af53ad44a7b0dab6",
+ "isDraft": false,
+ "mergeStateStatus": "BLOCKED",
+ "mergeable": "UNKNOWN",
+ "number": 269,
+ "reviewDecision": "",
+ "reviews": [
+  {
+   "id": "PRR_kwDOSkIl5s8AAAABT-xpTw",
+   "author": {
+    "login": "reviewer-bot"
+   },
+   "authorAssociation": "NONE",
+   "body": "<!-- codex-review-receipt:v1 -->\n\n\n### \ud83d\udca1 Codex Review\n\nHere are some automated review suggestions for this pull request.\n\n**Reviewed commit:** `e09354a72a`\n    ",
+   "submittedAt": "2026-10-24T00:37:03Z",
+   "includesCreatedEdit": false,
+   "reactionGroups": [],
+   "state": "COMMENTED",
+   "commit": {
+    "oid": "e09354a72a0893d643e71ec7af53ad44a7b0dab6"
+   }
+  }
+ ],
+ "state": "OPEN",
+ "statusCheckRollup": [
+  {
+   "__typename": "CheckRun",
+   "completedAt": "2026-10-24T00:35:11Z",
+   "conclusion": "FAILURE",
+   "detailsUrl": "https://github.com/cyl-castillo/agent-console/actions/runs/40045634508",
+   "name": "frontend",
+   "startedAt": "2026-10-24T00:34:23Z",
+   "status": "COMPLETED",
+   "workflowName": "CI"
+  },
+  {
+   "__typename": "CheckRun",
+   "completedAt": "2026-10-24T00:34:33Z",
+   "conclusion": "SUCCESS",
+   "detailsUrl": "https://github.com/cyl-castillo/agent-console/actions/runs/40045634436",
+   "name": "testigo-verify",
+   "startedAt": "2026-10-24T00:34:22Z",
+   "status": "COMPLETED",
+   "workflowName": "testigo-verify"
+  },
+  {
+   "__typename": "CheckRun",
+   "completedAt": "2026-10-24T00:37:35Z",
+   "conclusion": "",
+   "detailsUrl": "https://github.com/cyl-castillo/agent-console/actions/runs/40045634508",
+   "name": "visual",
+   "startedAt": "2026-10-24T00:34:22Z",
+   "status": "IN_PROGRESS",
+   "workflowName": "CI"
+  },
+  {
+   "__typename": "CheckRun",
+   "completedAt": "2026-10-24T00:48:04Z",
+   "conclusion": "SUCCESS",
+   "detailsUrl": "https://github.com/cyl-castillo/agent-console/actions/runs/40045634508",
+   "name": "backend",
+   "startedAt": "2026-10-24T00:34:23Z",
+   "status": "COMPLETED",
+   "workflowName": "CI"
+  },
+  {
+   "__typename": "CheckRun",
+   "completedAt": "2026-10-24T00:34:27Z",
+   "conclusion": "SUCCESS",
+   "detailsUrl": "https://github.com/cyl-castillo/agent-console/actions/runs/40045634508",
+   "name": "dco",
+   "startedAt": "2026-10-24T00:34:22Z",
+   "status": "COMPLETED",
+   "workflowName": "CI"
+  },
+  {
+   "__typename": "StatusContext",
+   "context": "lint/external",
+   "state": "SUCCESS",
+   "targetUrl": "https://ci.example.test/1",
+   "startedAt": "2026-10-24T00:34:23Z"
+  }
+ ],
+ "title": "Approvals as policy, as code: one versioned file compiled into what Claude, Codex and OpenCode enforce, with its hash on every approval (COMPETENCIA-2026-10 F6)",
+ "url": "https://github.com/cyl-castillo/agent-console/pull/269"
+}

@@ -225,6 +225,26 @@ ProofEvent {
   canónico) y desde entonces cada `approval_decision` lleva `policyHash`: el packet dice qué política
   estaba viva cuando se decidió. Lo que un engine no puede expresar queda listado como `skipped`, no se
   inventa. Export IETF: `policy_set` → decision / success / pre_execution.
+- **PR ↔ ledger (COMPETENCIA-2026-10 F7, 2026-10-23)**: proof-on-PR (P2) ya publicaba el packet en el
+  PR; F7 cierra el camino inverso. `pr_service.rs` lee el PR del branch con el `gh` del usuario
+  (`gh pr view --json …` + `gh api pulls/{n}/comments`; sin token ni bot propios) y camina los
+  commits de `origin/<base>..HEAD` contra el ledger: cada commit → su `commit` (caso, turno, sesión,
+  actor) → el último `verification` de ese turno (o `accepted` si hubo `verification_decision
+  {accept}`); un commit que el ledger nunca vio es `unbound`, un turno sin veredicto `unverified`.
+  `allVerified` sólo si todos los commits están ligados y verdes/aceptados. Eventos: `pr_link`
+  (actor `console`, la primera vez que se ve un par PR+headSha: número, url, refs, ci, commits con
+  turno/sesión/veredicto), `pr_autofix` (actor `human`: ids de los comentarios tipeados al agente —
+  review-first, el humano envía; nunca un bot contesta el PR) y `pr_decision` (actor `human`:
+  `decision merge|merge_when_green`, `gate verified|human`, `reason` obligatoria si `human`, resumen
+  de la evidencia). El merge corre `gh pr merge --merge` (con `--auto` si CI aún no está verde) sólo
+  DESPUÉS de registrar la decisión. UI: tarjeta "Pull request" en el Inbox cuando CI está en rojo,
+  hay comentarios no entregados para ese head, o está verde y abierto (merge es una palabra, no un
+  reflejo) — chips `CI red|running|green`, `verified N/M`, qué sostiene la compuerta, Auto-fix / Merge
+  o "Merge needs your word" (razón ≥ 8 chars); chip `#N · CI …` en la fila de la sesión que produjo
+  el branch. Export IETF: `pr_link` → lifecycle/success, `pr_autofix` → decision/success,
+  `pr_decision` → decision / success (gate verified) / escalated (gate human). Código: `pr_service.rs`,
+  `commands/pr.rs`, `prStore.ts`, `lib/prInbox.ts`, `PrDecision.tsx`; fixtures reales de gh 2.46 en
+  `src-tauri/fixtures/pr/`.
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A
