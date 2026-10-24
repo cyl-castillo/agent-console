@@ -1247,6 +1247,45 @@ export const defaultFixtures: FixtureMap = {
   jira_status: { configured: false, siteUrl: "", email: "" },
   jira_daily_digest: [],
   teams_status: { configured: false, clientId: "", tenant: "", account: "" },
+  policy_status: {
+    path: "/home/demo/code/demo-playground/.agent-console/policy.json",
+    exists: true,
+    policy: {
+      version: 1,
+      rules: [
+        { effect: "allow", tool: "shell", pattern: "npm test" },
+        { effect: "allow", tool: "shell", pattern: "git *" },
+        { effect: "block", tool: "shell", pattern: "rm -rf *" },
+        { effect: "ask", tool: "edit", pattern: "src/**" },
+        { effect: "block", tool: "read", pattern: ".env" },
+      ],
+    },
+    hash: "c0ffee0123456789c0ffee0123456789c0ffee0123456789c0ffee0123456789",
+    compiled: {
+      claude: {
+        allow: ["Bash(npm test)", "Bash(git:*)"],
+        ask: ["Edit(src/**)", "Write(src/**)", "MultiEdit(src/**)"],
+        deny: ["Bash(rm -rf:*)", "Read(.env)"],
+      },
+      codexRules: [
+        'prefix_rule(pattern=["npm", "test"], decision="allow", justification="agent-console policy: Bash(npm test)")',
+        'prefix_rule(pattern=["git"], decision="allow", justification="agent-console policy: Bash(git:*)")',
+        'prefix_rule(pattern=["rm", "-rf"], decision="forbidden", justification="agent-console policy: Bash(rm -rf:*)")',
+      ],
+      opencodePermission: {
+        bash: { "npm test": "allow", "git *": "allow", "rm -rf *": "deny" },
+        edit: { "src/**": "ask" },
+        read: { ".env": "deny" },
+      },
+      skipped: [
+        "codex: edit `src/**` — execpolicy has no per-path rule; use [permissions] in config.toml",
+        "codex: read `.env` — execpolicy has no per-path rule",
+      ],
+    },
+    errors: [],
+  },
+  policy_save: undefined,
+  policy_apply: undefined,
   trust_status: {
     state: "trusted",
     decision: {

@@ -223,6 +223,11 @@ fn map_kind(e: &ProofEvent) -> Mapped {
         // F1c: the console's verdict on the turn's own claims. Only a check
         // that passed after the last edit is a success; a contradicted claim
         // is a failure; everything in between is partial evidence.
+        "policy_set" => Mapped {
+            action_type: "decision",
+            outcome: "success",
+            phase: "pre_execution",
+        },
         "trust_decision" => {
             let trusted = p.get("decision").and_then(Value::as_str) == Some("trusted");
             Mapped {
@@ -682,6 +687,7 @@ Mapping from the Testigo ledger (the console's native chain):
 | verification | decision | post_execution | success (verified / checked / no_claim) / failure (claim_contradicted) / partial (unverified_claim, stale_check, unwitnessed) |
 | verification_decision | decision | post_execution | success (accept) / escalated (evidence_requested) |
 | trust_decision | decision | pre_execution | success (trusted) / denied (declined) |
+| policy_set | decision | pre_execution | success (the approval policy in force; its hash rides on later approval_decision lines) |
 | turn_end | lifecycle | post_execution | success / failure / timeout |
 | agent_action (MCP) | tool_call | post_execution | success / denied |
 | agent_declined (MCP) | escalation | post_execution | escalated |

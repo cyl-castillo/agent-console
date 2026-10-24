@@ -16,6 +16,7 @@ import { attachConsoleMcpHost } from "../lib/consoleMcpHost";
 import { attachDeclineListener } from "../stores/declinesStore";
 import { attachReviewListener } from "../stores/reviewsStore";
 import { attachTrustListeners } from "../stores/trustStore";
+import { attachPolicyListener } from "../stores/policyStore";
 import { attachHandoffWatcher } from "../stores/handoffStore";
 import { useShellStore } from "../stores/shellStore";
 import { attachSponsorWatcher } from "../stores/sponsorStore";
@@ -73,6 +74,7 @@ export function useAppLifecycle(): void {
     adopt(attachDeclineListener());
     adopt(attachReviewListener());
     adopt(attachTrustListeners());
+    adopt(Promise.resolve(attachPolicyListener()));
     offs.push(attachHandoffWatcher());
     offs.push(attachSponsorWatcher());
     offs.push(attachVoiceApprovalWatcher());

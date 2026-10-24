@@ -446,6 +446,27 @@ export interface TrustStatus {
   state: string;
 }
 
+/// F6: the project's approval policy as code (mirrors the Rust PolicyStatus).
+export interface PolicyRule {
+  effect: "allow" | "ask" | "block" | string;
+  tool: "shell" | "edit" | "read" | "fetch" | "mcp" | string;
+  pattern: string;
+  note?: string;
+}
+export interface PolicyStatus {
+  path: string;
+  exists: boolean;
+  policy: { version: number; rules: PolicyRule[] };
+  hash: string;
+  compiled: {
+    claude: { allow: string[]; ask: string[]; deny: string[] };
+    codexRules: string[];
+    opencodePermission: Record<string, Record<string, string>>;
+    skipped: string[];
+  };
+  errors: string[];
+}
+
 export interface StickyNote {
   id: string;
   text: string;
