@@ -515,6 +515,43 @@ export interface PrOverview {
   error?: string;
 }
 
+/// F9: a fan-out — N agents on the same prompt in twin worktrees (mirrors Rust).
+export interface FanOutConfig {
+  problem: string;
+  participants: RoundtableParticipant[];
+}
+export interface FanOutCandidate {
+  participant: RoundtableParticipant;
+  branch: string;
+  worktree: string;
+  /// running · done · error
+  status: string;
+  error?: string;
+  summary: string;
+  files: string[];
+  insertions: number;
+  deletions: number;
+  commands: number;
+  checks: { passed: number; failed: number; unknown: number };
+  /// F1c status from the candidate's own activity and words.
+  verification: string;
+  verificationReason: string;
+  tokens: number;
+  costUsd: number;
+  durationMs: number;
+}
+export interface FanOut {
+  id: string;
+  project: string;
+  problem: string;
+  baseBranch: string;
+  startedAtMs: number;
+  finishedAtMs?: number;
+  candidates: FanOutCandidate[];
+  applied?: string;
+  closed: boolean;
+}
+
 /// F8: a paired device that may answer decisions from afar (mirrors Rust).
 export type DeviceScope = "readOnly" | "readApprovals" | "full";
 export interface PairedDevice {

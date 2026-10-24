@@ -13,6 +13,7 @@ pub mod corpus_feedback;
 pub mod diagnostics;
 pub mod embedding_service;
 pub mod engine_runner;
+pub mod fanout_service;
 pub mod feedback_service;
 pub mod flywheel;
 pub mod fs_names;

@@ -674,3 +674,43 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
     )
     .toMatchObject({ pendingId: "pend-1", scope: "readOnly" });
 });
+
+test("F9: a fan-out compares the candidates' diffs, checks and verdicts; applying one is a confirmed merge", async ({
+  page,
+}) => {
+  await open(page, "app-v2--work-room");
+  // The fan-out toggle only exists for a working room.
+  await expect(page.getByTestId("rt-fanout-toggle")).toHaveCount(0);
+  await page.getByRole("checkbox", { name: /let agents edit the code/i }).check();
+  const toggle = page.getByTestId("rt-fanout-toggle");
+  await expect(toggle).toBeVisible();
+  await toggle.getByRole("checkbox").check();
+  await expect(page.getByRole("button", { name: "Start fan-out" })).toBeVisible();
+  // The finished fan-out from the fixture: two candidates, two verdicts.
+  const section = page.getByTestId("fanouts");
+  await expect(section).toBeVisible({ timeout: 5000 });
+  const a = section.getByTestId("fanout-candidate-p1");
+  const b = section.getByTestId("fanout-candidate-p2");
+  await expect(a).toContainText("2 files +41 −3");
+  await expect(a).toContainText("1✓ 0✗");
+  await expect(a).toContainText("verified");
+  await expect(b).toContainText("0✓ 1✗");
+  await expect(b).toContainText("contradicted");
+  // Apply the verified one: a confirm, then the command with the pick.
+  await a.getByRole("button", { name: "apply" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("fanout/fo-demo-1/p1");
+  await dialog.getByRole("button", { name: "Apply" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+            }
+          ).__fixtures.invokeLog.find((l) => l.cmd === "fanout_apply")?.args ?? null,
+      ),
+    )
+    .toMatchObject({ id: "fo-demo-1", participantId: "p1" });
+});

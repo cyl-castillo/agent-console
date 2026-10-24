@@ -269,6 +269,24 @@ ProofEvent {
   referencia `phone-sim` (pair / pending / decide sobre TCP real); test E2E sobre loopback real:
   pair → aprobar → pending → allow bajo (registrado con razón) → allow alto RECHAZADO → deny alto →
   readOnly no decide. La app del dispositivo vive en otro repo; voz diferida hasta segundo factor.
+- **Revisión cruzada y fan-out (COMPETENCIA-2026-10 F9, 2026-10-24)**: (1) la regla "el revisor nunca es
+  el productor" vive en un solo lugar, `reviewer_service::distinct_identity`: otro engine, o el mismo
+  engine en otra familia de modelo (Claude opus/sonnet/haiku/fable; OpenCode otro id); Codex con otro
+  effort es el mismo modelo y se rechaza; un modelo desconocido no es demostrablemente distinto.
+  `review_with_runner` la aplica siempre — elija la consola (`pick_reviewer`) o el humano ("review by"
+  en la tarjeta de verificación: `review_turn(reviewer_engine, reviewer_model)`), y
+  `validate_job_config` la exige en rooms en job mode con revisión (el reviewer no puede ser ninguno
+  de los implementadores, ni el organizador cuando produce solo). (2) Fan-out (`fanout_service.rs`):
+  N participantes, el mismo prompt, cada uno solo en su worktree `fanout/<id>/<pid>` con AcceptEdits,
+  un turno en paralelo; al terminar la consola compara sin rankear: diff contra la base (archivos,
+  +/−), comandos y checks con exit code cuando el engine lo reporta (Codex/OpenCode; Claude = `?`),
+  y el veredicto F1c sobre sus palabras (`facts_from_activity` → `verification_rules::verdict`,
+  mismas reglas que un turno). `fanout_result` (console) al cerrar la comparación; el humano aplica
+  uno (`merge_back --no-ff` a la base; worktrees fuera, ramas quedan) o descarta todo →
+  `fanout_decision` (human). Export IETF: result → lifecycle, decision → decision. UI: toggle "Fan
+  out" en Room (sólo con edición), tabla de comparación con apply/discard. Tests: tabla de identidades,
+  config de job, facts por engine, fan-out real sobre un repo git temporal con runner scripted (dos
+  gemelos → verified vs claim_contradicted → apply mergea y limpia), spec Playwright de la tabla.
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

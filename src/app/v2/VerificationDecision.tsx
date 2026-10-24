@@ -48,6 +48,9 @@ export function VerificationDecision({ turn }: { turn: TimelineTurn }) {
   const [accepting, setAccepting] = useState(false);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  // F9: "que lo revise otro" — the human may name the reviewer's engine;
+  // the backend refuses one that is the producer.
+  const [reviewBy, setReviewBy] = useState("auto");
   const session = sessions.find((s) => s.id === turn.termId);
   const t = TIER[v.status] ?? TIER.unverified_claim;
   const needsReason = v.status === "claim_contradicted";
@@ -92,8 +95,16 @@ export function VerificationDecision({ turn }: { turn: TimelineTurn }) {
   const requestReview = async () => {
     setBusy(true);
     try {
-      await ipc.reviewTurn(root, turn.termId ?? "", turnId);
-      showToast("Reviewer asked — its verdict lands in the Inbox", "success");
+      await ipc.reviewTurn(
+        root,
+        turn.termId ?? "",
+        turnId,
+        reviewBy === "auto" ? undefined : { engine: reviewBy },
+      );
+      showToast(
+        `Reviewer asked${reviewBy === "auto" ? "" : ` (${reviewBy})`} — its verdict lands in the Inbox`,
+        "success",
+      );
     } catch (e) {
       showToast(`Couldn't request a review: ${String(e)}`, "error");
     } finally {
@@ -166,6 +177,23 @@ export function VerificationDecision({ turn }: { turn: TimelineTurn }) {
                 <span className="text-faint-foreground">Agent: </span>
                 {turn.summary}
               </p>
+            )}
+            {!accepting && (
+              <label className="flex items-center gap-2 text-caption text-muted-foreground">
+                review by
+                <select
+                  aria-label="Review by"
+                  data-testid="review-by"
+                  className="rounded-1 border border-border bg-background px-1 text-caption text-foreground"
+                  value={reviewBy}
+                  onChange={(e) => setReviewBy(e.target.value)}
+                >
+                  <option value="auto">another engine (auto)</option>
+                  <option value="claude">claude</option>
+                  <option value="codex">codex</option>
+                  <option value="opencode">opencode</option>
+                </select>
+              </label>
             )}
             {accepting && (
               <Textarea

@@ -16,19 +16,28 @@ fn now_ms() -> i64 {
 /// D10: ask the reviewer agent to review a finished turn (the session's last
 /// one when `turn_id` is omitted). Blocking (a headless engine run); the
 /// verdict is witnessed and also emitted as `console://review` for the Inbox.
+/// F9: `reviewer_engine`/`reviewer_model` is the human's "review by" choice
+/// (`auto`/absent = the console picks); the gate refuses the producer.
 #[tauri::command(async)]
 pub fn review_turn(
     project_root: String,
     term_id: String,
     turn_id: Option<String>,
+    reviewer_engine: Option<String>,
+    reviewer_model: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ReviewVerdict> {
+    let explicit = reviewer_service::reviewer_from_choice(
+        reviewer_engine.as_deref(),
+        reviewer_model.as_deref(),
+    )?;
     let verdict = reviewer_service::review(
         &state.testigo,
         &project_root,
         &term_id,
         turn_id.as_deref(),
+        explicit,
         now_ms(),
     )?;
     let _ = app.emit(

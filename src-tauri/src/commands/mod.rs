@@ -2,6 +2,7 @@ pub mod advisor;
 pub mod console_mcp;
 pub mod context;
 pub mod diagnostics;
+pub mod fanout;
 pub mod feedback;
 pub mod git;
 pub mod harness_lab;

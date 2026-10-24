@@ -94,6 +94,8 @@ import type {
   TrustStatus,
   PrOverview,
   RemoteStatus,
+  FanOut,
+  FanOutConfig,
   PairingStartResult,
   PairedDevice,
   DeviceScope,
@@ -484,8 +486,28 @@ export const ipc = {
       newCapUsd: newCapUsd ?? null,
     }),
   /// D10: adversarial review of a finished turn by the reviewer agent.
-  reviewTurn: (projectRoot: string, termId: string, turnId?: string) =>
-    invoke<ReviewVerdict>("review_turn", { projectRoot, termId, turnId: turnId ?? null }),
+  /// F9: `reviewer` = the human's "review by" choice; absent/"auto" = the
+  /// console picks. The backend refuses a reviewer that is the producer.
+  reviewTurn: (
+    projectRoot: string,
+    termId: string,
+    turnId?: string,
+    reviewer?: { engine?: string; model?: string },
+  ) =>
+    invoke<ReviewVerdict>("review_turn", {
+      projectRoot,
+      termId,
+      turnId: turnId ?? null,
+      reviewerEngine: reviewer?.engine ?? null,
+      reviewerModel: reviewer?.model ?? null,
+    }),
+  /// F9: fan-outs.
+  fanoutStart: (config: FanOutConfig) => invoke<string>("fanout_start", { config }),
+  fanoutList: () => invoke<FanOut[]>("fanout_list"),
+  fanoutGet: (id: string) => invoke<FanOut | null>("fanout_get", { id }),
+  fanoutApply: (id: string, participantId: string, reason?: string) =>
+    invoke<MergeOutcome>("fanout_apply", { id, participantId, reason: reason ?? null }),
+  fanoutDiscard: (id: string) => invoke<void>("fanout_discard", { id }),
   reviewDecide: (
     projectRoot: string,
     termId: string,
