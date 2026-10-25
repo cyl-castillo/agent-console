@@ -3301,7 +3301,7 @@ How to contribute:
     )
 }
 
-fn is_safe_model(model: &str) -> bool {
+pub(crate) fn is_safe_model(model: &str) -> bool {
     // OpenCode ids are `provider/model`, optionally `#variant`; both are
     // shell-safe characters that never reach a shell anyway (argv, no shell).
     !model.is_empty()

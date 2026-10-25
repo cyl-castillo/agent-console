@@ -244,12 +244,7 @@ fn worktree_root(id: &str) -> PathBuf {
 }
 
 fn cap(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(n).collect();
-    out.push('…');
-    out
+    crate::services::text::cap_chars(s, n)
 }
 
 /// Where a project's fan-outs are kept (`fanouts.json` under the data dir).
@@ -292,12 +287,45 @@ fn save_store(file: &StoreFile) -> AppResult<()> {
 #[derive(Default)]
 pub struct FanOutService {
     runs: Mutex<HashMap<String, Arc<Mutex<FanOut>>>>,
-    disk: Mutex<()>,
+    /// Serializes every write of `fanouts.json` — the service's and the
+    /// workers' (they get a clone).
+    disk: Arc<Mutex<()>>,
 }
 
-/// Called whenever a fan-out changes (a candidate finished, the pick landed):
-/// the Tauri layer emits `fanout://changed`.
-pub type Notify = Arc<dyn Fn(&str) + Send + Sync>;
+/// Most activity lines kept per candidate (tool calls and results only).
+const ACTIVITY_CAP: usize = 5_000;
+/// Participant ids become branch and path components: a short safe charset.
+fn safe_participant_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 32
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// A record read from disk for a fan-out that is not live: a candidate
+/// still `running` was interrupted (the console exited mid-run) — say so,
+/// so the comparison closes instead of spinning forever.
+fn settle_stale(mut fo: FanOut) -> FanOut {
+    let mut touched = false;
+    for c in &mut fo.candidates {
+        if c.status == "running" {
+            c.status = "error".into();
+            c.error = Some("interrupted: the console exited before this candidate finished".into());
+            touched = true;
+        }
+    }
+    if touched && fo.finished_at_ms.is_none() {
+        fo.finished_at_ms = Some(now_ms());
+    }
+    fo
+}
+
+/// Called whenever a candidate finishes: `(id, finished)` where `finished`
+/// is true exactly once per fan-out — on the call that completed it. The
+/// Tauri layer emits `fanout://changed` on every call and witnesses
+/// `fanout_result` on the finishing one.
+pub type Notify = Arc<dyn Fn(&str, bool) + Send + Sync>;
 
 impl FanOutService {
     pub fn new() -> Self {
@@ -306,6 +334,13 @@ impl FanOutService {
 
     fn persist(&self, fo: &FanOut) {
         let _g = self.disk.lock().unwrap();
+        persist_locked(fo);
+    }
+}
+
+/// Write one fan-out into the store. The caller holds the disk lock.
+fn persist_locked(fo: &FanOut) {
+    {
         let mut file = load_store();
         file.fanouts.retain(|f| f.id != fo.id);
         file.fanouts.push(fo.clone());
@@ -322,7 +357,9 @@ impl FanOutService {
             tracing::warn!("fanout: failed to persist {}: {e}", fo.id);
         }
     }
+}
 
+impl FanOutService {
     /// Every fan-out of a project, newest first (live ones as they stand now).
     pub fn list(&self, project: &str) -> Vec<FanOut> {
         let live: HashMap<String, FanOut> = self
@@ -336,7 +373,7 @@ impl FanOutService {
             .fanouts
             .into_iter()
             .filter(|f| f.project == project)
-            .map(|f| live.get(&f.id).cloned().unwrap_or(f))
+            .map(|f| live.get(&f.id).cloned().unwrap_or_else(|| settle_stale(f)))
             .collect();
         for (id, f) in live {
             if f.project == project && !out.iter().any(|o| o.id == id) {
@@ -351,7 +388,11 @@ impl FanOutService {
         if let Some(l) = self.runs.lock().unwrap().get(id) {
             return Some(l.lock().unwrap().clone());
         }
-        load_store().fanouts.into_iter().find(|f| f.id == id)
+        load_store()
+            .fanouts
+            .into_iter()
+            .find(|f| f.id == id)
+            .map(settle_stale)
     }
 
     /// Stand up one worktree per participant and run them all at once, each
@@ -372,13 +413,37 @@ impl FanOutService {
                 "a fan-out needs at least two participants".into(),
             ));
         }
+        for p in &config.participants {
+            if !safe_participant_id(&p.id) {
+                return Err(AppError::InvalidArgument(format!(
+                    "participant id `{}` is not safe for a branch name (letters, digits, - and _)",
+                    p.id
+                )));
+            }
+            if !crate::services::roundtable_service::is_safe_model(&p.model) {
+                return Err(AppError::InvalidArgument(format!(
+                    "invalid model value for {}",
+                    p.name
+                )));
+            }
+        }
+        {
+            let mut ids: Vec<&str> = config.participants.iter().map(|p| p.id.as_str()).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            if ids.len() != config.participants.len() {
+                return Err(AppError::InvalidArgument(
+                    "participant ids must be unique".into(),
+                ));
+            }
+        }
         let base = worktree_service::current_branch(repo)?;
         let id = format!(
             "fo-{}-{}",
             now_ms(),
             &uuid::Uuid::new_v4().simple().to_string()[..6]
         );
-        let mut candidates = Vec::with_capacity(config.participants.len());
+        let mut candidates: Vec<Candidate> = Vec::with_capacity(config.participants.len());
         for p in &config.participants {
             let branch = format!("fanout/{id}/{}", p.id);
             let dest = worktree_root(&id).join(&p.id);
@@ -386,7 +451,6 @@ impl FanOutService {
             // with a missing candidate is not the comparison asked for.
             if let Err(e) = worktree_service::create(repo, &dest, &branch, Some(&base)) {
                 for c in &candidates {
-                    let c: &Candidate = c;
                     let _ =
                         worktree_service::discard(repo, Path::new(&c.worktree), &c.branch, true);
                 }
@@ -437,18 +501,27 @@ impl FanOutService {
                 (PathBuf::from(&c.worktree), c.branch.clone())
             };
             let id = id.clone();
+            let disk = self.disk.clone();
             std::thread::spawn(move || {
                 // Resolved on the thread: the runners are `'static` but not
                 // `Sync`, so the function pointer travels, not the reference.
                 let runner = runner_for(p.engine);
                 let started = now_ms();
                 let activity: Mutex<Vec<Activity>> = Mutex::new(Vec::new());
+                // Only what the facts read: tool calls and results. Streamed
+                // text deltas would be thousands of strings kept for nothing.
                 let sink = |kind: &str, label: &str, text: &str| {
-                    activity.lock().unwrap().push(Activity {
-                        kind: kind.into(),
-                        label: label.into(),
-                        text: text.into(),
-                    });
+                    if kind != "tool" && kind != "tool_result" {
+                        return;
+                    }
+                    let mut a = activity.lock().unwrap();
+                    if a.len() < ACTIVITY_CAP {
+                        a.push(Activity {
+                            kind: kind.into(),
+                            label: label.into(),
+                            text: text.into(),
+                        });
+                    }
                 };
                 let outcome = agent_run::run_with_runner(
                     &RunSpec {
@@ -468,6 +541,11 @@ impl FanOutService {
                 let _ = worktree_service::commit_all(&wt, &format!("fan-out {id}: {}", p.name));
                 let (files, ins, del) = diff_summary(&repo, &base, &branch);
                 let mut fo = shared.lock().unwrap();
+                // Discarded while this ran: the worktree is gone and the
+                // record is closed — nothing to persist, nobody to tell.
+                if fo.closed {
+                    return;
+                }
                 let c = &mut fo.candidates[idx];
                 c.files = files;
                 c.insertions = ins;
@@ -496,18 +574,21 @@ impl FanOutService {
                 };
                 c.verification = status.as_str().into();
                 c.verification_reason = reason;
-                if fo.all_done() {
+                // Exactly one worker completes the fan-out: the one that sets
+                // finished_at_ms. That flag is what the ledger line hangs on.
+                let finished = fo.all_done() && fo.finished_at_ms.is_none();
+                if finished {
                     fo.finished_at_ms = Some(now_ms());
                 }
-                let snapshot = fo.clone();
                 drop(fo);
-                // Persist through the store directly: the service is not
-                // shared with the thread, only the fan-out is.
-                let mut file = load_store();
-                file.fanouts.retain(|f| f.id != snapshot.id);
-                file.fanouts.push(snapshot.clone());
-                let _ = save_store(&file);
-                notify(&id);
+                // Snapshot under the disk lock so two workers can never
+                // write an older state after a newer one.
+                {
+                    let _g = disk.lock().unwrap();
+                    let snapshot = shared.lock().unwrap().clone();
+                    persist_locked(&snapshot);
+                }
+                notify(&id, finished);
             });
         }
         Ok(id)
@@ -611,16 +692,28 @@ impl FanOutService {
         Ok(outcome)
     }
 
-    /// Discard every candidate: worktrees and branches gone.
+    /// Discard every candidate: worktrees and branches gone. A candidate
+    /// still running loses its checkout; its worker sees `closed` and
+    /// persists nothing — the record stays discarded.
     pub fn discard(&self, repo: &Path, id: &str) -> AppResult<()> {
-        let fo = self
-            .get(id)
-            .ok_or_else(|| AppError::NotFound(format!("fan-out {id}")))?;
+        let live = self.runs.lock().unwrap().get(id).cloned();
+        let fo = match &live {
+            Some(l) => {
+                let mut fo = l.lock().unwrap();
+                fo.closed = true;
+                fo.clone()
+            }
+            None => {
+                let mut fo = self
+                    .get(id)
+                    .ok_or_else(|| AppError::NotFound(format!("fan-out {id}")))?;
+                fo.closed = true;
+                fo
+            }
+        };
         for c in &fo.candidates {
             let _ = worktree_service::discard(repo, Path::new(&c.worktree), &c.branch, true);
         }
-        let mut fo = fo;
-        fo.closed = true;
         self.persist(&fo);
         self.runs.lock().unwrap().remove(id);
         Ok(())
@@ -771,9 +864,9 @@ mod tests {
         std::env::set_var("XDG_DATA_HOME", &data);
         let repo = init_repo("twins");
         let svc = FanOutService::new();
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
-        let notify: Notify = Arc::new(move |id: &str| {
-            let _ = tx.send(id.to_string());
+        let (tx, rx) = std::sync::mpsc::channel::<(String, bool)>();
+        let notify: Notify = Arc::new(move |id: &str, finished: bool| {
+            let _ = tx.send((id.to_string(), finished));
         });
         let id = svc
             .start(
@@ -786,10 +879,14 @@ mod tests {
                 notify,
             )
             .unwrap();
-        // Two notifications: one per finished candidate.
+        // Two notifications: one per finished candidate; exactly one says
+        // "this one completed the fan-out".
+        let mut finished_flags = Vec::new();
         for _ in 0..2 {
-            rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+            let (_, f) = rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+            finished_flags.push(f);
         }
+        assert_eq!(finished_flags.iter().filter(|f| **f).count(), 1);
         let fo = svc.get(&id).unwrap();
         assert!(fo.all_done());
         assert!(fo.finished_at_ms.is_some());
@@ -838,7 +935,48 @@ mod tests {
         let _env = crate::test_support::lock_env();
         let repo = init_repo("cfg");
         let svc = FanOutService::new();
-        let notify: Notify = Arc::new(|_: &str| {});
+        let notify: Notify = Arc::new(|_: &str, _: bool| {});
+        // Ids become branch and path components; models reach argv.
+        let mut bad_id = participant("p1", "opus");
+        bad_id.id = "../../x".into();
+        assert!(svc
+            .start(
+                &repo,
+                FanOutConfig {
+                    problem: "x".into(),
+                    participants: vec![bad_id, participant("p2", "sonnet")],
+                },
+                scripted,
+                notify.clone(),
+            )
+            .is_err());
+        assert!(svc
+            .start(
+                &repo,
+                FanOutConfig {
+                    problem: "x".into(),
+                    participants: vec![
+                        participant("p1", "opus; rm -rf"),
+                        participant("p2", "sonnet")
+                    ],
+                },
+                scripted,
+                notify.clone(),
+            )
+            .is_err());
+        assert!(
+            svc.start(
+                &repo,
+                FanOutConfig {
+                    problem: "x".into(),
+                    participants: vec![participant("p1", "opus"), participant("p1", "sonnet")],
+                },
+                scripted,
+                notify.clone(),
+            )
+            .is_err(),
+            "duplicate ids"
+        );
         assert!(svc
             .start(
                 &repo,
@@ -861,5 +999,146 @@ mod tests {
                 notify,
             )
             .is_err());
+    }
+
+    /// A slow fake: lets the test discard mid-run.
+    struct Slow;
+    static SLOW_DONE: AtomicUsize = AtomicUsize::new(0);
+    impl EngineRunner for Slow {
+        fn run(
+            &self,
+            ctx: &RunCtx,
+            on_activity: &crate::services::engine_runner::ActivitySink,
+        ) -> AppResult<TurnOutput> {
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            let _ = std::fs::write(ctx.cwd.join("late.txt"), "late\n");
+            on_activity("tool", "Edit", "late.txt");
+            SLOW_DONE.fetch_add(1, Ordering::SeqCst);
+            Ok(TurnOutput {
+                text: "done".into(),
+                session_id: None,
+                tokens: 1,
+                cost_usd: 0.0,
+            })
+        }
+    }
+    fn slow(_: Engine) -> &'static dyn EngineRunner {
+        &Slow
+    }
+
+    /// Discarding while candidates run stays discarded: the late workers
+    /// see `closed`, persist nothing and notify nobody.
+    #[test]
+    fn discard_while_running_is_not_undone_by_late_workers() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let data = std::env::temp_dir().join(format!("ac-fanout-data-d-{nanos}"));
+        std::fs::create_dir_all(&data).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &data);
+        let repo = init_repo("discard");
+        let svc = FanOutService::new();
+        let notified = Arc::new(AtomicUsize::new(0));
+        let n2 = notified.clone();
+        let notify: Notify = Arc::new(move |_: &str, _: bool| {
+            n2.fetch_add(1, Ordering::SeqCst);
+        });
+        let before = SLOW_DONE.load(Ordering::SeqCst);
+        let id = svc
+            .start(
+                &repo,
+                FanOutConfig {
+                    problem: "slow".into(),
+                    participants: vec![participant("p1", "opus"), participant("p2", "sonnet")],
+                },
+                slow,
+                notify,
+            )
+            .unwrap();
+        svc.discard(&repo, &id).unwrap();
+        assert!(svc.get(&id).unwrap().closed);
+        // Let both workers finish their (now homeless) runs.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while SLOW_DONE.load(Ordering::SeqCst) < before + 2 && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let after = svc.get(&id).unwrap();
+        assert!(
+            after.closed,
+            "a late worker must not reopen a discarded fan-out"
+        );
+        assert_eq!(
+            notified.load(Ordering::SeqCst),
+            0,
+            "nothing to announce once discarded"
+        );
+        assert!(svc.apply(&repo, &id, "p1").is_err());
+    }
+
+    /// A record left `running` by a crash reads back as interrupted, so the
+    /// comparison closes instead of spinning forever.
+    #[test]
+    fn a_fan_out_interrupted_by_a_restart_settles_as_error() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let data = std::env::temp_dir().join(format!("ac-fanout-data-s-{nanos}"));
+        std::fs::create_dir_all(&data).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &data);
+        let svc = FanOutService::new();
+        let mut c = Candidate {
+            participant: participant("p1", "opus"),
+            branch: "fanout/x/p1".into(),
+            worktree: "/tmp/none".into(),
+            status: "running".into(),
+            error: None,
+            summary: String::new(),
+            files: Vec::new(),
+            insertions: 0,
+            deletions: 0,
+            commands: 0,
+            checks: CandidateChecks::default(),
+            verification: "unwitnessed".into(),
+            verification_reason: String::new(),
+            tokens: 0,
+            cost_usd: 0.0,
+            duration_ms: 0,
+        };
+        let done = {
+            let mut d = c.clone();
+            d.participant = participant("p2", "sonnet");
+            d.status = "done".into();
+            d
+        };
+        c.status = "running".into();
+        let fo = FanOut {
+            id: "fo-stale".into(),
+            project: "/p".into(),
+            problem: "x".into(),
+            base_branch: "main".into(),
+            started_at_ms: 1,
+            finished_at_ms: None,
+            candidates: vec![c, done],
+            applied: None,
+            closed: false,
+        };
+        svc.persist(&fo);
+        let read = svc.get("fo-stale").unwrap();
+        assert_eq!(read.candidates[0].status, "error");
+        assert!(read.candidates[0]
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("interrupted"));
+        assert_eq!(read.candidates[1].status, "done");
+        assert!(read.all_done());
+        assert!(read.finished_at_ms.is_some());
+        assert_eq!(svc.list("/p")[0].candidates[0].status, "error");
     }
 }

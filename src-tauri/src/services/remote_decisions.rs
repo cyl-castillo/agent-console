@@ -210,13 +210,7 @@ pub fn tier_for(tool: &str, input: &Value) -> (&'static str, &'static str, Strin
 }
 
 fn cap(s: &str) -> String {
-    let t = s.trim();
-    if t.chars().count() <= SUMMARY_CAP {
-        return t.to_string();
-    }
-    let mut out: String = t.chars().take(SUMMARY_CAP).collect();
-    out.push('…');
-    out
+    crate::services::text::cap_chars(s, SUMMARY_CAP)
 }
 
 /// What the device sees as the request's one line.

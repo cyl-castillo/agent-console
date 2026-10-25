@@ -61,6 +61,7 @@ pub mod terminal_runner;
 pub mod testigo_export;
 pub mod testigo_service;
 pub mod testigo_timestamp;
+pub mod text;
 pub mod transcript_service;
 pub mod transport;
 pub mod trust_service;

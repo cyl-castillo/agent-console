@@ -37,20 +37,22 @@ pub fn fanout_start(
     let repo = repo_of(&state)?;
     let notify_app = app.clone();
     let root = repo.to_string_lossy().to_string();
-    let notify: Notify = Arc::new(move |id: &str| {
-        // Every change reaches the UI; the finished comparison reaches the ledger.
+    let notify: Notify = Arc::new(move |id: &str, finished: bool| {
+        // Every change reaches the UI; the comparison reaches the ledger
+        // once — on the call that completed the fan-out.
         let _ = notify_app.emit("fanout://changed", &json!({ "id": id, "project": root }));
+        if !finished {
+            return;
+        }
         let st = tauri::Manager::state::<AppState>(&notify_app);
         if let Some(fo) = st.fanout.get(id) {
-            if fo.all_done() && !fo.closed {
-                let _ = st.testigo.on_fanout(
-                    &fo.project,
-                    now_ms(),
-                    "fanout_result",
-                    "console",
-                    FanOutService::result_payload(&fo),
-                );
-            }
+            let _ = st.testigo.on_fanout(
+                &fo.project,
+                now_ms(),
+                "fanout_result",
+                "console",
+                FanOutService::result_payload(&fo),
+            );
         }
     });
     state.fanout.start(
@@ -72,8 +74,9 @@ pub fn fanout_get(id: String, state: State<'_, AppState>) -> AppResult<Option<Fa
     Ok(state.fanout.get(&id))
 }
 
-/// The human's pick: merge that candidate onto the base; witnessed as
-/// `fanout_decision` with the reason, before the merge runs.
+/// The human's pick: merge that candidate onto the base. Witnessed as
+/// `fanout_decision` AFTER the merge, with what actually happened — a
+/// conflict is recorded as a pick that did not land, never as a success.
 #[tauri::command(async)]
 pub fn fanout_apply(
     id: String,
@@ -87,15 +90,16 @@ pub fn fanout_apply(
         .fanout
         .get(&id)
         .ok_or_else(|| AppError::NotFound(format!("fan-out {id}")))?;
+    let out = state.fanout.apply(&repo, &id, &participant_id)?;
     let _ = state.testigo.on_fanout(
         &fo.project,
         now_ms(),
         "fanout_decision",
         "human",
         json!({ "id": id, "decision": "apply", "participant": participant_id, "reason": reason,
-                "candidates": fo.candidates.len() }),
+                "candidates": fo.candidates.len(), "merged": out.merged,
+                "mergeCommit": out.merge_commit, "conflictFiles": out.conflict_files }),
     );
-    let out = state.fanout.apply(&repo, &id, &participant_id)?;
     let _ = app.emit("fanout://changed", &json!({ "id": id }));
     Ok(out)
 }
@@ -103,16 +107,18 @@ pub fn fanout_apply(
 #[tauri::command(async)]
 pub fn fanout_discard(id: String, app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     let repo = repo_of(&state)?;
-    if let Some(fo) = state.fanout.get(&id) {
-        let _ = state.testigo.on_fanout(
-            &fo.project,
-            now_ms(),
-            "fanout_decision",
-            "human",
-            json!({ "id": id, "decision": "discard", "candidates": fo.candidates.len() }),
-        );
-    }
+    let fo = state
+        .fanout
+        .get(&id)
+        .ok_or_else(|| AppError::NotFound(format!("fan-out {id}")))?;
     state.fanout.discard(&repo, &id)?;
+    let _ = state.testigo.on_fanout(
+        &fo.project,
+        now_ms(),
+        "fanout_decision",
+        "human",
+        json!({ "id": id, "decision": "discard", "candidates": fo.candidates.len() }),
+    );
     let _ = app.emit("fanout://changed", &json!({ "id": id }));
     Ok(())
 }

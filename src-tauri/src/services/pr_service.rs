@@ -182,13 +182,7 @@ fn s(v: &Value, key: &str) -> String {
 }
 
 fn cap(body: &str) -> String {
-    let b = body.trim();
-    if b.chars().count() <= COMMENT_BODY_CAP {
-        return b.to_string();
-    }
-    let mut out: String = b.chars().take(COMMENT_BODY_CAP).collect();
-    out.push('…');
-    out
+    crate::services::text::cap_chars(body, COMMENT_BODY_CAP)
 }
 
 fn author_of(v: &Value) -> (String, bool) {
