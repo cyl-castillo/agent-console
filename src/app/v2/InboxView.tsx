@@ -12,6 +12,7 @@ import { ReviewDecision } from "./ReviewDecision";
 import { VerificationDecision } from "./VerificationDecision";
 import { TrustDecision } from "./TrustDecision";
 import { PrDecision } from "./PrDecision";
+import { QuotaDecision } from "./QuotaDecision";
 import { tierRates, useDecisionStatsStore } from "../../stores/decisionStatsStore";
 import { Tooltip } from "../../ui/Tooltip";
 import { Button } from "../../ui/Button";
@@ -53,6 +54,7 @@ export function InboxView() {
     reviews,
     verifications,
     pr,
+    quota,
     trust,
     decisions,
   } = useInbox();
@@ -195,6 +197,15 @@ export function InboxView() {
           <SectionHeader title="Declined / escalated" count={declines.length} />
           {declines.map((d) => (
             <DeclineDecision key={d.id} d={d} />
+          ))}
+        </section>
+      )}
+
+      {quota.length > 0 && (
+        <section>
+          <SectionHeader title="Quota" count={quota.length} />
+          {quota.map((q) => (
+            <QuotaDecision key={q.session.id} session={q.session} turn={q.turn} />
           ))}
         </section>
       )}

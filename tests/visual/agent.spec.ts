@@ -714,3 +714,117 @@ test("F9: a fan-out compares the candidates' diffs, checks and verdicts; applyin
     )
     .toMatchObject({ id: "fo-demo-1", participantId: "p1" });
 });
+
+test("F10: at the cap, the budget card offers to continue in OpenCode — a seeded session, the switch and the hand-over in the ledger", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox-decisions");
+  const card = page.getByTestId("budget-sess-auth");
+  await expect(card).toBeVisible();
+  // The catalog is read live; the local open-weight model comes first.
+  const picker = card.getByTestId("budget-model-sess-auth");
+  await expect(picker).toHaveValue("ollama/qwen3-coder:30b", { timeout: 5000 });
+  const before = await page.evaluate(() => window.__agentConsole.state().sessions.length);
+  await card.getByRole("button", { name: "Continue in OpenCode" }).click();
+  await expect
+    .poll(async () => page.evaluate(() => window.__agentConsole.state().sessions.length))
+    .toBe(before + 1);
+  const names = await page.evaluate(() =>
+    window.__agentConsole.state().sessions.map((s) => s.name),
+  );
+  expect(names).toContain("fix auth test ↪ opencode");
+  const log = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+        }
+      ).__fixtures.invokeLog,
+  );
+  const handoff = log.find((l) => l.cmd === "testigo_handoff")?.args;
+  expect(handoff).toMatchObject({
+    termId: "sess-auth",
+    reason: "budget",
+    to: "ollama/qwen3-coder:30b",
+    toEngine: "opencode",
+  });
+  // The session's LAST witnessed turn is what travels, not its first.
+  expect((handoff?.context as { prompt: string }).prompt).toContain(
+    "Refactor retry.ts so backoff is configurable",
+  );
+  const budget = log.find((l) => l.cmd === "testigo_budget_event" && l.args.decision === "switch");
+  expect(budget?.args).toMatchObject({ termId: "sess-auth", decision: "switch" });
+  // The breach is answered: the card leaves.
+  await expect(page.getByTestId("budget-sess-auth")).toHaveCount(0);
+});
+
+test("F10: a turn refused on the plan's quota is a decision — wait, or continue in OpenCode", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox");
+  await expect(page.locator("[data-testid^='quota-']")).toHaveCount(0);
+  // The hook closed the last turn of sess-auth with StopFailure rate_limit.
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __fixtures: {
+        setFixture: (c: string, v: unknown) => void;
+        getFixture: (c: string) => unknown;
+        emit: (n: string, p: unknown) => Promise<void>;
+      };
+    };
+    const base = w.__fixtures.getFixture("testigo_list") as { seq: number; caseId: string }[];
+    const now = Date.now();
+    const lines = [
+      {
+        seq: 960,
+        ts: now - 1000,
+        caseId: "case-2026-10-13",
+        turnId: "turn-q1",
+        kind: "prompt",
+        termId: "sess-auth",
+        actor: "human",
+        payload: { prompt: "Add the retry path", cwd: "/home/demo/code/demo-playground" },
+        prevHash: "",
+        hash: "",
+      },
+      {
+        seq: 961,
+        ts: now,
+        caseId: "case-2026-10-13",
+        turnId: "turn-q1",
+        kind: "turn_end",
+        termId: "sess-auth",
+        actor: "agent",
+        payload: { failed: true, error: "rate_limit", summary: "", filesChanged: [] },
+        prevHash: "",
+        hash: "",
+      },
+    ];
+    w.__fixtures.setFixture("testigo_list", [...base, ...lines]);
+    await w.__fixtures.emit("ledger://appended", {
+      projectRoot: "/home/demo/code/demo-playground",
+      seq: 961,
+      kind: "turn_end",
+      termId: "sess-auth",
+    });
+  });
+  const card = page.getByTestId("quota-sess-auth");
+  await expect(card).toBeVisible({ timeout: 3000 });
+  await expect(card).toContainText("Quota exhausted");
+  await expect(card.getByTestId("quota-model-sess-auth")).toHaveValue("ollama/qwen3-coder:30b", {
+    timeout: 5000,
+  });
+  await card.getByRole("button", { name: "Continue in OpenCode" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+            }
+          ).__fixtures.invokeLog.find((l) => l.cmd === "testigo_handoff")?.args ?? null,
+      ),
+    )
+    .toMatchObject({ termId: "sess-auth", reason: "quota", toEngine: "opencode" });
+});

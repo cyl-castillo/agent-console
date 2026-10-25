@@ -1540,6 +1540,27 @@ export const defaultFixtures: FixtureMap = {
   scheduler_is_paused: false,
   // rooms & jobs
   roundtable_list_rooms: rooms,
+  // F10: OpenCode's live catalog, with one local open-weight model.
+  opencode_models: [
+    { id: "ollama/qwen3-coder:30b", name: "Qwen3 Coder 30B", provider: "ollama", variants: [] },
+    {
+      id: "openrouter/deepseek/deepseek-v3",
+      name: "DeepSeek V3",
+      provider: "openrouter",
+      variants: [],
+    },
+    { id: "openai/gpt-4o", name: "GPT-4o", provider: "openai", variants: [] },
+  ],
+  testigo_handoff: {
+    seq: 980,
+    ts: NOW,
+    caseId: "case-2026-10-13",
+    kind: "model_switch",
+    actor: "human",
+    payload: { reason: "budget", to: "ollama/qwen3-coder:30b", toEngine: "opencode" },
+    prevHash: "",
+    hash: "",
+  },
   // F9: one finished fan-out to compare, nothing running.
   fanout_list: [fanoutDemo],
   fanout_get: fanoutDemo,

@@ -2,7 +2,7 @@ import { ipc } from "../ipc/tauri";
 import { capFor, useBudgetStore } from "../stores/budgetStore";
 import type { TerminalSession } from "../stores/terminalsStore";
 
-export type BudgetDecisionKind = "stop" | "summary" | "raise";
+export type BudgetDecisionKind = "stop" | "summary" | "raise" | "switch";
 
 interface BudgetView {
   caps: Record<string, number>;

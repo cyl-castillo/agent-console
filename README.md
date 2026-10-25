@@ -110,6 +110,11 @@ suggest-only, none of them able to block the core:
   commands, plugins, MCP servers, rules, skills, instructions), hashed and
   decided on before any agent is launched there, asked again when it
   changes.
+- **Budget fallback** — when a Claude or Codex session hits its cost cap or
+  the plan's quota, continue on an open-weight model through OpenCode: a
+  new session seeded with the hand-over (task, files touched, last words,
+  the console's verdict), typed for you to read first, and a `model_switch`
+  with its reason in the ledger.
 - **Pull request** — the branch's PR as the ledger sees it (through your
   own `gh`, no bot): CI state on the session's row, review comments typed
   into the agent as a prompt you send, and merge-when-green that needs no
