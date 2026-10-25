@@ -130,8 +130,10 @@ export function useInbox(): InboxData {
   const needsYouWithoutApproval = (byState.get("needs-you") ?? []).filter(
     (s) => !approvalTermIds.includes(s.id),
   ).length;
+  // F10: a breach whose work moved to OpenCode stays marked (so the
+  // watcher stays quiet) but is no longer a decision.
   const breaches = visible
-    .filter((s) => budgets.breached[s.id] !== undefined)
+    .filter((s) => budgets.breached[s.id] !== undefined && budgets.handedOff[s.id] === undefined)
     .map((session) => ({
       session,
       spent: byTerm[session.id]?.costUsd ?? budgets.breached[session.id],
@@ -144,6 +146,7 @@ export function useInbox(): InboxData {
   const timeline = buildTimeline(events);
   const verifications = pendingVerifications(timeline);
   const quota = quotaOuts(timeline, events)
+    .filter((turn) => !turn.turnId || !budgets.quotaDismissed.includes(turn.turnId))
     .map((turn) => ({ session: visible.find((s) => s.id === turn.termId), turn }))
     .filter((q): q is { session: TerminalSession; turn: TimelineTurn } => q.session !== undefined);
   const trust = trustNeedsDecision(trustStatus) ? trustStatus : null;

@@ -19,8 +19,9 @@ import { useUIStore } from "../../stores/uiStore";
 /// offers. Picks a model from OpenCode's live catalog (open-weight first),
 /// opens a new OpenCode session in the same folder seeded with the
 /// hand-over prompt (typed, not sent: the human reads it), and witnesses
-/// `model_switch {reason}` on the session that stopped. `onDone` lets the
-/// card record its own decision and leave.
+/// `model_switch {reason}` on the session that stopped. `run()` resolves
+/// true once the new session exists — the cards record their own decision
+/// on that; the ledger line is best-effort, like every witness.
 export function useHandoff(
   session: TerminalSession,
   turn: TimelineTurn | undefined,
@@ -65,17 +66,24 @@ export function useHandoff(
         handoffPrompt(ctx),
       );
       persist();
-      await ipc.testigoHandoff(
-        root,
-        session.id,
-        session.agentSessionId,
-        reason,
-        session.model,
-        chosen,
-        "opencode",
-        toTermId,
-        handoffPayload(ctx),
-      );
+      // The session is the act; the ledger line is best-effort (witnessing
+      // can be off for the project) — a failure must not invite a second
+      // session.
+      try {
+        await ipc.testigoHandoff(
+          root,
+          session.id,
+          session.agentSessionId,
+          reason,
+          session.model,
+          chosen,
+          "opencode",
+          toTermId,
+          handoffPayload(ctx),
+        );
+      } catch (e) {
+        showToast(`Hand-over not witnessed: ${String(e)}`, "info");
+      }
       setActive(toTermId);
       goTo("sessions");
       setCenterTab("terminal");

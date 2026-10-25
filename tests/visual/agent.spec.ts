@@ -828,3 +828,61 @@ test("F10: a turn refused on the plan's quota is a decision — wait, or continu
     )
     .toMatchObject({ termId: "sess-auth", reason: "quota", toEngine: "opencode" });
 });
+
+test("F10: 'wait for the window' is remembered — the quota card stays away after leaving the Inbox", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox");
+  await page.evaluate(async () => {
+    const w = window as unknown as {
+      __fixtures: {
+        setFixture: (c: string, v: unknown) => void;
+        getFixture: (c: string) => unknown;
+        emit: (n: string, p: unknown) => Promise<void>;
+      };
+    };
+    const base = w.__fixtures.getFixture("testigo_list") as unknown[];
+    const now = Date.now();
+    w.__fixtures.setFixture("testigo_list", [
+      ...base,
+      {
+        seq: 970,
+        ts: now - 1000,
+        caseId: "case-2026-10-13",
+        turnId: "turn-q2",
+        kind: "prompt",
+        termId: "sess-auth",
+        actor: "human",
+        payload: { prompt: "Again", cwd: "/home/demo/code/demo-playground" },
+        prevHash: "",
+        hash: "",
+      },
+      {
+        seq: 971,
+        ts: now,
+        caseId: "case-2026-10-13",
+        turnId: "turn-q2",
+        kind: "turn_end",
+        termId: "sess-auth",
+        actor: "agent",
+        payload: { failed: true, error: "rate_limit", summary: "", filesChanged: [] },
+        prevHash: "",
+        hash: "",
+      },
+    ]);
+    await w.__fixtures.emit("ledger://appended", {
+      projectRoot: "/home/demo/code/demo-playground",
+      seq: 971,
+      kind: "turn_end",
+      termId: "sess-auth",
+    });
+  });
+  const card = page.getByTestId("quota-sess-auth");
+  await expect(card).toBeVisible({ timeout: 3000 });
+  await card.getByRole("button", { name: "Wait for the window" }).click();
+  await expect(page.getByTestId("quota-sess-auth")).toHaveCount(0);
+  await page.getByTestId("rail-sessions").click();
+  await page.getByTestId("rail-inbox").click();
+  await expect(page.getByTestId("inbox")).toBeVisible();
+  await expect(page.getByTestId("quota-sess-auth")).toHaveCount(0);
+});

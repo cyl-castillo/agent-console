@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useBudgetStore } from "../../stores/budgetStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { recordBudget } from "../../lib/budgetGuard";
@@ -32,14 +33,17 @@ export function BudgetDecision({
   const setCap = useBudgetStore((s) => s.setCap);
   const root = useSessionStore((s) => s.project?.root);
   const clearBreach = useBudgetStore((s) => s.clearBreach);
+  const markHandedOff = useBudgetStore((s) => s.markHandedOff);
   const setActive = useTerminalsStore((s) => s.setActive);
   const goTo = useShellStore((s) => s.goTo);
   const setCenterTab = useUIStore((s) => s.setTab);
   const raise = Math.max(5, Math.ceil(cap * 0.5));
   // F10: the session's last witnessed turn is what the hand-over carries.
   const events = useProofStore((s) => s.events);
-  const mine = buildTimeline(events).filter((t) => t.termId === session.id);
-  const lastTurn = mine[mine.length - 1];
+  const lastTurn = useMemo(() => {
+    const mine = buildTimeline(events).filter((t) => t.termId === session.id);
+    return mine[mine.length - 1];
+  }, [events, session.id]);
   const handoff = useHandoff(session, lastTurn, "budget");
   return (
     <div className="px-3 py-1.5">
@@ -89,13 +93,15 @@ export function BudgetDecision({
             disabled: !handoff.chosen,
             onClick: () => {
               void (async () => {
-                // The decision first, then the hand-over; the breach clears
-                // only once the new session exists.
+                // The hand-over first; the decision once the new session
+                // exists. The breach stays marked (the idle session still
+                // reports a cost over its cap) — the hand-over mark is what
+                // takes the card out of the Inbox.
                 const ok = await handoff.run();
                 if (!ok) return;
                 void recordBudget(root, session, spent, cap, "switch");
                 sendToSession(session.id, "\x03");
-                clearBreach(session.id);
+                markHandedOff(session.id);
               })();
             },
           },

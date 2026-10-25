@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useBudgetStore } from "../../stores/budgetStore";
 import { Chip } from "../../ui/Chip";
 import { DecisionCard } from "../../ui/DecisionCard";
 import type { TimelineTurn } from "../../stores/proofStore";
@@ -12,8 +12,7 @@ import { useHandoff } from "./useHandoff";
 /// witnessed as `model_switch {reason: quota}` and the card leaves.
 export function QuotaDecision({ session, turn }: { session: TerminalSession; turn: TimelineTurn }) {
   const handoff = useHandoff(session, turn, "quota");
-  const [dismissed, setDismissed] = useState(false);
-  if (dismissed) return null;
+  const dismissQuota = useBudgetStore((s) => s.dismissQuota);
   return (
     <div className="px-3 py-1.5">
       <DecisionCard
@@ -41,7 +40,9 @@ export function QuotaDecision({ session, turn }: { session: TerminalSession; tur
           {
             label: "Wait for the window",
             variant: "ghost",
-            onClick: () => setDismissed(true),
+            // Remembered across renders and restarts (budget store); a new
+            // refused turn is a new card.
+            onClick: () => dismissQuota(turn.turnId ?? `${session.id}:${turn.ts}`),
           },
           {
             label: "Continue in OpenCode",
