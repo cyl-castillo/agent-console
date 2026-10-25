@@ -886,3 +886,27 @@ test("F10: 'wait for the window' is remembered — the quota card stays away aft
   await expect(page.getByTestId("inbox")).toBeVisible();
   await expect(page.getByTestId("quota-sess-auth")).toHaveCount(0);
 });
+
+test("F11: the compliance pack is one click from the ledger — the result names the archive, its digest and what it holds", async ({
+  page,
+}) => {
+  await open(page, "app-v2--proof-ledger");
+  await expect(page.getByTestId("compliance-result")).toHaveCount(0);
+  await page.getByTestId("compliance-pack-ledger").click();
+  const result = page.getByTestId("compliance-result");
+  await expect(result).toBeVisible({ timeout: 5000 });
+  await expect(result).toContainText("compliance-ledger.zip");
+  await expect(result).toContainText("3 weeks");
+  await expect(result).toContainText("audit trail verified");
+  await expect(result).toContainText("policy c0ffee012345");
+  await expect(result).toContainText("9c1f0a7d3e5b");
+  const call = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+        }
+      ).__fixtures.invokeLog.find((l) => l.cmd === "testigo_compliance_pack")?.args ?? null,
+  );
+  expect(call).toMatchObject({ projectRoot: "/home/demo/code/demo-playground", caseId: null });
+});

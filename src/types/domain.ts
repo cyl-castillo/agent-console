@@ -347,6 +347,21 @@ export interface AatExportSummary {
   draft: string;
 }
 
+/// F11: the compliance pack the console wrote (mirrors Rust ComplianceSummary).
+export interface ComplianceSummary {
+  path: string;
+  bytes: number;
+  sha256: string;
+  draft: string;
+  sessions: number;
+  records: number;
+  aatOk: boolean;
+  weeks: number;
+  policyHash?: string;
+  files: string[];
+  lastSeq: number;
+}
+
 /// Section 6.3 verification of one exported chain.
 export interface AatVerifyReport {
   ok: boolean;

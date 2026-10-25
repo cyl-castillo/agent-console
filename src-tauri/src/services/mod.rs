@@ -6,6 +6,7 @@ pub mod agent_run;
 pub mod agent_sessions;
 pub mod claude_cli;
 pub mod codex_app_server;
+pub mod compliance;
 pub mod connector_service;
 pub mod console_mcp;
 pub mod context_service;

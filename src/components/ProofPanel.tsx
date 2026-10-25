@@ -73,6 +73,8 @@ export function ProofPanel() {
   const load = useProofStore((s) => s.load);
   const startExport = useProofStore((s) => s.startExport);
   const exportAat = useProofStore((s) => s.exportAat);
+  const compliancePack = useProofStore((s) => s.compliancePack);
+  const lastCompliance = useProofStore((s) => s.lastCompliance);
   const toggleRedact = useProofStore((s) => s.toggleRedact);
   const confirmExport = useProofStore((s) => s.confirmExport);
   const cancelExport = useProofStore((s) => s.cancelExport);
@@ -326,6 +328,14 @@ export function ProofPanel() {
                 >
                   audit trail
                 </button>
+                <button
+                  className="wb-link"
+                  disabled={exporting !== null}
+                  onClick={() => void compliancePack(c.caseId)}
+                  title="One reproducible zip: the audit trail (verified), the approval policy in force with its hash, verification by week, a manifest with every file's SHA-256"
+                >
+                  compliance pack
+                </button>
               </div>
             ))}
             <p className="wb-hint">
@@ -345,6 +355,16 @@ export function ProofPanel() {
                 title="Export the full ledger as IETF Agent Audit Trail JSONL, one chain per session"
               >
                 full ledger as audit trail
+              </button>
+              {" · "}
+              <button
+                className="wb-link"
+                disabled={exporting !== null}
+                onClick={() => void compliancePack(undefined)}
+                title="One reproducible zip for the whole ledger: audit trail (verified), policy in force, verification by week, manifest"
+                data-testid="compliance-pack-ledger"
+              >
+                compliance pack
               </button>
             </p>
           </section>
@@ -508,6 +528,28 @@ export function ProofPanel() {
                 </div>
               );
             })}
+          </section>
+        )}
+
+        {!review && lastCompliance && (
+          <section className="wb-section" data-testid="compliance-result">
+            <div className="wb-section-title">last compliance pack</div>
+            <p className="wb-hint">
+              <code>{lastCompliance.path}</code>
+            </p>
+            <p className="wb-hint">
+              {lastCompliance.sessions} sessions · {lastCompliance.records} records ·{" "}
+              {lastCompliance.weeks} week{lastCompliance.weeks === 1 ? "" : "s"} ·{" "}
+              {lastCompliance.draft} ·{" "}
+              {lastCompliance.aatOk ? "audit trail verified" : "audit trail NOT verified"} ·{" "}
+              {lastCompliance.policyHash
+                ? `policy ${lastCompliance.policyHash.slice(0, 12)}…`
+                : "no policy file"}
+            </p>
+            <p className="wb-hint">
+              sha256 <code>{lastCompliance.sha256}</code> · {lastCompliance.bytes} bytes · same
+              ledger, same bytes — an auditor can rebuild and compare.
+            </p>
           </section>
         )}
 

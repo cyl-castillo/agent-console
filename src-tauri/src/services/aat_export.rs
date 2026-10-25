@@ -47,7 +47,7 @@ pub struct AatVerifyReport {
     pub problems: Vec<String>,
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     let d = Sha256::digest(bytes);
     d.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -744,6 +744,11 @@ Mapping from the Testigo ledger (the console's native chain):
 | budget_decision | decision | post_execution | success / denied (stop); `switch` = the work moved to OpenCode (F10) |
 | model_switch | lifecycle | concurrent | success (`payload.to` feeds `languageModels`; F10 adds `reason: budget|quota`, `toEngine`, `toTermId`, `handoff`) |
 | anything else | lifecycle | concurrent | success |
+
+The console can also write a **compliance pack**: this export (verified),
+the approval policy in force with its hash, the verification verdicts by
+week and a manifest with every file's SHA-256, in one reproducible zip
+(Proof → compliance pack). See `README.md` at the root of that archive.
 
 `action_detail` keeps the Testigo `event`, `testigo_seq`, `testigo_hash`,
 `testigo_case_id` and the original payload, so both chains cross-reference.
