@@ -741,7 +741,8 @@ Mapping from the Testigo ledger (the console's native chain):
 | review_verdict (reviewer agent) | decision | post_execution | success / failure (request_changes) / denied (block) |
 | review_decision (human) | decision | post_execution | success (override) / denied (accept) |
 | budget_reached | escalation | concurrent | escalated |
-| budget_decision | decision | post_execution | success / denied (stop) |
+| budget_decision | decision | post_execution | success / denied (stop); `switch` = the work moved to OpenCode (F10) |
+| model_switch | lifecycle | concurrent | success (`payload.to` feeds `languageModels`; F10 adds `reason: budget|quota`, `toEngine`, `toTermId`, `handoff`) |
 | anything else | lifecycle | concurrent | success |
 
 `action_detail` keeps the Testigo `event`, `testigo_seq`, `testigo_hash`,

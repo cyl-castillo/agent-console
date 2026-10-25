@@ -109,6 +109,44 @@ pub fn testigo_budget_event(
     )
 }
 
+/// F10: the work moved to another engine/model because the budget or the
+/// quota ran out — `model_switch {reason, to, toEngine, toTermId, handoff}`.
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
+pub fn testigo_handoff(
+    project_root: String,
+    term_id: String,
+    session_id: Option<String>,
+    reason: String,
+    from: Option<String>,
+    to: String,
+    to_engine: String,
+    to_term_id: String,
+    context: serde_json::Value,
+    state: State<'_, AppState>,
+) -> AppResult<ProofEvent> {
+    if reason != "budget" && reason != "quota" {
+        return Err(crate::error::AppError::InvalidArgument(
+            "reason must be budget or quota".into(),
+        ));
+    }
+    state.testigo.on_handoff(
+        &project_root,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0),
+        &term_id,
+        session_id.as_deref(),
+        &reason,
+        from.as_deref(),
+        &to,
+        &to_engine,
+        &to_term_id,
+        context,
+    )
+}
+
 /// The pre-sign review: what the packet WOULD contain, so the human can mark
 /// events for manual redaction before anything is signed.
 #[tauri::command(async)]

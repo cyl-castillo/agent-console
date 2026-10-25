@@ -466,6 +466,29 @@ export const ipc = {
     }),
   testigoVerifyAat: (dir: string) =>
     invoke<[string, AatVerifyReport][]>("testigo_verify_aat", { dir }),
+  /// F10: the work moved to another engine/model (budget or quota).
+  testigoHandoff: (
+    projectRoot: string,
+    termId: string,
+    sessionId: string | undefined,
+    reason: "budget" | "quota",
+    from: string | undefined,
+    to: string,
+    toEngine: string,
+    toTermId: string,
+    context: Record<string, unknown>,
+  ) =>
+    invoke<ProofEvent>("testigo_handoff", {
+      projectRoot,
+      termId,
+      sessionId: sessionId ?? null,
+      reason,
+      from: from ?? null,
+      to,
+      toEngine,
+      toTermId,
+      context,
+    }),
   /// D5: `budget_reached` (no decision) or `budget_decision` into the ledger.
   testigoBudgetEvent: (
     projectRoot: string,
@@ -473,7 +496,7 @@ export const ipc = {
     sessionId: string | undefined,
     spentUsd: number,
     capUsd: number,
-    decision?: "stop" | "summary" | "raise",
+    decision?: "stop" | "summary" | "raise" | "switch",
     newCapUsd?: number,
   ) =>
     invoke<ProofEvent>("testigo_budget_event", {

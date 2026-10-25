@@ -719,6 +719,43 @@ impl TestigoService {
         )
     }
 
+    /// F10: the human moved the work to another engine/model because the
+    /// budget or the plan's quota ran out. Recorded as `model_switch` (the
+    /// kind the export already reads `payload.to` from) with `reason`
+    /// (`budget` | `quota`), where it went (`toEngine`, `toTermId`) and the
+    /// context handed over (prompt, files, last verdict) — inside the open
+    /// turn of the session that stopped, actor `human`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_handoff(
+        &self,
+        project_root: &str,
+        ts: i64,
+        term_id: &str,
+        session_id: Option<&str>,
+        reason: &str,
+        from: Option<&str>,
+        to: &str,
+        to_engine: &str,
+        to_term_id: &str,
+        context: Value,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        let turn_id = inner.turns.get(term_id).map(|s| s.turn_id.clone());
+        let case = Self::case_for(&inner, Some(term_id));
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            case,
+            turn_id,
+            "model_switch",
+            Some(term_id.to_string()),
+            session_id.map(String::from),
+            "human",
+            json!({ "to": to, "from": from, "reason": reason, "toEngine": to_engine, "toTermId": to_term_id, "handoff": context }),
+        )
+    }
+
     /// The model a session runs, as the CLI's own status line reports it
     /// (T3). Recorded once per (session, model) as `session_start` — the kind
     /// the export reads `payload.model` from — so packets carry
@@ -3290,6 +3327,33 @@ mod tests {
         assert_eq!(decided.payload["decision"], "raise");
         assert_eq!(decided.payload["newCapUsd"], 15.0);
         assert_eq!(decided.prev_hash, reached.hash, "chained");
+        assert!(svc.verify(root).unwrap().ok);
+
+        // F10: the hand-over to OpenCode sits in the same turn, as the
+        // model_switch the export already reads, with its reason and context.
+        let switched = svc
+            .on_handoff(
+                root,
+                4,
+                "t1",
+                Some("s1"),
+                "budget",
+                Some("claude-opus-5-5"),
+                "ollama/qwen3-coder:30b",
+                "opencode",
+                "t2",
+                serde_json::json!({ "prompt": "refactor", "files": ["a.rs"], "verification": "verified" }),
+            )
+            .unwrap();
+        assert_eq!(switched.kind, "model_switch");
+        assert_eq!(switched.actor, "human");
+        assert_eq!(switched.turn_id, prompt.turn_id, "inside the open turn");
+        assert_eq!(switched.payload["to"], "ollama/qwen3-coder:30b");
+        assert_eq!(switched.payload["reason"], "budget");
+        assert_eq!(switched.payload["toEngine"], "opencode");
+        assert_eq!(switched.payload["toTermId"], "t2");
+        assert_eq!(switched.payload["handoff"]["files"][0], "a.rs");
+        assert_eq!(switched.prev_hash, decided.hash, "chained");
         assert!(svc.verify(root).unwrap().ok);
         std::fs::remove_dir_all(&base).ok();
     }

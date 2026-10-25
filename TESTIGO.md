@@ -287,6 +287,20 @@ ProofEvent {
   out" en Room (sólo con edición), tabla de comparación con apply/discard. Tests: tabla de identidades,
   config de job, facts por engine, fan-out real sobre un repo git temporal con runner scripted (dos
   gemelos → verified vs claim_contradicted → apply mergea y limpia), spec Playwright de la tabla.
+- **Fallback por presupuesto o cuota a OpenCode (COMPETENCIA-2026-10 F10, 2026-10-25)**: la tarjeta de
+  presupuesto (`budget_reached`) y una tarjeta nueva de cuota (último turno cerrado por StopFailure
+  `rate_limit`, sin handoff posterior) ofrecen "Continue in OpenCode": el catálogo vivo de OpenCode
+  (`opencode models`) se ordena open-weight primero (local ollama/lmstudio, luego openrouter/groq/…,
+  luego nombres llama/qwen/deepseek/mistral/gemma/gpt-oss) y la elegida abre una sesión nueva de
+  OpenCode en la misma carpeta (o worktree) sembrada con el handoff — por qué paró el anterior, el
+  prompt del turno, los archivos tocados, sus últimas palabras y el veredicto F1c de la consola —
+  tipeado sin enviar (review-first). Se registra `model_switch {reason: budget|quota, from, to,
+  toEngine: opencode, toTermId, handoff:{prompt, files, verification, summary}}` (actor `human`,
+  dentro del turno abierto de la sesión que paró; el export ya lee `payload.to`) y, en el caso del
+  presupuesto, `budget_decision {decision: switch}` antes de interrumpir la sesión original. Sin
+  OpenCode instalado o sin modelos configurados la tarjeta lo dice y no ofrece nada. Código:
+  `lib/handoff.ts` (sugerencia, prompt, payload, `quotaOuts`), `HandoffAction.tsx`, `QuotaDecision.tsx`,
+  `testigo_handoff`.
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

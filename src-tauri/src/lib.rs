@@ -290,6 +290,7 @@ pub fn run() {
             commands::testigo::testigo_export_aat,
             commands::testigo::testigo_verify_aat,
             commands::testigo::testigo_budget_event,
+            commands::testigo::testigo_handoff,
             commands::review::review_turn,
             commands::identity::identity_card,
             commands::identity::identity_verify,
