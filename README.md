@@ -113,7 +113,8 @@ suggest-only, none of them able to block the core:
 - **Compliance pack** — one reproducible zip from Proof: the ledger as an
   IETF Agent Audit Trail (verified, verifier alongside), the approval policy
   in force with its hash, the console's verification verdicts by week and a
-  manifest with every file's SHA-256. Same ledger, same bytes.
+  manifest with every file's SHA-256. Same ledger, policy, console version
+  and path: same bytes.
 - **Budget fallback** — when a Claude or Codex session hits its cost cap or
   the plan's quota, continue on an open-weight model through OpenCode: a
   new session seeded with the hand-over (task, files touched, last words,

@@ -548,7 +548,8 @@ export function ProofPanel() {
             </p>
             <p className="wb-hint">
               sha256 <code>{lastCompliance.sha256}</code> · {lastCompliance.bytes} bytes · same
-              ledger, same bytes — an auditor can rebuild and compare.
+              ledger, policy, console version and path → same bytes; an auditor can rebuild and
+              compare.
             </p>
           </section>
         )}

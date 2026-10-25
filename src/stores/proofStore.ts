@@ -517,6 +517,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
       report: null,
       lastExport: null,
       lastAat: null,
+      lastCompliance: null,
       error: null,
       selectedCase: null,
       review: null,

@@ -4,11 +4,12 @@
 //! force with its hash, the console's verification verdicts summarized by
 //! week, and a manifest with the SHA-256 of every file.
 //!
-//! Reproducible: the same ledger and policy produce the same bytes. Nothing
-//! in the pack reads the wall clock — timestamps come from the ledger, the
-//! AAT record ids are digests, zip entries carry a fixed modification time
-//! and are written in sorted order. An auditor who re-runs the export over
-//! the same ledger gets the same SHA-256.
+//! Reproducible: the same ledger, policy, console version and project path
+//! produce the same bytes. Nothing in the pack reads the wall clock —
+//! timestamps come from the ledger, the AAT record ids are digests, zip
+//! entries carry a fixed modification time and are written in sorted order.
+//! The version and the path are in the manifest, so a digest that differs
+//! says why.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
-use crate::services::aat_export::{self, rfc3339_ms, sha256_hex, AAT_DRAFT};
+use crate::services::aat_export::{self, rfc3339_ms, safe_stem, sha256_hex, AAT_DRAFT};
 use crate::services::policy_service;
 use crate::services::testigo_service::{ProofEvent, TestigoService};
 
@@ -144,22 +145,17 @@ pub fn weekly_csv(rows: &[WeekRow]) -> String {
     s
 }
 
-fn safe_stem(s: &str) -> String {
-    let t: String = s
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if t.is_empty() {
-        "ledger".into()
-    } else {
-        t
+/// The gate in one line: a pack needs at least one chain and every chain
+/// green. Kept apart so the decision is testable without a ledger.
+pub fn chains_verified(ok: impl IntoIterator<Item = bool>) -> bool {
+    let mut any = false;
+    for o in ok {
+        any = true;
+        if !o {
+            return false;
+        }
     }
+    any
 }
 
 /// Every regular file under `root`, as (path relative to root with `/`,
@@ -207,9 +203,11 @@ What an auditor needs, in one archive that any party can re-verify:
 - `manifest.json` — format, draft, app version, the ledger's last sequence
   number and time, the policy hash, and the SHA-256 of every file above.
 
-Reproducible: the same ledger and policy produce the same bytes (ledger
-timestamps only, digest-derived record ids, fixed zip times, sorted
-entries). Compare the archive's SHA-256 with the one the console reported.
+Reproducible: the same ledger, the same policy, the same console version and
+the same project path produce the same bytes (ledger timestamps only,
+digest-derived record ids, fixed zip times, sorted entries). `manifest.json`
+names the version and the path, so a digest that differs says why. Compare
+the archive's SHA-256 with the one the console reported.
 "#;
 
 /// Build the pack for a project (or one case) under `dest_dir/compliance/`.
@@ -236,26 +234,33 @@ pub fn pack(
         fs::remove_dir_all(&build)?;
     }
     fs::create_dir_all(&build)?;
+    let path = out_dir.join(format!("compliance-{stem}.zip"));
+    let tmp = out_dir.join(format!("compliance-{stem}.zip.tmp"));
     let result = build_into(
         testigo,
         project_root,
         case_id,
         &build,
+        &tmp,
         app_version,
         &events,
         last_seq,
         last_ts,
     );
     let _ = fs::remove_dir_all(&build);
-    let (zip_bytes, files, aat, aat_ok, policy_hash, weeks) = result?;
-    let path = out_dir.join(format!("compliance-{stem}.zip"));
-    let tmp = out_dir.join(format!("compliance-{stem}.zip.tmp"));
-    fs::write(&tmp, &zip_bytes)?;
+    let (files, aat, aat_ok, policy_hash, weeks) = match result {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
+    };
+    let (bytes, sha256) = digest_file(&tmp)?;
     fs::rename(&tmp, &path)?;
     Ok(ComplianceSummary {
         path: path.to_string_lossy().to_string(),
-        bytes: zip_bytes.len() as u64,
-        sha256: sha256_hex(&zip_bytes),
+        bytes,
+        sha256,
         draft: AAT_DRAFT.into(),
         sessions: aat.sessions,
         records: aat.records,
@@ -269,17 +274,38 @@ pub fn pack(
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
+/// SHA-256 and size of a file, streamed.
+fn digest_file(path: &Path) -> AppResult<(u64, String)> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut f = fs::File::open(path)?;
+    let mut h = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    let mut n = 0u64;
+    loop {
+        let k = f.read(&mut buf)?;
+        if k == 0 {
+            break;
+        }
+        h.update(&buf[..k]);
+        n += k as u64;
+    }
+    Ok((n, format!("{:x}", h.finalize())))
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
 fn build_into(
     testigo: &TestigoService,
     project_root: &str,
     case_id: Option<&str>,
     build: &Path,
+    zip_path: &Path,
     app_version: &str,
     events: &[ProofEvent],
     last_seq: u64,
     last_ts: i64,
 ) -> AppResult<(
-    Vec<u8>,
     Vec<String>,
     aat_export::AatExportSummary,
     bool,
@@ -290,7 +316,7 @@ fn build_into(
     let aat = aat_export::export(testigo, project_root, case_id, build, app_version)?;
     let aat_dir = PathBuf::from(&aat.dir);
     let reports = aat_export::verify_dir(&aat_dir)?;
-    let aat_ok = !reports.is_empty() && reports.iter().all(|(_, r)| r.ok);
+    let aat_ok = chains_verified(reports.iter().map(|(_, r)| r.ok));
     let report_json: Vec<Value> = reports
         .iter()
         .map(|(p, r)| {
@@ -342,14 +368,16 @@ fn build_into(
     fs::write(build.join("verification-weekly.csv"), weekly_csv(&rows))?;
     fs::write(build.join("README.md"), PACK_README)?;
 
-    // 4. The manifest: every file's digest, then the archive.
-    let entries = walk(build)?;
-    let mut manifest_files = Vec::new();
-    for (rel, abs) in &entries {
-        let bytes = fs::read(abs)?;
-        manifest_files
-            .push(json!({ "path": rel, "sha256": sha256_hex(&bytes), "bytes": bytes.len() }));
+    // 4. The manifest: every file's digest (read once, kept for the
+    // archive), then the archive streamed to its file.
+    let mut contents: Vec<(String, Vec<u8>)> = Vec::new();
+    for (rel, abs) in walk(build)? {
+        contents.push((rel, fs::read(abs)?));
     }
+    let manifest_files: Vec<Value> = contents
+        .iter()
+        .map(|(rel, bytes)| json!({ "path": rel, "sha256": sha256_hex(bytes), "bytes": bytes.len() }))
+        .collect();
     let manifest = json!({
         "format": PACK_FORMAT,
         "version": PACK_VERSION,
@@ -363,17 +391,14 @@ fn build_into(
         "aat": { "sessions": aat.sessions, "records": aat.records, "ok": aat_ok },
         "files": manifest_files,
     });
-    fs::write(
-        build.join("manifest.json"),
-        serde_json::to_string_pretty(&manifest).map_err(|e| AppError::Other(e.to_string()))?,
-    )?;
-    let entries = walk(build)?;
-    let files: Vec<String> = entries.iter().map(|(rel, _)| rel.clone()).collect();
+    let manifest_bytes =
+        serde_json::to_vec_pretty(&manifest).map_err(|e| AppError::Other(e.to_string()))?;
+    contents.push(("manifest.json".into(), manifest_bytes));
+    contents.sort_by(|a, b| a.0.cmp(&b.0));
+    let files: Vec<String> = contents.iter().map(|(rel, _)| rel.clone()).collect();
 
-    let mut buf: Vec<u8> = Vec::new();
     {
-        let cursor = std::io::Cursor::new(&mut buf);
-        let mut z = zip::ZipWriter::new(cursor);
+        let mut z = zip::ZipWriter::new(fs::File::create(zip_path)?);
         // A fixed time keeps the archive reproducible; the ledger's own
         // times are inside the records.
         let fixed = zip::DateTime::from_date_and_time(2026, 1, 1, 0, 0, 0)
@@ -381,15 +406,15 @@ fn build_into(
         let opts = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
             .last_modified_time(fixed);
-        for (rel, abs) in &entries {
+        for (rel, bytes) in &contents {
             z.start_file(rel.as_str(), opts)
                 .map_err(|e| AppError::Other(format!("zip entry {rel}: {e}")))?;
-            z.write_all(&fs::read(abs)?)?;
+            z.write_all(bytes)?;
         }
         z.finish()
             .map_err(|e| AppError::Other(format!("zip finish: {e}")))?;
     }
-    Ok((buf, files, aat, aat_ok, policy_hash, rows.len()))
+    Ok((files, aat, aat_ok, policy_hash, rows.len()))
 }
 
 #[cfg(test)]
@@ -411,6 +436,16 @@ mod tests {
             prev_hash: String::new(),
             hash: String::new(),
         }
+    }
+
+    /// The gate refuses an empty export and any broken chain.
+    #[test]
+    fn the_gate_needs_at_least_one_green_chain_and_no_red_one() {
+        assert!(!chains_verified([]));
+        assert!(chains_verified([true]));
+        assert!(chains_verified([true, true]));
+        assert!(!chains_verified([true, false]));
+        assert!(!chains_verified([false]));
     }
 
     #[test]

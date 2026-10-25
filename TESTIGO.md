@@ -314,7 +314,9 @@ ProofEvent {
   por turno, por semana lunes-UTC, más los aceptados por humano), `README.md` y `manifest.json`
   (formato, draft, versión, último seq/ts del ledger, policyHash, SHA-256 de cada archivo).
   Reproducible: sólo tiempos del ledger, ids de registro derivados de digests, mtime fijo y entradas
-  ordenadas — mismo ledger, mismos bytes (test: dos packs idénticos; el verifier Node pasa sobre las
+  ordenadas — mismo ledger, misma política, misma versión de la consola y misma ruta del proyecto
+  → mismos bytes; versión y ruta van en el manifest para que un digest distinto se explique (test: dos
+  packs idénticos; el verifier Node pasa sobre las
   cadenas extraídas).
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y

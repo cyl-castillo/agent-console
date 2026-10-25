@@ -478,7 +478,7 @@ fn hex_to_bytes(h: &str) -> Vec<u8> {
         .collect()
 }
 
-fn safe_stem(s: &str) -> String {
+pub(crate) fn safe_stem(s: &str) -> String {
     let out: String = s
         .chars()
         .map(|c| {
