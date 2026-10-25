@@ -301,6 +301,23 @@ ProofEvent {
   OpenCode instalado o sin modelos configurados la tarjeta lo dice y no ofrece nada. Código:
   `lib/handoff.ts` (sugerencia, prompt, payload, `quotaOuts`), `HandoffAction.tsx`, `QuotaDecision.tsx`,
   `testigo_handoff`.
+- **AAT alineado + compliance pack (COMPETENCIA-2026-10 F11, 2026-10-25)**: verificado en el
+  datatracker que `draft-sharif-agent-audit-trail-08` (2026-10-13, Standards Track intended, stream
+  individual) es la revisión vigente — el "-06 Standards Track" del informe era viejo; el código ya
+  estaba alineado y la tabla de mapeo cubre `verification`, `verification_decision`, `policy_set`,
+  `trust_decision`, `agent_identity`, el actor `sponsor` de `approval_decision`, PR, fan-out, remoto y
+  `model_switch` con razón. **Compliance pack** (`compliance.rs`, `testigo_compliance_pack`, Proof →
+  "compliance pack" por caso o ledger completo): un zip reproducible bajo `<dest>/compliance/` con
+  `aat/<case>/` (export AAT + `aat-verify.mjs` + `verify-report.json` — la compuerta: si una cadena no
+  verifica, el pack no se escribe), `policy/policy.json` + `policy/policy.sha256` (la política vigente;
+  el mismo hash que llevan las `approval_decision`), `verification-weekly.json/.csv` (último veredicto
+  por turno, por semana lunes-UTC, más los aceptados por humano), `README.md` y `manifest.json`
+  (formato, draft, versión, último seq/ts del ledger, policyHash, SHA-256 de cada archivo).
+  Reproducible: sólo tiempos del ledger, ids de registro derivados de digests, mtime fijo y entradas
+  ordenadas — mismo ledger, misma política, misma versión de la consola y misma ruta del proyecto
+  → mismos bytes; versión y ruta van en el manifest para que un digest distinto se explique (test: dos
+  packs idénticos; el verifier Node pasa sobre las
+  cadenas extraídas).
 - **Identidad y perímetro por agente (D14, 2026-10-14)**: `identity_service.rs`. Cada agente tiene
   `agent_id` propio (`urn:agent-console:agent:<uuid>` para sesiones, acuñado al crearlas y
   persistido; `…:reviewer:<engine>` y `…:mcp:<caller>` estables) con un *Agent Card* a la A2A

@@ -14,6 +14,7 @@ import type {
   TestigoExportSummary,
   AatExportSummary,
   AatVerifyReport,
+  ComplianceSummary,
   TestigoExportPreview,
   TestigoSettings,
 } from "../types/domain";
@@ -174,6 +175,8 @@ interface ProofState {
   /// D3: last IETF audit-trail export plus the console's own re-verification
   /// of every chain it wrote (a third party runs the same check offline).
   lastAat: { summary: AatExportSummary; reports: [string, AatVerifyReport][] } | null;
+  /// F11: the last compliance pack written.
+  lastCompliance: ComplianceSummary | null;
   error: string | null;
   /// Case opened in the timeline view; null = case list.
   selectedCase: string | null;
@@ -198,6 +201,7 @@ interface ProofState {
   /// re-verify what was written. Nothing is signed; no review step needed —
   /// the records carry the same payloads the ledger already holds locally.
   exportAat: (caseId?: string) => Promise<void>;
+  compliancePack: (caseId?: string) => Promise<void>;
   /// Toggle manual redaction of one event in the open review.
   toggleRedact: (seq: number) => void;
   /// Step 2: sign and write the packet with the chosen redactions.
@@ -466,6 +470,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
   exporting: null,
   lastExport: null,
   lastAat: null,
+  lastCompliance: null,
   error: null,
   selectedCase: null,
   review: null,
@@ -512,6 +517,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
       report: null,
       lastExport: null,
       lastAat: null,
+      lastCompliance: null,
       error: null,
       selectedCase: null,
       review: null,
@@ -552,6 +558,17 @@ export const useProofStore = create<ProofState>((set, get) => ({
       const summary = await ipc.testigoExportAat(root, caseId);
       const reports = await ipc.testigoVerifyAat(summary.dir);
       set({ lastAat: { summary, reports }, exporting: null });
+    } catch (e) {
+      set({ exporting: null, error: String(e) });
+    }
+  },
+  compliancePack: async (caseId) => {
+    const root = get().projectRoot;
+    if (!root) return;
+    set({ exporting: caseId ?? "__ledger__", error: null });
+    try {
+      const summary = await ipc.testigoCompliancePack(root, caseId);
+      set({ lastCompliance: summary, exporting: null });
     } catch (e) {
       set({ exporting: null, error: String(e) });
     }

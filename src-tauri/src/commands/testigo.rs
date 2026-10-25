@@ -147,6 +147,28 @@ pub fn testigo_handoff(
     )
 }
 
+/// F11: the compliance pack — AAT export (verified), the policy in force
+/// with its hash, verification by week and a manifest, in one reproducible
+/// zip under `<dest>/compliance/`.
+#[tauri::command(async)]
+pub fn testigo_compliance_pack(
+    project_root: String,
+    case_id: Option<String>,
+    dest_dir: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<crate::services::compliance::ComplianceSummary> {
+    let dest = dest_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(&project_root).join("proofpacks"));
+    crate::services::compliance::pack(
+        &state.testigo,
+        &project_root,
+        case_id.as_deref(),
+        &dest,
+        env!("CARGO_PKG_VERSION"),
+    )
+}
+
 /// The pre-sign review: what the packet WOULD contain, so the human can mark
 /// events for manual redaction before anything is signed.
 #[tauri::command(async)]

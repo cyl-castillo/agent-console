@@ -4086,7 +4086,6 @@ mod tests {
         assert_eq!(Closure::default(), Closure::Confirm);
     }
 
-    #[test]
     /// F9: a reviewed job's reviewer is never one of its producers.
     #[test]
     fn a_reviewed_job_refuses_a_reviewer_that_is_its_producer() {

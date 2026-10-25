@@ -82,6 +82,7 @@ import type {
   AttachProofSummary,
   AatExportSummary,
   AatVerifyReport,
+  ComplianceSummary,
   ReviewVerdict,
   RunsIn,
   SignedAgentCard,
@@ -466,6 +467,13 @@ export const ipc = {
     }),
   testigoVerifyAat: (dir: string) =>
     invoke<[string, AatVerifyReport][]>("testigo_verify_aat", { dir }),
+  /// F11: the compliance pack (AAT + policy + weekly verification, one zip).
+  testigoCompliancePack: (projectRoot: string, caseId?: string, destDir?: string) =>
+    invoke<ComplianceSummary>("testigo_compliance_pack", {
+      projectRoot,
+      caseId: caseId ?? null,
+      destDir: destDir ?? null,
+    }),
   /// F10: the work moved to another engine/model (budget or quota).
   testigoHandoff: (
     projectRoot: string,
