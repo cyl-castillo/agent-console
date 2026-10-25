@@ -2251,6 +2251,44 @@ fn validate_job_config(
             "a reviewed job needs a participant with the reviewer role".into(),
         ));
     }
+    // F9: the reviewer is never the producer. Every reviewer must be a
+    // distinct identity (engine or model family) from every participant
+    // who may implement — the implementers, or the organizer when nobody
+    // carries that role (the organizer then does the work itself).
+    if review_required {
+        let has = |p: &Participant, role: &str| connector_roles(p).iter().any(|r| r == role);
+        let producers: Vec<&Participant> = {
+            let impls: Vec<&Participant> = participants
+                .iter()
+                .filter(|p| has(p, "implementer"))
+                .collect();
+            if impls.is_empty() {
+                participants
+                    .iter()
+                    .filter(|p| has(p, "organizer"))
+                    .collect()
+            } else {
+                impls
+            }
+        };
+        for reviewer in participants.iter().filter(|p| has(p, "reviewer")) {
+            for producer in &producers {
+                if producer.id == reviewer.id
+                    || !crate::services::reviewer_service::distinct_identity(
+                        producer.engine,
+                        Some(&producer.model),
+                        reviewer.engine,
+                        Some(&reviewer.model),
+                    )
+                {
+                    return Err(AppError::InvalidArgument(format!(
+                        "{} would review its own work: the reviewer must be another engine or model family than {} ({} {})",
+                        reviewer.name, producer.name, producer.engine.bin_name(), producer.model
+                    )));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3263,7 +3301,7 @@ How to contribute:
     )
 }
 
-fn is_safe_model(model: &str) -> bool {
+pub(crate) fn is_safe_model(model: &str) -> bool {
     // OpenCode ids are `provider/model`, optionally `#variant`; both are
     // shell-safe characters that never reach a shell anyway (argv, no shell).
     !model.is_empty()
@@ -4049,10 +4087,81 @@ mod tests {
     }
 
     #[test]
+    /// F9: a reviewed job's reviewer is never one of its producers.
+    #[test]
+    fn a_reviewed_job_refuses_a_reviewer_that_is_its_producer() {
+        let p = |id: &str, engine: Engine, model: &str, roles: &[&str]| Participant {
+            id: id.into(),
+            name: id.into(),
+            engine,
+            model: model.into(),
+            role: String::new(),
+            roles: roles.iter().map(|r| r.to_string()).collect(),
+        };
+        // Same engine, same family as the implementer: refused.
+        let err = validate_job_config(
+            &[
+                p("org", Engine::Claude, "opus", &["organizer"]),
+                p("imp", Engine::Claude, "opus", &["implementer"]),
+                p("rev", Engine::Claude, "opus", &["reviewer"]),
+            ],
+            true,
+            true,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("own work"), "{err}");
+        // Another family: fine.
+        validate_job_config(
+            &[
+                p("org", Engine::Claude, "opus", &["organizer"]),
+                p("imp", Engine::Claude, "opus", &["implementer"]),
+                p("rev", Engine::Claude, "sonnet", &["reviewer"]),
+            ],
+            true,
+            true,
+        )
+        .unwrap();
+        // No implementer: the organizer produces, so it may not review itself.
+        assert!(validate_job_config(
+            &[
+                p("org", Engine::Codex, "medium", &["organizer", "reviewer"]),
+                p("x", Engine::Claude, "opus", &[]),
+            ],
+            true,
+            true,
+        )
+        .is_err());
+        assert!(
+            validate_job_config(
+                &[
+                    p("org", Engine::Codex, "medium", &["organizer"]),
+                    p("rev", Engine::Codex, "high", &["reviewer"]),
+                ],
+                true,
+                true,
+            )
+            .is_err(),
+            "Codex at another effort is still Codex"
+        );
+        // Not reviewed: no constraint.
+        validate_job_config(
+            &[
+                p("org", Engine::Claude, "opus", &["organizer"]),
+                p("rev", Engine::Claude, "opus", &["reviewer"]),
+            ],
+            true,
+            false,
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn job_config_needs_one_organizer_and_a_reviewer_when_reviewed() {
         let org = with_roles("p1", &["organizer"]);
         let imp = with_roles("p2", &["implementer"]);
-        let rev = with_roles("p3", &["reviewer"]);
+        // F9: the reviewer must be another identity than the implementer.
+        let mut rev = with_roles("p3", &["reviewer"]);
+        rev.engine = Engine::Codex;
         // Conversation rooms are never constrained.
         assert!(validate_job_config(&[participant("p1"), participant("p2")], false, true).is_ok());
         assert!(validate_job_config(&[org.clone(), imp.clone()], true, false).is_ok());

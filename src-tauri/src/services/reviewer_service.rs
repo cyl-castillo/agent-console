@@ -250,6 +250,115 @@ fn floor_from(findings: &[Finding]) -> Verdict {
     v
 }
 
+/// F9: the one rule of cross-review — the reviewer is never the producer.
+/// Distinct = another engine, or the same engine on another model family
+/// (Claude: opus/sonnet/haiku/fable; OpenCode: a different model id).
+/// Codex reviewing Codex is the same model at another effort — not
+/// distinct. An unknown producer model on the same engine cannot be proven
+/// distinct and is refused.
+pub fn distinct_identity(
+    producer_engine: Engine,
+    producer_model: Option<&str>,
+    reviewer_engine: Engine,
+    reviewer_model: Option<&str>,
+) -> bool {
+    if producer_engine != reviewer_engine {
+        return true;
+    }
+    match producer_engine {
+        Engine::Codex => false,
+        Engine::Claude => match (
+            producer_model.and_then(claude_cli::family_alias),
+            reviewer_model.and_then(claude_cli::family_alias),
+        ) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        },
+        Engine::Opencode => match (producer_model, reviewer_model) {
+            (Some(a), Some(b)) => !a.trim().is_empty() && a.trim() != b.trim(),
+            _ => false,
+        },
+    }
+}
+
+/// `distinct_identity` as the gate every review passes through.
+pub fn ensure_distinct_reviewer(
+    scope: &ReviewScope,
+    reviewer: &(Engine, Option<String>),
+) -> AppResult<()> {
+    if distinct_identity(
+        scope.producer_engine,
+        scope.producer_model.as_deref(),
+        reviewer.0,
+        reviewer.1.as_deref(),
+    ) {
+        return Ok(());
+    }
+    Err(AppError::InvalidArgument(format!(
+        "the reviewer would be the producer ({} {}): pick another engine or model family",
+        reviewer.0.bin_name(),
+        reviewer.1.as_deref().unwrap_or("default model")
+    )))
+}
+
+/// F9: parse the human's "review by" choice. `None`/`auto` = the console
+/// picks; otherwise the engine (and optional model) named.
+pub fn reviewer_from_choice(
+    engine: Option<&str>,
+    model: Option<&str>,
+) -> AppResult<Option<(Engine, Option<String>)>> {
+    let Some(e) = engine
+        .map(str::trim)
+        .filter(|e| !e.is_empty() && *e != "auto")
+    else {
+        return Ok(None);
+    };
+    let engine = match e.to_ascii_lowercase().as_str() {
+        "claude" => Engine::Claude,
+        "codex" => Engine::Codex,
+        "opencode" => Engine::Opencode,
+        other => {
+            return Err(AppError::InvalidArgument(format!(
+                "unknown reviewer engine `{other}` (claude | codex | opencode)"
+            )))
+        }
+    };
+    let model = model
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(String::from);
+    Ok(Some((engine, model)))
+}
+
+/// F9: the console's own pick, guaranteed to pass the gate — the installed
+/// engines are tried in turn; the same engine on another family is the last
+/// resort (Claude only); when nothing distinct is installed the answer is
+/// `None` and the caller says so instead of failing on its own choice.
+pub fn pick_distinct_reviewer(
+    producer_engine: Engine,
+    producer_model: Option<&str>,
+    installed: &[Engine],
+) -> Option<(Engine, Option<String>)> {
+    let first = pick_reviewer(
+        producer_engine,
+        producer_model,
+        installed.contains(&Engine::Codex),
+        installed.contains(&Engine::Claude),
+    );
+    let candidates = std::iter::once(first).chain(installed.iter().map(|e| match e {
+        Engine::Claude if producer_engine == Engine::Opencode => {
+            (Engine::Claude, Some("opus".into()))
+        }
+        Engine::Codex if producer_engine == Engine::Opencode => {
+            (Engine::Codex, Some("high".into()))
+        }
+        other => (*other, None),
+    }));
+    candidates
+        .into_iter()
+        .find(|(e, m)| distinct_identity(producer_engine, producer_model, *e, m.as_deref()))
+}
+
 /// A different identity from the producer: the other engine when it is
 /// installed, else the other model family of the same engine.
 pub fn pick_reviewer(
@@ -525,6 +634,9 @@ pub fn review_with_runner(
     ts: i64,
 ) -> AppResult<ReviewVerdict> {
     let scope = scope_for(testigo, project_root, term_id, turn_id)?;
+    // F9: the gate, whoever chose the reviewer — the console's pick or the
+    // human's explicit choice.
+    ensure_distinct_reviewer(&scope, &reviewer)?;
     let floor = deterministic_findings(&scope);
     let diff = diff_text(Path::new(project_root), &scope);
     let prompt = build_prompt(&scope, &diff, &floor);
@@ -620,21 +732,42 @@ pub fn review_with_runner(
 }
 
 /// Review with the real adapters: the reviewer is picked to differ from the
-/// producer (engine first, model family second).
+/// producer (engine first, model family second), or is the human's explicit
+/// choice (F9 "que lo revise otro") — the gate applies to both.
 pub fn review(
     testigo: &TestigoService,
     project_root: &str,
     term_id: &str,
     turn_id: Option<&str>,
+    explicit: Option<(Engine, Option<String>)>,
     ts: i64,
 ) -> AppResult<ReviewVerdict> {
     let scope = scope_for(testigo, project_root, term_id, turn_id)?;
-    let reviewer = pick_reviewer(
-        scope.producer_engine,
-        scope.producer_model.as_deref(),
-        engine_available(&claude_cli::codex_bin()),
-        engine_available(&claude_cli::bin()),
-    );
+    let reviewer = match explicit {
+        Some(r) => r,
+        None => {
+            let installed: Vec<Engine> = [
+                (Engine::Claude, claude_cli::bin()),
+                (Engine::Codex, claude_cli::codex_bin()),
+                (Engine::Opencode, claude_cli::opencode_bin()),
+            ]
+            .into_iter()
+            .filter(|(_, bin)| engine_available(bin))
+            .map(|(e, _)| e)
+            .collect();
+            pick_distinct_reviewer(
+                scope.producer_engine,
+                scope.producer_model.as_deref(),
+                &installed,
+            )
+            .ok_or_else(|| {
+                AppError::InvalidArgument(format!(
+                    "no distinct reviewer installed for a {} producer: install another engine, or pick a reviewer explicitly",
+                    scope.producer_engine.bin_name()
+                ))
+            })?
+        }
+    };
     let runner = crate::services::engine_runner::runner_for(reviewer.0);
     review_with_runner(
         testigo,
@@ -744,6 +877,100 @@ mod tests {
             pick_reviewer(Engine::Claude, Some("claude-sonnet-5-5"), false, true),
             (Engine::Claude, Some("opus".into()))
         );
+    }
+
+    /// F9's gate: the reviewer is never the producer — whoever chose it.
+    #[test]
+    fn the_gate_refuses_a_reviewer_that_is_the_producer() {
+        use crate::services::engine_runner::Engine as E;
+        assert!(distinct_identity(
+            E::Claude,
+            Some("claude-opus-5-5"),
+            E::Codex,
+            None
+        ));
+        assert!(distinct_identity(
+            E::Claude,
+            Some("claude-opus-5-5"),
+            E::Claude,
+            Some("sonnet")
+        ));
+        assert!(!distinct_identity(
+            E::Claude,
+            Some("claude-opus-5-5"),
+            E::Claude,
+            Some("opus")
+        ));
+        assert!(
+            !distinct_identity(E::Claude, Some("claude-opus-5-5"), E::Claude, None),
+            "an unnamed model is not provably distinct"
+        );
+        assert!(
+            !distinct_identity(E::Claude, None, E::Claude, Some("sonnet")),
+            "an unknown producer model is not provably distinct"
+        );
+        assert!(
+            !distinct_identity(E::Codex, Some("medium"), E::Codex, Some("high")),
+            "another effort is the same model"
+        );
+        assert!(distinct_identity(
+            E::Codex,
+            Some("medium"),
+            E::Opencode,
+            Some("x/y")
+        ));
+        assert!(distinct_identity(
+            E::Opencode,
+            Some("a/b"),
+            E::Opencode,
+            Some("a/c")
+        ));
+        assert!(!distinct_identity(
+            E::Opencode,
+            Some("a/b"),
+            E::Opencode,
+            Some("a/b")
+        ));
+
+        let mut scope = scope(&[("M", "src/x.ts")], "fix", "", 1);
+        scope.producer_engine = E::Claude;
+        scope.producer_model = Some("claude-opus-5-5".into());
+        let err = ensure_distinct_reviewer(&scope, &(E::Claude, Some("opus".into()))).unwrap_err();
+        assert!(err.to_string().contains("would be the producer"), "{err}");
+        assert!(ensure_distinct_reviewer(&scope, &(E::Claude, Some("sonnet".into()))).is_ok());
+        assert!(ensure_distinct_reviewer(&scope, &(E::Codex, None)).is_ok());
+
+        // The console's own pick never hands the gate a producer.
+        assert_eq!(
+            pick_distinct_reviewer(E::Codex, Some("medium"), &[E::Codex]),
+            None,
+            "Codex alone cannot review Codex"
+        );
+        assert_eq!(
+            pick_distinct_reviewer(E::Codex, Some("medium"), &[E::Codex, E::Opencode]),
+            Some((E::Opencode, None))
+        );
+        assert_eq!(
+            pick_distinct_reviewer(E::Claude, Some("claude-opus-5-5"), &[E::Claude]),
+            Some((E::Claude, Some("sonnet".into())))
+        );
+        assert_eq!(
+            pick_distinct_reviewer(E::Claude, None, &[E::Claude]),
+            None,
+            "an unknown producer model on the only engine is not reviewable"
+        );
+        assert_eq!(
+            pick_distinct_reviewer(E::Opencode, Some("a/b"), &[E::Opencode]),
+            None
+        );
+
+        assert_eq!(reviewer_from_choice(None, None).unwrap(), None);
+        assert_eq!(reviewer_from_choice(Some("auto"), None).unwrap(), None);
+        assert_eq!(
+            reviewer_from_choice(Some("codex"), Some("high")).unwrap(),
+            Some((E::Codex, Some("high".into())))
+        );
+        assert!(reviewer_from_choice(Some("gemini"), None).is_err());
     }
 
     #[test]

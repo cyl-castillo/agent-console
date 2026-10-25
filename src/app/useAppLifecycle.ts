@@ -18,6 +18,7 @@ import { attachReviewListener } from "../stores/reviewsStore";
 import { attachTrustListeners } from "../stores/trustStore";
 import { attachPrListeners } from "../stores/prStore";
 import { attachRemoteListeners } from "../stores/remoteStore";
+import { attachFanOutListener } from "../stores/fanoutStore";
 import { attachPolicyListener } from "../stores/policyStore";
 import { attachHandoffWatcher } from "../stores/handoffStore";
 import { useShellStore } from "../stores/shellStore";
@@ -78,6 +79,7 @@ export function useAppLifecycle(): void {
     adopt(attachTrustListeners());
     adopt(attachPrListeners());
     adopt(attachRemoteListeners());
+    adopt(attachFanOutListener());
     adopt(Promise.resolve(attachPolicyListener()));
     offs.push(attachHandoffWatcher());
     offs.push(attachSponsorWatcher());

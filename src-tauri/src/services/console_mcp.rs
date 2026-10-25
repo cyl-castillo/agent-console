@@ -362,6 +362,7 @@ impl ConsoleMcp {
             &req.project,
             session,
             turn,
+            None,
             now_ms(),
         )
         .map_err(|e| e.to_string())?;

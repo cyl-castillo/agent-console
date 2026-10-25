@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { FanOutSection } from "./FanOutSection";
 
 import {
   useRoundtableStore,
@@ -196,10 +197,29 @@ function ConfigForm() {
         </span>
       </label>
 
+      {draft.allowEdits && !noRepo && (
+        <label className="rt-toggle" data-testid="rt-fanout-toggle">
+          <input
+            type="checkbox"
+            checked={draft.fanOut}
+            onChange={(e) => setDraft({ fanOut: e.target.checked })}
+          />
+          <span className="rt-toggle-text">
+            <span className="rt-toggle-title">Fan out: each agent alone, same prompt, compare</span>
+            <span className="rt-toggle-hint">
+              {draft.fanOut
+                ? "On — every participant works by itself in its own worktree on a fanout/… branch, one turn each; you get a comparison (diff, checks and their exit codes, the console's verdict on its words) and apply one or discard all."
+                : "Off — a shared conversation."}
+            </span>
+          </span>
+        </label>
+      )}
+
       <label className="rt-toggle">
         <input
           type="checkbox"
           checked={draft.jobMode}
+          disabled={draft.fanOut && draft.allowEdits}
           onChange={(e) => setJobMode(e.target.checked)}
         />
         <span className="rt-toggle-text">
@@ -265,8 +285,13 @@ function ConfigForm() {
       )}
 
       <button className="wb-cta" onClick={start} disabled={!draft.problem.trim()}>
-        {draft.jobMode ? "Start job" : "Start conversation"}
+        {draft.fanOut && draft.allowEdits && !noRepo
+          ? "Start fan-out"
+          : draft.jobMode
+            ? "Start job"
+            : "Start conversation"}
       </button>
+      <FanOutSection />
     </section>
   );
 }
