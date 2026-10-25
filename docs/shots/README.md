@@ -28,12 +28,34 @@ stories, see below):
 - `ledger-map.png` — Proof › Ledger: the map (a lane per session, a bar per
   turn, a tick per event) with the selected turn's events in the Inspector,
   chain verified. Story `app-v2--proof-turn-selected`.
+- `inbox-verdicts.png` (v0.93 set) — the Inbox with the newer decision
+  kinds: a PR with red CI and review comments (Auto-fix, merge needs your
+  word), a read-only approval, an unverified claim with the "review by"
+  picker, a session refused on the plan's quota offering to continue in
+  OpenCode. Story `app-v2--inbox` + a `verification` line, a red `pr_status`
+  (`console://pr`) and a `rate_limit` turn (`ledger://appended`) through
+  `window.__fixtures`. 1213×1075 (taller than the others so all four cards fit).
+- `trust-policy.png` (v0.93 set) — Settings › Permissions: workspace trust,
+  the approval policy as code with what each engine compiles it to, remote
+  devices listening on loopback with a pairing waiting for the click. Story
+  `app-v2--settings-permissions` + "listen on this machine" + a pending
+  pairing emitted on `remote://changed`.
+- `fanout-compare.png` (v0.93 set) — Room with "Let agents edit" and "Fan
+  out" on, the Start fan-out button and the fixture's finished fan-out:
+  two candidates compared on diff, checks, verdict and last words. Story
+  `app-v2--work-room`.
+- `compliance-pack.png` (v0.93 set) — Proof › Ledger after "compliance pack"
+  on the full ledger: path, counts, draft, verification state, policy hash,
+  SHA-256. Story `app-v2--proof-ledger` + the button.
 - `og-cover.png` — 1200×630 social cover (wired into `og:image` /
   `twitter:image`), generated from the hero with the wordmark baked in (PIL:
   resize to 1200 wide, crop to 630, dark gradient over the lower half,
   DejaVu Sans Mono Bold wordmark + DejaVu Sans tagline).
 
-Capture spec: see `../LANDING_SHOTLIST.md`.
+Capture spec: see `../LANDING_SHOTLIST.md`. The v0.93 set (October 25, 2026)
+was captured the same way with a one-off Playwright script (chromium, the
+clock pinned to `FIXED_NOW` + 25 s, offline), driving the stories through
+`window.__fixtures` exactly as `tests/visual/agent.spec.ts` does.
 
 **How these were captured (October 2026).** From the built Storybook
 (`npm run build-storybook`, served on 127.0.0.1:6006) with Playwright's
