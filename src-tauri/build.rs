@@ -37,6 +37,8 @@ fn main() {
     println!("cargo:rustc-env=AC_BUILD_TIME={now}");
     // Re-run when HEAD moves so the commit doesn't go stale across checkouts.
     println!("cargo:rerun-if-changed=../.git/HEAD");
+    // The shipped Teams public client id (teams_service::default_client_id).
+    println!("cargo:rerun-if-env-changed=AC_TEAMS_CLIENT_ID");
 
     tauri_build::build()
 }

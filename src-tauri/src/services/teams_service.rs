@@ -29,11 +29,24 @@ const SCOPES: &str =
 /// in flight must not outlive the token it carries.
 const EXPIRY_SLACK_MS: i64 = 60_000;
 
+/// The app's own public client (Entra app registration), baked in at build
+/// time from `AC_TEAMS_CLIENT_ID` (a repository variable in the release
+/// workflow). A public client has no secret — the same model as the Azure
+/// CLI — so shipping its id costs nothing and spares every user an app
+/// registration of their own: "Sign in with Microsoft" is the whole setup.
+/// `None` when the build had no id: the panel then asks for one, as before.
+pub fn default_client_id() -> Option<&'static str> {
+    option_env!("AC_TEAMS_CLIENT_ID")
+        .map(str::trim)
+        .filter(|id| valid_client_id(id))
+}
+
 /// The non-secret half of the connection, persisted as JSON.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamsConfig {
-    /// Application (client) ID of the user's own app registration.
+    /// Application (client) ID: the user's own app registration, or the
+    /// shipped one (see `default_client_id`).
     pub client_id: String,
     /// Entra tenant: "organizations", a domain, or a tenant GUID.
     pub tenant: String,
@@ -51,6 +64,9 @@ pub struct TeamsStatus {
     pub client_id: String,
     pub tenant: String,
     pub account: String,
+    /// True when this build ships a public client id: the connect form needs
+    /// no fields, just the sign-in button.
+    pub has_default_client_id: bool,
 }
 
 /// First half of the device code flow: what the user must do.
@@ -184,6 +200,7 @@ pub fn status() -> TeamsStatus {
         client_id: cfg.client_id,
         tenant: cfg.tenant,
         account: cfg.account,
+        has_default_client_id: default_client_id().is_some(),
     }
 }
 
@@ -277,7 +294,15 @@ fn login_base(tenant: &str) -> String {
 /// Start the device code flow. Persists client_id + tenant right away so a
 /// reconnect pre-fills the form even if the login is never completed.
 pub async fn begin_login(client_id: &str, tenant: &str) -> AppResult<DeviceLoginStart> {
-    let client_id = client_id.trim();
+    // An empty id means "the shipped one"; the user's own, when given, wins.
+    let client_id = match client_id.trim() {
+        "" => default_client_id().ok_or_else(|| {
+            AppError::InvalidArgument(
+                "this build ships no Teams app id — paste your app registration's client ID".into(),
+            )
+        })?,
+        own => own,
+    };
     if !valid_client_id(client_id) {
         return Err(AppError::InvalidArgument(
             "client ID must be the app registration's GUID".into(),
@@ -820,6 +845,16 @@ struct RawUser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_client_id_is_none_or_a_guid() {
+        // Unset (the dev build) → None; when the release sets it, it must be
+        // a GUID or it is ignored rather than sent to Entra.
+        match default_client_id() {
+            None => {}
+            Some(id) => assert!(valid_client_id(id), "{id}"),
+        }
+    }
 
     #[test]
     fn client_id_must_be_a_guid() {

@@ -1435,8 +1435,16 @@ export const defaultFixtures: FixtureMap = {
   },
   // work
   jira_status: { configured: false, siteUrl: "", email: "" },
+  jira_defaults: { email: "demo@example.com", siteUrl: null },
+  gh_auth_token: null,
   jira_daily_digest: [],
-  teams_status: { configured: false, clientId: "", tenant: "", account: "" },
+  teams_status: {
+    configured: false,
+    clientId: "",
+    tenant: "",
+    account: "",
+    hasDefaultClientId: false,
+  },
   policy_status: {
     path: "/home/demo/code/demo-playground/.agent-console/policy.json",
     exists: true,

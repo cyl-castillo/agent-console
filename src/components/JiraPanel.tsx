@@ -74,13 +74,52 @@ function ConnectForm() {
   const connect = useJiraStore((s) => s.connect);
   const connecting = useJiraStore((s) => s.connecting);
   const connectError = useJiraStore((s) => s.connectError);
+  const projectRoot = useSessionStore((s) => s.project?.root);
   const [siteUrl, setSiteUrl] = useState("https://");
   const [email, setEmail] = useState("");
   const [token, setToken] = useState("");
+  const [pasteNote, setPasteNote] = useState<string | null>(null);
+
+  // Detect instead of ask: git knows the email, the repo usually names the
+  // site. Only fields the user has not touched are filled.
+  useEffect(() => {
+    let alive = true;
+    void ipc
+      .jiraDefaults(projectRoot)
+      .then((d) => {
+        if (!alive) return;
+        if (d.email) setEmail((v) => (v === "" ? d.email! : v));
+        if (d.siteUrl) setSiteUrl((v) => (v === "https://" || v === "" ? d.siteUrl! : v));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [projectRoot]);
 
   const submit = () => {
     if (connecting) return;
     void connect(siteUrl.trim(), email.trim(), token.trim());
+  };
+  const ready = email.trim() !== "" && siteUrl.trim() !== "" && siteUrl.trim() !== "https://";
+  // "Get a token" opens the Atlassian page; coming back, one click pastes
+  // what was copied there and connects — no field to find, nothing to type.
+  const pasteAndConnect = async () => {
+    setPasteNote(null);
+    let text = "";
+    try {
+      const { readText } = await import("@tauri-apps/plugin-clipboard-manager");
+      text = (await readText()) ?? "";
+    } catch {
+      text = (await navigator.clipboard?.readText().catch(() => "")) ?? "";
+    }
+    const candidate = text.trim();
+    if (!candidate || candidate.includes(" ") || candidate.length < 12) {
+      setPasteNote("The clipboard does not hold a token — copy it from the Atlassian page first.");
+      return;
+    }
+    setToken(candidate);
+    if (ready) void connect(siteUrl.trim(), email.trim(), candidate);
   };
 
   return (
@@ -139,6 +178,17 @@ function ConnectForm() {
         </button>
         <button
           className="wb-cta wb-cta-sm"
+          onClick={() => void pasteAndConnect()}
+          disabled={connecting || !ready}
+          title={
+            ready ? "Paste the token you just copied and connect" : "Fill the site and email first"
+          }
+          data-testid="jira-paste-connect"
+        >
+          Paste token & connect
+        </button>
+        <button
+          className="wb-cta wb-cta-sm"
           onClick={submit}
           disabled={connecting || !token.trim() || !email.trim()}
         >
@@ -146,6 +196,7 @@ function ConnectForm() {
         </button>
       </div>
 
+      {pasteNote && <p className="wb-hint">{pasteNote}</p>}
       {connectError && <PanelError message={connectError} />}
     </div>
   );

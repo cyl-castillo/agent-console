@@ -101,6 +101,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The app's public Entra client id for Teams sign-in (a repository
+          # variable, not a secret — public clients have none). Empty until
+          # the registration exists: the panel then asks the user for one.
+          # See docs/TEAMS_APP_REGISTRATION.md.
+          AC_TEAMS_CLIENT_ID: ${{ vars.AC_TEAMS_CLIENT_ID }}
           # whisper.cpp (via whisper-rs) uses std::filesystem, which Apple marks
           # available only from macOS 10.15. The cc crate reads this env var to
           # set -mmacosx-version-min; without it the default (10.13) fails to

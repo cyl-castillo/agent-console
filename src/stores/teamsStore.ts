@@ -33,7 +33,13 @@ interface TeamsState {
   closeChat: () => void;
 }
 
-const DISCONNECTED: TeamsStatus = { configured: false, clientId: "", tenant: "", account: "" };
+const DISCONNECTED: TeamsStatus = {
+  configured: false,
+  clientId: "",
+  tenant: "",
+  account: "",
+  hasDefaultClientId: false,
+};
 
 export const useTeamsStore = create<TeamsState>((set, get) => {
   // Poll-loop bookkeeping lives in the closure, not in state: bumping the

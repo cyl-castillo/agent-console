@@ -21,6 +21,12 @@ pub async fn jira_connect(site_url: String, email: String, token: String) -> App
     }
 }
 
+/// Detect instead of ask: email from git, site from the project's own files.
+#[tauri::command(async)]
+pub fn jira_defaults(project_root: Option<String>) -> jira_service::JiraDefaults {
+    jira_service::defaults(project_root.as_deref().map(std::path::Path::new))
+}
+
 #[tauri::command(async)]
 pub fn jira_disconnect() -> AppResult<()> {
     jira_service::disconnect()
