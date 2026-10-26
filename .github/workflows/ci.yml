@@ -159,6 +159,22 @@ jobs:
 
   # Contributions must certify the DCO (see CONTRIBUTING.md). Push builds on
   # main skip this — the trailer is enforced at the door, not retroactively.
+  # The NSIS hooks only run inside the Windows installer, which CI never
+  # builds; a syntax slip would surface in the release. makensis ships with
+  # the Windows runner image, so assemble them the way installer.nsi does.
+  nsis-hooks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the installer hooks
+        shell: pwsh
+        working-directory: tests/nsis
+        # NSIS is on the image but not on PATH; chocolatey is the fallback.
+        run: |
+          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) { choco install nsis -y --no-progress }
+          & $nsis /V2 hooks-smoke.nsi
+
   dco:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-22.04
