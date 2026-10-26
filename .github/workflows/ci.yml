@@ -169,7 +169,11 @@ jobs:
       - name: Assemble the installer hooks
         shell: pwsh
         working-directory: tests/nsis
-        run: makensis /V2 hooks-smoke.nsi
+        # NSIS is on the image but not on PATH; chocolatey is the fallback.
+        run: |
+          $nsis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) { choco install nsis -y --no-progress }
+          & $nsis /V2 hooks-smoke.nsi
 
   dco:
     if: github.event_name == 'pull_request'
