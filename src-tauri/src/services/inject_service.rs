@@ -255,7 +255,51 @@ fn reset_profile_served() {
 /// `/rename` typed inside the CLI is not clobbered on every later prompt.
 /// In-memory on purpose: an app restart re-sends once, which is the harmless
 /// direction (the title is the one we'd set anyway).
-static TITLE_SENT: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+///
+/// The state is a value, not a global, so tests build their own instance and
+/// never race each other through the process-wide `TITLE_SENT`.
+#[derive(Debug, Default)]
+struct TitleDedupe(Option<HashMap<String, String>>);
+
+impl TitleDedupe {
+    const fn new() -> Self {
+        Self(None)
+    }
+
+    /// Gate a title behind "changed since the last one we sent for this
+    /// terminal" — peek only, no marking. Marking is deferred to `mark_sent`
+    /// AFTER the response is actually written: the hook aborts slow answers,
+    /// and marking on serve would burn the one delivery forever without the
+    /// CLI ever seeing it.
+    fn pending(&self, term_id: &str, title: String) -> Option<String> {
+        if self
+            .0
+            .as_ref()
+            .and_then(|sent| sent.get(term_id))
+            .is_some_and(|prev| prev == &title)
+        {
+            return None;
+        }
+        Some(title)
+    }
+
+    fn mark_sent(&mut self, term_id: &str, title: &str) {
+        self.0
+            .get_or_insert_with(HashMap::new)
+            .insert(term_id.to_string(), title.to_string());
+    }
+
+    /// Peek + mark in one step — the atomic form the dedupe tests exercise.
+    #[cfg(test)]
+    fn send(&mut self, term_id: &str, title: String) -> Option<String> {
+        let pending = self.pending(term_id, title)?;
+        self.mark_sent(term_id, &pending);
+        Some(pending)
+    }
+}
+
+/// The process-wide dedupe the hook server consults. Tests never touch it.
+static TITLE_SENT: Mutex<TitleDedupe> = Mutex::new(TitleDedupe::new());
 
 /// The name of a terminal, when it is worth exporting. A default "shell N"
 /// says nothing the CLI doesn't already know, and sending it would replace the
@@ -275,42 +319,15 @@ fn exportable_name(name: &str) -> Option<String> {
     Some(flat.chars().take(MAX_TITLE_CHARS).collect())
 }
 
-/// Gate a title behind "changed since the last one we sent for this terminal"
-/// — peek only, no marking. Marking is deferred to `mark_title_sent` AFTER the
-/// response is actually written: the hook aborts slow answers, and marking on
-/// serve would burn the one delivery forever without the CLI ever seeing it.
+/// Peek at the process-wide dedupe (see `TitleDedupe::pending`).
 fn title_pending(term_id: &str, title: String) -> Option<String> {
-    let guard = TITLE_SENT.lock().ok()?;
-    if guard
-        .as_ref()
-        .and_then(|sent| sent.get(term_id))
-        .is_some_and(|prev| prev == &title)
-    {
-        return None;
-    }
-    Some(title)
+    TITLE_SENT.lock().ok()?.pending(term_id, title)
 }
 
+/// Mark on the process-wide dedupe (see `TitleDedupe::mark_sent`).
 fn mark_title_sent(term_id: &str, title: &str) {
     if let Ok(mut guard) = TITLE_SENT.lock() {
-        guard
-            .get_or_insert_with(HashMap::new)
-            .insert(term_id.to_string(), title.to_string());
-    }
-}
-
-/// Peek + mark in one step — the atomic form the dedupe tests exercise.
-#[cfg(test)]
-fn title_if_new(term_id: &str, title: String) -> Option<String> {
-    let pending = title_pending(term_id, title)?;
-    mark_title_sent(term_id, &pending);
-    Some(pending)
-}
-
-#[cfg(test)]
-fn reset_titles_sent() {
-    if let Ok(mut g) = TITLE_SENT.lock() {
-        *g = None;
+        guard.mark_sent(term_id, title);
     }
 }
 
@@ -1066,24 +1083,26 @@ mod tests {
 
     #[test]
     fn a_title_is_sent_once_per_change_and_per_terminal() {
-        reset_titles_sent();
+        // Own instance: this test shares nothing with the others, so it is
+        // deterministic however the harness interleaves threads.
+        let mut sent = TitleDedupe::new();
         assert_eq!(
-            title_if_new("t1", "Fix login".into()),
+            sent.send("t1", "Fix login".into()),
             Some("Fix login".into()),
             "first prompt of the session carries the name"
         );
         assert_eq!(
-            title_if_new("t1", "Fix login".into()),
+            sent.send("t1", "Fix login".into()),
             None,
             "unchanged: a /rename typed in the CLI must survive later prompts"
         );
         assert_eq!(
-            title_if_new("t1", "Fix login on windows".into()),
+            sent.send("t1", "Fix login on windows".into()),
             Some("Fix login on windows".into()),
             "renamed in Agent Console: the new name travels"
         );
         assert_eq!(
-            title_if_new("t2", "Fix login".into()),
+            sent.send("t2", "Fix login".into()),
             Some("Fix login".into()),
             "dedupe is per terminal"
         );
@@ -1091,21 +1110,21 @@ mod tests {
 
     #[test]
     fn an_undelivered_title_stays_eligible_for_the_next_prompt() {
-        reset_titles_sent();
+        let mut sent = TitleDedupe::new();
         // Peek does not mark: a hook that times out before the response lands
         // must get the same title offered again on its next prompt.
         assert_eq!(
-            title_pending("t1", "Fix login".into()),
+            sent.pending("t1", "Fix login".into()),
             Some("Fix login".into())
         );
         assert_eq!(
-            title_pending("t1", "Fix login".into()),
+            sent.pending("t1", "Fix login".into()),
             Some("Fix login".into()),
             "not marked until delivery is confirmed"
         );
         // Only a confirmed write marks it sent.
-        mark_title_sent("t1", "Fix login");
-        assert_eq!(title_pending("t1", "Fix login".into()), None);
+        sent.mark_sent("t1", "Fix login");
+        assert_eq!(sent.pending("t1", "Fix login".into()), None);
     }
 
     #[test]
