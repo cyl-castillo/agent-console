@@ -41,6 +41,11 @@
     ],
     "resources": ["resources/userprompt-hook.cjs"],
     "externalBin": ["binaries/hook-bridge"],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    },
     "createUpdaterArtifacts": true,
     "macOS": {
       "minimumSystemVersion": "10.15"
