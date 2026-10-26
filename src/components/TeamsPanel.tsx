@@ -78,13 +78,43 @@ function ConnectForm() {
   const connectError = useTeamsStore((s) => s.connectError);
   const savedClientId = useTeamsStore((s) => s.status?.clientId ?? "");
   const savedTenant = useTeamsStore((s) => s.status?.tenant ?? "");
+  const hasDefault = useTeamsStore((s) => s.status?.hasDefaultClientId ?? false);
   const [clientId, setClientId] = useState(savedClientId);
   const [tenant, setTenant] = useState(savedTenant);
+  // With a shipped client id the form is one button; "your own app
+  // registration" stays one click away for tenants that require it.
+  const [ownApp, setOwnApp] = useState(!hasDefault || savedClientId !== "");
 
   const submit = () => {
-    if (connecting || !clientId.trim()) return;
-    void beginLogin(clientId.trim(), tenant.trim());
+    if (connecting) return;
+    if (ownApp && !clientId.trim()) return;
+    void beginLogin(ownApp ? clientId.trim() : "", tenant.trim());
   };
+
+  if (hasDefault && !ownApp) {
+    return (
+      <div className="jira-connect" data-testid="teams-connect-simple">
+        <p className="wb-hint wb-trust">
+          Read-only: this panel can see your own chats, never post to them. You sign in with your
+          Microsoft account (device code — no password touches this app) and the tokens live in your
+          OS keychain, never in a file or log.
+        </p>
+        <div className="jira-connect-actions">
+          <button className="wb-cta wb-cta-sm" onClick={submit} disabled={connecting}>
+            {connecting ? "Starting…" : "Sign in with Microsoft"}
+          </button>
+          <button
+            className="jira-token-link"
+            onClick={() => setOwnApp(true)}
+            title="If your tenant blocks third-party apps, register your own and paste its client ID"
+          >
+            Use your own app registration
+          </button>
+        </div>
+        {connectError && <PanelError message={connectError} />}
+      </div>
+    );
+  }
 
   return (
     <div className="jira-connect">

@@ -641,6 +641,13 @@ export interface JiraStatus {
   email: string;
 }
 
+/// What the Jira connect form can prefill (git user.email, the site the
+/// project mentions). Mirrors the Rust JiraDefaults.
+export interface JiraDefaults {
+  email: string | null;
+  siteUrl: string | null;
+}
+
 /// One assigned Jira issue, flattened for the UI. Mirrors the Rust JiraIssue.
 export interface JiraIssue {
   key: string;
@@ -663,6 +670,8 @@ export interface TeamsStatus {
   clientId: string;
   tenant: string;
   account: string;
+  /// This build ships a public client id: no fields, just "Sign in".
+  hasDefaultClientId: boolean;
 }
 
 /// First half of the Teams device-code login. Mirrors Rust DeviceLoginStart.

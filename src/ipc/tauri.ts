@@ -33,6 +33,7 @@ import type {
   InstalledPlugin,
   AvailableSnapshot,
   JiraStatus,
+  JiraDefaults,
   TeamsChat,
   TeamsDeviceLogin,
   TeamsLoginPoll,
@@ -375,6 +376,8 @@ export const ipc = {
   jiraStatus: () => invoke<JiraStatus>("jira_status"),
   jiraConnect: (siteUrl: string, email: string, token: string) =>
     invoke<string>("jira_connect", { siteUrl, email, token }),
+  jiraDefaults: (projectRoot?: string) =>
+    invoke<JiraDefaults>("jira_defaults", { projectRoot: projectRoot ?? null }),
   jiraDisconnect: () => invoke<void>("jira_disconnect"),
   jiraListIssues: (jql?: string) => invoke<JiraIssue[]>("jira_list_issues", { jql: jql ?? null }),
   jiraLogWork: (issueKey: string, duration: string, started: string, comment?: string) =>
@@ -588,6 +591,9 @@ export const ipc = {
     invoke<TestigoSettings>("testigo_set_settings", { projectRoot, settings }),
 
   mcpList: () => invoke<McpServer[]>("mcp_list"),
+  /// The gh CLI's token, for a GitHub MCP server's env; null when gh is
+  /// absent or logged out.
+  ghAuthToken: () => invoke<string | null>("gh_auth_token"),
   mcpAdd: (input: McpAddInput) => invoke<string>("mcp_add", { input }),
   mcpRemove: (name: string, scope: string) => invoke<string>("mcp_remove", { name, scope }),
 

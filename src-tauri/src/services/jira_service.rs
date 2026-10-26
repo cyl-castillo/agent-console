@@ -105,6 +105,75 @@ pub fn status() -> JiraStatus {
     }
 }
 
+/// What the connect form can fill in before the user types anything.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraDefaults {
+    /// `git config user.email` (the project's, else the global one).
+    pub email: Option<String>,
+    /// The first `https://<team>.atlassian.net` the project mentions (README,
+    /// PR templates, docs…) — the site is almost always written down somewhere.
+    pub site_url: Option<String>,
+}
+
+/// Detect instead of ask: the two Jira fields that the machine already knows.
+/// Never fails — a missing git or a project without a Jira mention just
+/// leaves the field empty.
+pub fn defaults(project_root: Option<&std::path::Path>) -> JiraDefaults {
+    let mut git = std::process::Command::new("git");
+    if let Some(root) = project_root {
+        git.current_dir(root);
+    }
+    let email = git
+        .args(["config", "--get", "user.email"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|e| e.contains('@'));
+    let site_url = project_root.and_then(|root| {
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args([
+                "grep",
+                "-I",
+                "-o",
+                "-h",
+                "-E",
+                "--max-count=1",
+                r"https://[a-z0-9-]+\.atlassian\.net",
+                "--",
+                "*.md",
+                "*.txt",
+                "*.json",
+                "*.yml",
+                "*.yaml",
+                ".github",
+            ])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| first_atlassian_site(&String::from_utf8_lossy(&o.stdout)))
+    });
+    JiraDefaults { email, site_url }
+}
+
+/// The first Atlassian cloud site in a blob of text, as a base URL.
+pub fn first_atlassian_site(text: &str) -> Option<String> {
+    let idx = text.find("https://")?;
+    let rest = &text[idx + "https://".len()..];
+    let host: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '.')
+        .collect();
+    let host = host.trim_end_matches('.');
+    if host.ends_with(".atlassian.net") && host.len() > ".atlassian.net".len() {
+        Some(format!("https://{host}"))
+    } else {
+        None
+    }
+}
+
 /// Persist site + email as JSON and the token in the keychain. The token is
 /// required here so "save" and "connect" are one atomic action.
 pub fn save(site_url: &str, email: &str, token: &str) -> AppResult<()> {
@@ -613,6 +682,33 @@ struct RawNamed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_atlassian_site_reads_the_host_and_nothing_else() {
+        assert_eq!(
+            first_atlassian_site("see https://acme.atlassian.net/browse/ACME-12 and more"),
+            Some("https://acme.atlassian.net".into())
+        );
+        assert_eq!(
+            first_atlassian_site("https://acme-team.atlassian.net.\nhttps://other.atlassian.net"),
+            Some("https://acme-team.atlassian.net".into())
+        );
+        assert_eq!(first_atlassian_site("https://example.com/x"), None);
+        assert_eq!(first_atlassian_site("https://.atlassian.net"), None);
+        assert_eq!(first_atlassian_site("no links"), None);
+    }
+
+    #[test]
+    fn defaults_never_fail_without_a_project() {
+        // Whatever git says on this machine, the call returns a value.
+        let d = defaults(None);
+        if let Some(e) = &d.email {
+            assert!(e.contains('@'));
+        }
+        assert!(d.site_url.is_none());
+        let none = defaults(Some(std::path::Path::new("/definitely/not/a/repo")));
+        assert!(none.site_url.is_none());
+    }
 
     #[test]
     fn normalize_site_enforces_https_and_trims() {

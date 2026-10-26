@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 
+import { looksLikeGithubMcp, setEnvLine } from "../lib/mcpEnv";
 import { useMcpStore } from "../stores/mcpStore";
 import { PanelError } from "./PanelError";
 import { ConsoleMcpSection } from "./ConsoleMcpSection";
 import type { McpServer } from "../types/domain";
 import { confirmDialog } from "../stores/confirmStore";
+import { ipc } from "../ipc/tauri";
 
 type Transport = "stdio" | "http" | "sse";
 type Scope = "local" | "user" | "project";
@@ -182,6 +184,22 @@ function AddForm({ onDone }: { onDone: () => void }) {
 
   const stdio = transport === "stdio";
   const canSubmit = name.trim() !== "" && commandOrUrl.trim() !== "" && !adding;
+  // Detect instead of ask: a GitHub server's token is what `gh` already holds.
+  const [ghBusy, setGhBusy] = useState(false);
+  const [ghNote, setGhNote] = useState<string | null>(null);
+  const fillGithubToken = async () => {
+    setGhBusy(true);
+    setGhNote(null);
+    try {
+      const token = await ipc.ghAuthToken();
+      if (token) setEnvText((t) => setEnvLine(t, "GITHUB_TOKEN", token));
+      else setGhNote("gh is not logged in — run `gh auth login` first");
+    } catch (e) {
+      setGhNote(String(e));
+    } finally {
+      setGhBusy(false);
+    }
+  };
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -265,6 +283,21 @@ function AddForm({ onDone }: { onDone: () => void }) {
             placeholder="GITHUB_TOKEN=ghp_…"
             onChange={(e) => setEnvText(e.target.value)}
           />
+          {looksLikeGithubMcp(commandOrUrl) && (
+            <span className="mcp-env-helpers">
+              <button
+                type="button"
+                className="wb-link"
+                disabled={ghBusy}
+                onClick={() => void fillGithubToken()}
+                data-testid="mcp-gh-token"
+                title="Use the token the gh CLI is logged in with (gh auth token)"
+              >
+                {ghBusy ? "asking gh…" : "use the gh CLI's token"}
+              </button>
+              {ghNote && <span className="wb-hint">{ghNote}</span>}
+            </span>
+          )}
         </label>
       ) : (
         <label className="mcp-field">
