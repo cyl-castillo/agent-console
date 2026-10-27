@@ -678,9 +678,75 @@ pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
         Some(j) => validate_jql(j)?,
         None => DEFAULT_JQL,
     };
+    // A self-hosted Jira may refuse a sort field the preset takes for granted
+    // ("Unable to sort by field 'priority'": hidden on that instance). The
+    // WHERE is the user's intent; the ORDER BY is a nicety — so on a 400 the
+    // same query is retried with a plainer order, then with none.
+    let mut last_err = None;
+    for candidate in order_by_fallbacks(jql) {
+        match search_once(&site, &secret, &candidate).await {
+            Ok(issues) => return Ok(issues),
+            Err(SearchError::BadRequest(msg)) => last_err = Some(msg),
+            Err(SearchError::Other(e)) => return Err(e),
+        }
+    }
+    Err(AppError::Other(
+        last_err.unwrap_or_else(|| "Jira search failed".into()),
+    ))
+}
+
+enum SearchError {
+    /// Jira rejected the query itself (400): worth retrying with a plainer one.
+    BadRequest(String),
+    Other(AppError),
+}
+
+/// The JQL as given, then with the ORDER BY reduced to `updated DESC` (a
+/// field every Jira can sort by), then with no ORDER BY at all. A query
+/// without an ORDER BY yields just itself.
+pub fn order_by_fallbacks(jql: &str) -> Vec<String> {
+    let lower = jql.to_ascii_lowercase();
+    let Some(idx) = find_order_by(&lower) else {
+        return vec![jql.to_string()];
+    };
+    let where_part = jql[..idx].trim();
+    let plain = format!("{where_part} ORDER BY updated DESC");
+    let mut out = vec![jql.to_string()];
+    if !plain.eq_ignore_ascii_case(jql.trim()) {
+        out.push(plain);
+    }
+    out.push(where_part.to_string());
+    out
+}
+
+/// Byte offset of the last top-level `order by` in a lower-cased JQL.
+fn find_order_by(lower: &str) -> Option<usize> {
+    let mut found = None;
+    let mut from = 0;
+    while let Some(rel) = lower[from..].find("order") {
+        let i = from + rel;
+        let rest = lower[i + 5..].trim_start();
+        let before_ok = i == 0 || !lower.as_bytes()[i - 1].is_ascii_alphanumeric();
+        if before_ok
+            && rest.starts_with("by")
+            && !rest[2..].starts_with(|c: char| c.is_ascii_alphanumeric())
+        {
+            found = Some(i);
+        }
+        from = i + 5;
+    }
+    found
+}
+
+async fn search_once(
+    site: &JiraSite,
+    secret: &str,
+    jql: &str,
+) -> Result<Vec<JiraIssue>, SearchError> {
     let req = match site.kind {
         // Cloud: the only search left is POST /search/jql with a JSON body.
-        JiraKind::Cloud => client()?
+        JiraKind::Cloud => client()
+            .map_err(SearchError::Other)?
             .post(format!("{}{}", site.site_url, search_path(site.kind)))
             .header("Accept", "application/json")
             .json(&serde_json::json!({
@@ -691,7 +757,8 @@ pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
         // Server/DC: GET with query parameters is what every version (and
         // every reverse proxy in front of one) accepts; a JSON POST to
         // /rest/api/2/search came back 400 from a self-hosted instance.
-        JiraKind::Server => client()?
+        JiraKind::Server => client()
+            .map_err(SearchError::Other)?
             .get(format!("{}{}", site.site_url, search_path(site.kind)))
             .header("Accept", "application/json")
             .query(&[
@@ -700,27 +767,29 @@ pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
                 ("fields", &SEARCH_FIELDS.join(",")),
             ]),
     };
-    let resp = authed(req, &site, &secret)
+    let resp = authed(req, site, secret)
         .send()
         .await
-        .map_err(|e| AppError::Other(format!("Jira request failed: {e}")))?;
+        .map_err(|e| SearchError::Other(AppError::Other(format!("Jira request failed: {e}"))))?;
     if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(AppError::Other(
+        return Err(SearchError::Other(AppError::Other(
             "Jira rejected the credentials (401)".into(),
-        ));
+        )));
     }
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(AppError::Other(format!(
-            "Jira search returned {status}{}",
-            error_detail(&body)
-        )));
+        let msg = format!("Jira search returned {status}{}", error_detail(&body));
+        return Err(if status == reqwest::StatusCode::BAD_REQUEST {
+            SearchError::BadRequest(msg)
+        } else {
+            SearchError::Other(AppError::Other(msg))
+        });
     }
     let parsed: SearchResp = resp
         .json()
         .await
-        .map_err(|e| AppError::Other(format!("bad Jira response: {e}")))?;
+        .map_err(|e| SearchError::Other(AppError::Other(format!("bad Jira response: {e}"))))?;
     Ok(parsed
         .issues
         .into_iter()
@@ -1219,6 +1288,44 @@ mod tests {
         assert_eq!(parse_sites(&txt), new);
         assert_eq!(parse_sites("{}"), JiraSites::default());
         assert_eq!(parse_sites("garbage"), JiraSites::default());
+    }
+
+    #[test]
+    fn order_by_fallbacks_plain_then_none_and_keep_the_where() {
+        let q = "assignee = currentUser() AND statusCategory != Done ORDER BY duedate ASC, priority DESC, updated DESC";
+        assert_eq!(
+            order_by_fallbacks(q),
+            vec![
+                q.to_string(),
+                "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC".into(),
+                "assignee = currentUser() AND statusCategory != Done".into(),
+            ]
+        );
+        // Already the plain order: no duplicate step.
+        assert_eq!(
+            order_by_fallbacks("project = X order by updated desc"),
+            vec![
+                "project = X order by updated desc".to_string(),
+                "project = X".into()
+            ]
+        );
+        assert_eq!(
+            order_by_fallbacks("project = X"),
+            vec!["project = X".to_string()]
+        );
+        // A word containing "order" is not the clause.
+        assert_eq!(
+            order_by_fallbacks("summary ~ reorder AND status = Done"),
+            vec!["summary ~ reorder AND status = Done".to_string()]
+        );
+        assert_eq!(
+            order_by_fallbacks("summary ~ \"border by\" ORDER BY priority"),
+            vec![
+                "summary ~ \"border by\" ORDER BY priority".to_string(),
+                "summary ~ \"border by\" ORDER BY updated DESC".into(),
+                "summary ~ \"border by\"".into(),
+            ]
+        );
     }
 
     #[test]
