@@ -243,6 +243,8 @@ pub fn run() {
             commands::diagnostics::diagnostics_log_file,
             commands::jira::jira_status,
             commands::jira::jira_defaults,
+            commands::jira::jira_switch,
+            commands::jira::jira_forget,
             commands::jira::jira_connect,
             commands::jira::jira_disconnect,
             commands::jira::jira_list_issues,

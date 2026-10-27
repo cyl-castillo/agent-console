@@ -379,6 +379,8 @@ export const ipc = {
   jiraDefaults: (projectRoot?: string) =>
     invoke<JiraDefaults>("jira_defaults", { projectRoot: projectRoot ?? null }),
   jiraDisconnect: () => invoke<void>("jira_disconnect"),
+  jiraSwitch: (siteId: string) => invoke<void>("jira_switch", { siteId }),
+  jiraForget: (siteId: string) => invoke<void>("jira_forget", { siteId }),
   jiraListIssues: (jql?: string) => invoke<JiraIssue[]>("jira_list_issues", { jql: jql ?? null }),
   jiraLogWork: (issueKey: string, duration: string, started: string, comment?: string) =>
     invoke<string>("jira_log_work", { issueKey, duration, started, comment: comment ?? null }),

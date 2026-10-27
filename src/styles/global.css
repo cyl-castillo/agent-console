@@ -7171,6 +7171,18 @@ select:focus-visible,
   font-size: 11px;
   color: var(--text-faint);
 }
+.jira-site-switch {
+  max-width: 160px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 4px;
+}
+
 .jira-account-who {
   overflow: hidden;
   text-overflow: ellipsis;
