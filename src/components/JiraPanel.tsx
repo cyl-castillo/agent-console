@@ -31,6 +31,7 @@ export function JiraPanel() {
   const status = useJiraStore((s) => s.status);
   const loadingStatus = useJiraStore((s) => s.loadingStatus);
   const loadStatus = useJiraStore((s) => s.loadStatus);
+  const addingSite = useJiraStore((s) => s.addingSite);
 
   useEffect(() => {
     void loadStatus();
@@ -40,12 +41,12 @@ export function JiraPanel() {
     <div className="workbench">
       <div className="workbench-header workbench-header-slim">
         <span className="workbench-title">tasks</span>
-        {status?.configured && <JiraHeaderActions />}
+        {status?.configured && !addingSite && <JiraHeaderActions />}
       </div>
       <div className="workbench-body">
         {loadingStatus && !status ? (
           <div className="wb-hint">Loading…</div>
-        ) : status?.configured ? (
+        ) : status?.configured && !addingSite ? (
           <IssueList />
         ) : (
           <ConnectForm />
@@ -55,19 +56,54 @@ export function JiraPanel() {
   );
 }
 
+/// Several Jiras (a company's and a client's, say): the switcher picks the
+/// one the queue shows; "+" connects another.
 function JiraHeaderActions() {
   const refreshIssues = useJiraStore((s) => s.refreshIssues);
   const loadingIssues = useJiraStore((s) => s.loadingIssues);
+  const sites = useJiraStore((s) => s.status?.sites ?? []);
+  const activeId = useJiraStore((s) => s.status?.activeId ?? "");
+  const switchSite = useJiraStore((s) => s.switchSite);
+  const setAddingSite = useJiraStore((s) => s.setAddingSite);
   return (
-    <button
-      className="workbench-action"
-      onClick={() => void refreshIssues()}
-      disabled={loadingIssues}
-      title="Refresh assigned issues"
-    >
-      ↻
-    </button>
+    <span className="teams-header-actions">
+      {sites.length > 1 && (
+        <select
+          className="jira-site-switch"
+          aria-label="Jira site"
+          value={activeId}
+          onChange={(e) => void switchSite(e.target.value)}
+          data-testid="jira-site-switch"
+        >
+          {sites.map((s) => (
+            <option key={s.id} value={s.id}>
+              {hostOf(s.siteUrl)}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        className="workbench-action"
+        onClick={() => setAddingSite(true)}
+        title="Connect another Jira site"
+        data-testid="jira-add-site"
+      >
+        +
+      </button>
+      <button
+        className="workbench-action"
+        onClick={() => void refreshIssues()}
+        disabled={loadingIssues}
+        title="Refresh assigned issues"
+      >
+        ↻
+      </button>
+    </span>
   );
+}
+
+function hostOf(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 }
 
 function ConnectForm() {
@@ -102,6 +138,10 @@ function ConnectForm() {
     void connect(siteUrl.trim(), email.trim(), token.trim());
   };
   const ready = email.trim() !== "" && siteUrl.trim() !== "" && siteUrl.trim() !== "https://";
+  const addingSite = useJiraStore((s) => s.addingSite);
+  const setAddingSite = useJiraStore((s) => s.setAddingSite);
+  const plainHttp = /^http:\/\//i.test(siteUrl.trim());
+  const selfHosted = siteUrl.trim() !== "" && !/\.atlassian\.net/i.test(siteUrl);
   // "Get a token" opens the Atlassian page; coming back, one click pastes
   // what was copied there and connects — no field to find, nothing to type.
   const pasteAndConnect = async () => {
@@ -125,8 +165,9 @@ function ConnectForm() {
   return (
     <div className="jira-connect">
       <p className="wb-hint wb-trust">
-        Your API token is stored in your OS keychain, never in a file or log — it only leaves this
-        machine as an authenticated request to your own Jira site.
+        Your secret is stored in your OS keychain, never in a file or log — it only leaves this
+        machine as an authenticated request to your own Jira site. Jira Cloud and self-hosted Jira
+        Server / Data Center both work; connect as many sites as you have.
       </p>
 
       <label className="jira-field">
@@ -135,24 +176,30 @@ function ConnectForm() {
           className="jira-input"
           value={siteUrl}
           onChange={(e) => setSiteUrl(e.target.value)}
-          placeholder="https://yourteam.atlassian.net"
+          placeholder="https://yourteam.atlassian.net or http://jira.yourcompany.local"
           spellCheck={false}
           autoCapitalize="off"
         />
       </label>
+      {plainHttp && (
+        <p className="wb-hint" data-testid="jira-http-note">
+          Plain http: the connection is not encrypted — fine for a server on your own network, never
+          over the internet.
+        </p>
+      )}
       <label className="jira-field">
-        <span>Email</span>
+        <span>{selfHosted ? "Username" : "Email"}</span>
         <input
           className="jira-input"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@company.com"
+          placeholder={selfHosted ? "your Jira username" : "you@company.com"}
           spellCheck={false}
           autoCapitalize="off"
         />
       </label>
       <label className="jira-field">
-        <span>API token</span>
+        <span>{selfHosted ? "Personal access token or password" : "API token"}</span>
         <input
           className="jira-input"
           type="password"
@@ -161,7 +208,11 @@ function ConnectForm() {
           onKeyDown={(e) => {
             if (e.key === "Enter") submit();
           }}
-          placeholder="paste your Atlassian API token"
+          placeholder={
+            selfHosted
+              ? "a personal access token (Jira ≥ 8.14), or your password"
+              : "paste your Atlassian API token"
+          }
           spellCheck={false}
         />
       </label>
@@ -170,9 +221,17 @@ function ConnectForm() {
         <button
           className="jira-token-link"
           onClick={() =>
-            void openUrl("https://id.atlassian.com/manage-profile/security/api-tokens")
+            void openUrl(
+              selfHosted
+                ? `${siteUrl.trim().replace(/\/$/, "")}/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens`
+                : "https://id.atlassian.com/manage-profile/security/api-tokens",
+            )
           }
-          title="Create an API token on id.atlassian.com"
+          title={
+            selfHosted
+              ? "Create a personal access token in your Jira profile"
+              : "Create an API token on id.atlassian.com"
+          }
         >
           Get a token ↗
         </button>
@@ -196,6 +255,13 @@ function ConnectForm() {
         </button>
       </div>
 
+      {addingSite && (
+        <p className="wb-hint">
+          <button className="wb-link" onClick={() => setAddingSite(false)}>
+            ← back to the connected site
+          </button>
+        </p>
+      )}
       {pasteNote && <p className="wb-hint">{pasteNote}</p>}
       {connectError && <PanelError message={connectError} />}
     </div>
@@ -255,6 +321,7 @@ function IssueList() {
       <div className="jira-account">
         <span className="jira-account-who" title={status?.siteUrl}>
           {status?.email}
+          {status?.siteUrl ? ` @ ${hostOf(status.siteUrl)}` : ""}
         </span>
         <button
           className="wb-link"
@@ -262,7 +329,7 @@ function IssueList() {
             if (
               await confirmDialog({
                 title: "Disconnect Jira",
-                message: "Disconnect Jira? The stored token is removed.",
+                message: `Disconnect ${status?.siteUrl ? hostOf(status.siteUrl) : "this site"}? Its stored secret is removed; other sites stay.`,
                 confirmLabel: "Disconnect",
                 danger: true,
               })

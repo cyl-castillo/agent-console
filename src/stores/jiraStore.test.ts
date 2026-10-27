@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const world = vi.hoisted(() => ({
-  status: { configured: false, siteUrl: "", email: "" },
+  status: {
+    configured: false,
+    siteUrl: "",
+    email: "",
+    activeId: null as string | null,
+    sites: [] as never[],
+  },
   statusError: null as string | null,
   connectError: null as string | null,
   disconnectError: null as string | null,
@@ -43,7 +49,13 @@ vi.mock("../ipc/tauri", () => ({
     },
     jiraConnect: async () => {
       if (world.connectError) throw new Error(world.connectError);
-      world.status = { configured: true, siteUrl: "https://x.atlassian.net", email: "a@b.c" };
+      world.status = {
+        configured: true,
+        siteUrl: "https://x.atlassian.net",
+        email: "a@b.c",
+        activeId: "acme",
+        sites: [],
+      };
     },
     jiraDisconnect: async () => {
       if (world.disconnectError) throw new Error(world.disconnectError);
@@ -59,7 +71,7 @@ vi.mock("../ipc/tauri", () => ({
 import { useJiraStore } from "./jiraStore";
 
 beforeEach(() => {
-  world.status = { configured: false, siteUrl: "", email: "" };
+  world.status = { configured: false, siteUrl: "", email: "", activeId: null, sites: [] };
   world.statusError = null;
   world.connectError = null;
   world.disconnectError = null;
@@ -93,7 +105,13 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe("jira connection", () => {
   it("loadStatus on a configured site auto-fetches the issue queue", async () => {
-    world.status = { configured: true, siteUrl: "https://x.atlassian.net", email: "a@b.c" };
+    world.status = {
+      configured: true,
+      siteUrl: "https://x.atlassian.net",
+      email: "a@b.c",
+      activeId: "acme",
+      sites: [],
+    };
     world.issues = [{ key: "FIX-1" }];
     await useJiraStore.getState().loadStatus();
     await settle();
@@ -133,7 +151,13 @@ describe("jira connection", () => {
 
   it("disconnect clears local state even when the backend call fails", async () => {
     useJiraStore.setState({
-      status: { configured: true, siteUrl: "https://x", email: "a@b.c" },
+      status: {
+        configured: true,
+        siteUrl: "https://x",
+        email: "a@b.c",
+        activeId: "acme",
+        sites: [],
+      },
       issues: [{ key: "FIX-1" }] as never,
     });
     world.disconnectError = "network";
@@ -169,7 +193,15 @@ describe("worklog", () => {
 
 describe("role-driven JQL", () => {
   it("setJql refreshes the queue with the new query when connected", async () => {
-    useJiraStore.setState({ status: { configured: true, siteUrl: "https://x", email: "a@b.c" } });
+    useJiraStore.setState({
+      status: {
+        configured: true,
+        siteUrl: "https://x",
+        email: "a@b.c",
+        activeId: "acme",
+        sites: [],
+      },
+    });
     await useJiraStore.getState().setJql("statusCategory != Done");
     expect(world.jqls).toEqual(["statusCategory != Done"]);
     // Same JQL again: no redundant fetch.

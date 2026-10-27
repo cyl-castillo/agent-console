@@ -637,8 +637,22 @@ export interface StickyNote {
 /// the backend/keychain). Mirrors the Rust JiraStatus.
 export interface JiraStatus {
   configured: boolean;
+  /// The active site.
   siteUrl: string;
   email: string;
+  activeId: string | null;
+  /// Every connected site, for the switcher.
+  sites: JiraSiteInfo[];
+}
+
+export interface JiraSiteInfo {
+  id: string;
+  siteUrl: string;
+  email: string;
+  /// "cloud" = *.atlassian.net (REST v3, API token); "server" = self-hosted
+  /// (REST v2, personal access token or password).
+  kind: "cloud" | "server";
+  connected: boolean;
 }
 
 /// What the Jira connect form can prefill (git user.email, the site the

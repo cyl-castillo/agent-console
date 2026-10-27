@@ -1,12 +1,17 @@
-//! Jira Cloud integration: see the issues assigned to you and turn one into an
+//! Jira integration: see the issues assigned to you and turn one into an
 //! agent session. Read-mostly by design.
 //!
-//! - Credentials: the site URL + email live in a small global JSON config; the
-//!   API token lives in the OS keychain (never in the JSON, never in a log).
-//!   The token only ever leaves the machine as a Basic-auth header to the
-//!   user's own Jira site.
-//! - API: Jira Cloud REST v3. The legacy `/rest/api/3/search` was removed, so
-//!   we use `POST /rest/api/3/search/jql`.
+//! - Sites: any number, one active at a time (a company Jira and a client's,
+//!   say). The site URL + email/username of each live in a small global JSON
+//!   config; each site's secret lives in the OS keychain under its own
+//!   account (never in the JSON, never in a log). The secret only ever
+//!   leaves the machine as an auth header to that site.
+//! - Cloud (`*.atlassian.net`, REST v3): Basic auth with the Atlassian API
+//!   token. The legacy `/rest/api/3/search` was removed, so we use
+//!   `POST /rest/api/3/search/jql`.
+//! - Server / Data Center (self-hosted, REST v2, plain http allowed for an
+//!   intranet): a personal access token as Bearer, or a username + password as
+//!   Basic — whichever `/myself` accepts at connect time is remembered.
 
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
@@ -15,9 +20,60 @@ use std::path::PathBuf;
 use crate::error::{AppError, AppResult};
 
 const KEYRING_SERVICE: &str = "agent-console:jira";
-const KEYRING_ACCOUNT: &str = "api-token";
+/// The single-site era stored the one token here; migrated to a per-site
+/// account on first load (see `load_sites`).
+const LEGACY_KEYRING_ACCOUNT: &str = "api-token";
+
+/// Cloud or self-hosted: decides the REST version, the auth styles that can
+/// work and the worklog comment format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JiraKind {
+    #[default]
+    Cloud,
+    Server,
+}
+
+/// How the stored secret is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JiraAuth {
+    /// Cloud: Basic `email:api-token`.
+    #[default]
+    ApiToken,
+    /// Server/DC: `Authorization: Bearer <personal access token>`.
+    Pat,
+    /// Server/DC: Basic `username:password`.
+    Password,
+}
+
+/// One connected site (the non-secret half).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraSite {
+    /// Stable id derived from the host; also the keychain account suffix.
+    pub id: String,
+    /// Base URL, e.g. `https://acme.atlassian.net` or `http://jira.corp.local`.
+    pub site_url: String,
+    /// Email (Cloud) or username (Server/DC).
+    pub email: String,
+    #[serde(default)]
+    pub kind: JiraKind,
+    #[serde(default)]
+    pub auth: JiraAuth,
+}
+
+/// The config file: every site and which one the panel shows.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraSites {
+    pub sites: Vec<JiraSite>,
+    pub active: Option<String>,
+}
 
 /// The non-secret half of the connection, persisted as JSON.
+/// The single-site config file of v0.75–v0.94 (`{siteUrl, email}`), read
+/// once and migrated into `JiraSites`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JiraConfig {
@@ -27,13 +83,28 @@ pub struct JiraConfig {
 }
 
 /// What the UI needs to decide "connect form" vs "issue list", without ever
-/// shipping the token to the frontend.
+/// shipping a secret to the frontend. `site_url`/`email` describe the active
+/// site; `sites` lists every connected one for the switcher.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JiraStatus {
     pub configured: bool,
     pub site_url: String,
     pub email: String,
+    pub active_id: Option<String>,
+    pub sites: Vec<JiraSiteInfo>,
+}
+
+/// One row of the site switcher.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraSiteInfo {
+    pub id: String,
+    pub site_url: String,
+    pub email: String,
+    pub kind: JiraKind,
+    /// The keychain still holds this site's secret.
+    pub connected: bool,
 }
 
 /// One assigned issue, flattened from Jira's nested fields for the UI.
@@ -62,28 +133,154 @@ fn config_path() -> AppResult<PathBuf> {
     Ok(dir.join("jira.json"))
 }
 
-fn keyring_entry() -> AppResult<Entry> {
-    Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .map_err(|e| AppError::Other(format!("keyring open: {e}")))
+fn keyring_entry(account: &str) -> AppResult<Entry> {
+    Entry::new(KEYRING_SERVICE, account).map_err(|e| AppError::Other(format!("keyring open: {e}")))
 }
 
-pub fn load_config() -> Option<JiraConfig> {
-    let path = config_path().ok()?;
-    let txt = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&txt).ok()
+/// Keychain account for a site's secret.
+fn secret_account(site_id: &str) -> String {
+    format!("secret:{site_id}")
 }
 
-fn get_token() -> Option<String> {
-    keyring_entry().ok()?.get_password().ok()
+fn get_secret(site_id: &str) -> Option<String> {
+    keyring_entry(&secret_account(site_id))
+        .ok()?
+        .get_password()
+        .ok()
 }
 
-/// Normalize/validate the site URL: must be https and have a host. Trailing
-/// slash trimmed so we can concatenate `/rest/...` cleanly.
-fn normalize_site(raw: &str) -> AppResult<String> {
+fn set_secret(site_id: &str, secret: &str) -> AppResult<()> {
+    keyring_entry(&secret_account(site_id))?
+        .set_password(secret)
+        .map_err(|e| AppError::Other(format!("keyring set: {e}")))
+}
+
+fn delete_secret(site_id: &str) {
+    if let Ok(entry) = keyring_entry(&secret_account(site_id)) {
+        let _ = entry.delete_credential();
+    }
+}
+
+/// Parse the config file in either shape: the current `{sites, active}` or
+/// the single-site `{siteUrl, email}` of earlier versions, which becomes one
+/// Cloud site (the only kind that existed) that is active.
+pub fn parse_sites(text: &str) -> JiraSites {
+    if let Ok(v) = serde_json::from_str::<JiraSites>(text) {
+        if !v.sites.is_empty() || text.contains("\"sites\"") {
+            return v;
+        }
+    }
+    match serde_json::from_str::<JiraConfig>(text) {
+        Ok(old) if !old.site_url.is_empty() => {
+            let id = site_id(&old.site_url);
+            JiraSites {
+                active: Some(id.clone()),
+                sites: vec![JiraSite {
+                    id,
+                    site_url: old.site_url,
+                    email: old.email,
+                    kind: JiraKind::Cloud,
+                    auth: JiraAuth::ApiToken,
+                }],
+            }
+        }
+        _ => JiraSites::default(),
+    }
+}
+
+/// Read the sites; a legacy single-site file is migrated on the spot, token
+/// included (moved from the old keychain account to the site's own).
+pub fn load_sites() -> JiraSites {
+    let Ok(path) = config_path() else {
+        return JiraSites::default();
+    };
+    let Ok(txt) = std::fs::read_to_string(&path) else {
+        return JiraSites::default();
+    };
+    let sites = parse_sites(&txt);
+    let legacy = !txt.contains("\"sites\"");
+    if legacy && !sites.sites.is_empty() {
+        let id = &sites.sites[0].id;
+        if let Ok(old) = keyring_entry(LEGACY_KEYRING_ACCOUNT) {
+            if let Ok(tok) = old.get_password() {
+                if set_secret(id, &tok).is_ok() {
+                    let _ = old.delete_credential();
+                }
+            }
+        }
+        let _ = save_sites(&sites);
+    }
+    sites
+}
+
+fn save_sites(sites: &JiraSites) -> AppResult<()> {
+    let json = serde_json::to_string_pretty(sites).map_err(|e| AppError::Other(e.to_string()))?;
+    std::fs::write(config_path()?, json)?;
+    Ok(())
+}
+
+/// The site the panel shows.
+pub fn active_site() -> Option<JiraSite> {
+    let all = load_sites();
+    let id = all.active.clone()?;
+    all.sites.into_iter().find(|s| s.id == id)
+}
+
+/// A stable, filename- and keychain-safe id from the site's host:
+/// `https://acme.atlassian.net` → `acme-atlassian-net`.
+pub fn site_id(site_url: &str) -> String {
+    let host = site_url
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/');
+    let mut out = String::with_capacity(host.len());
+    for c in host.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Cloud lives on `*.atlassian.net`; anything else is self-hosted. (A Cloud
+/// custom domain is rare enough that the connect probe below decides.)
+pub fn kind_from_host(site_url: &str) -> JiraKind {
+    let host = site_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    if host.ends_with(".atlassian.net") {
+        JiraKind::Cloud
+    } else {
+        JiraKind::Server
+    }
+}
+
+/// Normalize/validate the site URL: a host with an http(s) scheme (none
+/// given → https). Plain http is allowed because a self-hosted Jira on an
+/// intranet often has no certificate; the panel says so. Trailing slash
+/// trimmed so we can concatenate `/rest/...` cleanly.
+pub fn normalize_site(raw: &str) -> AppResult<String> {
     let s = raw.trim().trim_end_matches('/');
-    if !s.starts_with("https://") || s.len() < "https://a.b".len() {
+    let s = if s.starts_with("https://") || s.starts_with("http://") {
+        s.to_string()
+    } else if s.contains("://") {
         return Err(AppError::InvalidArgument(
-            "site URL must be https:// (e.g. https://yourteam.atlassian.net)".into(),
+            "site URL must start with https:// or http://".into(),
+        ));
+    } else {
+        format!("https://{s}")
+    };
+    let host = s.split("://").nth(1).unwrap_or("");
+    if host.len() < "a.b".len() || !host.contains('.') {
+        return Err(AppError::InvalidArgument(
+            "site URL needs a host (e.g. https://yourteam.atlassian.net or http://jira.yourcompany.local)"
+                .into(),
         ));
     }
     // No spaces or control chars — it becomes a request URL.
@@ -92,16 +289,32 @@ fn normalize_site(raw: &str) -> AppResult<String> {
             "site URL contains invalid characters".into(),
         ));
     }
-    Ok(s.to_string())
+    Ok(s)
 }
 
 pub fn status() -> JiraStatus {
-    let cfg = load_config().unwrap_or_default();
-    let has_token = get_token().is_some();
+    let all = load_sites();
+    let infos: Vec<JiraSiteInfo> = all
+        .sites
+        .iter()
+        .map(|s| JiraSiteInfo {
+            id: s.id.clone(),
+            site_url: s.site_url.clone(),
+            email: s.email.clone(),
+            kind: s.kind,
+            connected: get_secret(&s.id).is_some(),
+        })
+        .collect();
+    let active = all
+        .active
+        .as_ref()
+        .and_then(|id| infos.iter().find(|s| &s.id == id));
     JiraStatus {
-        configured: !cfg.site_url.is_empty() && !cfg.email.is_empty() && has_token,
-        site_url: cfg.site_url,
-        email: cfg.email,
+        configured: active.is_some_and(|s| s.connected && !s.email.is_empty()),
+        site_url: active.map(|s| s.site_url.clone()).unwrap_or_default(),
+        email: active.map(|s| s.email.clone()).unwrap_or_default(),
+        active_id: active.map(|s| s.id.clone()),
+        sites: infos,
     }
 }
 
@@ -174,38 +387,190 @@ pub fn first_atlassian_site(text: &str) -> Option<String> {
     }
 }
 
-/// Persist site + email as JSON and the token in the keychain. The token is
-/// required here so "save" and "connect" are one atomic action.
-pub fn save(site_url: &str, email: &str, token: &str) -> AppResult<()> {
+/// Validate the connect form's three fields; the normalized site and the
+/// trimmed email/secret come back.
+pub fn validate_inputs(
+    site_url: &str,
+    email: &str,
+    secret: &str,
+) -> AppResult<(String, String, String)> {
     let site = normalize_site(site_url)?;
     let email = email.trim();
     if email.is_empty() {
-        return Err(AppError::InvalidArgument("email is required".into()));
+        return Err(AppError::InvalidArgument(
+            "email (Cloud) or username (Server) is required".into(),
+        ));
     }
-    if token.trim().is_empty() {
-        return Err(AppError::InvalidArgument("API token is required".into()));
+    let secret = secret.trim();
+    if secret.is_empty() {
+        return Err(AppError::InvalidArgument(
+            "an API token, personal access token or password is required".into(),
+        ));
     }
-    let cfg = JiraConfig {
-        site_url: site,
-        email: email.to_string(),
-    };
-    let json = serde_json::to_string_pretty(&cfg).map_err(|e| AppError::Other(e.to_string()))?;
-    std::fs::write(config_path()?, json)?;
-    keyring_entry()?
-        .set_password(token.trim())
-        .map_err(|e| AppError::Other(format!("keyring set: {e}")))?;
-    Ok(())
+    Ok((site, email.to_string(), secret.to_string()))
 }
 
-/// Forget the connection entirely: config file + keychain token.
+/// Add (or update) a site and make it active, validating the credentials
+/// first. Cloud: Basic email + API token against REST v3. Self-hosted: the
+/// secret is tried as a personal access token (Bearer), then as a password
+/// (Basic) — whichever `/myself` accepts is what gets remembered. Nothing is
+/// persisted until the site answered. Returns the account's display name.
+pub async fn connect(site_url: &str, email: &str, secret: &str) -> AppResult<String> {
+    let (site_url, email, secret) = validate_inputs(site_url, email, secret)?;
+    let kind = detect_kind(&site_url).await;
+    let candidates: &[JiraAuth] = match kind {
+        JiraKind::Cloud => &[JiraAuth::ApiToken],
+        JiraKind::Server => &[JiraAuth::Pat, JiraAuth::Password],
+    };
+    let mut last_err = None;
+    for auth in candidates {
+        let probe = JiraSite {
+            id: site_id(&site_url),
+            site_url: site_url.clone(),
+            email: email.clone(),
+            kind,
+            auth: *auth,
+        };
+        match myself(&probe, &secret).await {
+            Ok(name) => {
+                set_secret(&probe.id, &secret)?;
+                let mut all = load_sites();
+                all.sites.retain(|s| s.id != probe.id);
+                all.active = Some(probe.id.clone());
+                all.sites.push(probe);
+                save_sites(&all)?;
+                return Ok(name);
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| AppError::Other("Jira did not answer".into())))
+}
+
+/// Show another connected site.
+pub fn switch(site_id: &str) -> AppResult<()> {
+    let mut all = load_sites();
+    if !all.sites.iter().any(|s| s.id == site_id) {
+        return Err(AppError::InvalidArgument("unknown Jira site".into()));
+    }
+    all.active = Some(site_id.to_string());
+    save_sites(&all)
+}
+
+/// Remove one site: its secret and its row. The active one moves to the
+/// next site left, if any.
+pub fn forget(site_id: &str) -> AppResult<()> {
+    let mut all = load_sites();
+    delete_secret(site_id);
+    all.sites.retain(|s| s.id != site_id);
+    if all.active.as_deref() == Some(site_id) {
+        all.active = all.sites.first().map(|s| s.id.clone());
+    }
+    if all.sites.is_empty() {
+        if let Ok(path) = config_path() {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Ok(old) = keyring_entry(LEGACY_KEYRING_ACCOUNT) {
+            let _ = old.delete_credential();
+        }
+        return Ok(());
+    }
+    save_sites(&all)
+}
+
+/// Forget the active site (the panel's "disconnect"); other sites stay.
 pub fn disconnect() -> AppResult<()> {
-    if let Ok(path) = config_path() {
-        let _ = std::fs::remove_file(path);
+    match load_sites().active {
+        Some(id) => forget(&id),
+        None => Ok(()),
     }
-    if let Ok(entry) = keyring_entry() {
-        let _ = entry.delete_credential();
+}
+
+/// `GET /rest/api/2/serverInfo` is public on both deployments and says which
+/// one answers (`deploymentType`). Unreachable → judge by the host.
+async fn detect_kind(site_url: &str) -> JiraKind {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Info {
+        deployment_type: Option<String>,
     }
-    Ok(())
+    let probe = async {
+        let resp = client()
+            .ok()?
+            .get(format!("{site_url}/rest/api/2/serverInfo"))
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        let info: Info = resp.json().await.ok()?;
+        info.deployment_type
+    };
+    match probe.await.as_deref() {
+        Some("Cloud") => JiraKind::Cloud,
+        Some(_) => JiraKind::Server,
+        None => kind_from_host(site_url),
+    }
+}
+
+/// REST version per deployment: Cloud removed v2 for search; Server/DC has no v3.
+pub fn api_version(kind: JiraKind) -> &'static str {
+    match kind {
+        JiraKind::Cloud => "3",
+        JiraKind::Server => "2",
+    }
+}
+
+/// The search endpoint per deployment.
+pub fn search_path(kind: JiraKind) -> &'static str {
+    match kind {
+        JiraKind::Cloud => "/rest/api/3/search/jql",
+        JiraKind::Server => "/rest/api/2/search",
+    }
+}
+
+/// Attach the site's credentials the way it wants them.
+fn authed(req: reqwest::RequestBuilder, site: &JiraSite, secret: &str) -> reqwest::RequestBuilder {
+    match site.auth {
+        JiraAuth::Pat => req.bearer_auth(secret),
+        JiraAuth::ApiToken | JiraAuth::Password => req.basic_auth(&site.email, Some(secret)),
+    }
+}
+
+/// `GET /myself` with the given site + secret: the display name on success.
+async fn myself(site: &JiraSite, secret: &str) -> AppResult<String> {
+    let req = client()?
+        .get(format!(
+            "{}/rest/api/{}/myself",
+            site.site_url,
+            api_version(site.kind)
+        ))
+        .header("Accept", "application/json");
+    let resp = authed(req, site, secret)
+        .send()
+        .await
+        .map_err(|e| AppError::Other(format!("Jira request failed: {e}")))?;
+    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(AppError::Other(match site.kind {
+            JiraKind::Cloud => {
+                "Jira rejected the credentials (401) — check the email and API token".into()
+            }
+            JiraKind::Server => {
+                "Jira rejected the credentials (401) — a personal access token, or your username and password"
+                    .into()
+            }
+        }));
+    }
+    if !resp.status().is_success() {
+        return Err(AppError::Other(format!("Jira returned {}", resp.status())));
+    }
+    let me: MyselfResp = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Other(format!("bad Jira response: {e}")))?;
+    Ok(me.display_name.unwrap_or_else(|| site.email.clone()))
 }
 
 fn client() -> AppResult<reqwest::Client> {
@@ -216,39 +581,14 @@ fn client() -> AppResult<reqwest::Client> {
         .map_err(|e| AppError::Other(format!("http client: {e}")))
 }
 
-fn creds() -> AppResult<(JiraConfig, String)> {
-    let cfg = load_config()
-        .filter(|c| !c.site_url.is_empty() && !c.email.is_empty())
+/// The active site and its secret.
+fn creds() -> AppResult<(JiraSite, String)> {
+    let site = active_site()
+        .filter(|s| !s.site_url.is_empty() && !s.email.is_empty())
         .ok_or_else(|| AppError::InvalidArgument("Jira is not configured".into()))?;
-    let token = get_token()
-        .ok_or_else(|| AppError::InvalidArgument("Jira token missing from keychain".into()))?;
-    Ok((cfg, token))
-}
-
-/// Validate the stored credentials against `GET /myself`. Returns the account's
-/// display name on success — used by the connect form as a confirmation.
-pub async fn test_connection() -> AppResult<String> {
-    let (cfg, token) = creds()?;
-    let resp = client()?
-        .get(format!("{}/rest/api/3/myself", cfg.site_url))
-        .basic_auth(&cfg.email, Some(&token))
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .map_err(|e| AppError::Other(format!("Jira request failed: {e}")))?;
-    if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        return Err(AppError::Other(
-            "Jira rejected the credentials (401) — check the email and API token".into(),
-        ));
-    }
-    if !resp.status().is_success() {
-        return Err(AppError::Other(format!("Jira returned {}", resp.status())));
-    }
-    let me: MyselfResp = resp
-        .json()
-        .await
-        .map_err(|e| AppError::Other(format!("bad Jira response: {e}")))?;
-    Ok(me.display_name.unwrap_or_else(|| cfg.email.clone()))
+    let secret = get_secret(&site.id)
+        .ok_or_else(|| AppError::InvalidArgument("Jira secret missing from keychain".into()))?;
+    Ok((site, secret))
 }
 
 const DEFAULT_JQL: &str = "assignee = currentUser() AND statusCategory != Done ORDER BY duedate ASC, priority DESC, updated DESC";
@@ -275,7 +615,7 @@ fn validate_jql(jql: &str) -> AppResult<&str> {
 /// Issues for the given JQL (role presets / user-tuned), or the classic
 /// "assigned to me, not Done" when none is provided.
 pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
-    let (cfg, token) = creds()?;
+    let (site, secret) = creds()?;
     let jql = match jql {
         Some(j) => validate_jql(j)?,
         None => DEFAULT_JQL,
@@ -285,11 +625,11 @@ pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
         "maxResults": 50,
         "fields": ["summary", "status", "priority", "duedate", "issuetype", "project", "updated"],
     });
-    let resp = client()?
-        .post(format!("{}/rest/api/3/search/jql", cfg.site_url))
-        .basic_auth(&cfg.email, Some(&token))
+    let req = client()?
+        .post(format!("{}{}", site.site_url, search_path(site.kind)))
         .header("Accept", "application/json")
-        .json(&body)
+        .json(&body);
+    let resp = authed(req, &site, &secret)
         .send()
         .await
         .map_err(|e| AppError::Other(format!("Jira request failed: {e}")))?;
@@ -311,7 +651,7 @@ pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
     Ok(parsed
         .issues
         .into_iter()
-        .map(|i| flatten(&cfg.site_url, i))
+        .map(|i| flatten(&site.site_url, i))
         .collect())
 }
 
@@ -428,24 +768,17 @@ pub async fn log_work(
     }
     let secs = parse_duration_to_seconds(duration)?;
 
-    let mut body = serde_json::json!({
-        "timeSpentSeconds": secs,
-        "started": format!("{started_date}T12:00:00.000+0000"),
-    });
-    if let Some(text) = comment.map(str::trim).filter(|t| !t.is_empty()) {
-        body["comment"] = serde_json::json!({
-            "type": "doc",
-            "version": 1,
-            "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": text }] }],
-        });
-    }
-
-    let (cfg, token) = creds()?;
-    let resp = client()?
-        .post(format!("{}/rest/api/3/issue/{key}/worklog", cfg.site_url))
-        .basic_auth(&cfg.email, Some(&token))
+    let (site, secret) = creds()?;
+    let body = worklog_body(site.kind, secs, started_date, comment);
+    let req = client()?
+        .post(format!(
+            "{}/rest/api/{}/issue/{key}/worklog",
+            site.site_url,
+            api_version(site.kind)
+        ))
         .header("Accept", "application/json")
-        .json(&body)
+        .json(&body);
+    let resp = authed(req, &site, &secret)
         .send()
         .await
         .map_err(|e| AppError::Other(format!("Jira request failed: {e}")))?;
@@ -459,6 +792,31 @@ pub async fn log_work(
         ))),
         s => Err(AppError::Other(format!("Jira worklog returned {s}"))),
     }
+}
+
+/// The worklog request body: Cloud's v3 wants the comment as an ADF document,
+/// Server's v2 wants plain text.
+pub fn worklog_body(
+    kind: JiraKind,
+    secs: u64,
+    started_date: &str,
+    comment: Option<&str>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "timeSpentSeconds": secs,
+        "started": format!("{started_date}T12:00:00.000+0000"),
+    });
+    if let Some(text) = comment.map(str::trim).filter(|t| !t.is_empty()) {
+        body["comment"] = match kind {
+            JiraKind::Cloud => serde_json::json!({
+                "type": "doc",
+                "version": 1,
+                "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": text }] }],
+            }),
+            JiraKind::Server => serde_json::Value::String(text.to_string()),
+        };
+    }
+    body
 }
 
 /// Estimate seconds actually worked from witnessed event timestamps (the
@@ -711,21 +1069,135 @@ mod tests {
     }
 
     #[test]
-    fn normalize_site_enforces_https_and_trims() {
+    fn normalize_site_accepts_http_and_bare_hosts_and_trims() {
         assert_eq!(
             normalize_site("https://acme.atlassian.net/").unwrap(),
             "https://acme.atlassian.net"
         );
-        assert!(normalize_site("http://acme.atlassian.net").is_err());
-        assert!(normalize_site("acme.atlassian.net").is_err());
+        // A self-hosted Jira on an intranet, plain http — the BSE case.
+        assert_eq!(
+            normalize_site(" http://jiraportal.bse.com.uy/ ").unwrap(),
+            "http://jiraportal.bse.com.uy"
+        );
+        assert_eq!(
+            normalize_site("acme.atlassian.net").unwrap(),
+            "https://acme.atlassian.net"
+        );
+        assert!(normalize_site("ftp://acme.atlassian.net").is_err());
         assert!(normalize_site("https://a b.net").is_err());
+        assert!(normalize_site("https://localhost").is_err());
         assert!(normalize_site("").is_err());
     }
 
     #[test]
-    fn save_rejects_blank_email_and_token() {
-        assert!(save("https://x.atlassian.net", "  ", "tok").is_err());
-        assert!(save("https://x.atlassian.net", "me@x.com", "  ").is_err());
+    fn validate_inputs_rejects_blank_identity_and_secret() {
+        assert!(validate_inputs("https://x.atlassian.net", "  ", "tok").is_err());
+        assert!(validate_inputs("https://x.atlassian.net", "me@x.com", "  ").is_err());
+        assert_eq!(
+            validate_inputs("http://jira.corp/", " jdoe ", " pat-1 ").unwrap(),
+            ("http://jira.corp".into(), "jdoe".into(), "pat-1".into())
+        );
+    }
+
+    #[test]
+    fn site_id_and_kind_follow_the_host() {
+        assert_eq!(site_id("https://acme.atlassian.net"), "acme-atlassian-net");
+        assert_eq!(
+            site_id("http://jiraportal.bse.com.uy/"),
+            "jiraportal-bse-com-uy"
+        );
+        assert_eq!(site_id("https://Jira.Corp:8080"), "jira-corp-8080");
+        assert_eq!(
+            kind_from_host("https://acme.atlassian.net"),
+            JiraKind::Cloud
+        );
+        assert_eq!(
+            kind_from_host("http://jiraportal.bse.com.uy"),
+            JiraKind::Server
+        );
+        assert_eq!(api_version(JiraKind::Cloud), "3");
+        assert_eq!(search_path(JiraKind::Server), "/rest/api/2/search");
+    }
+
+    #[test]
+    fn parse_sites_migrates_the_single_site_file_and_reads_the_new_one() {
+        let old = parse_sites(r#"{"siteUrl":"https://acme.atlassian.net","email":"me@acme.com"}"#);
+        assert_eq!(old.active.as_deref(), Some("acme-atlassian-net"));
+        assert_eq!(old.sites.len(), 1);
+        assert_eq!(old.sites[0].kind, JiraKind::Cloud);
+        assert_eq!(old.sites[0].auth, JiraAuth::ApiToken);
+        assert_eq!(old.sites[0].email, "me@acme.com");
+
+        let new = parse_sites(
+            r#"{"sites":[{"id":"a","siteUrl":"https://a.atlassian.net","email":"x"},{"id":"b","siteUrl":"http://jira.corp","email":"jdoe","kind":"server","auth":"pat"}],"active":"b"}"#,
+        );
+        assert_eq!(new.sites.len(), 2);
+        assert_eq!(new.active.as_deref(), Some("b"));
+        assert_eq!(new.sites[1].kind, JiraKind::Server);
+        assert_eq!(new.sites[1].auth, JiraAuth::Pat);
+        // Round-trips through serde unchanged.
+        let txt = serde_json::to_string(&new).unwrap();
+        assert_eq!(parse_sites(&txt), new);
+        assert_eq!(parse_sites("{}"), JiraSites::default());
+        assert_eq!(parse_sites("garbage"), JiraSites::default());
+    }
+
+    #[test]
+    fn worklog_body_speaks_adf_to_cloud_and_text_to_server() {
+        let c = worklog_body(JiraKind::Cloud, 5400, "2026-10-26", Some(" fixed it "));
+        assert_eq!(c["timeSpentSeconds"], 5400);
+        assert_eq!(c["started"], "2026-10-26T12:00:00.000+0000");
+        assert_eq!(c["comment"]["type"], "doc");
+        assert_eq!(c["comment"]["content"][0]["content"][0]["text"], "fixed it");
+        let s = worklog_body(JiraKind::Server, 60, "2026-10-26", Some("fixed it"));
+        assert_eq!(s["comment"], "fixed it");
+        assert!(worklog_body(JiraKind::Server, 60, "2026-10-26", Some("  "))
+            .get("comment")
+            .is_none());
+    }
+
+    #[test]
+    fn authed_sends_bearer_for_a_pat_and_basic_otherwise() {
+        let site = |auth: JiraAuth| JiraSite {
+            id: "x".into(),
+            site_url: "http://jira.corp".into(),
+            email: "jdoe".into(),
+            kind: JiraKind::Server,
+            auth,
+        };
+        let c = reqwest::Client::new();
+        let pat = authed(
+            c.get("http://jira.corp/rest/api/2/myself"),
+            &site(JiraAuth::Pat),
+            "tok",
+        )
+        .build()
+        .unwrap();
+        assert_eq!(pat.headers()["authorization"], "Bearer tok");
+        let pw = authed(
+            c.get("http://jira.corp/rest/api/2/myself"),
+            &site(JiraAuth::Password),
+            "s3cret",
+        )
+        .build()
+        .unwrap();
+        let v = pw.headers()["authorization"].to_str().unwrap().to_string();
+        assert!(v.starts_with("Basic "), "{v}");
+        let cloud = authed(
+            c.get("https://a.atlassian.net/rest/api/3/myself"),
+            &JiraSite {
+                kind: JiraKind::Cloud,
+                auth: JiraAuth::ApiToken,
+                ..site(JiraAuth::ApiToken)
+            },
+            "tok",
+        )
+        .build()
+        .unwrap();
+        assert!(cloud.headers()["authorization"]
+            .to_str()
+            .unwrap()
+            .starts_with("Basic "));
     }
 
     #[test]

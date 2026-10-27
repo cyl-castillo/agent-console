@@ -1434,7 +1434,7 @@ export const defaultFixtures: FixtureMap = {
     };
   },
   // work
-  jira_status: { configured: false, siteUrl: "", email: "" },
+  jira_status: { configured: false, siteUrl: "", email: "", activeId: null, sites: [] },
   jira_defaults: { email: "demo@example.com", siteUrl: null },
   gh_auth_token: null,
   jira_daily_digest: [],

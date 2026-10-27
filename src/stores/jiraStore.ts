@@ -17,6 +17,14 @@ export function localDay(offsetDays: number): { startMs: number; endMs: number; 
   };
 }
 
+const DISCONNECTED: JiraStatus = {
+  configured: false,
+  siteUrl: "",
+  email: "",
+  activeId: null,
+  sites: [],
+};
+
 interface JiraState {
   status: JiraStatus | null;
   issues: JiraIssue[];
@@ -35,6 +43,13 @@ interface JiraState {
   loadStatus: () => Promise<void>;
   connect: (siteUrl: string, email: string, token: string) => Promise<boolean>;
   disconnect: () => Promise<void>;
+  /// Show another connected site (issues reload).
+  switchSite: (siteId: string) => Promise<void>;
+  /// Remove one site; the backend picks the next active one.
+  forgetSite: (siteId: string) => Promise<void>;
+  /// The connect form is open on top of a configured panel ("add a site").
+  addingSite: boolean;
+  setAddingSite: (v: boolean) => void;
   refreshIssues: () => Promise<void>;
   /// Log time on an issue. Resolves to the normalized label logged ("1h 30m")
   /// or null on failure (error surfaced via the returned message in `logError`).
@@ -72,7 +87,7 @@ export const useJiraStore = create<JiraState>((set, get) => ({
       set({ status, loadingStatus: false });
       if (status.configured) void get().refreshIssues();
     } catch (e) {
-      set({ loadingStatus: false, status: { configured: false, siteUrl: "", email: "" } });
+      set({ loadingStatus: false, status: DISCONNECTED });
       void e;
     }
   },
@@ -82,7 +97,7 @@ export const useJiraStore = create<JiraState>((set, get) => ({
     set({ connecting: true, connectError: null });
     try {
       await ipc.jiraConnect(siteUrl, email, token);
-      set({ connecting: false });
+      set({ connecting: false, addingSite: false });
       await get().loadStatus();
       return true;
     } catch (e) {
@@ -97,13 +112,34 @@ export const useJiraStore = create<JiraState>((set, get) => ({
     } catch {
       /* best-effort */
     }
-    set({
-      status: { configured: false, siteUrl: "", email: "" },
-      issues: [],
-      issuesError: null,
-      connectError: null,
-    });
+    set({ issues: [], issuesError: null, connectError: null });
+    await get().loadStatus();
   },
+
+  switchSite: async (siteId) => {
+    if (get().status?.activeId === siteId) return;
+    try {
+      await ipc.jiraSwitch(siteId);
+    } catch (e) {
+      set({ issuesError: String(e) });
+      return;
+    }
+    set({ issues: [], issuesError: null });
+    await get().loadStatus();
+  },
+
+  forgetSite: async (siteId) => {
+    try {
+      await ipc.jiraForget(siteId);
+    } catch {
+      /* best-effort */
+    }
+    set({ issues: [], issuesError: null, connectError: null });
+    await get().loadStatus();
+  },
+
+  addingSite: false,
+  setAddingSite: (addingSite) => set({ addingSite, connectError: null }),
 
   jql: null,
   setJql: async (jql) => {

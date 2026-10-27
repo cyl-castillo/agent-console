@@ -6,19 +6,25 @@ pub fn jira_status() -> JiraStatus {
     jira_service::status()
 }
 
-/// Save the connection AND validate it in one step: persist, then hit
-/// `/myself`. If validation fails, roll the save back so a bad token doesn't
-/// leave the app looking "configured". Returns the account display name.
+/// Connect a site (Cloud or self-hosted) and make it active: the
+/// credentials are validated against `/myself` before anything is persisted,
+/// so a bad secret never leaves the app looking "configured". Returns the
+/// account display name.
 #[tauri::command]
 pub async fn jira_connect(site_url: String, email: String, token: String) -> AppResult<String> {
-    jira_service::save(&site_url, &email, &token)?;
-    match jira_service::test_connection().await {
-        Ok(name) => Ok(name),
-        Err(e) => {
-            let _ = jira_service::disconnect();
-            Err(e)
-        }
-    }
+    jira_service::connect(&site_url, &email, &token).await
+}
+
+/// Show another connected site.
+#[tauri::command(async)]
+pub fn jira_switch(site_id: String) -> AppResult<()> {
+    jira_service::switch(&site_id)
+}
+
+/// Remove one site (its secret too); the active one moves on if needed.
+#[tauri::command(async)]
+pub fn jira_forget(site_id: String) -> AppResult<()> {
+    jira_service::forget(&site_id)
 }
 
 /// Detect instead of ask: email from git, site from the project's own files.
