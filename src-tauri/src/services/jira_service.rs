@@ -564,7 +564,12 @@ async fn myself(site: &JiraSite, secret: &str) -> AppResult<String> {
         }));
     }
     if !resp.status().is_success() {
-        return Err(AppError::Other(format!("Jira returned {}", resp.status())));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AppError::Other(format!(
+            "Jira returned {status}{}",
+            error_detail(&body)
+        )));
     }
     let me: MyselfResp = resp
         .json()
@@ -593,6 +598,59 @@ fn creds() -> AppResult<(JiraSite, String)> {
 
 const DEFAULT_JQL: &str = "assignee = currentUser() AND statusCategory != Done ORDER BY duedate ASC, priority DESC, updated DESC";
 
+/// The issue fields the queue reads; the same list on both deployments.
+const SEARCH_FIELDS: [&str; 7] = [
+    "summary",
+    "status",
+    "priority",
+    "duedate",
+    "issuetype",
+    "project",
+    "updated",
+];
+
+/// Jira's own words for a failed request — `errorMessages` and `errors` of
+/// its JSON error body, or a short tail of a non-JSON one — so a 400 says
+/// *why* ("Field 'sprint' does not exist") instead of just the number.
+pub fn error_detail(body: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(arr) = v.get("errorMessages").and_then(|m| m.as_array()) {
+            parts.extend(arr.iter().filter_map(|m| m.as_str()).map(str::to_string));
+        }
+        if let Some(obj) = v.get("errors").and_then(|e| e.as_object()) {
+            parts.extend(
+                obj.iter()
+                    .filter_map(|(k, val)| val.as_str().map(|s| format!("{k}: {s}"))),
+            );
+        }
+        if parts.is_empty() {
+            if let Some(m) = v.get("message").and_then(|m| m.as_str()) {
+                parts.push(m.to_string());
+            }
+        }
+    } else {
+        let plain: String = body
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect::<String>()
+            .trim()
+            .to_string();
+        if !plain.is_empty() && !plain.starts_with('<') {
+            parts.push(plain);
+        }
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    let joined = parts.join(" · ");
+    let cut: String = joined.chars().take(300).collect();
+    format!(
+        " — {cut}{}",
+        if cut.len() < joined.len() { "…" } else { "" }
+    )
+}
+
 /// Guard a caller-supplied JQL before it becomes a request body: length-capped
 /// and free of control characters. Jira itself is the real parser — this only
 /// keeps junk and log-breaking bytes out.
@@ -620,15 +678,28 @@ pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
         Some(j) => validate_jql(j)?,
         None => DEFAULT_JQL,
     };
-    let body = serde_json::json!({
-        "jql": jql,
-        "maxResults": 50,
-        "fields": ["summary", "status", "priority", "duedate", "issuetype", "project", "updated"],
-    });
-    let req = client()?
-        .post(format!("{}{}", site.site_url, search_path(site.kind)))
-        .header("Accept", "application/json")
-        .json(&body);
+    let req = match site.kind {
+        // Cloud: the only search left is POST /search/jql with a JSON body.
+        JiraKind::Cloud => client()?
+            .post(format!("{}{}", site.site_url, search_path(site.kind)))
+            .header("Accept", "application/json")
+            .json(&serde_json::json!({
+                "jql": jql,
+                "maxResults": 50,
+                "fields": SEARCH_FIELDS,
+            })),
+        // Server/DC: GET with query parameters is what every version (and
+        // every reverse proxy in front of one) accepts; a JSON POST to
+        // /rest/api/2/search came back 400 from a self-hosted instance.
+        JiraKind::Server => client()?
+            .get(format!("{}{}", site.site_url, search_path(site.kind)))
+            .header("Accept", "application/json")
+            .query(&[
+                ("jql", jql),
+                ("maxResults", "50"),
+                ("fields", &SEARCH_FIELDS.join(",")),
+            ]),
+    };
     let resp = authed(req, &site, &secret)
         .send()
         .await
@@ -639,9 +710,11 @@ pub async fn list_assigned(jql: Option<&str>) -> AppResult<Vec<JiraIssue>> {
         ));
     }
     if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
         return Err(AppError::Other(format!(
-            "Jira search returned {}",
-            resp.status()
+            "Jira search returned {status}{}",
+            error_detail(&body)
         )));
     }
     let parsed: SearchResp = resp
@@ -790,7 +863,13 @@ pub async fn log_work(
         reqwest::StatusCode::NOT_FOUND => Err(AppError::Other(format!(
             "Jira says {key} doesn't exist (404)"
         ))),
-        s => Err(AppError::Other(format!("Jira worklog returned {s}"))),
+        s => {
+            let body = resp.text().await.unwrap_or_default();
+            Err(AppError::Other(format!(
+                "Jira worklog returned {s}{}",
+                error_detail(&body)
+            )))
+        }
     }
 }
 
@@ -1140,6 +1219,29 @@ mod tests {
         assert_eq!(parse_sites(&txt), new);
         assert_eq!(parse_sites("{}"), JiraSites::default());
         assert_eq!(parse_sites("garbage"), JiraSites::default());
+    }
+
+    #[test]
+    fn error_detail_quotes_jira_and_stays_short() {
+        assert_eq!(
+            error_detail(
+                r#"{"errorMessages":["Field 'sprint' does not exist or you do not have permission to view it."],"errors":{}}"#
+            ),
+            " — Field 'sprint' does not exist or you do not have permission to view it."
+        );
+        assert_eq!(
+            error_detail(r#"{"errorMessages":[],"errors":{"jql":"bad"}}"#),
+            " — jql: bad"
+        );
+        assert_eq!(
+            error_detail(r#"{"message":"XSRF check failed"}"#),
+            " — XSRF check failed"
+        );
+        assert_eq!(error_detail("<html><body>502</body></html>"), "");
+        assert_eq!(error_detail(""), "");
+        let long = format!(r#"{{"errorMessages":["{}"]}}"#, "x".repeat(500));
+        let d = error_detail(&long);
+        assert!(d.ends_with('…') && d.chars().count() < 320, "{}", d.len());
     }
 
     #[test]
