@@ -18,9 +18,15 @@ headed `tauri dev` locally, see [[tauri-dev-needs-interactive-shell]], or Carlos
 3. **`changes-diff.png`** — Changes tab, split diff, terminal hidden.
 4. **`proof-verify.png`** — the hosted Testigo verifier (browser; unchanged).
 5. **`ledger-map.png`** — Proof › Ledger map with a turn selected.
+6. **`inbox-verdicts.png`** (v0.93) — Inbox: PR card, approval, unverified
+   claim, quota → OpenCode. 1213×1075.
+7. **`trust-policy.png`** (v0.93) — Permissions: trust, policy as code,
+   remote devices with a pending pairing.
+8. **`fanout-compare.png`** (v0.93) — Room: fan-out toggles + comparison.
+9. **`compliance-pack.png`** (v0.93) — Proof: the compliance pack result.
 
 Candidates for a later set: a room mid-conversation (needs a fixture with a
-real transcript), a roundtable, a worktree review.
+real transcript), a worktree review.
 
 ## og:image cover — `og-cover.png` (1200×630)
 - Hero shot #1 cropped to 1200×630, with wordmark + one-line tagline baked in.
