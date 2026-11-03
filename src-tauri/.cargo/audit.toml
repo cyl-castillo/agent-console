@@ -16,7 +16,11 @@ ignore = [
     # extracts an archive) and zip 4 pinned by tauri-plugin-updater 2.10
     # (extracts only the update it downloaded, after verifying our minisign
     # signature). Drop these when candle and the updater move to zip >= 9.
+    # RUSTSEC-2026-0429 (2026-10-22) is the same family: `extract()` sizes a
+    # symlink-target buffer from the declared size and aborts on a hostile
+    # archive. Same two pinned copies, same non-hostile inputs.
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    "RUSTSEC-2026-0429",
 ]
