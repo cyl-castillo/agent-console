@@ -34,6 +34,30 @@ const POSTTOOLUSEFAILURE_HOOK: &str = include_str!("../../resources/posttoolusef
 /// bridge; the daily CLI watch can lower this once an older release is
 /// checked. Verified on the CLI, not guessed from docs.
 const MIN_CLAUDE_PERMISSIONREQUEST_VERSION: (u64, u64, u64) = (2, 1, 248);
+
+/// Oldest Claude Code that ACCEPTS each version-gated hook event key in
+/// settings.json. Distinct from the bridge floor above: this is "the CLI
+/// knows the name", not "our bridge is verified on it". A CLI older than
+/// 2.1.101 refuses to start on an unknown event name ("invalid hook event",
+/// listing PreToolUse/PostToolUse/Notification/Stop/UserPromptSubmit as the
+/// valid ones) — Maikel's install, 2026-11-03 — so an event below its floor
+/// must never be written, and one already there must be removed.
+/// Source: anthropics/claude-code CHANGELOG.md — PermissionRequest "Added"
+/// in 2.0.45; StopFailure "Added" in 2.1.78; PostModelSwitch "Added" in
+/// 2.1.251; PostToolUseFailure has no "Added" line, its earliest mention is
+/// 2.1.119 (`duration_ms` on its input), used here as the floor.
+/// Events absent from this table are the base set every CLI accepts.
+const CLAUDE_EVENT_FLOORS: &[(&str, (u64, u64, u64))] = &[
+    ("PermissionRequest", (2, 0, 45)),
+    ("StopFailure", (2, 1, 78)),
+    ("PostToolUseFailure", (2, 1, 119)),
+    ("PostModelSwitch", (2, 1, 251)),
+];
+
+/// How long we wait for `claude --version` before treating the version as
+/// unknown (same contract as the auth probe: the child runs off-thread and
+/// an abandoned one exits on its own).
+const CLAUDE_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const INTERRUPT_HOOK: &str = include_str!("../../resources/interrupt-hook.cjs");
 /// OpenCode has no hooks: this plugin, written to the user's OpenCode config,
 /// is what witnesses its sessions (tool results with exit codes, the prompt,
@@ -374,29 +398,44 @@ impl HooksRuntime {
             &self.posttooluse_script_path,
             self.binary_path.as_deref(),
         );
+        // Version-gated Claude-only observers: written only when the
+        // installed CLI accepts the event name (see CLAUDE_EVENT_FLOORS); an
+        // unknown version gets the base set only.
+        let version = detect_claude_version();
         // Claude-only: failed tool runs (Codex has no PostToolUseFailure).
-        upsert_hook(
-            &mut settings,
-            "PostToolUseFailure",
-            &self.posttoolusefailure_script_path,
-            self.binary_path.as_deref(),
-        );
+        if claude_event_supported("PostToolUseFailure", version) {
+            upsert_hook(
+                &mut settings,
+                "PostToolUseFailure",
+                &self.posttoolusefailure_script_path,
+                self.binary_path.as_deref(),
+            );
+        }
         // Claude-only (see `ensure_stopfailure_autoinstalled`): the event and
         // its `error` enum are Claude's, and Codex has no equivalent today.
-        upsert_hook(
-            &mut settings,
-            "StopFailure",
-            &self.stopfailure_script_path,
-            self.binary_path.as_deref(),
-        );
+        if claude_event_supported("StopFailure", version) {
+            upsert_hook(
+                &mut settings,
+                "StopFailure",
+                &self.stopfailure_script_path,
+                self.binary_path.as_deref(),
+            );
+        }
         // Claude-only: Codex has no model-switch event, so this one is absent
         // from the mirror list below on purpose.
-        upsert_hook(
-            &mut settings,
-            "PostModelSwitch",
-            &self.modelswitch_script_path,
-            self.binary_path.as_deref(),
-        );
+        if claude_event_supported("PostModelSwitch", version) {
+            upsert_hook(
+                &mut settings,
+                "PostModelSwitch",
+                &self.modelswitch_script_path,
+                self.binary_path.as_deref(),
+            );
+        }
+        // Anything of ours the CLI can't parse goes in the same pass.
+        let pruned = prune_unsupported_hooks(&mut settings, version, &self.claude_gated_pairs());
+        if !pruned.is_empty() {
+            tracing::warn!("hooks: removed hook event(s) this claude doesn't accept: {pruned:?}");
+        }
 
         write_settings_atomic(&settings_path, &settings)?;
 
@@ -553,12 +592,15 @@ impl HooksRuntime {
 
     /// Auto-install the PostToolUseFailure observer (Claude only), under its
     /// own marker. Observer-class: records a tool that ran and failed — the
-    /// half of every test run PostToolUse never sees.
+    /// half of every test run PostToolUse never sees. Version-gated: a CLI
+    /// below the event's floor (or one we couldn't identify) gets nothing
+    /// and no marker, so the observer lands on the first launch that finds
+    /// a new-enough `claude`.
     pub fn ensure_posttoolusefailure_autoinstalled(&self) -> AppResult<()> {
         let marker = self
             .script_path
             .with_file_name(".posttoolusefailure-autoinstalled");
-        if marker.exists() {
+        if marker.exists() || !claude_supports("PostToolUseFailure") {
             return Ok(());
         }
         let settings_path = settings_path();
@@ -761,12 +803,17 @@ impl HooksRuntime {
     ///
     /// Observer-class (writes an event, changes no behavior) and the CLI ignores
     /// its output and exit code entirely, so it's safe to enable by default.
-    /// Older Claude versions simply never fire an event they don't have.
+    ///
+    /// Version-gated (2.1.78+): "older versions never fire an event they don't
+    /// have" was wrong for the settings file itself — a CLI before 2.1.101
+    /// refuses to START on an unknown event name (Maikel, 2026-11-03). Below
+    /// the floor, or on an unknown version, nothing is written and no marker
+    /// is left, so the observer lands once the CLI is new enough.
     pub fn ensure_stopfailure_autoinstalled(&self) -> AppResult<()> {
         let marker = self
             .script_path
             .with_file_name(".stopfailure-autoinstalled");
-        if marker.exists() {
+        if marker.exists() || !claude_supports("StopFailure") {
             return Ok(());
         }
         let settings_path = settings_path();
@@ -872,14 +919,16 @@ impl HooksRuntime {
     ///
     /// Observer-class and then some: PostModelSwitch is an ASYNC event, so the
     /// CLI doesn't even read our decision fields — the switch has already
-    /// happened. Older Claude versions simply never fire an event they don't
-    /// have, which is exactly how they degrade: the pill keeps showing intent,
-    /// as it did before.
+    /// happened. Version-gated (2.1.251+): an older CLI doesn't just skip the
+    /// event, one before 2.1.101 refuses to start on the unknown key (Maikel,
+    /// 2026-11-03), so below the floor — or on an unknown version — nothing
+    /// is written and no marker is left; the pill keeps showing intent, as it
+    /// did before, until the CLI is new enough.
     pub fn ensure_modelswitch_autoinstalled(&self) -> AppResult<()> {
         let marker = self
             .script_path
             .with_file_name(".modelswitch-autoinstalled");
-        if marker.exists() {
+        if marker.exists() || !claude_supports("PostModelSwitch") {
             return Ok(());
         }
         let settings_path = settings_path();
@@ -902,6 +951,51 @@ impl HooksRuntime {
         );
         write_settings_atomic(&settings_path, &settings)?;
         let _ = fs::write(&marker, b"1");
+        Ok(())
+    }
+
+    /// The version-gated Claude events with their scripts: what
+    /// `prune_unsupported_claude_hooks` is allowed to touch. Base events
+    /// (UserPromptSubmit, PreToolUse, PostToolUse, Notification, Stop) are
+    /// deliberately absent — every CLI accepts them.
+    fn claude_gated_pairs(&self) -> [(&'static str, &PathBuf); 4] {
+        [
+            ("PermissionRequest", &self.permissionrequest_script_path),
+            ("StopFailure", &self.stopfailure_script_path),
+            ("PostToolUseFailure", &self.posttoolusefailure_script_path),
+            ("PostModelSwitch", &self.modelswitch_script_path),
+        ]
+    }
+
+    /// Remove OUR entries for every version-gated event the installed
+    /// `claude` doesn't accept, from ~/.claude/settings.json only (Codex has
+    /// its own table and none of these events). Runs on every startup: a
+    /// previous Agent Console wrote StopFailure/PostModelSwitch unconditionally,
+    /// and a CLI before 2.1.101 refuses to start while they're in the file —
+    /// the user's own Claude then deleted them by hand (Maikel, 2026-11-03),
+    /// and a one-time marker alone would never undo what we left behind.
+    /// Other people's entries under the same event are kept; the key is
+    /// dropped only when removing ours emptied it (an empty unknown key is
+    /// still an unknown key to the old parser). Unknown version ⇒ prunes
+    /// down to the base set, same rule as install.
+    pub fn prune_unsupported_claude_hooks(&self) -> AppResult<()> {
+        let settings_path = settings_path();
+        let Some(mut settings) = read_settings(&settings_path) else {
+            return Ok(());
+        };
+        if !settings.is_object() {
+            return Ok(());
+        }
+        let pruned = prune_unsupported_hooks(
+            &mut settings,
+            detect_claude_version(),
+            &self.claude_gated_pairs(),
+        );
+        if pruned.is_empty() {
+            return Ok(());
+        }
+        write_settings_atomic(&settings_path, &settings)?;
+        tracing::warn!("hooks: removed hook event(s) this claude doesn't accept: {pruned:?}");
         Ok(())
     }
 
@@ -1194,8 +1288,92 @@ fn upsert_hook(settings: &mut Value, event: &str, script_path: &Path, binary: Op
 /// W5). Unknown ⇒ false: an unrecognized event key in settings.json is a
 /// risk we don't take on a CLI we couldn't identify.
 fn permissionrequest_supported() -> bool {
-    crate::services::rewind_service::claude_version()
-        .is_some_and(|v| v >= MIN_CLAUDE_PERMISSIONREQUEST_VERSION)
+    detect_claude_version().is_some_and(|v| v >= MIN_CLAUDE_PERMISSIONREQUEST_VERSION)
+}
+
+/// Pure: does a `claude` of `version` accept `event` as a hook key? Events
+/// outside CLAUDE_EVENT_FLOORS are the base set every CLI knows. Unknown
+/// version (`None`) ⇒ base set only: the one thing we know about a CLI we
+/// couldn't identify is that an unknown key can stop it from starting.
+fn claude_event_supported(event: &str, version: Option<(u64, u64, u64)>) -> bool {
+    match CLAUDE_EVENT_FLOORS.iter().find(|(e, _)| *e == event) {
+        None => true,
+        Some((_, floor)) => version.is_some_and(|v| v >= *floor),
+    }
+}
+
+/// `claude_event_supported` against the installed CLI.
+fn claude_supports(event: &str) -> bool {
+    claude_event_supported(event, detect_claude_version())
+}
+
+/// `claude --version` as a semver triple, bounded by
+/// CLAUDE_VERSION_PROBE_TIMEOUT and cached per process once it succeeds (the
+/// startup sequence asks several times; a login shell per ask adds up). A
+/// failed probe is NOT cached — the next ask retries — and is logged once,
+/// because its consequence (base hook set only) is otherwise invisible.
+fn detect_claude_version() -> Option<(u64, u64, u64)> {
+    static CACHE: std::sync::OnceLock<Mutex<Option<(u64, u64, u64)>>> =
+        std::sync::OnceLock::new();
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    if let Some(v) = *cache.lock() {
+        return Some(v);
+    }
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(crate::services::rewind_service::claude_version());
+    });
+    let probed = rx.recv_timeout(CLAUDE_VERSION_PROBE_TIMEOUT).ok().flatten();
+    match probed {
+        Some(v) => {
+            *cache.lock() = Some(v);
+            Some(v)
+        }
+        None => {
+            if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                tracing::warn!(
+                    "hooks: could not detect `claude --version` (missing, failed or timed out); \
+                     only the base hook events (PreToolUse, PostToolUse, Notification, Stop, \
+                     UserPromptSubmit) will be written"
+                );
+            }
+            None
+        }
+    }
+}
+
+/// Pure: drop OUR entries for every event in `pairs` that `version` doesn't
+/// accept (per `claude_event_supported`). Foreign entries under the same
+/// event stay; the event key is removed only when our removal emptied it.
+/// Returns the events whose entries were removed (empty ⇒ nothing changed).
+fn prune_unsupported_hooks(
+    settings: &mut Value,
+    version: Option<(u64, u64, u64)>,
+    pairs: &[(&str, &PathBuf)],
+) -> Vec<String> {
+    let mut pruned = Vec::new();
+    let Some(hooks) = settings.get_mut("hooks").and_then(|v| v.as_object_mut()) else {
+        return pruned;
+    };
+    for (event, script) in pairs {
+        if claude_event_supported(event, version) {
+            continue;
+        }
+        let Some(arr) = hooks.get_mut(*event).and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        let before = arr.len();
+        arr.retain(|e| !has_command_path(e, script) && !has_bridge_command(e, bridge_mode(event)));
+        if arr.len() == before {
+            continue;
+        }
+        if arr.is_empty() {
+            hooks.remove(*event);
+        }
+        pruned.push((*event).to_string());
+    }
+    pruned
 }
 
 /// Add our PermissionRequest bridge entry when no bridge of ours is there
@@ -2841,6 +3019,180 @@ mod tests {
         let stop = settings.pointer("/hooks/Stop").unwrap().as_array().unwrap();
         assert_eq!(stop.len(), 1);
         assert!(has_bridge_command(&stop[0], "stop"));
+    }
+
+    /// Maikel's case (2026-11-03): a CLI older than the events we wrote
+    /// refused to start on StopFailure/PostModelSwitch. The table decides
+    /// per version; the base set is never gated; unknown ⇒ base set only.
+    #[test]
+    fn version_gate_admits_only_the_events_the_installed_claude_knows() {
+        let base = [
+            "UserPromptSubmit",
+            "PreToolUse",
+            "PostToolUse",
+            "Notification",
+            "Stop",
+        ];
+        for v in [None, Some((1, 0, 50)), Some((2, 1, 78)), Some((2, 1, 300))] {
+            for e in base {
+                assert!(claude_event_supported(e, v), "{e} is base, always on ({v:?})");
+            }
+        }
+
+        // Old CLI: the five base events only.
+        let old = Some((2, 0, 30));
+        for e in [
+            "PermissionRequest",
+            "StopFailure",
+            "PostToolUseFailure",
+            "PostModelSwitch",
+        ] {
+            assert!(!claude_event_supported(e, old), "{e} is above 2.0.30");
+        }
+
+        // Each floor is inclusive, and one below it is off.
+        assert!(claude_event_supported("PermissionRequest", Some((2, 0, 45))));
+        assert!(!claude_event_supported("PermissionRequest", Some((2, 0, 44))));
+        assert!(claude_event_supported("StopFailure", Some((2, 1, 78))));
+        assert!(!claude_event_supported("StopFailure", Some((2, 1, 77))));
+        assert!(claude_event_supported("PostToolUseFailure", Some((2, 1, 119))));
+        assert!(!claude_event_supported("PostToolUseFailure", Some((2, 1, 118))));
+        assert!(claude_event_supported("PostModelSwitch", Some((2, 1, 251))));
+        assert!(!claude_event_supported("PostModelSwitch", Some((2, 1, 250))));
+
+        // In between: StopFailure yes, PostModelSwitch not yet.
+        let mid = Some((2, 1, 200));
+        assert!(claude_event_supported("StopFailure", mid));
+        assert!(claude_event_supported("PostToolUseFailure", mid));
+        assert!(!claude_event_supported("PostModelSwitch", mid));
+
+        // New CLI: everything.
+        let new = Some((2, 1, 300));
+        for e in [
+            "PermissionRequest",
+            "StopFailure",
+            "PostToolUseFailure",
+            "PostModelSwitch",
+        ] {
+            assert!(claude_event_supported(e, new), "{e} on a new CLI");
+        }
+
+        // Unknown version: base set only — the one thing we know about a CLI
+        // we couldn't identify is that an unknown key can stop it.
+        for e in [
+            "PermissionRequest",
+            "StopFailure",
+            "PostToolUseFailure",
+            "PostModelSwitch",
+        ] {
+            assert!(!claude_event_supported(e, None), "{e} off on unknown version");
+        }
+    }
+
+    /// The prune strips OUR entries for events the CLI doesn't accept — in
+    /// either command generation — keeps foreign entries under the same
+    /// event, drops the key only when we emptied it, and never touches the
+    /// base events or a new-enough CLI's file.
+    #[test]
+    fn prune_removes_only_our_entries_for_events_the_claude_rejects() {
+        let stopfailure = PathBuf::from("/cache/stopfailure-hook.cjs");
+        let modelswitch = PathBuf::from("/cache/modelswitch-hook.cjs");
+        let ptuf = PathBuf::from("/cache/posttoolusefailure-hook.cjs");
+        let pr = PathBuf::from("/cache/permissionrequest-hook.cjs");
+        let bin = Path::new("/cache/bin/hook-bridge");
+        let pairs: [(&str, &PathBuf); 4] = [
+            ("PermissionRequest", &pr),
+            ("StopFailure", &stopfailure),
+            ("PostToolUseFailure", &ptuf),
+            ("PostModelSwitch", &modelswitch),
+        ];
+
+        // What a previous Agent Console left in Maikel's file: bridge-form
+        // StopFailure and node-form PostModelSwitch (both ours), a
+        // PostToolUseFailure event shared with a foreign hook, the base
+        // events, and a foreign PostModelSwitch-free table otherwise.
+        let fresh = || {
+            let mut s = json!({
+                "model": "opus",
+                "hooks": {
+                    "PostModelSwitch": [
+                        { "matcher": "*", "hooks": [{ "type": "command", "command": "node \"/cache/modelswitch-hook.cjs\"" }] }
+                    ],
+                    "PostToolUseFailure": [
+                        { "matcher": "*", "hooks": [{ "type": "command", "command": "their-own-tool" }] }
+                    ]
+                }
+            });
+            upsert_hook(&mut s, "StopFailure", &stopfailure, Some(bin));
+            upsert_hook(&mut s, "PostToolUseFailure", &ptuf, Some(bin));
+            upsert_hook(&mut s, "Stop", Path::new("/cache/stop-hook.cjs"), Some(bin));
+            upsert_hook(
+                &mut s,
+                "UserPromptSubmit",
+                Path::new("/cache/userprompt-hook.cjs"),
+                Some(bin),
+            );
+            s
+        };
+
+        // Old CLI (Maikel): ours go, theirs stay, base stays.
+        let mut s = fresh();
+        let mut pruned = prune_unsupported_hooks(&mut s, Some((2, 0, 30)), &pairs);
+        pruned.sort();
+        assert_eq!(
+            pruned,
+            vec!["PostModelSwitch", "PostToolUseFailure", "StopFailure"]
+        );
+        assert!(s.pointer("/hooks/StopFailure").is_none(), "emptied ⇒ key gone");
+        assert!(s.pointer("/hooks/PostModelSwitch").is_none(), "node form recognized");
+        let ptuf_arr = s
+            .pointer("/hooks/PostToolUseFailure")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(ptuf_arr.len(), 1, "foreign entry under the same event survives");
+        assert!(entry_has_command(&ptuf_arr[0], "their-own-tool"));
+        assert_eq!(s.pointer("/hooks/Stop").unwrap().as_array().unwrap().len(), 1);
+        assert_eq!(
+            s.pointer("/hooks/UserPromptSubmit").unwrap().as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(s["model"], "opus", "unrelated settings untouched");
+        // Idempotent: a second pass has nothing left to remove.
+        assert!(prune_unsupported_hooks(&mut s, Some((2, 0, 30)), &pairs).is_empty());
+
+        // Unknown version: same outcome as an old CLI.
+        let mut s = fresh();
+        let mut pruned = prune_unsupported_hooks(&mut s, None, &pairs);
+        pruned.sort();
+        assert_eq!(
+            pruned,
+            vec!["PostModelSwitch", "PostToolUseFailure", "StopFailure"]
+        );
+
+        // Mid version: StopFailure and PostToolUseFailure accepted, only
+        // PostModelSwitch goes.
+        let mut s = fresh();
+        assert_eq!(
+            prune_unsupported_hooks(&mut s, Some((2, 1, 200)), &pairs),
+            vec!["PostModelSwitch"]
+        );
+        assert!(s.pointer("/hooks/StopFailure").is_some());
+        assert_eq!(
+            s.pointer("/hooks/PostToolUseFailure").unwrap().as_array().unwrap().len(),
+            2
+        );
+
+        // New CLI: nothing changes at all.
+        let mut s = fresh();
+        let before = s.to_string();
+        assert!(prune_unsupported_hooks(&mut s, Some((2, 1, 300)), &pairs).is_empty());
+        assert_eq!(s.to_string(), before);
+
+        // No hooks table: nothing to do, nothing invented.
+        let mut s = json!({ "model": "opus" });
+        assert!(prune_unsupported_hooks(&mut s, None, &pairs).is_empty());
+        assert!(s.get("hooks").is_none());
     }
 
     /// Interrupt is Codex-only and gets its OWN bridge mode for the same reason
