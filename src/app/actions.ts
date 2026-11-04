@@ -5,6 +5,7 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUIStore } from "../stores/uiStore";
+import { useShellStore } from "../stores/shellStore";
 
 export function newSession(): void {
   const project = useSessionStore.getState().project;
@@ -12,6 +13,7 @@ export function newSession(): void {
   const t = useTerminalsStore.getState();
   t.add(project.root);
   useUIStore.getState().setTab("terminal");
+  useShellStore.getState().goTo("sessions");
   void t.persist();
 }
 
