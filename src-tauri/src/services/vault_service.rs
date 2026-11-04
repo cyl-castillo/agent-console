@@ -249,7 +249,17 @@ fn save_store(path: &Path, store: &StoreFile) -> AppResult<()> {
     }
     let raw = serde_json::to_string_pretty(store)
         .map_err(|e| AppError::Other(format!("vault serialize: {e}")))?;
-    fs::write(path, raw)?;
+    // Write-then-rename so a concurrent reader (another window, a test on
+    // a sibling thread, the agent listing keys mid-save) never sees a
+    // half-written file: it reads either the old store or the new one.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.{}-{seq}.tmp", std::process::id()));
+    fs::write(&tmp, raw)?;
+    if let Err(e) = fs::rename(&tmp, path) {
+        fs::remove_file(&tmp).ok();
+        return Err(e.into());
+    }
     Ok(())
 }
 
