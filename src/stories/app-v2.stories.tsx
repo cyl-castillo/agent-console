@@ -10,6 +10,8 @@ import {
   pendingApproval,
   ROOT,
   prOpenRed,
+  defaultFixtures,
+  NOW,
 } from "../dev/fixtures/defaults";
 import { useBudgetStore } from "../stores/budgetStore";
 import { useLiveStatusStore } from "../stores/liveStatusStore";
@@ -217,6 +219,26 @@ export const SessionsBooting = scenario({
     term_spawn: (args: Record<string, unknown>) => `term-${String(args.termKey ?? "x")}`,
   },
   after: () => useTermSignalsStore.getState().markBooting("sess-auth"),
+});
+/// The folder changed since it was trusted: the agent is held in its
+/// terminal and the trust decision sits at the top of the conversation
+/// (a session started from the Jira queue landed exactly here).
+export const SessionsTrustFolder = scenario({
+  destination: "sessions",
+  fixtures: {
+    testigo_list: [],
+    term_spawn: (args: Record<string, unknown>) => `term-${String(args.termKey ?? "x")}`,
+    trust_status: {
+      ...(defaultFixtures.trust_status as Record<string, unknown>),
+      state: "changed",
+      decision: {
+        decision: "trusted",
+        digest: "old-digest",
+        ts: NOW - 3 * 86_400_000,
+        counts: { hooks: 0, mcp: 1, plugins: 0, rules: 0, instructions: 1, skills: 1, setup: 0 },
+      },
+    },
+  },
 });
 /// Focus mode: the terminal alone.
 export const SessionsFocus = scenario({

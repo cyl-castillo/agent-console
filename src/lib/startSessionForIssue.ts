@@ -3,6 +3,9 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useModelStore } from "../stores/modelStore";
 import { useUIStore } from "../stores/uiStore";
+import { useShellStore } from "../stores/shellStore";
+import { useTrustStore } from "../stores/trustStore";
+import { trustNeedsDecision } from "./trust";
 import { useToastStore } from "../stores/toastStore";
 import { ipc } from "../ipc/tauri";
 import { seedForIssue, intentForIssue, intentVerb } from "./jira";
@@ -72,6 +75,16 @@ export async function startSessionForIssue(
 
   terminals.persist();
   useUIStore.getState().setTab("terminal");
+  // The session is the thing to look at now: leave the queue for Sessions so
+  // the terminal, the boot card and — when the folder is not trusted yet —
+  // the trust decision are in front of the user, not in another destination.
+  useShellStore.getState().goTo("sessions");
+  if (trustNeedsDecision(useTrustStore.getState().status)) {
+    toast.show(
+      `${agent} starts after you trust this folder — the decision card is at the top of the conversation`,
+      "info",
+    );
+  }
 }
 
 /// Record the ticket→session lineage in the Testigo evidence chain, so every
