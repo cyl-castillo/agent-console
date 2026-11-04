@@ -142,9 +142,14 @@ suggest-only, none of them able to block the core:
 ## Rooms & cowork
 
 A **room** is a shared conversation about one problem between you and N agents
-(Claude, Codex and/or OpenCode). In a **working room** (the "let them edit" toggle) the
-agents edit code in an isolated git worktree on a `room/<id>` branch, committing
-one checkpoint per turn — your own files stay untouched until you review and merge.
+(Claude, Codex and/or OpenCode). You choose what the agents may do: **converse**
+(read-only), **act in the folder** (edit files and use your MCP servers — comment a
+Jira ticket, move it, update a document; changes land directly, no branch, shell
+stays off, every call in the ledger; works without a git repo) or **edit code on a
+branch** — the **working room**, where agents edit in an isolated git worktree on a
+`room/<id>` branch, committing one checkpoint per turn; your own files stay
+untouched until you review and merge. A folder that is a workspace of several
+repos picks which repo the branch comes from.
 
 **Cowork with human colleagues** happens over the git remote you already use — no
 realtime sync, no extra infra. From a live working room:

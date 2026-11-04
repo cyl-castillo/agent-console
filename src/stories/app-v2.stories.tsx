@@ -10,6 +10,7 @@ import {
   pendingApproval,
   ROOT,
   prOpenRed,
+  gitStatus,
   defaultFixtures,
   NOW,
 } from "../dev/fixtures/defaults";
@@ -288,6 +289,13 @@ export const SessionsMany = scenario({
 });
 export const WorkJobs = scenario({ destination: "work", tab: "jobs" });
 export const WorkRoom = scenario({ destination: "work", tab: "roundtable" });
+/// SALAS-2026-11: the open folder is a workspace of repos, not a repo —
+/// "Act in the folder" works as is; "Edit code on a branch" asks which repo.
+export const WorkRoomWorkspace = scenario({
+  destination: "work",
+  tab: "roundtable",
+  fixtures: { git_status: { ...gitStatus, isRepo: false, branch: null, changes: [] } },
+});
 /// D11: a sponsor that decides low-risk requests alone, with a weekly budget.
 export const WorkJobsSponsor = scenario({
   destination: "work",

@@ -870,6 +870,26 @@ test("v2 parity: below 900 px the side columns collapse, the list can be summone
   await expect(page.getByTestId("inspector")).toBeVisible();
 });
 
+test("SALAS: a room picks what its agents may do; a workspace of repos can still branch", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--work-room-workspace");
+  const modes = page.getByTestId("rt-modes");
+  await expect(modes).toBeVisible();
+  await expect(page.getByTestId("rt-mode-converse").getByRole("radio")).toBeChecked();
+  // Acting needs no repo and says what it opens.
+  await page.getByTestId("rt-mode-act").getByRole("radio").check();
+  await expect(page.getByTestId("rt-mode-act")).toContainText("MCP servers");
+  await expect(page.getByTestId("rt-repo-pick")).toHaveCount(0);
+  // Branching in a folder that is not a repo asks which nested repo to use.
+  await page.getByTestId("rt-mode-branch").getByRole("radio").check();
+  const pick = page.getByTestId("rt-repo-pick");
+  await expect(pick).toBeVisible();
+  await expect(pick.locator("option")).toHaveCount(3);
+  await pick.locator("select").selectOption({ label: "api · main" });
+  await expect(page.getByTestId("rt-fanout-toggle")).toBeVisible();
+});
+
 test("v2 parity: saved rooms live under Work and open the Room panel", async ({ page }) => {
   await openV2(page, "app-v2--work-jobs");
   const rooms = page.getByTestId("saved-rooms");

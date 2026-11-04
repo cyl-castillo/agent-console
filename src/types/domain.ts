@@ -1133,8 +1133,16 @@ export interface RoundtableConfig {
   tokenBudget: number;
   /// Working room: agents may edit the code in an isolated worktree
   /// (AcceptEdits), each turn auto-committed on a room/<id> branch for the human
-  /// to review and merge. Off = conversation-only, read-only.
+  /// to review and merge. Off = conversation-only, read-only. Kept for older
+  /// callers; `mode` is what the room reads first.
   allowEdits: boolean;
+  /// SALAS-2026-11: what the agents may do — converse (read-only), act (edit
+  /// in the folder + the user's MCP servers, no branch) or branch (the
+  /// working room). Omitted = converse, or branch when allowEdits is set.
+  mode?: RoomMode;
+  /// Branch mode in a folder that is not itself a repo: the nested repo to
+  /// branch off (one of `repos_in`).
+  repo?: string;
   /// Job mode: the organizer gets the objective and drives the work through the
   /// connector; the room runs only the turns the queue asks for and, once it
   /// drains, reviews (if required) and closes. Omitted = conversation.
@@ -1146,6 +1154,16 @@ export interface RoundtableConfig {
   /// Working-room jobs: "confirm" (default) waits for you to land the merged,
   /// reviewed branch; "auto" lands by itself.
   closure?: "confirm" | "auto";
+}
+
+export type RoomMode = "converse" | "act" | "branch";
+
+/// A git repository one level inside the open folder (a workspace that holds
+/// several projects). Mirrors the Rust NestedRepo.
+export interface NestedRepo {
+  path: string;
+  name: string;
+  branch: string | null;
 }
 
 /// Job-mode state persisted with a room.

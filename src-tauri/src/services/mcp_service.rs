@@ -84,7 +84,7 @@ fn name_re_ok(name: &str) -> bool {
 
 /// Names of configured servers, parsed from `claude mcp list`. Lines look like:
 ///   `memory: memory server - ✓ Connected`
-fn list_names(cwd: Option<&str>) -> AppResult<Vec<String>> {
+pub(crate) fn list_names(cwd: Option<&str>) -> AppResult<Vec<String>> {
     let out = run(&["mcp", "list"], cwd)?;
     parse_list_names(&out)
 }

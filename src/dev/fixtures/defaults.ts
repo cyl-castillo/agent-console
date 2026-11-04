@@ -1099,6 +1099,10 @@ export const defaultFixtures: FixtureMap = {
   claude_session_exists: true,
   // git
   git_status: gitStatus,
+  repos_in: [
+    { path: `${ROOT}/api`, name: "api", branch: "main" },
+    { path: `${ROOT}/web`, name: "web", branch: "develop" },
+  ],
   git_branches: branches,
   git_diff_file: diffApi,
   git_recent_messages: ["Fix expired token fixture in auth test", "Add retry regression test"],
