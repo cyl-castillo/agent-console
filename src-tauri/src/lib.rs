@@ -167,6 +167,7 @@ pub fn run() {
             commands::rewind::turn_rewind,
             commands::rewind::claude_session_exists,
             commands::worktree::worktree_create,
+            commands::worktree::repos_in,
             commands::worktree::worktree_suggest_branch,
             commands::worktree::worktree_status,
             commands::worktree::worktree_merge,

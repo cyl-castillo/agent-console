@@ -832,3 +832,67 @@ mod tests {
         cleanup(&[&repo]);
     }
 }
+
+/// A git repository one level inside a folder that is not itself a repo —
+/// the "workspace with several projects" layout (SALAS-2026-11). What the
+/// room's branch mode and the Jira queue's worktree option can branch off.
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NestedRepo {
+    pub path: String,
+    pub name: String,
+    pub branch: Option<String>,
+}
+
+/// Immediate subdirectories of `root` that are git repositories (a `.git`
+/// directory, or a `.git` file for a linked worktree), sorted by name.
+/// Hidden folders are skipped. Never fails: an unreadable root is empty.
+pub fn repos_in(root: &Path) -> Vec<NestedRepo> {
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<NestedRepo> = rd
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .filter(|e| e.path().join(".git").exists())
+        .map(|e| NestedRepo {
+            path: e.path().to_string_lossy().to_string(),
+            name: e.file_name().to_string_lossy().to_string(),
+            branch: current_branch(&e.path()).ok(),
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+#[cfg(test)]
+mod nested_repos_tests {
+    use super::*;
+
+    #[test]
+    fn repos_in_lists_only_git_subfolders_sorted() {
+        let root = std::env::temp_dir().join(format!("ac-repos-in-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for name in ["web", "api", "notes", ".hidden"] {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+        }
+        for name in ["web", "api", ".hidden"] {
+            let out = std::process::Command::new("git")
+                .args(["init", "-q", "-b", "main"])
+                .current_dir(root.join(name))
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        }
+        std::fs::write(root.join("a-file.txt"), "x").unwrap();
+        let got = repos_in(&root);
+        assert_eq!(
+            got.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            vec!["api", "web"]
+        );
+        assert!(got[0].path.ends_with("api"));
+        assert!(repos_in(&root.join("does-not-exist")).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

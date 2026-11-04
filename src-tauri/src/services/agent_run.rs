@@ -152,6 +152,7 @@ fn attempt(spec: &RunSpec, runner: &dyn EngineRunner, model: &str) -> AppResult<
         prompt: spec.prompt,
         resume: spec.resume,
         child_slot: Some(&slot),
+        extra_allowed_tools: &[],
         mcp: None,
     };
     let result = runner.run(&ctx, &sink);

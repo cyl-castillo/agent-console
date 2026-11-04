@@ -10,6 +10,7 @@ import {
 import { engineGlyph, type AgentKind } from "../agents/profiles";
 import { useModelPresets } from "../agents/modelCatalog";
 import { useChangesStore } from "../stores/changesStore";
+import { ipc } from "../ipc/tauri";
 import { AGENT_PROFILES } from "../agents/profiles";
 import { MarkdownText } from "./MarkdownText";
 import type {
@@ -19,6 +20,7 @@ import type {
   ConnectorView,
   RoundtableActivity,
   RoundtableTurn,
+  NestedRepo,
 } from "../types/domain";
 
 // Stable accent per participant, so each voice is recognizable in the feed.
@@ -112,6 +114,20 @@ function ConfigForm() {
     if (isRepo === undefined) void refreshGit();
   }, [isRepo, refreshGit]);
   const noRepo = isRepo === false;
+  // A workspace that holds several projects: the repos one level down are
+  // what a branch room can branch off.
+  const [repos, setRepos] = useState<NestedRepo[]>([]);
+  useEffect(() => {
+    if (!noRepo) return;
+    let alive = true;
+    void ipc
+      .reposIn()
+      .then((list) => alive && setRepos(list))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [noRepo]);
   const updateParticipant = useRoundtableStore((s) => s.updateParticipant);
 
   // Turning job mode on needs an organizer. If nobody holds connector roles
@@ -178,26 +194,74 @@ function ConfigForm() {
         </label>
       </div>
 
-      <label className="rt-toggle" style={noRepo ? { opacity: 0.6 } : undefined}>
-        <input
-          type="checkbox"
-          checked={draft.allowEdits && !noRepo}
-          disabled={noRepo}
-          onChange={(e) => setDraft({ allowEdits: e.target.checked })}
-        />
-        <span className="rt-toggle-text">
-          <span className="rt-toggle-title">Let agents edit the code</span>
-          <span className="rt-toggle-hint">
-            {noRepo
-              ? "Unavailable — the open folder isn't a git repo. Editing needs a repo with at least one commit; conversation still works."
-              : draft.allowEdits
-                ? "On — they work in an isolated worktree on a room/… branch; you review and merge. Your files stay untouched."
-                : "Off — conversation only, read-only."}
-          </span>
-        </span>
-      </label>
+      <fieldset className="rt-modes" data-testid="rt-modes">
+        <legend className="rt-modes-legend">What the agents may do</legend>
+        {(
+          [
+            {
+              mode: "converse",
+              title: "Converse",
+              hint: "Read and reason in the folder. Nothing that needs a permission runs: no edits, no shell, no MCP calls.",
+            },
+            {
+              mode: "act",
+              title: "Act in the folder",
+              hint: "Edit files here and use your MCP servers (Jira, Linear, …) — comment a ticket, move it, update a document. Changes land directly: no branch, no diff review. Shell stays off; every tool call is in the ledger. Works without a git repo.",
+            },
+            {
+              mode: "branch",
+              title: "Edit code on a branch",
+              hint: noRepo
+                ? repos.length > 0
+                  ? "The open folder isn't a repo — pick one of the repos inside it; agents work in an isolated worktree on a room/… branch; you review and merge."
+                  : "The open folder isn't a git repo and holds none: this mode needs a repo with at least one commit. Use “Act in the folder” instead."
+                : "Agents work in an isolated worktree on a room/… branch; you review and merge. Your files stay untouched.",
+            },
+          ] as const
+        ).map((m) => {
+          const unavailable = m.mode === "branch" && noRepo && repos.length === 0;
+          return (
+            <label
+              key={m.mode}
+              className="rt-toggle rt-mode"
+              style={unavailable ? { opacity: 0.6 } : undefined}
+              data-testid={`rt-mode-${m.mode}`}
+            >
+              <input
+                type="radio"
+                name="rt-mode"
+                value={m.mode}
+                checked={draft.mode === m.mode}
+                disabled={unavailable}
+                onChange={() => setDraft({ mode: m.mode, allowEdits: m.mode === "branch" })}
+              />
+              <span className="rt-toggle-text">
+                <span className="rt-toggle-title">{m.title}</span>
+                <span className="rt-toggle-hint">{m.hint}</span>
+              </span>
+            </label>
+          );
+        })}
+        {draft.mode === "branch" && noRepo && repos.length > 0 && (
+          <label className="rt-field" data-testid="rt-repo-pick">
+            <span>repo for the branch</span>
+            <select
+              value={draft.repo ?? ""}
+              onChange={(e) => setDraft({ repo: e.target.value || null })}
+            >
+              <option value="">— choose a repo —</option>
+              {repos.map((r) => (
+                <option key={r.path} value={r.path}>
+                  {r.name}
+                  {r.branch ? ` · ${r.branch}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </fieldset>
 
-      {draft.allowEdits && !noRepo && (
+      {draft.mode === "branch" && (!noRepo || !!draft.repo) && (
         <label className="rt-toggle" data-testid="rt-fanout-toggle">
           <input
             type="checkbox"
@@ -219,7 +283,7 @@ function ConfigForm() {
         <input
           type="checkbox"
           checked={draft.jobMode}
-          disabled={draft.fanOut && draft.allowEdits}
+          disabled={draft.fanOut && draft.mode === "branch"}
           onChange={(e) => setJobMode(e.target.checked)}
         />
         <span className="rt-toggle-text">

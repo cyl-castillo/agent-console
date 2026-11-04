@@ -681,7 +681,7 @@ test("F9: a fan-out compares the candidates' diffs, checks and verdicts; applyin
   await open(page, "app-v2--work-room");
   // The fan-out toggle only exists for a working room.
   await expect(page.getByTestId("rt-fanout-toggle")).toHaveCount(0);
-  await page.getByRole("checkbox", { name: /let agents edit the code/i }).check();
+  await page.getByTestId("rt-mode-branch").getByRole("radio").check();
   const toggle = page.getByTestId("rt-fanout-toggle");
   await expect(toggle).toBeVisible();
   await toggle.getByRole("checkbox").check();

@@ -697,6 +697,7 @@ mod tests {
         let room = PersistedRoom {
             version: 1,
             allow_edits: false,
+            mode: None,
             id: "r1".into(),
             problem: "debate".into(),
             participants: Vec::new(),
@@ -928,6 +929,7 @@ mod tests {
         let room = PersistedRoom {
             version: 1,
             allow_edits: false,
+            mode: None,
             id: "room-1".into(),
             problem: "should we ship?".into(),
             participants: Vec::new(),

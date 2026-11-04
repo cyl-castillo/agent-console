@@ -60,6 +60,7 @@ import type {
   RecentProject,
   RoomSummary,
   RoundtableConfig,
+  NestedRepo,
   ConnectorView,
   ConnectorPendingJob,
   JobsBoard,
@@ -646,6 +647,8 @@ export const ipc = {
   schedulerRunNow: (id: string) => invoke<RunRecord>("scheduler_run_now", { id }),
 
   roundtableStart: (config: RoundtableConfig) => invoke<string>("roundtable_start", { config }),
+  /// Git repos one level inside the open folder (a workspace of projects).
+  reposIn: () => invoke<NestedRepo[]>("repos_in"),
   roundtablePause: (id: string) => invoke<void>("roundtable_pause", { id }),
   roundtableResume: (id: string) => invoke<void>("roundtable_resume", { id }),
   roundtableInject: (id: string, message: string) =>
