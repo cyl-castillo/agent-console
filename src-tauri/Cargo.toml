@@ -1,6 +1,6 @@
 [package]
 name = "agent-console"
-version = "0.94.4"
+version = "0.95.0"
 description = "Agent Console — minimalist AI-native console IDE"
 authors = ["Carlos Castillo"]
 license = "AGPL-3.0-only"

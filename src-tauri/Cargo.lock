@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "agent-console"
-version = "0.94.4"
+version = "0.95.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
