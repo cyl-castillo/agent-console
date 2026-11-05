@@ -9,7 +9,11 @@
 //! "Pair a device"; the QR's URI carries the address):
 //!   phone-sim pair "<offer-uri-from-QR>" [addr]   # then approve on the desktop
 //!   phone-sim pending                             # the decisions waiting
+//!   phone-sim sessions                            # where each session stands
 //!   phone-sim decide <id> allow|deny ["reason"]
+//!
+//! Add `--ws` before the verb to dial the same port as a browser would (HTTP
+//! upgrade to a WebSocket, then the identical protocol) — what the PWA does.
 //!
 //! State (its keypair, the pinned desktop key and the address) is saved to
 //! ~/.local/share/agent-console/phone-sim-state.json. A real app uses the OS
@@ -19,8 +23,23 @@ use std::path::PathBuf;
 
 use agent_console_lib::phone_protocol::{self, PhoneClient};
 use agent_console_lib::ServerMessage;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+/// A dialled connection: the raw socket, or the same port behind a
+/// WebSocket upgrade (`--ws`).
+async fn dial(addr: &str, ws: bool) -> Result<Box<dyn Stream>> {
+    let tcp = tokio::net::TcpStream::connect(addr).await?;
+    if ws {
+        Ok(Box::new(agent_console_lib::ws_connect(tcp, addr).await?))
+    } else {
+        Ok(Box::new(tcp))
+    }
+}
+
+trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
 
 fn state_path() -> Result<PathBuf> {
     let dir = dirs::data_local_dir()
@@ -89,6 +108,23 @@ fn print_reply(r: ServerMessage) {
             }
         }
         ServerMessage::Decided { id } => println!("recorded: {id}"),
+        ServerMessage::Sessions { items } if items.is_empty() => println!("no sessions"),
+        ServerMessage::Sessions { items } => {
+            for s in items {
+                println!(
+                    "{:<10} {:<8} {}{}  ({})",
+                    s.state,
+                    s.agent.as_deref().unwrap_or("?"),
+                    s.name,
+                    if s.pending > 0 {
+                        format!(" · {} waiting", s.pending)
+                    } else {
+                        String::new()
+                    },
+                    s.term_id
+                );
+            }
+        }
         ServerMessage::Error { message } => eprintln!("error: {message}"),
         ServerMessage::Pong => println!("pong"),
     }
@@ -96,7 +132,9 @@ fn print_reply(r: ServerMessage) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
+    let ws = args.iter().any(|a| a == "--ws");
+    args.retain(|a| a != "--ws");
     match args.get(1).map(String::as_str) {
         Some("pair") => {
             let uri = args
@@ -109,7 +147,7 @@ async fn main() -> Result<()> {
                 .or(addr_in_uri)
                 .ok_or("the offer carries no address — pass it as the second argument")?;
             let mut client = PhoneClient::new()?;
-            let mut sock = tokio::net::TcpStream::connect(&addr).await?;
+            let mut sock = dial(&addr, ws).await?;
             client
                 .pair(&mut sock, &offer, "phone-sim (reference)")
                 .await?;
@@ -120,8 +158,11 @@ async fn main() -> Result<()> {
         }
         Some("pending") => {
             let (client, addr) = load()?;
-            let sock = tokio::net::TcpStream::connect(&addr).await?;
-            print_reply(client.pending(sock).await?);
+            print_reply(client.pending(dial(&addr, ws).await?).await?);
+        }
+        Some("sessions") => {
+            let (client, addr) = load()?;
+            print_reply(client.sessions(dial(&addr, ws).await?).await?);
         }
         Some("decide") => {
             let id = args
@@ -132,12 +173,15 @@ async fn main() -> Result<()> {
                 .ok_or("usage: phone-sim decide <id> allow|deny [reason]")?;
             let reason = args.get(4).map(String::as_str);
             let (client, addr) = load()?;
-            let sock = tokio::net::TcpStream::connect(&addr).await?;
-            print_reply(client.decide(sock, id, decision, reason).await?);
+            print_reply(
+                client
+                    .decide(dial(&addr, ws).await?, id, decision, reason)
+                    .await?,
+            );
         }
         _ => {
             eprintln!(
-                "usage:\n  phone-sim pair <offer-uri> [addr]\n  phone-sim pending\n  phone-sim decide <id> allow|deny [reason]"
+                "usage:\n  phone-sim [--ws] pair <offer-uri> [addr]\n  phone-sim [--ws] pending\n  phone-sim [--ws] sessions\n  phone-sim [--ws] decide <id> allow|deny [reason]"
             );
             std::process::exit(2);
         }

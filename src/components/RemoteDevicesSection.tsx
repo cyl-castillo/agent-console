@@ -98,7 +98,8 @@ export function RemoteDevicesSection() {
         {running && status?.addr && (
           <>
             {" "}
-            · dial <span className="font-code">{status.addr}</span>
+            · dial <span className="font-code">{status.addr}</span> (raw socket, or{" "}
+            <span className="font-code">ws://{status.addr}/</span> from a browser)
           </>
         )}
         {error && <> · {error}</>}

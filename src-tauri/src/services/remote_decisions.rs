@@ -407,6 +407,38 @@ pub fn decision_gap(
     }
 }
 
+/// MOVIL F1a: one session as a device sees it — enough to know where the
+/// agents stand without a chat or a diff. `state` mirrors the Inbox's four
+/// groups: `needs_you` (a decision waits), `working` (a turn is open),
+/// `idle` (live, nothing open), `stopped` (no terminal behind it).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSession {
+    pub term_id: String,
+    pub name: String,
+    pub project: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    pub state: String,
+    /// Decisions waiting in this session right now.
+    pub pending: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_active_ms: Option<i64>,
+}
+
+/// At most this many sessions in one `sessions` reply (newest activity first
+/// within each state).
+pub const SESSIONS_CAP: usize = 100;
+
+fn state_rank(state: &str) -> u8 {
+    match state {
+        "needs_you" => 0,
+        "working" => 1,
+        "idle" => 2,
+        _ => 3,
+    }
+}
+
 /// What the channel asks of the console: the pending decisions for a device
 /// and the recording of one answer. The transport enforces `gate` before
 /// `decide` is ever called, so an implementation only has to act.
@@ -421,6 +453,9 @@ pub trait DecisionHandler: Send + Sync + 'static {
         decision: &str,
         reason: Option<&str>,
     ) -> AppResult<()>;
+    /// The open project's sessions and where each stands (read-only; every
+    /// scope may ask).
+    fn sessions(&self, device: &PairedDevice) -> AppResult<Vec<RemoteSession>>;
 }
 
 /// The part of the bridge that needs no window: the hook's queue in, the
@@ -515,6 +550,59 @@ impl BridgeCore<'_> {
         let _ = self.devices.touch(&device.id, Self::now_ms());
         Ok(root)
     }
+
+    /// The open project's sessions as the device shows them. `live` = the
+    /// terminal ids that have a shell right now; a decision in the hook's
+    /// queue makes `needs_you`, an open ledger turn makes `working`.
+    pub fn sessions(
+        &self,
+        live: &std::collections::HashSet<String>,
+    ) -> AppResult<Vec<RemoteSession>> {
+        let Some(root) = self.open_project.clone() else {
+            return Ok(Vec::new());
+        };
+        let mut pending: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for req in self.hooks.pending_approvals() {
+            if let Some(t) = req.get("termId").and_then(Value::as_str) {
+                *pending.entry(t.to_string()).or_default() += 1;
+            }
+        }
+        let mut out: Vec<RemoteSession> = self
+            .sessions
+            .list(&root)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| s.archived != Some(true))
+            .map(|s| {
+                let n = pending.get(&s.id).copied().unwrap_or(0);
+                let state = if n > 0 {
+                    "needs_you"
+                } else if self.testigo.peek_turn(&s.id).is_some() {
+                    "working"
+                } else if live.contains(&s.id) {
+                    "idle"
+                } else {
+                    "stopped"
+                };
+                RemoteSession {
+                    term_id: s.id,
+                    name: s.name,
+                    project: root.clone(),
+                    agent: s.agent,
+                    state: state.into(),
+                    pending: n,
+                    last_active_ms: s.last_active_ms.map(|v| v as i64),
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            state_rank(&a.state)
+                .cmp(&state_rank(&b.state))
+                .then(b.last_active_ms.cmp(&a.last_active_ms))
+        });
+        out.truncate(SESSIONS_CAP);
+        Ok(out)
+    }
 }
 
 /// The real bridge: `BridgeCore` over the app's state, plus the Inbox told
@@ -568,6 +656,19 @@ impl DecisionHandler for ConsoleBridge {
             &json!({ "id": id, "decision": decision, "via": "remote", "device": device.label }),
         );
         Ok(())
+    }
+
+    fn sessions(&self, _device: &PairedDevice) -> AppResult<Vec<RemoteSession>> {
+        use tauri::Manager;
+        let live: std::collections::HashSet<String> = self
+            .app
+            .state::<crate::state::AppState>()
+            .terminals
+            .live_shells()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        self.with_core(|c| c.sessions(&live))
     }
 }
 
@@ -799,6 +900,65 @@ mod tests {
         let (items, truncated) = core.pending().unwrap();
         assert_eq!(items.len(), PENDING_CAP);
         assert!(truncated, "more waited than the cap");
+
+        // MOVIL F1a: the sessions as the device sees them. t1 has decisions
+        // waiting (needs_you, with the count), t2 has an open turn and a
+        // shell (working), t3 has a shell and nothing open (idle), t4 has no
+        // shell (stopped); archived ones never show.
+        let mk = |id: &str, name: &str, archived: bool, last: u64| {
+            crate::services::sessions_service::PersistedSession {
+                id: id.into(),
+                name: name.into(),
+                cwd: root.clone(),
+                created_at_ms: 1,
+                scrollback: String::new(),
+                agent: Some("claude".into()),
+                agent_session_id: None,
+                name_suggested: None,
+                model: None,
+                worktree: None,
+                agent_id: None,
+                runs_in: None,
+                allowed_hosts: None,
+                archived: archived.then_some(true),
+                last_active_ms: Some(last),
+            }
+        };
+        sessions
+            .save(
+                &root,
+                vec![
+                    mk("t1", "auth", false, 10),
+                    mk("t2", "docs", false, 20),
+                    mk("t3", "spike", false, 30),
+                    mk("t4", "old", false, 40),
+                    mk("t5", "gone", true, 50),
+                ],
+            )
+            .unwrap();
+        testigo
+            .on_prompt(&root, 5, Some("t2"), None, Some("write docs"), None, None)
+            .unwrap();
+        let live: std::collections::HashSet<String> =
+            ["t1", "t2", "t3"].into_iter().map(String::from).collect();
+        let list = core.sessions(&live).unwrap();
+        let view: Vec<(&str, &str, u32)> = list
+            .iter()
+            .map(|s| (s.term_id.as_str(), s.state.as_str(), s.pending))
+            .collect();
+        assert_eq!(
+            view,
+            [
+                // a-low's req file is still on disk (the hook, not the
+                // console, deletes it once answered), so it still counts.
+                ("t1", "needs_you", (PENDING_CAP + 2) as u32),
+                ("t2", "working", 0),
+                ("t3", "idle", 0),
+                ("t4", "stopped", 0),
+            ]
+        );
+        assert_eq!(list[0].name, "auth");
+        assert_eq!(list[0].project, root);
     }
 
     /// The device sees the session's last verdict and last check, bounded.

@@ -74,3 +74,4 @@ pub mod voice_service;
 pub mod work_profile;
 pub mod workspace_archive;
 pub mod worktree_service;
+pub mod ws;
