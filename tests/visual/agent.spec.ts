@@ -606,6 +606,10 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   await expect(section).toBeVisible({ timeout: 5000 });
   await expect(section.getByTestId("remote-state")).toHaveText("off");
   await expect(section).toContainText("Pixel (kitchen)");
+  // MOVIL F0: the gap is the ledger's number, in words a human reads once.
+  await expect(section.getByTestId("remote-gap")).toHaveText(
+    "Last 7 days: 108 of 212 decisions timed out or were answered in the CLI before this screen saw them. The ones taken here waited 2 min at the 90th percentile and 31 h at most. A paired device catches them wherever you are.",
+  );
   await section.getByTestId("remote-start-loopback").click();
   await expect(section.getByTestId("remote-state")).toHaveText("listening · loopback", {
     timeout: 3000,
@@ -673,6 +677,20 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
       ),
     )
     .toMatchObject({ pendingId: "pend-1", scope: "readOnly" });
+});
+
+test("MOVIL F0: an empty Inbox names last week's unseen decisions and offers to pair a device", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox-empty");
+  const gap = page.getByTestId("inbox-gap");
+  await expect(gap).toBeVisible({ timeout: 5000 });
+  await expect(gap).toContainText("108 of 212 decisions timed out or were answered in the CLI");
+  await page.getByRole("button", { name: "Pair a device" }).click();
+  await expect(page.getByTestId("remote-devices")).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId("remote-devices").getByTestId("remote-gap")).toContainText(
+    "108 of 212",
+  );
 });
 
 test("F9: a fan-out compares the candidates' diffs, checks and verdicts; applying one is a confirmed merge", async ({

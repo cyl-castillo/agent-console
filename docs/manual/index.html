@@ -713,6 +713,8 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <p>Yes — flip the session-wide "approve all" toggle when you trust the task. The snapshot safety net still applies, so you can always rewind.</p>
         <h3>Which platforms are supported?</h3>
         <p>Linux, macOS, and Windows by design; Linux-first in practice. It's not yet packaged for Snap / Flatpak / Homebrew / the MS Store.</p>
+        <h3>Can I use it from my phone?</h3>
+        <p>Not the console itself — it is a desktop app and there is no phone build. Two things do work today. First, any remote-desktop tool (RustDesk, VNC over Tailscale) shows you the real window; it is clumsy but complete. Second, the desktop can <em>pair a device</em> under Settings → Trust → Remote devices: a paired device sees the decisions waiting on the desktop, with their evidence, and answers the low- and medium-risk ones with one tap — a dangerous action is never approved from a device, and every remote answer lands in the ledger as <code>approval_decision via.remote</code>. That channel is end-to-end encrypted (Noise, keys pinned at pairing by QR) and the listener binds to this machine or to your LAN address only, never to the internet; from outside the LAN use Tailscale or another VPN. The protocol is public (<code>docs/pairing-protocol.md</code>) and a reference client (<code>phone-sim</code>) ships with the source; a companion web app for phones is in progress. The Remote devices section shows the number that motivates it: how many of last week's decisions timed out or were answered in the CLI before this screen saw them.</p>
       </section>
 
       <!-- ============ SUPPORT ============ -->

@@ -320,6 +320,93 @@ pub fn gate(scope: DeviceScope, item: &RemoteDecision, decision: &str) -> AppRes
     }
 }
 
+/// F0 of the device plan (MOVIL-2026-10): how many decisions never reached
+/// this screen. Computed from the ledger, never estimated: an
+/// `approval_request` inside the window with no `approval_decision` for its
+/// id, and not pending right now, is one the human answered in the CLI or
+/// let time out — the console never saw it decided. The wait percentiles
+/// are over the decisions the console did take.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionGap {
+    pub window_days: u32,
+    /// Approval requests the ledger saw in the window.
+    pub requests: u64,
+    /// Of those, decided through the console (keyboard, device or sponsor).
+    pub decided: u64,
+    /// Of those, still waiting in the hook's queue right now.
+    pub pending: u64,
+    /// Of those, neither decided here nor pending: timed out or answered in
+    /// the CLI. The number a paired device would have caught.
+    pub unseen: u64,
+    /// p90 of request → decision, over the console's own decisions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p90_wait_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_wait_ms: Option<i64>,
+}
+
+/// The gap over `[since_ms, now]`. `pending` are the ids in the hook's queue
+/// at this moment (they are neither unseen nor decided yet). Events outside
+/// the window are ignored, except a decision for a request inside it.
+pub fn decision_gap(
+    events: &[ProofEvent],
+    since_ms: i64,
+    pending: &std::collections::HashSet<String>,
+    window_days: u32,
+) -> DecisionGap {
+    use std::collections::HashMap;
+    let id_of = |e: &ProofEvent| -> Option<String> {
+        e.payload
+            .get("approvalId")
+            .and_then(Value::as_str)
+            .map(String::from)
+    };
+    let mut requested: HashMap<String, i64> = HashMap::new();
+    let mut decided_at: HashMap<String, i64> = HashMap::new();
+    for e in events {
+        match e.kind.as_str() {
+            "approval_request" if e.ts >= since_ms => {
+                if let Some(id) = id_of(e) {
+                    requested.entry(id).or_insert(e.ts);
+                }
+            }
+            "approval_decision" => {
+                if let Some(id) = id_of(e) {
+                    decided_at.entry(id).or_insert(e.ts);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut waits: Vec<i64> = Vec::new();
+    let mut decided = 0u64;
+    let mut pend = 0u64;
+    for (id, ts) in &requested {
+        if let Some(d) = decided_at.get(id) {
+            decided += 1;
+            waits.push((d - ts).max(0));
+        } else if pending.contains(id) {
+            pend += 1;
+        }
+    }
+    waits.sort_unstable();
+    let p90 = (!waits.is_empty()).then(|| {
+        let idx = ((waits.len() as f64) * 0.9).ceil() as usize;
+        waits[idx.clamp(1, waits.len()) - 1]
+    });
+    let requests = requested.len() as u64;
+    DecisionGap {
+        window_days,
+        requests,
+        decided,
+        pending: pend,
+        unseen: requests - decided - pend,
+        p90_wait_ms: p90,
+        max_wait_ms: waits.last().copied(),
+    }
+}
+
 /// What the channel asks of the console: the pending decisions for a device
 /// and the recording of one answer. The transport enforces `gate` before
 /// `decide` is ever called, so an implementation only has to act.
@@ -505,6 +592,53 @@ mod tests {
             Some("auth".into()),
             &[],
         )
+    }
+
+    fn ev(kind: &str, ts: i64, id: &str) -> ProofEvent {
+        ProofEvent {
+            seq: 0,
+            ts,
+            case_id: "term:t1".into(),
+            turn_id: None,
+            kind: kind.into(),
+            term_id: Some("t1".into()),
+            session_id: None,
+            actor: "agent".into(),
+            payload: json!({ "approvalId": id }),
+            prev_hash: String::new(),
+            hash: String::new(),
+        }
+    }
+
+    /// The gap counts what the ledger proves: a request with no decision and
+    /// not pending now is unseen; the percentiles are over the console's
+    /// own decisions; requests before the window do not count.
+    #[test]
+    fn the_decision_gap_comes_from_the_ledger_not_an_estimate() {
+        let events = vec![
+            ev("approval_request", 50, "old"), // before the window
+            ev("approval_request", 100, "a"),
+            ev("approval_decision", 102, "a"), // 2 s
+            ev("approval_request", 200, "b"),
+            ev("approval_decision", 290, "b"), // 90 s
+            ev("approval_request", 300, "c"),  // never decided here
+            ev("approval_request", 400, "d"),  // pending right now
+            ev("approval_request", 500, "e"),
+            ev("approval_decision", 500 + 7 * 60, "e"), // 7 min
+        ];
+        let pending: std::collections::HashSet<String> = ["d".to_string()].into_iter().collect();
+        let gap = decision_gap(&events, 100, &pending, 7);
+        assert_eq!(gap.requests, 5);
+        assert_eq!(gap.decided, 3);
+        assert_eq!(gap.pending, 1);
+        assert_eq!(gap.unseen, 1);
+        assert_eq!(gap.max_wait_ms, Some(420));
+        assert_eq!(gap.p90_wait_ms, Some(420));
+        // An empty ledger is zeros, not a crash and not None percentiles that lie.
+        let empty = decision_gap(&[], 0, &Default::default(), 7);
+        assert_eq!(empty.requests, 0);
+        assert_eq!(empty.unseen, 0);
+        assert_eq!(empty.p90_wait_ms, None);
     }
 
     #[test]

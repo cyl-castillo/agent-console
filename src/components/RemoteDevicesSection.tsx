@@ -4,6 +4,7 @@ import { useRemoteStore } from "../stores/remoteStore";
 import { useToastStore } from "../stores/toastStore";
 import { Chip } from "../ui/Chip";
 import type { DeviceScope } from "../types/domain";
+import { gapSentence } from "../lib/decisionGap";
 
 const SCOPES: { value: DeviceScope; label: string; hint: string }[] = [
   { value: "readOnly", label: "read only", hint: "sees the queue, answers nothing" },
@@ -103,6 +104,11 @@ export function RemoteDevicesSection() {
         {error && <> · {error}</>}
         {status?.identityError && <> · {status.identityError}</>}
       </p>
+      {gapSentence(status?.gap) && (
+        <p className="wb-hint" data-testid="remote-gap">
+          {gapSentence(status?.gap)}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {!running && (
           <>
