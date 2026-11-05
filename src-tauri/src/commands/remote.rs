@@ -9,7 +9,6 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use data_encoding::BASE64URL_NOPAD;
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
@@ -159,12 +158,7 @@ pub fn remote_pairing_start(state: State<'_, AppState>) -> AppResult<PairingStar
     };
     let now = now_ms();
     let offer = state.pairing()?.start_pairing(now, PAIRING_TTL_SECS);
-    let json = serde_json::to_string(&offer)
-        .map_err(|e| AppError::Other(format!("serialize offer: {e}")))?;
-    let uri = format!(
-        "agentconsole://pair?d={}&a={addr}",
-        BASE64URL_NOPAD.encode(json.as_bytes())
-    );
+    let uri = transport::client::offer_uri(&offer, &addr);
     let qr_svg = render_qr_svg(&uri)?;
     Ok(PairingStartResult {
         uri,
