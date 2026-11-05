@@ -16,6 +16,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "phone-sim"
 path = "src/bin/phone_sim.rs"
 
+# The desktop end as a standalone responder, for device-app implementers
+# and the companion's end-to-end test (MOVIL F2).
+[[bin]]
+name = "desktop-sim"
+path = "src/bin/desktop_sim.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

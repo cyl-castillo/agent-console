@@ -515,6 +515,15 @@ pub mod client {
     use serde::{Deserialize, Serialize};
     use tokio::io::{AsyncRead, AsyncWrite};
 
+    /// Encode an offer as the QR's deep link: `agentconsole://pair?d=<base64url(json)>&a=<host:port>`.
+    pub fn offer_uri(offer: &PairingOffer, addr: &str) -> String {
+        let json = serde_json::to_string(offer).unwrap_or_default();
+        format!(
+            "agentconsole://pair?d={}&a={addr}",
+            BASE64URL_NOPAD.encode(json.as_bytes())
+        )
+    }
+
     /// Decode an `agentconsole://pair?d=<base64url(json)>[&a=<host:port>]` URI
     /// into its offer and, when present, the listener's address.
     pub fn parse_offer_uri(uri: &str) -> AppResult<(PairingOffer, Option<String>)> {
@@ -1205,6 +1214,21 @@ mod tests {
         let reply = phone.pending(raw).await.unwrap();
         assert!(matches!(reply, ServerMessage::Decisions { .. }));
         server.abort();
+    }
+
+    /// The QR's deep link round-trips through the reference parser — the
+    /// desktop, phone-sim and desktop-sim all build it with this one helper.
+    #[test]
+    fn offer_uri_round_trips_through_the_parser() {
+        let kp = crate::services::secure_channel::generate_static().unwrap();
+        let offer =
+            crate::services::secure_channel::new_offer(&kp.public, 1_700_000_000_000, 120).unwrap();
+        let uri = client::offer_uri(&offer, "192.168.1.9:4870");
+        assert!(uri.starts_with("agentconsole://pair?d="));
+        let (parsed, addr) = client::parse_offer_uri(&uri).unwrap();
+        assert_eq!(addr.as_deref(), Some("192.168.1.9:4870"));
+        assert_eq!(parsed.responder_static_bytes().unwrap(), kp.public);
+        assert_eq!(parsed.psk_bytes().unwrap(), offer.psk_bytes().unwrap());
     }
 
     #[test]
