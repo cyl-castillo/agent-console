@@ -1,5 +1,8 @@
+import { useEffect } from "react";
 import { Inbox as InboxIcon } from "lucide-react";
 import { useSessionStore } from "../../stores/sessionStore";
+import { useRemoteStore } from "../../stores/remoteStore";
+import { gapSentence } from "../../lib/decisionGap";
 import { useShellStore } from "../../stores/shellStore";
 import { useTerminalsStore } from "../../stores/terminalsStore";
 import { useUIStore } from "../../stores/uiStore";
@@ -80,6 +83,15 @@ export function InboxView() {
   const openJobs = () => {
     setWorkbenchTab("jobs");
   };
+  // MOVIL F0: an empty Inbox says how many decisions never got here last
+  // week — the ledger's number, loaded with the remote status it belongs to.
+  const remote = useRemoteStore((s) => s.status);
+  const loadRemote = useRemoteStore((s) => s.load);
+  const quiet = decisions === 0;
+  useEffect(() => {
+    if (quiet && project && remote === null) void loadRemote();
+  }, [quiet, project, remote, loadRemote]);
+  const gap = quiet && (remote?.gap?.unseen ?? 0) > 0 ? gapSentence(remote?.gap) : null;
 
   const groups: { state: AgentState; title: string }[] = [
     { state: "needs-you", title: "Needs you" },
@@ -94,12 +106,27 @@ export function InboxView() {
         className="h-full"
         icon={<InboxIcon />}
         title="Nothing to decide"
-        description="Start a session and the agent's questions, approvals and finished work will land here."
+        description={
+          <>
+            Start a session and the agent's questions, approvals and finished work will land here.
+            {gap && (
+              <>
+                {" "}
+                <span data-testid="inbox-gap">{gap}</span>
+              </>
+            )}
+          </>
+        }
         action={
           <div className="flex items-center gap-2">
             <Button variant="primary" onClick={newSession}>
               New session
             </Button>
+            {gap && (
+              <Button variant="ghost" onClick={() => setWorkbenchTab("permissions")}>
+                Pair a device
+              </Button>
+            )}
             {onboarding.pending > 0 && !onboarding.dismissed && (
               <Button variant="ghost" onClick={() => showOverlay("gettingStarted")}>
                 Open the guide
@@ -150,6 +177,17 @@ export function InboxView() {
           New session
         </Button>
       </div>
+      {gap && (
+        <p
+          className="m-0 flex flex-wrap items-center gap-2 border-b border-border px-4 py-1.5 font-sans text-small text-muted-foreground"
+          data-testid="inbox-gap"
+        >
+          <span>{gap}</span>
+          <Button variant="ghost" onClick={() => setWorkbenchTab("permissions")}>
+            Pair a device
+          </Button>
+        </p>
+      )}
 
       {trust && (
         <section>

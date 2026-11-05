@@ -16,7 +16,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::paired_devices_service::{DeviceScope, PairedDevice, PendingPairing};
-use crate::services::remote_decisions::{ConsoleBridge, DecisionHandler};
+use crate::services::remote_decisions::{self, ConsoleBridge, DecisionGap, DecisionHandler};
 use crate::services::secure_channel::IdentityStore;
 use crate::services::transport::{self, ServerHandle};
 use crate::state::AppState;
@@ -66,6 +66,31 @@ pub struct RemoteStatus {
     pub identity_error: Option<String>,
     pub devices: Vec<PairedDevice>,
     pub pending: Vec<PendingPairing>,
+    /// MOVIL F0: the decisions of the last 7 days that never reached this
+    /// screen, from the open project's ledger. None without a project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gap: Option<DecisionGap>,
+}
+
+/// The ledger's window for the gap shown next to the devices.
+const GAP_WINDOW_DAYS: u32 = 7;
+
+fn gap_of(state: &AppState) -> Option<DecisionGap> {
+    let root = project_root(state)?;
+    let events = state.testigo.list(&root, None, None).ok()?;
+    let pending: std::collections::HashSet<String> = state
+        .hooks
+        .pending_approvals()
+        .iter()
+        .filter_map(|r| r.get("id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let since = now_ms() - i64::from(GAP_WINDOW_DAYS) * 86_400_000;
+    Some(remote_decisions::decision_gap(
+        &events,
+        since,
+        &pending,
+        GAP_WINDOW_DAYS,
+    ))
 }
 
 fn status_of(state: &AppState) -> AppResult<RemoteStatus> {
@@ -84,6 +109,7 @@ fn status_of(state: &AppState) -> AppResult<RemoteStatus> {
         identity_error,
         devices: state.paired_devices.list_devices()?,
         pending: state.paired_devices.pending(),
+        gap: gap_of(state),
     })
 }
 

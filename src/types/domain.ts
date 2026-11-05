@@ -590,6 +590,17 @@ export interface PairingStartResult {
   ttlSecs: number;
   expiresAtMs: number;
 }
+/// MOVIL F0: the decisions of the last `windowDays` that never reached the
+/// console, from the ledger (mirrors Rust `DecisionGap`).
+export interface DecisionGap {
+  windowDays: number;
+  requests: number;
+  decided: number;
+  pending: number;
+  unseen: number;
+  p90WaitMs?: number;
+  maxWaitMs?: number;
+}
 export interface RemoteStatus {
   running: boolean;
   addr?: string;
@@ -601,6 +612,7 @@ export interface RemoteStatus {
   identityError?: string;
   devices: PairedDevice[];
   pending: PendingPairing[];
+  gap?: DecisionGap;
 }
 
 /// F6: the project's approval policy as code (mirrors the Rust PolicyStatus).

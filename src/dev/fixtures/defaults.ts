@@ -356,6 +356,18 @@ export function remoteStatus(running: boolean): RemoteStatus {
       },
     ],
     pending: [],
+    // MOVIL F0: the week's gap as the ledger counts it — about half the
+    // requests were answered in the CLI or timed out before the Inbox saw
+    // them, and the slowest decision the console took waited a night.
+    gap: {
+      windowDays: 7,
+      requests: 212,
+      decided: 104,
+      pending: 0,
+      unseen: 108,
+      p90WaitMs: 90_000,
+      maxWaitMs: 110_520_000,
+    },
   };
 }
 
