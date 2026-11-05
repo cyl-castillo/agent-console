@@ -70,6 +70,10 @@ pub struct PairedDevice {
     pub paired_at_ms: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_ms: Option<i64>,
+    /// MOVIL F1b: the device's Web Push subscription, when it sent one.
+    /// Stored next to its key because a push is addressed to this device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push: Option<crate::services::push_service::PushSubscription>,
 }
 
 /// A handshake that completed but is awaiting the human's explicit approval on
@@ -204,6 +208,23 @@ impl PairedDevicesService {
         Self::write_file(&file)
     }
 
+    /// Store (or clear, with None) the device's push subscription.
+    pub fn set_push(
+        &self,
+        id: &str,
+        sub: Option<crate::services::push_service::PushSubscription>,
+    ) -> AppResult<()> {
+        let _g = self.file_lock.lock().unwrap();
+        let mut file = Self::load_file()?;
+        let dev = file
+            .devices
+            .iter_mut()
+            .find(|d| d.id == id)
+            .ok_or_else(|| AppError::NotFound(format!("device {id}")))?;
+        dev.push = sub;
+        Self::write_file(&file)
+    }
+
     pub fn touch(&self, id: &str, now_ms: i64) -> AppResult<()> {
         let _g = self.file_lock.lock().unwrap();
         let mut file = Self::load_file()?;
@@ -265,6 +286,7 @@ impl PairedDevicesService {
             scope: proposal.proposed_scope,
             paired_at_ms: now_ms,
             last_seen_ms: None,
+            push: None,
         };
         file.devices.push(device.clone());
         Self::write_file(&file)?;

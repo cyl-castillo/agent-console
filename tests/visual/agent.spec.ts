@@ -606,6 +606,9 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   await expect(section).toBeVisible({ timeout: 5000 });
   await expect(section.getByTestId("remote-state")).toHaveText("off");
   await expect(section).toContainText("Pixel (kitchen)");
+  // MOVIL F1b: a subscribed device shows the push service, never the endpoint.
+  await expect(section.getByTestId("remote-device-push")).toHaveText("push · fcm.googleapis.com");
+  await expect(section).not.toContainText("demo-subscription");
   // MOVIL F0: the gap is the ledger's number, in words a human reads once.
   await expect(section.getByTestId("remote-gap")).toHaveText(
     "Last 7 days: 108 of 212 decisions timed out or were answered in the CLI before this screen saw them. The ones taken here waited 2 min at the 90th percentile and 31 h at most. A paired device catches them wherever you are.",

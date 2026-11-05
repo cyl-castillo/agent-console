@@ -53,6 +53,10 @@ fn witness(state: &AppState, kind: &str, payload: serde_json::Value) {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteStatus {
     pub running: bool,
+    /// MOVIL F1b: the VAPID public key a browser subscribes with; absent
+    /// when neither the keystore nor the file could hold one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_public_key: Option<String>,
     /// `host:port` a device dials — the LAN address when bound to the LAN.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub addr: Option<String>,
@@ -103,6 +107,7 @@ fn status_of(state: &AppState) -> AppResult<RemoteStatus> {
     };
     Ok(RemoteStatus {
         running: guard.is_some(),
+        push_public_key: state.push.public_key(),
         addr: guard.as_ref().map(|h| h.addr().to_string()),
         bind: guard.as_ref().map(|h| h.bind().to_string()),
         identity_store,

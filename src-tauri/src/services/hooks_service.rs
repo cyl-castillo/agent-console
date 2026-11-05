@@ -2235,6 +2235,12 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
                 if let Some(root) = event_root(&v, &state) {
                     let _ = state.testigo.on_approval_request(&root, &v);
                 }
+                // MOVIL F1b: knock on the paired devices if this is still
+                // waiting once the debounce passes (the count is taken then).
+                let counter = app.clone();
+                state.push.knock(Box::new(move || {
+                    counter.state::<AppState>().hooks.pending_approvals().len()
+                }));
             }
             seen.insert(name);
         }

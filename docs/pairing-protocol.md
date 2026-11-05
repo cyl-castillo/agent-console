@@ -136,6 +136,9 @@ Device → desktop (`ClientMessage`):
 { "type": "pending" }
 { "type": "decide", "id": "<approval id>", "decision": "allow" | "deny", "reason": "optional" }
 { "type": "sessions" }
+{ "type": "push_info" }
+{ "type": "subscribe", "endpoint": "https://…", "p256dh": "<base64url>", "auth": "<base64url>" }
+{ "type": "unsubscribe" }
 ```
 
 Desktop → device (`ServerMessage`):
@@ -145,6 +148,9 @@ Desktop → device (`ServerMessage`):
 { "type": "decisions", "items": [ <RemoteDecision>, … ], "truncated": false }
 { "type": "decided", "id": "<approval id>" }
 { "type": "sessions", "items": [ <RemoteSession>, … ] }
+{ "type": "push_info", "vapidPublicKey": "<base64url, 65 bytes>" }
+{ "type": "subscribed" }
+{ "type": "unsubscribed" }
 { "type": "error", "message": "..." }
 ```
 
@@ -207,6 +213,38 @@ A `RemoteDecision`:
   leaves with the device's name. The desktop reads the request as it stands
   **now** — `decide` on an id no longer pending is an error.
 
+## Push: "N decisions wait" (Web Push)
+
+A device may ask to be knocked when decisions wait, so the human opens the
+app instead of discovering the queue hours later. Standard Web Push, so a
+PWA gets it with the browser's `PushManager` and no app store:
+
+1. `push_info` → the desktop's VAPID public key (RFC 8292). Pass it as
+   `applicationServerKey` to `registration.pushManager.subscribe({
+   userVisibleOnly: true, applicationServerKey })`.
+2. Send the resulting subscription with `subscribe` (`endpoint` must be
+   https; `p256dh` is the 65-byte uncompressed P-256 point; `auth` 16
+   bytes). The desktop stores it on the device's record and writes
+   `remote_device {action: push_subscribed, host}` to the ledger — the host
+   of the push service, never the endpoint (a capability URL).
+3. The desktop pushes an RFC 8291 (`aes128gcm`) message whose plaintext is
+   exactly `{"type":"decisions","pending":N}`, with `TTL: 120` and
+   `Urgency: high`. The push service (Google, Apple, Mozilla) relays a
+   count. It never sees a tool, a command, a path or a session name.
+4. The service worker shows "N decisions wait"; the tap opens the app,
+   which reconnects and asks `pending` — the decision is taken on the
+   evidence, never from the notification.
+
+When it knocks: a request is pushed only if it is **still pending 15 s
+after it arrived** (the human at the keyboard answers in seconds), and a
+device is knocked **at most once a minute** — a burst is one push with the
+count. A `404`/`410` from the push service drops the subscription.
+`unsubscribe` clears it; revoking the device clears it too.
+
+iOS note: Web Push works for a PWA added to the Home Screen (iOS ≥ 16.4);
+in Safari's tab it does not. Android and desktop browsers have no such
+restriction.
+
 ## Security obligations for the device implementation
 
 - Generate the identity keypair with a **CSPRNG**; store the private key in the
@@ -217,6 +255,8 @@ A `RemoteDecision`:
   never offer **allow** when `remoteAllow` is false.
 - An answer is one tap on a visible card after the evidence; no auto-answer,
   no "allow all".
+- A push notification is a knock, not a decision: never offer allow/deny
+  actions on the notification itself.
 
 ## Versioning
 

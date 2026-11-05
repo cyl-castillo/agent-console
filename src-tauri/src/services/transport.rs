@@ -80,6 +80,16 @@ pub enum ClientMessage {
     /// MOVIL F1a: the open project's sessions and where each stands
     /// (read-only; any scope may ask).
     Sessions,
+    /// MOVIL F1b: the desktop's VAPID public key, to subscribe with.
+    PushInfo,
+    /// The browser's PushSubscription: the desktop will knock with
+    /// "N decisions wait" and nothing else.
+    Subscribe {
+        endpoint: String,
+        p256dh: String,
+        auth: String,
+    },
+    Unsubscribe,
 }
 
 /// A message from the desktop to the device.
@@ -103,6 +113,12 @@ pub enum ServerMessage {
     Sessions {
         items: Vec<RemoteSession>,
     },
+    /// `applicationServerKey` for `pushManager.subscribe`, base64url.
+    PushInfo {
+        vapid_public_key: String,
+    },
+    Subscribed,
+    Unsubscribed,
     Error {
         message: String,
     },
@@ -307,6 +323,53 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
                 let dev = device.clone();
                 match tokio::task::spawn_blocking(move || h.sessions(&dev)).await {
                     Ok(Ok(items)) => ServerMessage::Sessions { items },
+                    Ok(Err(e)) => ServerMessage::Error {
+                        message: e.to_string(),
+                    },
+                    Err(e) => ServerMessage::Error {
+                        message: format!("handler panicked: {e}"),
+                    },
+                }
+            }
+            Ok(ClientMessage::PushInfo) => {
+                let h = handler.clone();
+                match tokio::task::spawn_blocking(move || h.push_info()).await {
+                    Ok(Ok(vapid_public_key)) => ServerMessage::PushInfo { vapid_public_key },
+                    Ok(Err(e)) => ServerMessage::Error {
+                        message: e.to_string(),
+                    },
+                    Err(e) => ServerMessage::Error {
+                        message: format!("handler panicked: {e}"),
+                    },
+                }
+            }
+            Ok(ClientMessage::Subscribe {
+                endpoint,
+                p256dh,
+                auth,
+            }) => {
+                let h = handler.clone();
+                let dev = device.clone();
+                let sub = crate::services::push_service::PushSubscription {
+                    endpoint,
+                    p256dh,
+                    auth,
+                };
+                match tokio::task::spawn_blocking(move || h.subscribe(&dev, sub)).await {
+                    Ok(Ok(())) => ServerMessage::Subscribed,
+                    Ok(Err(e)) => ServerMessage::Error {
+                        message: e.to_string(),
+                    },
+                    Err(e) => ServerMessage::Error {
+                        message: format!("handler panicked: {e}"),
+                    },
+                }
+            }
+            Ok(ClientMessage::Unsubscribe) => {
+                let h = handler.clone();
+                let dev = device.clone();
+                match tokio::task::spawn_blocking(move || h.unsubscribe(&dev)).await {
+                    Ok(Ok(())) => ServerMessage::Unsubscribed,
                     Ok(Err(e)) => ServerMessage::Error {
                         message: e.to_string(),
                     },
@@ -588,6 +651,40 @@ pub mod client {
             self.request(stream, ClientMessage::Sessions).await
         }
 
+        /// The key to subscribe with.
+        pub async fn push_info<S: AsyncRead + AsyncWrite + Unpin>(
+            &self,
+            stream: S,
+        ) -> AppResult<ServerMessage> {
+            self.request(stream, ClientMessage::PushInfo).await
+        }
+
+        /// Hand the desktop a push subscription.
+        pub async fn subscribe<S: AsyncRead + AsyncWrite + Unpin>(
+            &self,
+            stream: S,
+            endpoint: &str,
+            p256dh: &str,
+            auth: &str,
+        ) -> AppResult<ServerMessage> {
+            self.request(
+                stream,
+                ClientMessage::Subscribe {
+                    endpoint: endpoint.into(),
+                    p256dh: p256dh.into(),
+                    auth: auth.into(),
+                },
+            )
+            .await
+        }
+
+        pub async fn unsubscribe<S: AsyncRead + AsyncWrite + Unpin>(
+            &self,
+            stream: S,
+        ) -> AppResult<ServerMessage> {
+            self.request(stream, ClientMessage::Unsubscribe).await
+        }
+
         pub fn to_state(&self) -> PhoneState {
             PhoneState {
                 private: BASE64URL_NOPAD.encode(&self.keys.private),
@@ -658,11 +755,13 @@ mod tests {
     /// that records what it was asked to decide.
     struct StubHandler {
         decided: Mutex<Vec<(String, String, String, Option<String>)>>,
+        subscribed: Mutex<Option<crate::services::push_service::PushSubscription>>,
     }
     impl StubHandler {
         fn new() -> Arc<Self> {
             Arc::new(Self {
                 decided: Mutex::new(Vec::new()),
+                subscribed: Mutex::new(None),
             })
         }
     }
@@ -709,6 +808,22 @@ mod tests {
                 pending: 2,
                 last_active_ms: Some(7),
             }])
+        }
+        fn push_info(&self) -> AppResult<String> {
+            Ok("BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8".into())
+        }
+        fn subscribe(
+            &self,
+            _device: &PairedDevice,
+            sub: crate::services::push_service::PushSubscription,
+        ) -> AppResult<()> {
+            sub.validate()?;
+            *self.subscribed.lock().unwrap() = Some(sub);
+            Ok(())
+        }
+        fn unsubscribe(&self, _device: &PairedDevice) -> AppResult<()> {
+            *self.subscribed.lock().unwrap() = None;
+            Ok(())
         }
     }
 
@@ -1041,6 +1156,49 @@ mod tests {
         assert_eq!(decided.len(), 1);
         assert_eq!(decided[0].1, "a-low");
         drop(decided);
+
+        // MOVIL F1b: the browser asks for the key, subscribes, and the
+        // desktop keeps the subscription; an http endpoint is refused.
+        let reply = phone.push_info(dial().await).await.unwrap();
+        let ServerMessage::PushInfo { vapid_public_key } = reply else {
+            panic!("expected push info, got {reply:?}");
+        };
+        assert_eq!(
+            BASE64URL_NOPAD
+                .decode(vapid_public_key.as_bytes())
+                .unwrap()
+                .len(),
+            65
+        );
+        let reply = phone
+            .subscribe(
+                dial().await,
+                "https://fcm.googleapis.com/fcm/send/abc",
+                "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+                "BTBZMqHH6r4Tts7J_aSIgg",
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply, ServerMessage::Subscribed);
+        assert_eq!(
+            handler
+                .subscribed
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|s| s.host()),
+            Some("fcm.googleapis.com".into())
+        );
+        let reply = phone
+            .subscribe(dial().await, "http://plain/", "AAAA", "AAAA")
+            .await
+            .unwrap();
+        assert!(matches!(reply, ServerMessage::Error { .. }));
+        assert_eq!(
+            phone.unsubscribe(dial().await).await.unwrap(),
+            ServerMessage::Unsubscribed
+        );
+        assert!(handler.subscribed.lock().unwrap().is_none());
 
         // And a raw socket still works beside it on the same port.
         let raw = tokio::net::TcpStream::connect(addr).await.unwrap();

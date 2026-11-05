@@ -456,6 +456,16 @@ pub trait DecisionHandler: Send + Sync + 'static {
     /// The open project's sessions and where each stands (read-only; every
     /// scope may ask).
     fn sessions(&self, device: &PairedDevice) -> AppResult<Vec<RemoteSession>>;
+    /// MOVIL F1b: the desktop's VAPID public key (base64url), or an error
+    /// when the desktop cannot push.
+    fn push_info(&self) -> AppResult<String>;
+    /// Remember the device's push subscription (any scope).
+    fn subscribe(
+        &self,
+        device: &PairedDevice,
+        sub: crate::services::push_service::PushSubscription,
+    ) -> AppResult<()>;
+    fn unsubscribe(&self, device: &PairedDevice) -> AppResult<()>;
 }
 
 /// The part of the bridge that needs no window: the hook's queue in, the
@@ -603,6 +613,41 @@ impl BridgeCore<'_> {
         out.truncate(SESSIONS_CAP);
         Ok(out)
     }
+
+    /// Store the device's push subscription on its record and witness it:
+    /// a device that can be knocked is part of the exposure the ledger
+    /// describes. Only the push service's host goes in the line.
+    pub fn subscribe(
+        &self,
+        device: &PairedDevice,
+        sub: crate::services::push_service::PushSubscription,
+    ) -> AppResult<()> {
+        sub.validate()?;
+        let host = sub.host();
+        self.devices.set_push(&device.id, Some(sub))?;
+        if let Some(root) = &self.open_project {
+            let _ = self.testigo.on_remote(
+                root,
+                Self::now_ms(),
+                "remote_device",
+                json!({ "action": "push_subscribed", "deviceId": device.id, "label": device.label, "host": host }),
+            );
+        }
+        Ok(())
+    }
+
+    pub fn unsubscribe(&self, device: &PairedDevice) -> AppResult<()> {
+        self.devices.set_push(&device.id, None)?;
+        if let Some(root) = &self.open_project {
+            let _ = self.testigo.on_remote(
+                root,
+                Self::now_ms(),
+                "remote_device",
+                json!({ "action": "push_unsubscribed", "deviceId": device.id, "label": device.label }),
+            );
+        }
+        Ok(())
+    }
 }
 
 /// The real bridge: `BridgeCore` over the app's state, plus the Inbox told
@@ -670,6 +715,31 @@ impl DecisionHandler for ConsoleBridge {
             .collect();
         self.with_core(|c| c.sessions(&live))
     }
+
+    fn push_info(&self) -> AppResult<String> {
+        use tauri::Manager;
+        self.app
+            .state::<crate::state::AppState>()
+            .push
+            .public_key()
+            .ok_or_else(|| {
+                AppError::Other(
+                    "this desktop has no push key (keystore and file both unavailable)".into(),
+                )
+            })
+    }
+
+    fn subscribe(
+        &self,
+        device: &PairedDevice,
+        sub: crate::services::push_service::PushSubscription,
+    ) -> AppResult<()> {
+        self.with_core(|c| c.subscribe(device, sub))
+    }
+
+    fn unsubscribe(&self, device: &PairedDevice) -> AppResult<()> {
+        self.with_core(|c| c.unsubscribe(device))
+    }
 }
 
 #[cfg(test)]
@@ -684,6 +754,7 @@ mod tests {
             scope,
             paired_at_ms: 0,
             last_seen_ms: None,
+            push: None,
         }
     }
 
@@ -959,6 +1030,44 @@ mod tests {
         );
         assert_eq!(list[0].name, "auth");
         assert_eq!(list[0].project, root);
+
+        // MOVIL F1b: a subscription lands on the device's record and in the
+        // ledger with the push service's host only; unsubscribe clears it.
+        let pid = devices.propose_pairing("phone", "k-phone", DeviceScope::ReadOnly, 1);
+        let real = devices.approve_pairing(&pid, 1).unwrap();
+        let sub = crate::services::push_service::PushSubscription {
+            endpoint: "https://fcm.googleapis.com/fcm/send/secret-capability".into(),
+            p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4".into(),
+            auth: "BTBZMqHH6r4Tts7J_aSIgg".into(),
+        };
+        core.subscribe(&real, sub.clone()).unwrap();
+        let stored = devices.find_by_key("k-phone").unwrap().unwrap();
+        assert_eq!(stored.push, Some(sub));
+        let line = testigo
+            .list(&root, None, None)
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find(|e| e.kind == "remote_device")
+            .expect("remote_device line");
+        assert_eq!(line.payload["action"], "push_subscribed");
+        assert_eq!(line.payload["host"], "fcm.googleapis.com");
+        assert!(
+            !line.payload.to_string().contains("secret-capability"),
+            "the endpoint never reaches the ledger"
+        );
+        core.unsubscribe(&real).unwrap();
+        assert!(devices
+            .find_by_key("k-phone")
+            .unwrap()
+            .unwrap()
+            .push
+            .is_none());
+        let bad = crate::services::push_service::PushSubscription {
+            endpoint: "http://plain/".into(),
+            ..stored.push.clone().unwrap()
+        };
+        assert!(core.subscribe(&real, bad).is_err(), "validated at the door");
     }
 
     /// The device sees the session's last verdict and last check, bounded.

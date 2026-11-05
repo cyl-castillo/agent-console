@@ -73,6 +73,11 @@ tokenizers = "0.23.1"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# MOVIL F1b: Web Push to a paired device — RFC 8291 (ECDH P-256 + HKDF +
+# AES-128-GCM) and RFC 8292 VAPID (ES256). RustCrypto, pure Rust.
+p256 = { version = "0.14", features = ["ecdh", "ecdsa"] }
+hkdf = "0.12"
+aes-gcm = "0.10"
 
 [dev-dependencies]
 # `test` unlocks tauri::test::{mock_builder, MockRuntime} for the terminal
