@@ -9,6 +9,12 @@ the runnable reference client is the `phone-sim` binary
 
 See also: `docs/threat-model-voice-companion.md` (security rationale).
 
+Implementations: the desktop (this repo), the reference device `phone-sim`,
+the reference desktop `desktop-sim` (a standalone responder for testing a
+device app), and the companion PWA served at `agent-console.dev/app`
+(source: the `agent-console-companion` repo; its built files live in
+`docs/app/` here).
+
 **What the device does, and only that:** show the decisions waiting on the
 desktop — with their evidence — and return an answer. No chat, no diffs, no
 prompts. v1 of this document carried a voice protocol; it was replaced, not
