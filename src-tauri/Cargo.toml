@@ -52,6 +52,8 @@ cpal = "0.18"
 snow = "0.9"
 rand = "0.8"
 data-encoding = "2"
+# MOVIL F1a: the WebSocket upgrade for browsers (RFC 6455 accept key).
+sha1 = "0.10"
 # QR rendering for the pairing offer (SVG only; image backend disabled).
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # tracing_backend: whisper.cpp/ggml log lines go to tracing (debug level)

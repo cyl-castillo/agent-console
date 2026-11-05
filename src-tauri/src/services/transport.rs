@@ -26,7 +26,7 @@ use tokio::task::JoinHandle;
 use crate::error::{AppError, AppResult};
 use crate::services::paired_devices_service::{DeviceScope, PairedDevicesService};
 use crate::services::pairing_service::PairingService;
-use crate::services::remote_decisions::{gate, DecisionHandler, RemoteDecision};
+use crate::services::remote_decisions::{gate, DecisionHandler, RemoteDecision, RemoteSession};
 use crate::services::secure_channel::{decrypt, encrypt};
 
 fn now_ms() -> i64 {
@@ -77,6 +77,9 @@ pub enum ClientMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// MOVIL F1a: the open project's sessions and where each stands
+    /// (read-only; any scope may ask).
+    Sessions,
 }
 
 /// A message from the desktop to the device.
@@ -94,6 +97,11 @@ pub enum ServerMessage {
     /// The answer reached the hook and the ledger.
     Decided {
         id: String,
+    },
+    /// Needs-you first, then working, idle, stopped; at most
+    /// `remote_decisions::SESSIONS_CAP`.
+    Sessions {
+        items: Vec<RemoteSession>,
     },
     Error {
         message: String,
@@ -294,6 +302,19 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
                     },
                 }
             }
+            Ok(ClientMessage::Sessions) => {
+                let h = handler.clone();
+                let dev = device.clone();
+                match tokio::task::spawn_blocking(move || h.sessions(&dev)).await {
+                    Ok(Ok(items)) => ServerMessage::Sessions { items },
+                    Ok(Err(e)) => ServerMessage::Error {
+                        message: e.to_string(),
+                    },
+                    Err(e) => ServerMessage::Error {
+                        message: format!("handler panicked: {e}"),
+                    },
+                }
+            }
             Err(e) => ServerMessage::Error {
                 message: format!("bad message: {e}"),
             },
@@ -362,9 +383,52 @@ pub async fn run_listener<F>(
         let handler = handler.clone();
         let on_done = on_done.clone();
         tokio::spawn(async move {
-            let out = serve_connection(stream, &pairing, &devices, handler, now_ms()).await;
+            let out = serve_sniffed(stream, &pairing, &devices, handler).await;
             on_done(out);
         });
+    }
+}
+
+/// How long a peer has to send its first bytes before we treat the
+/// connection as the raw protocol (a browser sends its whole request at
+/// once; a raw client sends a 4-byte length first).
+const SNIFF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// One listener, two transports: peek the first bytes without consuming
+/// them; an HTTP `GET` is a browser (the PWA) and is upgraded to a
+/// WebSocket, anything else is the raw framed protocol. Both then run the
+/// same `serve_connection` — same Hello, same Noise, same gate.
+async fn serve_sniffed(
+    stream: tokio::net::TcpStream,
+    pairing: &PairingService,
+    devices: &PairedDevicesService,
+    handler: Arc<dyn DecisionHandler>,
+) -> AppResult<Outcome> {
+    let mut first = [0u8; 4];
+    let is_http = tokio::time::timeout(SNIFF_TIMEOUT, async {
+        loop {
+            let n = match stream.peek(&mut first).await {
+                Ok(n) => n,
+                Err(_) => return false,
+            };
+            if n == 0 {
+                return false;
+            }
+            if !crate::services::ws::could_be_http(&first[..n]) {
+                return crate::services::ws::looks_like_http(&first[..n]);
+            }
+            // Fewer than 4 bytes so far and still a prefix of `GET `: wait
+            // for the rest; the readiness wake comes with the next bytes.
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap_or(false);
+    if is_http {
+        let ws = crate::services::ws::accept(stream).await?;
+        serve_connection(ws, pairing, devices, handler, now_ms()).await
+    } else {
+        serve_connection(stream, pairing, devices, handler, now_ms()).await
     }
 }
 
@@ -516,6 +580,14 @@ pub mod client {
             .await
         }
 
+        /// The open project's sessions and where each stands.
+        pub async fn sessions<S: AsyncRead + AsyncWrite + Unpin>(
+            &self,
+            stream: S,
+        ) -> AppResult<ServerMessage> {
+            self.request(stream, ClientMessage::Sessions).await
+        }
+
         pub fn to_state(&self) -> PhoneState {
             PhoneState {
                 private: BASE64URL_NOPAD.encode(&self.keys.private),
@@ -626,6 +698,17 @@ mod tests {
                 reason.map(String::from),
             ));
             Ok(())
+        }
+        fn sessions(&self, _device: &PairedDevice) -> AppResult<Vec<RemoteSession>> {
+            Ok(vec![RemoteSession {
+                term_id: "t1".into(),
+                name: "auth".into(),
+                project: "/p".into(),
+                agent: Some("claude".into()),
+                state: "needs_you".into(),
+                pending: 2,
+                last_active_ms: Some(7),
+            }])
         }
     }
 
@@ -879,6 +962,90 @@ mod tests {
             "nothing more recorded"
         );
 
+        server.abort();
+    }
+
+    /// MOVIL F1a: the same listener serves a browser. The reference client
+    /// dials the TCP port, upgrades to a WebSocket, and pairs, reconnects,
+    /// reads the decisions and the sessions, and decides — same Hello, same
+    /// Noise, same gate as the raw socket, because it IS the same code.
+    #[tokio::test]
+    async fn a_websocket_client_pairs_and_decides_through_the_same_listener() {
+        let _env = crate::test_support::lock_env();
+        isolated_data_dir();
+        let now = now_ms();
+        let pairing = Arc::new(PairingService::load().unwrap());
+        let devices = Arc::new(PairedDevicesService::new());
+        let handler = StubHandler::new();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let offer = pairing.start_pairing(now, 60);
+        let server = tokio::spawn(run_listener(
+            listener,
+            pairing.clone(),
+            devices.clone(),
+            handler.clone(),
+            move |_out| {},
+        ));
+        let dial = || async {
+            let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+            crate::services::ws::connect(tcp, &addr.to_string())
+                .await
+                .unwrap()
+        };
+
+        let mut phone = PhoneClient::new().unwrap();
+        let mut ws = dial().await;
+        phone
+            .pair(&mut ws, &offer, "Pixel (browser)")
+            .await
+            .unwrap();
+        drop(ws);
+        let pid = devices.pending()[0].id.clone();
+        devices.approve_pairing(&pid, now).unwrap();
+
+        let reply = phone.pending(dial().await).await.unwrap();
+        let ServerMessage::Decisions { items, .. } = reply else {
+            panic!("expected decisions, got {reply:?}");
+        };
+        assert_eq!(items.len(), 2);
+        let reply = phone.sessions(dial().await).await.unwrap();
+        assert_eq!(
+            reply,
+            ServerMessage::Sessions {
+                items: vec![RemoteSession {
+                    term_id: "t1".into(),
+                    name: "auth".into(),
+                    project: "/p".into(),
+                    agent: Some("claude".into()),
+                    state: "needs_you".into(),
+                    pending: 2,
+                    last_active_ms: Some(7),
+                }]
+            }
+        );
+        let reply = phone
+            .decide(dial().await, "a-low", "allow", Some("from a browser"))
+            .await
+            .unwrap();
+        assert_eq!(reply, ServerMessage::Decided { id: "a-low".into() });
+        let reply = phone
+            .decide(dial().await, "a-high", "allow", None)
+            .await
+            .unwrap();
+        assert!(
+            matches!(reply, ServerMessage::Error { .. }),
+            "the gate holds over a websocket too: {reply:?}"
+        );
+        let decided = handler.decided.lock().unwrap();
+        assert_eq!(decided.len(), 1);
+        assert_eq!(decided[0].1, "a-low");
+        drop(decided);
+
+        // And a raw socket still works beside it on the same port.
+        let raw = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let reply = phone.pending(raw).await.unwrap();
+        assert!(matches!(reply, ServerMessage::Decisions { .. }));
         server.abort();
     }
 

@@ -379,6 +379,7 @@ pub fn run() {
 pub use crate::services::remote_decisions::RemoteDecision;
 pub use crate::services::transport::client as phone_protocol;
 pub use crate::services::transport::{ClientMessage, ServerMessage};
+pub use crate::services::ws::connect as ws_connect;
 
 /// Test-only support shared across modules. Placed at the end of the crate so it
 /// doesn't trip clippy's `items_after_test_module` (a cfg(test) module followed

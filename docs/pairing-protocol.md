@@ -27,6 +27,31 @@ gated on an on-device second factor (threat model T5).
 - The desktop's static public key is delivered to the device **out-of-band via
   the QR** — that's what makes the (untrusted) network un-MITM-able.
 
+## Transports
+
+The desktop listens on **one** TCP port and serves two transports on it,
+telling them apart by the first bytes of the connection:
+
+- **Raw TCP** — the framed byte stream below starts immediately (its first
+  bytes are a big-endian length, never ASCII). Native apps and `phone-sim`.
+- **WebSocket** (RFC 6455) — the connection starts with an HTTP `GET`; the
+  desktop upgrades it and then runs the *identical* protocol over it. This is
+  what a browser (the companion PWA) uses: `new WebSocket("ws://<host:port>/")`
+  with `binaryType = "arraybuffer"`. Rules: binary messages only (a text frame
+  ends the connection), no subprotocol, no extensions, any path. The
+  WebSocket carries the protocol's **byte stream**: message boundaries mean
+  nothing, the length prefix is the framing — concatenate what arrives and
+  parse frames from it, exactly as on TCP. `phone-sim --ws` is the reference
+  client for this transport and the desktop's own tests drive it.
+
+Encryption is Noise above either transport, so `ws://` is fine on the LAN. A
+page served over **https** (an installed PWA) can only open `wss://`: put a
+TLS edge in front of the port — `tailscale serve` on the desktop gives a
+`wss://<machine>.<tailnet>.ts.net` with a valid certificate and reaches the
+phone anywhere; any reverse proxy with a certificate the phone trusts does
+the same. The desktop never terminates TLS itself and never listens on
+`0.0.0.0`.
+
 ## Framing
 
 Every message on the wire is length-prefixed:
@@ -110,6 +135,7 @@ Device → desktop (`ClientMessage`):
 { "type": "ping" }
 { "type": "pending" }
 { "type": "decide", "id": "<approval id>", "decision": "allow" | "deny", "reason": "optional" }
+{ "type": "sessions" }
 ```
 
 Desktop → device (`ServerMessage`):
@@ -118,8 +144,28 @@ Desktop → device (`ServerMessage`):
 { "type": "pong" }
 { "type": "decisions", "items": [ <RemoteDecision>, … ], "truncated": false }
 { "type": "decided", "id": "<approval id>" }
+{ "type": "sessions", "items": [ <RemoteSession>, … ] }
 { "type": "error", "message": "..." }
 ```
+
+A `RemoteSession` (read-only; every scope may ask):
+
+```json
+{
+  "termId": "sess-auth",
+  "name": "auth refactor",
+  "project": "/home/u/code/demo",
+  "agent": "claude",
+  "state": "needs_you" | "working" | "idle" | "stopped",
+  "pending": 2,
+  "lastActiveMs": 1700000000000
+}
+```
+
+`state` mirrors the desktop Inbox's groups: `needs_you` = a decision waits
+in that session (`pending` says how many), `working` = a turn is open in the
+ledger, `idle` = a shell is live and nothing is open, `stopped` = no shell
+behind it. Needs-you first, then working, idle, stopped; at most 100 items.
 
 A `RemoteDecision`:
 

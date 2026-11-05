@@ -70,6 +70,7 @@ dependencies = [
  "serde",
  "serde_jcs",
  "serde_json",
+ "sha1",
  "sha2",
  "snow",
  "tar",
