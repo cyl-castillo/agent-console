@@ -34,6 +34,8 @@ pub struct AppState {
     pub paired_devices: std::sync::Arc<PairedDevicesService>,
     /// The remote-decisions listener, when started. None = stopped.
     pub remote_server: Mutex<Option<crate::services::transport::ServerHandle>>,
+    /// MOVIL F1b: knocks on subscribed devices when decisions wait.
+    pub push: std::sync::Arc<crate::services::push_notifier::PushNotifier>,
     pub git_watcher: GitWatcher,
     pub roundtable: RoundtableService,
     /// F9: fan-outs (N agents, one prompt, twin worktrees).
@@ -65,6 +67,7 @@ impl AppState {
 
     pub fn new() -> Self {
         let hooks = HooksRuntime::new().expect("failed to initialize hooks runtime");
+        let paired_devices = std::sync::Arc::new(PairedDevicesService::new());
         Self {
             inner: Mutex::new(SessionState::default()),
             terminals: TerminalRegistry::new(),
@@ -75,7 +78,10 @@ impl AppState {
             activity: ActivityService::new(),
             testigo: TestigoService::new(),
             pairing: std::sync::OnceLock::new(),
-            paired_devices: std::sync::Arc::new(PairedDevicesService::new()),
+            paired_devices: paired_devices.clone(),
+            push: std::sync::Arc::new(crate::services::push_notifier::PushNotifier::new(
+                paired_devices,
+            )),
             remote_server: Mutex::new(None),
             git_watcher: GitWatcher::new(),
             roundtable: RoundtableService::new(),

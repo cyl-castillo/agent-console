@@ -353,8 +353,16 @@ export function remoteStatus(running: boolean): RemoteStatus {
         scope: "readOnly",
         pairedAtMs: NOW - d(12),
         lastSeenMs: NOW - h(5),
+        push: {
+          endpoint: "https://fcm.googleapis.com/fcm/send/demo-subscription",
+          p256dh:
+            "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+          auth: "BTBZMqHH6r4Tts7J_aSIgg",
+        },
       },
     ],
+    pushPublicKey:
+      "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8",
     pending: [],
     // MOVIL F0: the week's gap as the ledger counts it — about half the
     // requests were answered in the CLI or timed out before the Inbox saw

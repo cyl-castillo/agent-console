@@ -10,6 +10,7 @@
 //!   phone-sim pair "<offer-uri-from-QR>" [addr]   # then approve on the desktop
 //!   phone-sim pending                             # the decisions waiting
 //!   phone-sim sessions                            # where each session stands
+//!   phone-sim push-info                           # the key a browser subscribes with
 //!   phone-sim decide <id> allow|deny ["reason"]
 //!
 //! Add `--ws` before the verb to dial the same port as a browser would (HTTP
@@ -125,6 +126,13 @@ fn print_reply(r: ServerMessage) {
                 );
             }
         }
+        ServerMessage::PushInfo { vapid_public_key } => {
+            println!("applicationServerKey: {vapid_public_key}")
+        }
+        ServerMessage::Subscribed => {
+            println!("subscribed: the desktop will knock when decisions wait")
+        }
+        ServerMessage::Unsubscribed => println!("unsubscribed"),
         ServerMessage::Error { message } => eprintln!("error: {message}"),
         ServerMessage::Pong => println!("pong"),
     }
@@ -164,6 +172,10 @@ async fn main() -> Result<()> {
             let (client, addr) = load()?;
             print_reply(client.sessions(dial(&addr, ws).await?).await?);
         }
+        Some("push-info") => {
+            let (client, addr) = load()?;
+            print_reply(client.push_info(dial(&addr, ws).await?).await?);
+        }
         Some("decide") => {
             let id = args
                 .get(2)
@@ -181,7 +193,7 @@ async fn main() -> Result<()> {
         }
         _ => {
             eprintln!(
-                "usage:\n  phone-sim [--ws] pair <offer-uri> [addr]\n  phone-sim [--ws] pending\n  phone-sim [--ws] sessions\n  phone-sim [--ws] decide <id> allow|deny [reason]"
+                "usage:\n  phone-sim [--ws] pair <offer-uri> [addr]\n  phone-sim [--ws] pending\n  phone-sim [--ws] sessions\n  phone-sim [--ws] push-info\n  phone-sim [--ws] decide <id> allow|deny [reason]"
             );
             std::process::exit(2);
         }

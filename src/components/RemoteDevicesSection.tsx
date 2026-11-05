@@ -20,6 +20,11 @@ function scopeLabel(s: DeviceScope): string {
   return SCOPES.find((x) => x.value === s)?.label ?? s;
 }
 
+/// The push service's host, the only part of a subscription worth showing.
+function pushHost(endpoint: string): string {
+  return endpoint.split("://")[1]?.split("/")[0] ?? "?";
+}
+
 /// F8: who may answer decisions from a paired device, and where the desktop
 /// listens. Pairing is a QR shown here and a click here — the device never
 /// becomes trusted on its own. Loopback by default; the LAN is a typed choice
@@ -94,7 +99,8 @@ export function RemoteDevicesSection() {
       </div>
       <p className="wb-hint">
         A paired device sees the decisions waiting here, with their evidence, and answers. No chat,
-        no diffs. Dangerous actions are decided at this keyboard whatever the device's scope.
+        no diffs. Dangerous actions are decided at this keyboard whatever the device's scope. A
+        device that asks for push is told only that decisions wait, and how many.
         {running && status?.addr && (
           <>
             {" "}
@@ -241,6 +247,18 @@ export function RemoteDevicesSection() {
               <span className="text-caption text-muted-foreground">
                 {d.lastSeenMs ? `seen ${new Date(d.lastSeenMs).toLocaleString()}` : "never seen"}
               </span>
+              <Chip
+                tone={d.push ? "ok" : "neutral"}
+                mono
+                title={
+                  d.push
+                    ? `Pushed "N decisions wait" through ${pushHost(d.push.endpoint)} — never what the decisions are`
+                    : "The device has not asked for push; it sees the queue when it opens"
+                }
+                data-testid="remote-device-push"
+              >
+                {d.push ? `push · ${pushHost(d.push.endpoint)}` : "no push"}
+              </Chip>
               <button
                 className="wb-cta"
                 disabled={busy}

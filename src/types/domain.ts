@@ -576,6 +576,9 @@ export interface PairedDevice {
   scope: DeviceScope;
   pairedAtMs: number;
   lastSeenMs?: number;
+  /// MOVIL F1b: the device asked to be pushed "N decisions wait". Only the
+  /// push service's host is shown; the endpoint is a capability URL.
+  push?: { endpoint: string; p256dh: string; auth: string };
 }
 export interface PendingPairing {
   id: string;
@@ -603,6 +606,9 @@ export interface DecisionGap {
 }
 export interface RemoteStatus {
   running: boolean;
+  /// MOVIL F1b: the desktop's VAPID public key (base64url, 65 bytes) — what
+  /// a browser passes as `applicationServerKey` to subscribe.
+  pushPublicKey?: string;
   addr?: string;
   /// loopback · lan
   bind?: string;
