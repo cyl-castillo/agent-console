@@ -1221,14 +1221,14 @@ mod tests {
     #[test]
     fn offer_uri_round_trips_through_the_parser() {
         let kp = crate::services::secure_channel::generate_static().unwrap();
-        let offer =
-            crate::services::secure_channel::new_offer(&kp.public, 1_700_000_000_000, 120).unwrap();
+        let (offer, psk) =
+            crate::services::secure_channel::new_offer(&kp.public, 1_700_000_000_000, 120);
         let uri = client::offer_uri(&offer, "192.168.1.9:4870");
         assert!(uri.starts_with("agentconsole://pair?d="));
         let (parsed, addr) = client::parse_offer_uri(&uri).unwrap();
         assert_eq!(addr.as_deref(), Some("192.168.1.9:4870"));
         assert_eq!(parsed.responder_static_bytes().unwrap(), kp.public);
-        assert_eq!(parsed.psk_bytes().unwrap(), offer.psk_bytes().unwrap());
+        assert_eq!(parsed.psk_bytes().unwrap(), psk);
     }
 
     #[test]
