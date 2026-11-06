@@ -114,9 +114,13 @@ describe("assessCommand", () => {
     expect(assessCommand("dd if=/dev/zero of=/dev/sda")?.level).toBe("dangerous");
   });
 
-  it("flags destructive-but-predictable commands as caution", () => {
-    expect(assessCommand("rm -rf node_modules")?.level).toBe("caution");
-    expect(assessCommand("git push --force origin main")?.level).toBe("caution");
+  it("flags destructive-but-predictable commands as caution, and the irreversible ones as dangerous", () => {
+    // SEGURIDAD-MOVIL F1: recursive/forced deletes and force-pushes are
+    // irreversible, so they are dangerous now; a plain `rm x` is caution.
+    expect(assessCommand("rm -rf node_modules")?.level).toBe("dangerous");
+    expect(assessCommand("rm --recursive --force build")?.level).toBe("dangerous");
+    expect(assessCommand("git push --force origin main")?.level).toBe("dangerous");
+    expect(assessCommand("git -c user.name=x push --force")?.level).toBe("dangerous");
     expect(assessCommand("git push origin main")?.level).toBe("caution");
     expect(assessCommand("sudo systemctl restart nginx")?.level).toBe("caution");
     expect(assessCommand("docker system prune")?.level).toBe("caution");

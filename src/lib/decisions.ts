@@ -14,8 +14,62 @@ export interface TierInfo {
   reason: string;
 }
 
-const READ_ONLY_BASH =
-  /^\s*(ls|pwd|cat|head|tail|less|wc|echo|which|type|env|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|find(?![^|]*-delete)|git\s+(status|log|diff|show|branch(?!\s+-[a-zA-Z]*[dD])|remote\s+-v|rev-parse|describe|blame|stash\s+list)|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|node\s+-e|python3?\s+-c|make\s+test|pytest|go\s+(test|vet|build))\b/;
+// One simple command whose head is here. Code runners (`node -e`,
+// `python -c`) are not: they are shells with another syntax. Mirrors
+// `remote_decisions.rs` (READ_ONLY / FIND_ACTS / GIT_BRANCH_DELETE).
+const READ_ONLY_HEAD =
+  /^\s*(ls|pwd|cat|head|tail|less|wc|echo|which|type|env|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|find(?![^|]*\s-(delete|exec|execdir|ok|okdir|fprint0?|fls)\b)|git\s+(status|log|diff|show|branch(?!\s+-[a-zA-Z]*[dD])|remote\s+-v|rev-parse|describe|blame|stash\s+list)|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))\b/;
+// Anything that chains, redirects, substitutes or backgrounds is not "one
+// read-only command", whatever its head says.
+const COMPOUND = /[;&>`\n]|\$\(|<<|<\(|\|\|/;
+const XARGS = /\bxargs\b/;
+
+/// Read-only = no compound syntax, no xargs, and every pipe segment's head in
+/// the allowlist (`git log | head` is fine; `ls | xargs rm` is not).
+export function isReadOnlyCommand(cmd: string): boolean {
+  if (COMPOUND.test(cmd) || XARGS.test(cmd)) return false;
+  const segments = cmd.split("|");
+  return segments.length > 0 && segments.every((seg) => READ_ONLY_HEAD.test(seg.trim()));
+}
+
+/// Paths where a write runs code later (hooks, shells, keys) or holds
+/// secrets — high whatever the tool. Mirrors `SENSITIVE_PATH` in Rust.
+const SENSITIVE_PATH =
+  /(^|\/)(\.ssh|\.claude|\.codex|\.config\/opencode|\.git\/hooks|\.git\/config|\.gnupg|\.aws|\.kube|\.docker|\.npmrc|\.netrc|\.bashrc|\.zshrc|\.profile|\.bash_profile|\.zprofile|\.env(\.[^/]+)?)(\/|$)|^\/etc\/|\.(pem|key|p12|pfx)$/i;
+const MCP_DESTRUCTIVE = /(delete|remove|destroy|drop|purge|send|publish|deploy|merge|push|force)/i;
+
+/// The engines name the shell differently (Claude `Bash`, Codex `shell`,
+/// OpenCode `bash`); one shape before classifying. Mirrors `normalize_tool`.
+export function normalizeTool(tool: string): string {
+  switch (tool) {
+    case "Bash":
+    case "bash":
+    case "shell":
+    case "local_shell":
+    case "LocalShell":
+    case "commandExecution":
+    case "exec_command":
+      return "Bash";
+    case "edit":
+      return "Edit";
+    case "write":
+      return "Write";
+    case "multiedit":
+      return "MultiEdit";
+    case "read":
+      return "Read";
+    default:
+      return tool;
+  }
+}
+
+/// The command string of a shell request, whatever its shape.
+export function commandOf(input: Record<string, unknown>): string {
+  const c = input.command ?? input.cmd;
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) return c.filter((x) => typeof x === "string").join(" ");
+  return "";
+}
 
 const HIGH_REASON = /remote|delete|discards|destroys|removes|elevated|truncates|rewrites/i;
 
@@ -36,9 +90,9 @@ export function tierFor(req: ApprovalRequest, perimeter?: Perimeter): TierInfo {
     };
   }
   const inp = req.input ?? {};
-  const tool = req.tool;
+  const tool = normalizeTool(req.tool);
   if (tool === "Bash") {
-    const cmd = typeof inp.command === "string" ? inp.command : "";
+    const cmd = commandOf(inp);
     const a = assessCommand(cmd);
     if (a?.level === "dangerous") return { tier: "high", label: "Irreversible", reason: a.reason };
     if (a) {
@@ -46,17 +100,30 @@ export function tierFor(req: ApprovalRequest, perimeter?: Perimeter): TierInfo {
         ? { tier: "high", label: "Irreversible or external", reason: a.reason }
         : { tier: "medium", label: "Changes the machine", reason: a.reason };
     }
-    if (READ_ONLY_BASH.test(cmd))
+    if (isReadOnlyCommand(cmd))
       return { tier: "low", label: "Read-only", reason: "inspects, builds or tests" };
     return { tier: "medium", label: "Runs a command", reason: "not in the read-only allowlist" };
   }
   if (tool === "Edit" || tool === "Write" || tool === "MultiEdit" || tool === "NotebookEdit") {
-    const path = typeof inp.file_path === "string" ? inp.file_path : "";
+    const path =
+      typeof inp.file_path === "string"
+        ? inp.file_path
+        : typeof inp.path === "string"
+          ? inp.path
+          : typeof inp.notebook_path === "string"
+            ? inp.notebook_path
+            : "";
     const rel = path ? toRelative(path, req.cwd) : null;
     const cwd = req.cwd.endsWith("/") ? req.cwd.slice(0, -1) : req.cwd;
+    if (SENSITIVE_PATH.test(path) || SENSITIVE_PATH.test(rel ?? ""))
+      return {
+        tier: "high",
+        label: "Touches secrets, hooks or a shell profile",
+        reason: rel ?? path,
+      };
     const outside = path.startsWith("/") && path !== cwd && !path.startsWith(`${cwd}/`);
     if (outside) return { tier: "high", label: "Writes outside the project", reason: path };
-    if (/(^|\/)(\.env|.*\.(pem|key|p12))$|(^|\/)\.git\//.test(rel ?? path))
+    if (/(^|\/)\.git\//.test(rel ?? path))
       return { tier: "high", label: "Touches secrets or git internals", reason: rel ?? path };
     if (/(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/.test(rel ?? path))
       return {
@@ -82,7 +149,9 @@ export function tierFor(req: ApprovalRequest, perimeter?: Perimeter): TierInfo {
     return { tier: "low", label: "Read-only", reason: tool };
   }
   if (tool.startsWith("mcp__"))
-    return { tier: "medium", label: "Calls a tool server", reason: tool };
+    return MCP_DESTRUCTIVE.test(tool)
+      ? { tier: "high", label: "Tool server: destructive or external", reason: tool }
+      : { tier: "medium", label: "Calls a tool server", reason: tool };
   return { tier: "medium", label: "Uses a tool", reason: tool };
 }
 
