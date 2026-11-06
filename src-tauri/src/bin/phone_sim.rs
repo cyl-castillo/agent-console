@@ -84,7 +84,7 @@ fn print_reply(r: ServerMessage) {
                 let allow = if d.remote_allow {
                     "allow|deny"
                 } else {
-                    "deny only (dangerous: keyboard decides)"
+                    "deny only (changes the machine: keyboard decides)"
                 };
                 println!(
                     "{}  [{} · {}]  {}: {}\n    session {} · {}\n    evidence: verification {} · last check {}",

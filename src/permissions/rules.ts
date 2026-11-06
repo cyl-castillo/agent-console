@@ -49,21 +49,59 @@ const BROAD_GLOBAL_BASH_PREFIXES = new Set([
 // directly targets hardware (block device writes). NOT placed here: rm -rf ./local,
 // git push --force, reset --hard — those are predictable in effect and common
 // enough that blocking the keyboard creates rubber-stamp-via-mouse behavior.
+// Mirrors `remote_decisions.rs` (DANGEROUS) — the desktop's remote gate
+// and the Inbox card must agree on what is irreversible.
 const DANGEROUS_COMMAND_PATTERNS: Array<{ re: RegExp; reason: string }> = [
-  { re: /curl[^|#\n]*\|\s*(ba)?sh/i, reason: "downloads and executes remote code" },
-  { re: /wget[^|#\n]*\|\s*(ba)?sh/i, reason: "downloads and executes remote code" },
+  {
+    re: /\b(curl|wget)\b[^|#\n]*\|\s*(sudo\s+)?(ba|z|da|k|fi|c|tc)?sh\b/i,
+    reason: "downloads and executes remote code",
+  },
+  {
+    re: /\b(ba|z|da|k)?sh\b[^\n]*\$\(\s*(curl|wget)\b/i,
+    reason: "downloads and executes remote code",
+  },
+  {
+    re: /\b(source|\.|(ba|z|da|k)?sh)\s+<\(\s*(curl|wget)\b/i,
+    reason: "downloads and executes remote code",
+  },
   { re: />\s*\/dev\/(sda|hda|nvme|disk)\d*/i, reason: "raw block device write" },
   { re: /\bdd\s+if=/i, reason: "raw block device write" },
   { re: /\bmkfs\b/i, reason: "formats a filesystem" },
+  {
+    re: /\brm\b(\s+\S+)*\s+(-[a-z]*[rf]|--recursive|--force|--no-preserve-root)\b/i,
+    reason: "removes files recursively or by force",
+  },
+  {
+    re: /\bfind\b[^\n]*\s-(exec|execdir|ok|okdir)\s+(sudo\s+)?rm\b/i,
+    reason: "removes matched files",
+  },
+  { re: /\bxargs\b[^\n]*\brm\b/i, reason: "removes files through xargs" },
+  {
+    re: /\bgit\b(\s+-[cC]\s*\S+)*\s+push\b[^\n]*(--force\b|--force-with-lease\b|\s-f\b|\s\+\S)/i,
+    reason: "force-push rewrites remote history",
+  },
+  { re: /\b(npm|pnpm|yarn|cargo|gem|twine)\s+publish\b/i, reason: "publishes a package" },
+  { re: /\bterraform\s+(apply|destroy)\b/i, reason: "changes infrastructure" },
+  { re: /\bkubectl\s+(apply|delete|drain|replace)\b/i, reason: "changes Kubernetes resources" },
+  {
+    re: /\b(aws|gcloud|az)\b[^\n]*\b(rm|delete|terminate|destroy)\b/i,
+    reason: "destroys cloud resources",
+  },
+  {
+    re: />>?\s*~?\/?[^\s]*(\.ssh\/|\.claude\/|\.bashrc|\.zshrc|\.profile|\.bash_profile|\.zprofile|\.git\/hooks\/|\/etc\/)/i,
+    reason: "writes where code runs on the next prompt or login",
+  },
+  {
+    re: /\b(tee|cp|mv|install)\b[^\n]*\s~?\/?[^\s]*(\.ssh\/|\.claude\/|\.bashrc|\.zshrc|\.profile|\.git\/hooks\/|\/etc\/)/i,
+    reason: "writes where code runs on the next prompt or login",
+  },
 ];
 
 // Badge-only tier: amber chip, Ctrl+Enter still works. Broad enough to cover
 // the common irreversible actions in agent sessions without adding mouse-click
 // overhead to every build cycle.
 const CAUTION_COMMAND_PATTERNS: Array<{ re: RegExp; reason: string }> = [
-  { re: /\brm\s+-[a-z]*[rf]/i, reason: "recursive or force-delete" },
-  { re: /\bgit\s+push\b.*?(--force|-f)\b/i, reason: "force-push rewrites remote history" },
-  { re: /\bgit\s+push\b/i, reason: "pushes to remote" },
+  { re: /\bgit\b(\s+-[cC]\s*\S+)*\s+push\b/i, reason: "pushes to remote" },
   { re: /\bgit\s+reset\s+--hard\b/i, reason: "discards uncommitted changes" },
   { re: /\bgit\s+rebase\b/i, reason: "rewrites commit history" },
   { re: /\bgit\s+clean\s+-[a-z]*f/i, reason: "removes untracked files" },
@@ -80,7 +118,6 @@ const CAUTION_COMMAND_PATTERNS: Array<{ re: RegExp; reason: string }> = [
   { re: /\bpip\s+install\b/i, reason: "installs Python package" },
   { re: /\byarn\s+global\b/i, reason: "modifies global packages" },
   { re: /\bdocker\s+(rm|rmi|system\s+prune)\b/i, reason: "destroys containers or images" },
-  { re: /\bkubectl\s+(delete|drain)\b/i, reason: "removes Kubernetes resources" },
 ];
 
 export function assessCommand(

@@ -11,9 +11,9 @@ const SCOPES: { value: DeviceScope; label: string; hint: string }[] = [
   {
     value: "readApprovals",
     label: "approvals",
-    hint: "allows low and medium; dangerous actions stay at the keyboard",
+    hint: "allows read-only requests; anything that changes the machine stays at the keyboard",
   },
-  { value: "full", label: "full", hint: "same as approvals today; prompts are not remote yet" },
+  { value: "full", label: "full", hint: "same as approvals today; prompts are never remote" },
 ];
 
 function scopeLabel(s: DeviceScope): string {
@@ -99,8 +99,9 @@ export function RemoteDevicesSection() {
       </div>
       <p className="wb-hint">
         A paired device sees the decisions waiting here, with their evidence, and answers. No chat,
-        no diffs. Dangerous actions are decided at this keyboard whatever the device's scope. A
-        device that asks for push is told only that decisions wait, and how many.
+        no diffs. From a device only read-only requests can be allowed; anything that changes the
+        machine is decided at this keyboard whatever the device's scope. A device that asks for push
+        is told only that decisions wait, and how many.
         {running && status?.addr && (
           <>
             {" "}

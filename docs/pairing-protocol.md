@@ -204,16 +204,26 @@ A `RemoteDecision`:
 - `items` is newest first and holds at most 40 decisions; `truncated: true`
   says more wait on the desktop (ask again after answering some).
 - `tier` is computed on the **desktop** from the request (`remote_decisions::tier_for`,
-  the same rules as the Inbox card for Bash; every other tool is medium). The
-  device must render what it receives and may not raise or lower it.
-- `remoteAllow: false` (high tier) means the device may **deny** but never
-  **allow**: a dangerous action is decided at the keyboard. The desktop
+  the same rules as the Inbox card: for the shell a read-only allowlist of
+  single commands — no chaining, redirection, substitution or `xargs` — and
+  pattern lists for what is irreversible; for file tools a sensitive or
+  out-of-project path is high; tool servers are high when their name says
+  they destroy, send or publish). The device must render what it receives
+  and may not raise or lower it.
+- `remoteAllow` is `true` **only for a low (read-only) tier**. Medium and
+  high mean the device may **deny** but never **allow**: anything that
+  changes the machine or leaves it is decided at the keyboard. The desktop
   enforces this on `decide` regardless of what the device shows.
+- `reason` on a `decide` goes to the **ledger only**, bounded to 300
+  characters with control characters removed. It is never shown to the
+  agent: the hook that answers the agent gets a fixed sentence. Text from a
+  device is never a prompt.
 - `evidence` is the ledger's: the console's verdict on the session's last
   closed turn (F1c) and its last witnessed check. Show both next to the request.
 - Per-device scope: `readOnly` may send `pending` only (every `decide` is an
-  error); `readApprovals` and `full` may decide within the tier rule above.
-  `full` does not yet grant anything more over this protocol.
+  error); `readApprovals` and `full` may decide within the tier rule above
+  (allow only low; deny anything). `full` does not yet grant anything more
+  over this protocol.
 - A `decide` is recorded on the desktop as `approval_decision` (actor `human`,
   `via.remote = {deviceId, label}`), answered to the hook, and the Inbox card
   leaves with the device's name. The desktop reads the request as it stands
