@@ -137,28 +137,26 @@ impl PushNotifier {
         for d in devices {
             let Some(sub) = d.push.as_ref() else { continue };
             {
-                let st = self.state.lock().unwrap();
+                // Reserve the slot under the lock: two knocks racing here
+                // must not both push to one device (F5, A3).
+                let mut st = self.state.lock().unwrap();
                 if let Some(t) = st.last_sent.get(&d.id) {
                     if t.elapsed() < self.min_interval {
                         continue;
                     }
                 }
+                st.last_sent.insert(d.id.clone(), Instant::now());
             }
             match self.sender.send(vapid, sub, &payload) {
                 Ok(Delivery::Sent) => {
-                    self.state
-                        .lock()
-                        .unwrap()
-                        .last_sent
-                        .insert(d.id.clone(), Instant::now());
                     pushed.push(d.id.clone());
                 }
                 Ok(Delivery::Gone) => {
                     let _ = self.devices.set_push(&d.id, None);
                 }
                 Ok(Delivery::Failed(_)) | Err(_) => {
-                    // Transient: the next knock tries again. Nothing to log
-                    // beyond the attempt; the payload holds no content.
+                    // Transient: give the slot back so the next knock retries.
+                    self.state.lock().unwrap().last_sent.remove(&d.id);
                 }
             }
         }

@@ -359,8 +359,14 @@ pub fn device_text(s: &str) -> String {
     crate::services::text::cap_chars(cleaned.trim(), SUMMARY_CAP)
 }
 
-/// What the device sees as the request's one line.
+/// What the device sees as the request's one line — with secrets masked
+/// (F5, M2): a bearer token in a curl line or a password in a connection
+/// string never leaves the machine.
 pub fn summary_of(tool: &str, input: &Value) -> String {
+    crate::services::redact::redact_secrets(&summary_raw(tool, input))
+}
+
+fn summary_raw(tool: &str, input: &Value) -> String {
     let pick = |keys: &[&str]| {
         keys.iter()
             .find_map(|k| input.get(k).and_then(Value::as_str))
@@ -729,11 +735,12 @@ impl BridgeCore<'_> {
         // — the hook's reason is what the model reads, so a stolen phone
         // would be writing prompts. The hook gets a fixed sentence; the
         // ledger keeps the device's reason, bounded and control-free.
-        self.hooks
-            .respond(id, decision, Some("answered on a paired device"))?;
         let root = self.ledger_root(&req);
         let clean = reason.map(device_text);
-        let _ = self.testigo.on_approval_decision_via(
+        // Ledger first: the line that says a device answered must exist
+        // before the answer takes effect (F5, L6). A ledger failure is loud
+        // but does not leave the hook hanging.
+        if let Err(e) = self.testigo.on_approval_decision_via(
             &root,
             Self::now_ms(),
             id,
@@ -741,7 +748,11 @@ impl BridgeCore<'_> {
             clean.as_deref(),
             None,
             Some(json!({ "remote": { "deviceId": device.id, "label": device.label } })),
-        );
+        ) {
+            tracing::warn!("ledger line for a remote decision failed: {e}");
+        }
+        self.hooks
+            .respond(id, decision, Some("answered on a paired device"))?;
         let _ = self.devices.touch(&device.id, Self::now_ms());
         Ok(root)
     }
@@ -807,7 +818,15 @@ impl BridgeCore<'_> {
         device: &PairedDevice,
         sub: crate::services::push_service::PushSubscription,
     ) -> AppResult<()> {
+        // A push makes the desktop POST somewhere on every knock: that is a
+        // privilege, and a read-only device has none (F5, M1).
+        if !device.scope.can_approve_small() {
+            return Err(AppError::InvalidArgument(
+                "push needs the readApprovals scope".into(),
+            ));
+        }
         sub.validate()?;
+        crate::services::push_service::endpoint_is_public(&sub.host())?;
         let host = sub.host();
         self.devices.set_push(&device.id, Some(sub))?;
         if let Some(root) = &self.open_project {
@@ -1176,6 +1195,14 @@ mod tests {
             summary_of("shell", &json!({ "command": ["git", "status"] })),
             "git status"
         );
+        // F5: a secret in the command never reaches the device.
+        assert_eq!(
+            summary_of(
+                "Bash",
+                &json!({ "command": "curl -H 'Authorization: Bearer abc123' https://x" })
+            ),
+            "curl -H 'Authorization: Bearer [redacted]' https://x"
+        );
         // Only low is remotely allowable — medium is the keyboard's too.
         let medium = decision_from(
             &json!({ "id": "m", "ts": 1, "tool": "Edit", "input": { "file_path": "src/a.ts" }, "cwd": "/p" }),
@@ -1374,6 +1401,14 @@ mod tests {
             p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4".into(),
             auth: "BTBZMqHH6r4Tts7J_aSIgg".into(),
         };
+        assert!(
+            core.subscribe(&real, sub.clone()).is_err(),
+            "a read-only device may not make the desktop push anywhere"
+        );
+        devices
+            .set_scope(&real.id, DeviceScope::ReadApprovals)
+            .unwrap();
+        let real = devices.find_by_key("k-phone").unwrap().unwrap();
         core.subscribe(&real, sub.clone()).unwrap();
         let stored = devices.find_by_key("k-phone").unwrap().unwrap();
         assert_eq!(stored.push, Some(sub));

@@ -58,12 +58,25 @@ impl PushSubscription {
             .to_string()
     }
 
-    /// Only https endpoints, only a plausible length — a subscription is
-    /// stored and pushed to, so it is validated at the door.
+    /// Only https endpoints with a real host name, only a plausible length —
+    /// a subscription is stored and pushed to, so it is validated at the
+    /// door. IP literals and `localhost` are refused outright (F5, M1).
     pub fn validate(&self) -> AppResult<()> {
         if !self.endpoint.starts_with("https://") || self.endpoint.len() > 2048 {
             return Err(AppError::InvalidArgument(
                 "push endpoint must be an https URL".into(),
+            ));
+        }
+        let host = self.host();
+        let bare = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(&host);
+        if bare.is_empty()
+            || bare.eq_ignore_ascii_case("localhost")
+            || bare.ends_with(".localhost")
+            || bare.parse::<std::net::IpAddr>().is_ok()
+            || bare.starts_with('[')
+        {
+            return Err(AppError::InvalidArgument(
+                "push endpoint must name a public push service, not an address".into(),
             ));
         }
         let key = decode_b64url(&self.p256dh)?;
@@ -77,6 +90,65 @@ impl PushSubscription {
         }
         Ok(())
     }
+}
+
+/// Push services whose hosts need no resolution check.
+const KNOWN_PUSH_HOSTS: &[&str] = &[
+    "fcm.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "push.services.mozilla.com",
+];
+const KNOWN_PUSH_SUFFIXES: &[&str] = &[".push.apple.com", ".notify.windows.com"];
+
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+                || o[0] == 0)
+        }
+        std::net::IpAddr::V6(v6) => {
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                || (v6.segments()[0] & 0xffc0) == 0xfe80)
+                && v6
+                    .to_ipv4_mapped()
+                    .is_none_or(|v4| is_public_ip(std::net::IpAddr::V4(v4)))
+        }
+    }
+}
+
+/// A known push service, or a host whose every address is public. The
+/// desktop POSTs to this URL on every knock: it must never be a way into
+/// the LAN, loopback or a cloud metadata service (SSRF).
+pub fn endpoint_is_public(host: &str) -> AppResult<()> {
+    let bare = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host);
+    let lower = bare.to_ascii_lowercase();
+    if KNOWN_PUSH_HOSTS.contains(&lower.as_str())
+        || KNOWN_PUSH_SUFFIXES.iter().any(|s| lower.ends_with(s))
+    {
+        return Ok(());
+    }
+    use std::net::ToSocketAddrs;
+    let addrs: Vec<std::net::SocketAddr> = (bare, 443)
+        .to_socket_addrs()
+        .map_err(|e| AppError::InvalidArgument(format!("push host {bare} does not resolve: {e}")))?
+        .collect();
+    if addrs.is_empty() || !addrs.iter().all(|a| is_public_ip(a.ip())) {
+        return Err(AppError::InvalidArgument(format!(
+            "push host {bare} resolves to a private or local address; refused"
+        )));
+    }
+    Ok(())
 }
 
 /// base64url with or without padding, since browsers hand out both.
@@ -195,14 +267,13 @@ impl VapidKey {
             return Self::load_or_create_file();
         };
         match entry.get_password() {
-            Ok(txt) => match Self::from_json(&txt) {
-                Ok(k) => Ok(k),
-                Err(_) => {
-                    let k = Self::generate();
-                    let _ = entry.set_password(&k.to_json());
-                    Ok(k)
-                }
-            },
+            // A value that does not parse is corruption, not "no key": minting
+            // a new one here would silently kill every subscription. Surface it.
+            Ok(txt) => Self::from_json(&txt).map_err(|e| {
+                AppError::Other(format!(
+                    "the push key in the keystore is unreadable ({e}); remove the `agent-console.remote / vapid-key` entry to start over"
+                ))
+            }),
             Err(keyring::Error::NoEntry) => {
                 let k = Self::load_or_create_file()?;
                 if entry.set_password(&k.to_json()).is_ok() {
@@ -372,14 +443,19 @@ pub const PUSH_TTL_SECS: u64 = 120;
 /// callers run it off the UI thread.
 pub fn send(vapid: &VapidKey, sub: &PushSubscription, payload: &[u8]) -> AppResult<Delivery> {
     sub.validate()?;
+    endpoint_is_public(&sub.host())?;
     let body = encrypt(sub, payload)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let auth = vapid.authorization(&sub.endpoint, now, 12 * 3600)?;
+    // No redirects (a 307 into the LAN is the classic SSRF) and never a
+    // downgrade to http.
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .https_only(true)
         .build()
         .map_err(|e| AppError::Other(format!("push client: {e}")))?;
     let resp = client
@@ -501,6 +577,40 @@ mod tests {
         // The key round-trips through its scalar (what the keystore holds).
         let again = VapidKey::from_scalar(&key.scalar_bytes()).unwrap();
         assert_eq!(again.public_b64(), key.public_b64());
+    }
+
+    /// F5 (M1): no address, no localhost, no host that lands in the LAN;
+    /// the known services pass without a lookup.
+    #[test]
+    fn endpoints_that_could_reach_the_lan_are_refused() {
+        let base = PushSubscription {
+            endpoint: "https://fcm.googleapis.com/fcm/send/x".into(),
+            p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4".into(),
+            auth: "BTBZMqHH6r4Tts7J_aSIgg".into(),
+        };
+        base.validate().unwrap();
+        for bad in [
+            "https://127.0.0.1/push",
+            "https://10.0.0.5:8443/push",
+            "https://[::1]/push",
+            "https://localhost/push",
+            "https://metadata.localhost/push",
+        ] {
+            let s = PushSubscription {
+                endpoint: bad.into(),
+                ..base.clone()
+            };
+            assert!(s.validate().is_err(), "{bad}");
+        }
+        assert!(endpoint_is_public("fcm.googleapis.com").is_ok());
+        assert!(endpoint_is_public("web.push.apple.com").is_ok());
+        assert!(endpoint_is_public("wns2-bn1p.notify.windows.com").is_ok());
+        // `localhost` resolves to loopback: refused by resolution too.
+        assert!(endpoint_is_public("localhost").is_err());
+        assert!(!is_public_ip("169.254.169.254".parse().unwrap()));
+        assert!(!is_public_ip("100.100.1.1".parse().unwrap()));
+        assert!(!is_public_ip("192.168.1.9".parse().unwrap()));
+        assert!(is_public_ip("142.250.72.14".parse().unwrap()));
     }
 
     #[test]

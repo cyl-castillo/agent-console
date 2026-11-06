@@ -48,6 +48,7 @@ pub mod projects_service;
 pub mod provenance;
 pub mod push_notifier;
 pub mod push_service;
+pub mod redact;
 pub mod remote_decisions;
 pub mod reviewer_service;
 pub mod rewind_service;
