@@ -125,9 +125,15 @@ authenticates.
    e.g. "Carlos's iPhone").
 5. Desktop registers a **pending** pairing and replies with an encrypted
    `"pending-approval"` frame, then closes.
-6. The human approves on the desktop (Trust → Remote devices), choosing the
-   scope. Only then is the device trusted; the ledger records
-   `remote_device {action: paired, scope}`.
+6. **Both ends derive the same four words** from the Noise handshake hash
+   (`get_handshake_hash()` / `handshakeHash` after message 3, before
+   transport mode): the first four bytes index a fixed list of 256 words
+   (appendix below), joined by `-`. The desktop shows them on the pending
+   pairing; the device MUST show them after pairing. A man-in-the-middle or
+   someone who raced the QR cannot make the two screens match.
+7. The human approves on the desktop (Trust → Remote devices) **only if the
+   four words match**, choosing the scope. Only then is the device trusted;
+   the ledger records `remote_device {action: paired, scope}`.
 
 ### B. Reconnect (paired device)
 
@@ -279,6 +285,14 @@ restriction.
   handshake doesn't authenticate it.
 - Render `tier`, `tierLabel`, `tierReason` and `evidence` exactly as received;
   never offer **allow** when `remoteAllow` is false.
+- Show the four-word authentication string after pairing until the desktop
+  approved the device, and tell the human to approve only if the desktop
+  shows the same four.
+- Verify the desktop's static key against the QR as soon as it arrives
+  (after message 2 of XX), before sending message 3 — your own static key
+  travels in message 3 and should never reach an impostor.
+- Show the host that will be dialled and the desktop key's fingerprint
+  before dialling a scanned or pasted link, and require a tap.
 - An answer is one tap on a visible card after the evidence; no auto-answer,
   no "allow all".
 - A push notification is a knock, not a decision: never offer allow/deny
@@ -289,3 +303,27 @@ restriction.
 This is **v2** (decisions). v1 (voice) is retired; no desktop speaks it.
 Breaking changes bump a version carried in a future `Hello` field. Keep
 desktop and device in lockstep on the suite strings and message shapes.
+
+## Appendix: the 256 words of the authentication string
+
+Byte value → word, in order (0 = `acorn`, 255 = `zinc`). Both
+implementations carry this list verbatim (`src-tauri/src/services/sas.rs`,
+`src/protocol/sas.ts`); known answer: hash bytes `00 01 02 03` →
+`acorn-amber-anchor-apple`.
+
+acorn amber anchor apple arrow aspen atlas badge bagel baker balsa bamboo banjo barley basil beach
+beacon beetle bell berry birch bison blade blossom bolt bonnet bottle bramble brass bread breeze brick
+bridge broom bucket buffalo butter cabin cactus camel candle canoe canvas canyon carbon cargo carrot castle
+cedar cello chalk cherry chess cider cinder clam cliff cloud clover cobalt cocoa comet copper coral
+cotton crane crater cricket crow crystal cumin cypress daisy dawn delta denim desert dial diamond dolphin
+dome donkey dragon drum dune eagle earth echo elder elk ember engine falcon feather fennel fern
+fig flame flint forest fossil fox frost galaxy garden garlic gecko ginger glacier glass globe goose
+granite grape gravel grove harbor harp hawk hazel heron hill honey horizon iceberg indigo iris island
+ivory jade jaguar jasmine jelly juniper kayak kettle kiwi koala lagoon lantern lava lemon lily linen
+lion lizard llama lobster lotus magnet mango maple marble meadow melon meteor mint mirror moss moth
+mountain mule nectar needle nickel noodle nutmeg oak oasis ocean olive onion orange orbit orchid otter
+oyster paddle panda paper parrot peach pearl pebble pepper piano pickle pillow pine planet plum pocket
+poppy pumpkin quail quartz quill rabbit radar raven ribbon river robin rocket rose ruby saddle salmon
+sand sapphire scarf seal shadow shell silver sketch slate snow sparrow spider spruce square stone storm
+sugar summer sunset swan tango teapot thunder tiger timber tomato topaz torch tulip tundra turtle umbrella
+valley velvet violet volcano wagon walnut walrus water willow window winter wolf yarn zebra zephyr zinc

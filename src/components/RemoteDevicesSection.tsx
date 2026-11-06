@@ -185,7 +185,8 @@ export function RemoteDevicesSection() {
             <p className="m-0">
               Scan from the device, or paste the link into it. The offer is one-time and expires in{" "}
               <span className="font-code tabular-nums">{secondsLeft}s</span>; the device then shows
-              up below for your approval.
+              up below for your approval, with four words — approve only if the device shows the
+              same four.
               {status?.bind === "loopback" && (
                 <>
                   {" "}
@@ -217,6 +218,7 @@ export function RemoteDevicesSection() {
               key={p.id}
               label={p.label}
               publicKey={p.publicKey}
+              sas={p.sas}
               proposed={p.proposedScope}
               busy={busy}
               onApprove={(scope) => void run("Couldn't approve", () => approve(p.id, scope))}
@@ -303,6 +305,7 @@ export function RemoteDevicesSection() {
 function PendingRow({
   label,
   publicKey,
+  sas,
   proposed,
   busy,
   onApprove,
@@ -310,6 +313,7 @@ function PendingRow({
 }: {
   label: string;
   publicKey: string;
+  sas: string;
   proposed: DeviceScope;
   busy: boolean;
   onApprove: (scope: DeviceScope) => void;
@@ -325,6 +329,15 @@ function PendingRow({
         wants to pair
       </Chip>
       <span className="min-w-0 flex-1 truncate text-foreground">{label}</span>
+      {sas && (
+        <span
+          className="rounded-1 border border-warn px-1.5 font-code text-caption text-foreground"
+          title="The device shows the same four words after pairing. If they differ, someone else answered the QR — reject."
+          data-testid="remote-pending-sas"
+        >
+          {sas}
+        </span>
+      )}
       <span className="font-code text-caption text-faint-foreground">
         {publicKey.slice(0, 10)}…
       </span>

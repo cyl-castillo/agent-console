@@ -86,6 +86,9 @@ pub struct PendingPairing {
     pub public_key: String,
     pub proposed_scope: DeviceScope,
     pub created_ms: i64,
+    /// F6: the four words the device shows too; approve only if they match.
+    #[serde(default)]
+    pub sas: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -246,6 +249,19 @@ impl PairedDevicesService {
         proposed_scope: DeviceScope,
         now_ms: i64,
     ) -> String {
+        self.propose_pairing_with_sas(label, public_key, proposed_scope, now_ms, "")
+    }
+
+    /// `propose_pairing` with the short authentication string of the
+    /// handshake that produced it.
+    pub fn propose_pairing_with_sas(
+        &self,
+        label: &str,
+        public_key: &str,
+        proposed_scope: DeviceScope,
+        now_ms: i64,
+        sas: &str,
+    ) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         let mut pending = self.pending.lock().unwrap();
         // A pending pairing the human never looked at is not a right to
@@ -261,6 +277,7 @@ impl PairedDevicesService {
             public_key: public_key.to_string(),
             proposed_scope,
             created_ms: now_ms,
+            sas: sas.to_string(),
         });
         id
     }

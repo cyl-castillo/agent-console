@@ -220,7 +220,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop {
                 tokio::time::sleep(Duration::from_millis(250)).await;
                 for p in devices.pending() {
-                    emit(json!({ "event": "pending_pairing", "id": p.id, "label": p.label }));
+                    emit(
+                        json!({ "event": "pending_pairing", "id": p.id, "label": p.label, "sas": p.sas }),
+                    );
                     tokio::time::sleep(Duration::from_secs(approve_after)).await;
                     if let Ok(d) = devices.approve_pairing(&p.id, now_ms()) {
                         let _ = devices.set_scope(&d.id, DeviceScope::ReadApprovals);
