@@ -248,9 +248,16 @@ impl PairedDevicesService {
     ) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         let mut pending = self.pending.lock().unwrap();
+        // A pending pairing the human never looked at is not a right to
+        // wait forever; and the slot is finite (a QR race fills it with
+        // junk otherwise).
+        pending.retain(|p| now_ms.saturating_sub(p.created_ms) < PENDING_TTL_MS);
+        if pending.len() >= PENDING_CAP {
+            pending.remove(0);
+        }
         pending.push(PendingPairing {
             id: id.clone(),
-            label: label.to_string(),
+            label: clean_label(label),
             public_key: public_key.to_string(),
             proposed_scope,
             created_ms: now_ms,
@@ -260,6 +267,14 @@ impl PairedDevicesService {
 
     pub fn pending(&self) -> Vec<PendingPairing> {
         self.pending.lock().unwrap().clone()
+    }
+
+    /// Drop pendings older than the TTL (called by the UI's status reads).
+    pub fn prune_pending(&self, now_ms: i64) {
+        self.pending
+            .lock()
+            .unwrap()
+            .retain(|p| now_ms.saturating_sub(p.created_ms) < PENDING_TTL_MS);
     }
 
     /// Human approved on the desktop: move the pending pairing into the trusted
@@ -298,6 +313,29 @@ impl PairedDevicesService {
     pub fn reject_pairing(&self, pending_id: &str) {
         let mut pending = self.pending.lock().unwrap();
         pending.retain(|p| p.id != pending_id);
+    }
+}
+
+/// How long a pairing waits for the human's click before it is forgotten.
+pub const PENDING_TTL_MS: i64 = 10 * 60 * 1000;
+/// How many pairings may wait at once.
+pub const PENDING_CAP: usize = 8;
+/// The label a device chose, as the UI and the ledger may show it: bounded,
+/// no control or format characters.
+pub fn clean_label(label: &str) -> String {
+    let cleaned: String = label
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+        })
+        .collect();
+    let trimmed = cleaned.trim();
+    let capped: String = trimmed.chars().take(64).collect();
+    if capped.is_empty() {
+        "unnamed device".into()
+    } else {
+        capped
     }
 }
 

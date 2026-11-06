@@ -44,7 +44,9 @@ telling them apart by the first bytes of the connection:
   desktop upgrades it and then runs the *identical* protocol over it. This is
   what a browser (the companion PWA) uses: `new WebSocket("ws://<host:port>/")`
   with `binaryType = "arraybuffer"`. Rules: binary messages only (a text frame
-  ends the connection), no subprotocol, no extensions, any path. The
+  ends the connection), no subprotocol, no extensions, any path; a browser's
+  `Origin` must be `https://agent-console.dev` or a `localhost`/`127.0.0.1`
+  dev server, any other page is refused at the upgrade. The
   WebSocket carries the protocol's **byte stream**: message boundaries mean
   nothing, the length prefix is the framing — concatenate what arrives and
   parse frames from it, exactly as on TCP. `phone-sim --ws` is the reference
@@ -57,6 +59,14 @@ TLS edge in front of the port — `tailscale serve` on the desktop gives a
 phone anywhere; any reverse proxy with a certificate the phone trusts does
 the same. The desktop never terminates TLS itself and never listens on
 `0.0.0.0`.
+
+Bounds the desktop enforces on every connection: ten seconds to say Hello
+and finish the handshake, five minutes of silence between requests once
+authenticated, 32 connections served at once (the rest wait in the accept
+queue), and the pairing offer is spent only by a handshake that completes
+with its PSK — saying "pair" without it does not burn the QR. A pending
+pairing waits ten minutes for the human's click; labels are capped at 64
+characters with control characters removed.
 
 ## Framing
 

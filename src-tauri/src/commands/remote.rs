@@ -78,8 +78,28 @@ pub struct RemoteStatus {
 /// The ledger's window for the gap shown next to the devices.
 const GAP_WINDOW_DAYS: u32 = 7;
 
+/// The gap is read from the whole ledger: cache it briefly so a burst of
+/// status reads (the UI refreshing) does not become a disk read each.
+static GAP_CACHE: std::sync::Mutex<Option<(String, std::time::Instant, DecisionGap)>> =
+    std::sync::Mutex::new(None);
+const GAP_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
 fn gap_of(state: &AppState) -> Option<DecisionGap> {
     let root = project_root(state)?;
+    if let Some((r, at, gap)) = GAP_CACHE.lock().ok().and_then(|g| g.clone()) {
+        if r == root && at.elapsed() < GAP_CACHE_TTL {
+            return Some(gap);
+        }
+    }
+    let gap = gap_uncached(state, &root)?;
+    if let Ok(mut g) = GAP_CACHE.lock() {
+        *g = Some((root, std::time::Instant::now(), gap.clone()));
+    }
+    Some(gap)
+}
+
+fn gap_uncached(state: &AppState, root: &str) -> Option<DecisionGap> {
+    let root = root.to_string();
     let events = state.testigo.list(&root, None, None).ok()?;
     let pending: std::collections::HashSet<String> = state
         .hooks
@@ -97,6 +117,7 @@ fn gap_of(state: &AppState) -> Option<DecisionGap> {
 }
 
 fn status_of(state: &AppState) -> AppResult<RemoteStatus> {
+    state.paired_devices.prune_pending(now_ms());
     let guard = state.remote_server.lock();
     // The identity is loaded on first use; a locked keystore shows up here
     // as `identity_error`, not as a crash and not as a second identity.
@@ -123,7 +144,27 @@ fn lan_ip() -> Option<IpAddr> {
     let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     s.connect("10.255.255.255:1").ok()?;
     let ip = s.local_addr().ok()?.ip();
-    (!ip.is_loopback() && !ip.is_unspecified()).then_some(ip)
+    (!ip.is_loopback() && !ip.is_unspecified() && is_private_v4(ip)).then_some(ip)
+}
+
+/// Only a private (RFC 1918) or CGNAT (100.64/10 — a tailnet) address is a
+/// "LAN": a public or otherwise routed address is never bound by that
+/// choice (F4, M5). The confirmation shows the exact address.
+fn is_private_v4(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_private() || (o[0] == 100 && (64..=127).contains(&o[1]))
+        }
+        IpAddr::V6(_) => false,
+    }
+}
+
+/// The address "listen on the LAN" would bind, so the confirmation can
+/// name it; None when the machine has no private address on its route.
+#[tauri::command(async)]
+pub fn remote_lan_address() -> Option<String> {
+    lan_ip().map(|ip| ip.to_string())
 }
 
 #[tauri::command(async)]
@@ -287,7 +328,9 @@ pub async fn remote_server_start(
     let host: IpAddr = match bind.as_str() {
         "loopback" => IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
         "lan" => lan_ip().ok_or_else(|| {
-            AppError::Other("no LAN address found on this machine (is it on a network?)".into())
+            AppError::Other(
+                "no private LAN address on this machine's route (a public or VPN address is never bound)".into(),
+            )
         })?,
         other => {
             return Err(AppError::InvalidArgument(format!(
@@ -330,9 +373,13 @@ pub async fn remote_server_start(
         pairing,
         devices,
         handler,
-        move |_out| {
-            // Nudge the UI to refresh its pending/devices lists.
-            let _ = notify.emit("remote://changed", ());
+        move |out| {
+            // Nudge the UI only when there is something new for it: a
+            // pairing to approve. A failed or probing connection must not
+            // make the webview re-read the ledger (F4, M4).
+            if matches!(out, Ok(transport::Outcome::PendingApproval { .. })) {
+                let _ = notify.emit("remote://changed", ());
+            }
         },
     ));
     *state.remote_server.lock() = Some(ServerHandle::new(addr, &bind, task));

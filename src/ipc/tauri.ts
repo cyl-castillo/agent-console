@@ -441,6 +441,8 @@ export const ipc = {
   remoteServerStart: (bind: "loopback" | "lan", port?: number) =>
     invoke<RemoteStatus>("remote_server_start", { bind, port }),
   remoteServerStop: () => invoke<RemoteStatus>("remote_server_stop"),
+  /// The private address "listen on the LAN" would bind (null = none).
+  remoteLanAddress: () => invoke<string | null>("remote_lan_address"),
   remotePairingStart: () => invoke<PairingStartResult>("remote_pairing_start"),
   remoteApprove: (pendingId: string, scope?: DeviceScope) =>
     invoke<PairedDevice>("remote_approve", { pendingId, scope }),

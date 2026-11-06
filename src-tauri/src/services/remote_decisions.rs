@@ -607,6 +607,12 @@ pub trait DecisionHandler: Send + Sync + 'static {
         decision: &str,
         reason: Option<&str>,
     ) -> AppResult<()>;
+    /// One request by id, as the desktop sees it NOW — over the whole queue,
+    /// not the capped page, so an old request can still be answered (F4,
+    /// L3). The default searches the page; the console overrides.
+    fn lookup(&self, device: &PairedDevice, id: &str) -> AppResult<Option<RemoteDecision>> {
+        Ok(self.pending(device)?.0.into_iter().find(|d| d.id == id))
+    }
     /// The open project's sessions and where each stands (read-only; every
     /// scope may ask).
     fn sessions(&self, device: &PairedDevice) -> AppResult<Vec<RemoteSession>>;
@@ -682,6 +688,25 @@ impl BridgeCore<'_> {
             out.push(decision_from(req, session, events));
         }
         Ok((out, truncated))
+    }
+
+    /// One request by id over the whole queue (not the capped page).
+    pub fn lookup(&self, id: &str) -> AppResult<Option<RemoteDecision>> {
+        let Some(req) = self
+            .hooks
+            .pending_approvals()
+            .into_iter()
+            .find(|r| r.get("id").and_then(Value::as_str) == Some(id))
+        else {
+            return Ok(None);
+        };
+        let root = self.ledger_root(&req);
+        let events = self.testigo.list(&root, None, None).unwrap_or_default();
+        let sessions = self.sessions.list(&root).unwrap_or_default();
+        let term_id = req.get("termId").and_then(Value::as_str);
+        let session =
+            term_id.and_then(|t| sessions.iter().find(|s| s.id == t).map(|s| s.name.clone()));
+        Ok(Some(decision_from(&req, session, &events)))
     }
 
     /// Answer one request: the hook's answer file, the ledger line with the
@@ -861,6 +886,10 @@ impl DecisionHandler for ConsoleBridge {
             &json!({ "id": id, "decision": decision, "via": "remote", "device": device.label }),
         );
         Ok(())
+    }
+
+    fn lookup(&self, _device: &PairedDevice, id: &str) -> AppResult<Option<RemoteDecision>> {
+        self.with_core(|c| c.lookup(id))
     }
 
     fn sessions(&self, _device: &PairedDevice) -> AppResult<Vec<RemoteSession>> {

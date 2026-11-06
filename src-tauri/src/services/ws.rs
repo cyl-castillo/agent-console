@@ -71,7 +71,15 @@ enum Role {
 /// the header text and whatever followed it (the peer may pipeline its first
 /// frame behind the handshake).
 async fn read_header<S: AsyncRead + Unpin>(inner: &mut S) -> AppResult<(String, Vec<u8>)> {
-    let mut buf: Vec<u8> = Vec::with_capacity(1024);
+    read_header_with_prefix(inner, Vec::new()).await
+}
+
+async fn read_header_with_prefix<S: AsyncRead + Unpin>(
+    inner: &mut S,
+    prefix: Vec<u8>,
+) -> AppResult<(String, Vec<u8>)> {
+    let mut buf: Vec<u8> = prefix;
+    buf.reserve(1024);
     let mut tmp = [0u8; 1024];
     loop {
         if let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
@@ -119,11 +127,40 @@ fn token_present(value: Option<&str>, token: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// The page origins that may open the socket from a browser. Native clients
+/// send no `Origin` and are not subject to this.
+pub fn origin_allowed(origin: &str) -> bool {
+    let o = origin.trim().to_ascii_lowercase();
+    if o == "https://agent-console.dev" || o == "null" {
+        return o != "null";
+    }
+    for host in [
+        "http://localhost",
+        "http://127.0.0.1",
+        "https://localhost",
+        "https://127.0.0.1",
+    ] {
+        if o == host || o.starts_with(&format!("{host}:")) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Server side: consume the HTTP upgrade on `inner`, answer `101`, and hand
 /// back a stream that speaks the protocol's bytes. Any path is accepted (the
 /// page the PWA was served from decides it); no subprotocol is negotiated.
-pub async fn accept<S: AsyncRead + AsyncWrite + Unpin>(mut inner: S) -> AppResult<WsStream<S>> {
-    let (head, rest) = read_header(&mut inner).await?;
+#[cfg_attr(not(test), allow(dead_code))]
+pub async fn accept<S: AsyncRead + AsyncWrite + Unpin>(inner: S) -> AppResult<WsStream<S>> {
+    accept_with_prefix(inner, Vec::new()).await
+}
+
+/// `accept` for a stream whose first bytes were already read by a sniffer.
+pub async fn accept_with_prefix<S: AsyncRead + AsyncWrite + Unpin>(
+    mut inner: S,
+    prefix: Vec<u8>,
+) -> AppResult<WsStream<S>> {
+    let (head, rest) = read_header_with_prefix(&mut inner, prefix).await?;
     let (first, headers) = parse_head(&head);
     let mut parts = first.split_whitespace();
     if parts.next() != Some("GET") || !matches!(parts.nth(1), Some("HTTP/1.1")) {
@@ -141,6 +178,16 @@ pub async fn accept<S: AsyncRead + AsyncWrite + Unpin>(mut inner: S) -> AppResul
     }
     let key = header(&headers, "sec-websocket-key")
         .ok_or_else(|| AppError::Other("websocket: missing Sec-WebSocket-Key".into()))?;
+    // A browser names the page that opened the socket. Only our pages may
+    // (the published app and a dev server); a stray web page in the user's
+    // browser must not reach the listener at all (SEGURIDAD-MOVIL F4, L1).
+    if let Some(origin) = header(&headers, "origin") {
+        if !origin_allowed(origin) {
+            return Err(AppError::Other(format!(
+                "websocket: origin {origin} is not allowed"
+            )));
+        }
+    }
     let response = format!(
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
         accept_key(key)
@@ -420,7 +467,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for WsStream<S> {
                                 "websocket: text frames are not part of this protocol",
                             )))
                         }
-                        OP_PING => this.queue_frame(OP_PONG, &payload),
+                        OP_PING => {
+                            // A peer that pings and never reads must not grow
+                            // our buffer without bound.
+                            if this.wr.len() > MAX_MESSAGE {
+                                return Poll::Ready(Err(io::Error::new(
+                                    io::ErrorKind::WriteZero,
+                                    "websocket: peer floods pings without reading",
+                                )));
+                            }
+                            this.queue_frame(OP_PONG, &payload)
+                        }
                         OP_PONG => {}
                         OP_CLOSE => {
                             this.closed = true;
@@ -512,6 +569,17 @@ mod tests {
             accept_key("dGhlIHNhbXBsZSBub25jZQ=="),
             "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
         );
+    }
+
+    #[test]
+    fn only_our_pages_may_open_the_socket_from_a_browser() {
+        assert!(origin_allowed("https://agent-console.dev"));
+        assert!(origin_allowed("http://localhost:5174"));
+        assert!(origin_allowed("http://127.0.0.1:5173"));
+        assert!(!origin_allowed("https://evil.example"));
+        assert!(!origin_allowed("http://agent-console.dev"));
+        assert!(!origin_allowed("https://agent-console.dev.evil.com"));
+        assert!(!origin_allowed("null"));
     }
 
     #[test]

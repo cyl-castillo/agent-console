@@ -193,20 +193,72 @@ async fn handshake_over_stream<S: AsyncRead + AsyncWrite + Unpin>(
 /// Takes the stream BY VALUE and owns it for the connection's lifetime: on
 /// return — success OR error (e.g. a refused/revoked device) — the stream is
 /// dropped, closing it so the peer sees a clean EOF instead of hanging.
+#[cfg_attr(not(test), allow(dead_code))]
 pub async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
-    mut stream: S,
+    stream: S,
     pairing: &PairingService,
     devices: &PairedDevicesService,
     handler: Arc<dyn DecisionHandler>,
     now_ms: i64,
 ) -> AppResult<Outcome> {
-    let hello_bytes = read_frame_required(&mut stream).await?;
+    serve_connection_with(
+        stream,
+        pairing,
+        devices,
+        handler,
+        now_ms,
+        &Limits::default(),
+    )
+    .await
+}
+
+/// Bounds on one connection (SEGURIDAD-MOVIL F4, M3): an unauthenticated
+/// peer gets `setup` to say Hello and finish the handshake; an authenticated
+/// one may stay quiet `idle` between requests. Tests pass small values.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    pub setup: std::time::Duration,
+    pub idle: std::time::Duration,
+    /// Connections served at once; the rest wait in the accept queue.
+    pub concurrent: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            setup: std::time::Duration::from_secs(10),
+            idle: std::time::Duration::from_secs(5 * 60),
+            concurrent: 32,
+        }
+    }
+}
+
+fn timed_out(what: &str) -> AppError {
+    AppError::Other(format!("{what}: the peer did not finish in time"))
+}
+
+pub async fn serve_connection_with<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    pairing: &PairingService,
+    devices: &PairedDevicesService,
+    handler: Arc<dyn DecisionHandler>,
+    now_ms: i64,
+    limits: &Limits,
+) -> AppResult<Outcome> {
+    let hello_bytes = tokio::time::timeout(limits.setup, read_frame_required(&mut stream))
+        .await
+        .map_err(|_| timed_out("hello"))??;
     let hello: Hello = serde_json::from_slice(&hello_bytes)
         .map_err(|e| AppError::Other(format!("bad hello: {e}")))?;
     match hello {
-        Hello::Pair => serve_pairing(&mut stream, pairing, devices, now_ms).await,
+        Hello::Pair => tokio::time::timeout(
+            limits.setup,
+            serve_pairing(&mut stream, pairing, devices, now_ms),
+        )
+        .await
+        .map_err(|_| timed_out("pairing"))?,
         Hello::Reconnect { key } => {
-            serve_reconnect(&mut stream, &key, pairing, devices, handler).await
+            serve_reconnect(&mut stream, &key, pairing, devices, handler, limits).await
         }
     }
 }
@@ -220,8 +272,11 @@ async fn serve_pairing<S: AsyncRead + AsyncWrite + Unpin>(
     devices: &PairedDevicesService,
     now_ms: i64,
 ) -> AppResult<Outcome> {
-    let hs = pairing.pairing_responder(now_ms)?;
+    let (hs, generation) = pairing.pairing_responder(now_ms)?;
     let hs = handshake_over_stream(stream, hs, false).await?;
+    // Only a peer that held the PSK gets here: the one-time offer is spent
+    // now, not when someone merely said "pair".
+    pairing.consume_offer(generation);
     let phone_pub = hs
         .get_remote_static()
         .ok_or_else(|| AppError::Other("no device key after pairing handshake".into()))?
@@ -252,6 +307,7 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
     pairing: &PairingService,
     devices: &PairedDevicesService,
     handler: Arc<dyn DecisionHandler>,
+    limits: &Limits,
 ) -> AppResult<Outcome> {
     // The auth gate: a revoked/unknown key matches no device → refuse before any
     // crypto work.
@@ -263,12 +319,20 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
         .map_err(|e| AppError::Other(format!("decode device key: {e}")))?;
 
     let hs = pairing.reconnect_responder(&device_pub)?;
-    let hs = handshake_over_stream(stream, hs, false).await?;
+    let hs = tokio::time::timeout(limits.setup, handshake_over_stream(stream, hs, false))
+        .await
+        .map_err(|_| timed_out("handshake"))??;
     let mut t = hs
         .into_transport_mode()
         .map_err(|e| AppError::Other(format!("transport: {e}")))?;
 
-    while let Some(ct) = read_frame(stream).await? {
+    loop {
+        let Some(ct) = tokio::time::timeout(limits.idle, read_frame(stream))
+            .await
+            .map_err(|_| timed_out("request"))??
+        else {
+            break;
+        };
         let plain = decrypt(&mut t, &ct)?;
         let reply = match serde_json::from_slice::<ClientMessage>(&plain) {
             Ok(ClientMessage::Ping) => ServerMessage::Pong,
@@ -295,14 +359,9 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
                 let res = tokio::task::spawn_blocking(move || -> AppResult<String> {
                     // The gate reads the request as the desktop sees it NOW —
                     // never the tier the device claims.
-                    let item = h
-                        .pending(&dev)?
-                        .0
-                        .into_iter()
-                        .find(|d| d.id == id)
-                        .ok_or_else(|| {
-                            AppError::InvalidArgument("that request is no longer pending".into())
-                        })?;
+                    let item = h.lookup(&dev, &id)?.ok_or_else(|| {
+                        AppError::InvalidArgument("that request is no longer pending".into())
+                    })?;
                     gate(dev.scope, &item, &decision)?;
                     h.decide(&dev, &id, &decision, reason.as_deref())?;
                     Ok(id)
@@ -436,62 +495,152 @@ pub async fn run_listener<F>(
 ) where
     F: Fn(AppResult<Outcome>) + Send + Sync + Clone + 'static,
 {
+    run_listener_with(
+        listener,
+        pairing,
+        devices,
+        handler,
+        on_done,
+        Limits::default(),
+    )
+    .await
+}
+
+pub async fn run_listener_with<F>(
+    listener: TcpListener,
+    pairing: Arc<PairingService>,
+    devices: Arc<PairedDevicesService>,
+    handler: Arc<dyn DecisionHandler>,
+    on_done: F,
+    limits: Limits,
+) where
+    F: Fn(AppResult<Outcome>) + Send + Sync + Clone + 'static,
+{
+    // At most `concurrent` connections in flight: a flood waits in the
+    // kernel's accept queue instead of spawning a task per socket.
+    let slots = Arc::new(tokio::sync::Semaphore::new(limits.concurrent.max(1)));
     loop {
+        let permit = match slots.clone().acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => return,
+        };
         let (stream, _peer) = match listener.accept().await {
             Ok(pair) => pair,
-            Err(_) => continue,
+            Err(_) => {
+                // EMFILE and friends: back off instead of spinning hot.
+                drop(permit);
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                continue;
+            }
         };
         let pairing = pairing.clone();
         let devices = devices.clone();
         let handler = handler.clone();
         let on_done = on_done.clone();
         tokio::spawn(async move {
-            let out = serve_sniffed(stream, &pairing, &devices, handler).await;
+            let out = serve_sniffed(stream, &pairing, &devices, handler, &limits).await;
+            drop(permit);
             on_done(out);
         });
     }
 }
 
-/// How long a peer has to send its first bytes before we treat the
-/// connection as the raw protocol (a browser sends its whole request at
-/// once; a raw client sends a 4-byte length first).
-const SNIFF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// One listener, two transports: peek the first bytes without consuming
-/// them; an HTTP `GET` is a browser (the PWA) and is upgraded to a
-/// WebSocket, anything else is the raw framed protocol. Both then run the
-/// same `serve_connection` — same Hello, same Noise, same gate.
+/// One listener, two transports: read the first four bytes (bounded by
+/// `limits.setup`); an HTTP `GET` is a browser (the PWA) and is upgraded to
+/// a WebSocket, anything else is the raw framed protocol. The bytes read
+/// are handed back to whichever transport runs, so nothing is lost. Both
+/// then run the same `serve_connection` — same Hello, same Noise, same gate.
 async fn serve_sniffed(
-    stream: tokio::net::TcpStream,
+    mut stream: tokio::net::TcpStream,
     pairing: &PairingService,
     devices: &PairedDevicesService,
     handler: Arc<dyn DecisionHandler>,
+    limits: &Limits,
 ) -> AppResult<Outcome> {
-    let mut first = [0u8; 4];
-    let is_http = tokio::time::timeout(SNIFF_TIMEOUT, async {
-        loop {
-            let n = match stream.peek(&mut first).await {
-                Ok(n) => n,
-                Err(_) => return false,
-            };
+    use tokio::io::AsyncReadExt;
+    let mut first = Vec::with_capacity(4);
+    let read_prefix = async {
+        let mut byte = [0u8; 1];
+        while first.len() < 4 {
+            let n = stream.read(&mut byte).await?;
             if n == 0 {
-                return false;
+                break;
             }
-            if !crate::services::ws::could_be_http(&first[..n]) {
-                return crate::services::ws::looks_like_http(&first[..n]);
+            first.push(byte[0]);
+            if !crate::services::ws::could_be_http(&first) {
+                break;
             }
-            // Fewer than 4 bytes so far and still a prefix of `GET `: wait
-            // for the rest; the readiness wake comes with the next bytes.
-            tokio::task::yield_now().await;
         }
-    })
-    .await
-    .unwrap_or(false);
-    if is_http {
-        let ws = crate::services::ws::accept(stream).await?;
-        serve_connection(ws, pairing, devices, handler, now_ms()).await
+        Ok::<(), std::io::Error>(())
+    };
+    tokio::time::timeout(limits.setup, read_prefix)
+        .await
+        .map_err(|_| timed_out("first bytes"))??;
+    if first.is_empty() {
+        return Err(AppError::Other("the peer sent nothing".into()));
+    }
+    if crate::services::ws::looks_like_http(&first) {
+        let ws = tokio::time::timeout(
+            limits.setup,
+            crate::services::ws::accept_with_prefix(stream, first),
+        )
+        .await
+        .map_err(|_| timed_out("websocket upgrade"))??;
+        serve_connection_with(ws, pairing, devices, handler, now_ms(), limits).await
     } else {
-        serve_connection(stream, pairing, devices, handler, now_ms()).await
+        let prefixed = Prefixed {
+            prefix: first,
+            pos: 0,
+            inner: stream,
+        };
+        serve_connection_with(prefixed, pairing, devices, handler, now_ms(), limits).await
+    }
+}
+
+/// A stream whose first bytes were already read by the sniffer: they are
+/// replayed before the inner stream is consulted; writes pass through.
+struct Prefixed<S> {
+    prefix: Vec<u8>,
+    pos: usize,
+    inner: S,
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Prefixed<S> {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        if this.pos < this.prefix.len() {
+            let n = buf.remaining().min(this.prefix.len() - this.pos);
+            buf.put_slice(&this.prefix[this.pos..this.pos + n]);
+            this.pos += n;
+            return std::task::Poll::Ready(Ok(()));
+        }
+        std::pin::Pin::new(&mut this.inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Prefixed<S> {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        data: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_write(cx, data)
+    }
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::pin::Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
     }
 }
 
@@ -1218,6 +1367,115 @@ mod tests {
 
     /// The QR's deep link round-trips through the reference parser — the
     /// desktop, phone-sim and desktop-sim all build it with this one helper.
+    /// SEGURIDAD-MOVIL F4 (M3): a peer that says "pair" without the PSK —
+    /// anyone who can reach the port — does not burn the QR; the real phone
+    /// still pairs with the same offer afterwards.
+    #[tokio::test]
+    async fn a_psk_less_pair_attempt_does_not_spend_the_offer() {
+        let _env = crate::test_support::lock_env();
+        isolated_data_dir();
+        let now = now_ms();
+        let pairing = Arc::new(PairingService::load().unwrap());
+        let devices = Arc::new(PairedDevicesService::new());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let offer = pairing.start_pairing(now, 60);
+        let server = tokio::spawn(run_listener_with(
+            listener,
+            pairing.clone(),
+            devices.clone(),
+            StubHandler::new(),
+            move |_out| {},
+            Limits {
+                setup: std::time::Duration::from_secs(2),
+                ..Limits::default()
+            },
+        ));
+        // The attacker: a pair Hello and a handshake with the wrong PSK.
+        let mut wrong = offer.clone();
+        wrong.psk = BASE64URL_NOPAD.encode(&[7u8; 32]);
+        let mut impostor = PhoneClient::new().unwrap();
+        let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+        assert!(impostor.pair(&mut sock, &wrong, "junk").await.is_err());
+        drop(sock);
+        // And one that only says hello, then hangs: closed by the setup bound.
+        let mut hang = tokio::net::TcpStream::connect(addr).await.unwrap();
+        write_frame(&mut hang, br#"{"type":"pair"}"#).await.unwrap();
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let mut b = [0u8; 1];
+            hang.read(&mut b).await
+        })
+        .await
+        .expect("the desktop closes an idle unauthenticated peer");
+        assert!(matches!(closed, Ok(0) | Err(_)));
+        // The legitimate phone pairs with the very same offer.
+        let mut phone = PhoneClient::new().unwrap();
+        let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+        phone
+            .pair(&mut sock, &offer, "Carlos iPhone")
+            .await
+            .unwrap();
+        assert_eq!(devices.pending().len(), 1);
+        // And now it is spent: a second completion with it is refused.
+        let mut again = PhoneClient::new().unwrap();
+        let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+        assert!(again.pair(&mut sock, &offer, "replay").await.is_err());
+        server.abort();
+    }
+
+    /// F4 (M3): the listener serves at most `concurrent` connections at
+    /// once; a flood of silent sockets waits in the accept queue and the
+    /// legitimate client is still served within the setup bound.
+    #[tokio::test]
+    async fn a_flood_of_silent_sockets_does_not_starve_a_real_client() {
+        let _env = crate::test_support::lock_env();
+        isolated_data_dir();
+        let now = now_ms();
+        let pairing = Arc::new(PairingService::load().unwrap());
+        let devices = Arc::new(PairedDevicesService::new());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let offer = pairing.start_pairing(now, 60);
+        let server = tokio::spawn(run_listener_with(
+            listener,
+            pairing.clone(),
+            devices.clone(),
+            StubHandler::new(),
+            move |_out| {},
+            Limits {
+                setup: std::time::Duration::from_millis(500),
+                idle: std::time::Duration::from_secs(5),
+                concurrent: 4,
+            },
+        ));
+        let mut flood = Vec::new();
+        for _ in 0..40 {
+            if let Ok(s) = tokio::net::TcpStream::connect(addr).await {
+                flood.push(s); // silent: never sends a byte
+            }
+        }
+        let started = std::time::Instant::now();
+        let mut phone = PhoneClient::new().unwrap();
+        let mut sock = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            phone.pair(&mut sock, &offer, "Carlos iPhone"),
+        )
+        .await
+        .expect("served despite the flood")
+        .unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        assert_eq!(devices.pending().len(), 1);
+        drop(flood);
+        server.abort();
+    }
+
     #[test]
     fn offer_uri_round_trips_through_the_parser() {
         let kp = crate::services::secure_channel::generate_static().unwrap();

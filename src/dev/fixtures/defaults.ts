@@ -1530,6 +1530,7 @@ export const defaultFixtures: FixtureMap = {
     addr: args.bind === "lan" ? "192.168.1.9:4870" : "127.0.0.1:4870",
   }),
   remote_server_stop: remoteStatus(false),
+  remote_lan_address: "192.168.1.9",
   remote_pairing_start: {
     uri: "agentconsole://pair?d=eyJkZW1vIjp0cnVlfQ&a=127.0.0.1:4870",
     qrSvg:

@@ -282,6 +282,7 @@ pub fn run() {
             commands::remote::remote_set_scope,
             commands::remote::remote_server_start,
             commands::remote::remote_server_stop,
+            commands::remote::remote_lan_address,
             commands::fanout::fanout_start,
             commands::fanout::fanout_list,
             commands::fanout::fanout_get,
