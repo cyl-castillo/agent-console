@@ -42,10 +42,20 @@ fn project_root(state: &AppState) -> Option<String> {
         .map(|p| p.root.to_string_lossy().to_string())
 }
 
+/// Where `remote_*` lines go when no project is open: a ledger of the
+/// machine, so "every act goes to the ledger" holds without a project
+/// (F5, L6).
+pub fn global_ledger_root() -> String {
+    dirs::data_local_dir()
+        .map(|d| d.join("agent-console").join("global"))
+        .unwrap_or_else(|| std::path::PathBuf::from("agent-console-global"))
+        .to_string_lossy()
+        .to_string()
+}
+
 fn witness(state: &AppState, kind: &str, payload: serde_json::Value) {
-    if let Some(root) = project_root(state) {
-        let _ = state.testigo.on_remote(&root, now_ms(), kind, payload);
-    }
+    let root = project_root(state).unwrap_or_else(global_ledger_root);
+    let _ = state.testigo.on_remote(&root, now_ms(), kind, payload);
 }
 
 #[derive(Serialize)]
