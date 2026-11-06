@@ -26,12 +26,15 @@ struct ActiveOffer {
     psk: Vec<u8>,
     created_ms: i64,
     ttl_secs: u64,
+    /// Which `start_pairing` minted it (monotonic).
+    generation: u64,
 }
 
 pub struct PairingService {
     identity: StaticKeypair,
     active: Mutex<Option<ActiveOffer>>,
     store: IdentityStore,
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl PairingService {
@@ -39,6 +42,7 @@ impl PairingService {
         Self {
             identity,
             active: Mutex::new(None),
+            generation: std::sync::atomic::AtomicU64::new(0),
             store: IdentityStore::File,
         }
     }
@@ -71,27 +75,45 @@ impl PairingService {
     /// Mint a fresh pairing offer (the QR payload) and arm the one-time secret.
     pub fn start_pairing(&self, now_ms: i64, ttl_secs: u64) -> PairingOffer {
         let (offer, psk) = new_offer(&self.identity.public, now_ms, ttl_secs);
+        let generation = self
+            .generation
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
         *self.active.lock().unwrap() = Some(ActiveOffer {
             psk,
             created_ms: now_ms,
             ttl_secs,
+            generation,
         });
         offer
     }
 
     /// Build the responder handshake for an in-flight first-contact pairing.
-    /// Consumes the active offer (one-time) and refuses an expired one.
-    pub fn pairing_responder(&self, now_ms: i64) -> AppResult<HandshakeState> {
-        let offer = self
-            .active
-            .lock()
-            .unwrap()
-            .take()
+    /// The offer stays armed until a handshake actually completes with its
+    /// PSK (`consume_offer`): a peer that merely says "pair" and cannot
+    /// finish — anyone who can reach the port — must not burn the QR the
+    /// human is holding up (SEGURIDAD-MOVIL F4, M3). Returns the offer's
+    /// generation so the consumer can tell it from a newer one.
+    pub fn pairing_responder(&self, now_ms: i64) -> AppResult<(HandshakeState, u64)> {
+        let guard = self.active.lock().unwrap();
+        let offer = guard
+            .as_ref()
             .ok_or_else(|| AppError::Other("no active pairing offer".into()))?;
         if now_ms.saturating_sub(offer.created_ms) > (offer.ttl_secs as i64) * 1000 {
             return Err(AppError::Other("pairing offer expired".into()));
         }
-        build_responder(&self.identity.private, &offer.psk)
+        let hs = build_responder(&self.identity.private, &offer.psk)?;
+        Ok((hs, offer.generation))
+    }
+
+    /// A handshake completed with the offer of `generation`: it is one-time,
+    /// so it is gone now. A newer offer (the human clicked again) is left
+    /// alone.
+    pub fn consume_offer(&self, generation: u64) {
+        let mut guard = self.active.lock().unwrap();
+        if guard.as_ref().map(|o| o.generation) == Some(generation) {
+            *guard = None;
+        }
     }
 
     /// Build the responder handshake for a reconnect of an already-paired device
@@ -179,7 +201,7 @@ mod tests {
         let offer = desktop.start_pairing(now, 60);
         let mut phone = PhoneClient::new();
         let initiator = phone.pair_initiator(&offer);
-        let responder = desktop.pairing_responder(now).unwrap();
+        let responder = desktop.pairing_responder(now).unwrap().0;
         let (init_hs, resp_hs) =
             drive_handshake(initiator, responder).expect("pairing handshake succeeds");
 
@@ -238,7 +260,7 @@ mod tests {
         let offer = desktop.start_pairing(now, 60);
         let mut phone = PhoneClient::new();
         let init = phone.pair_initiator(&offer);
-        let resp = desktop.pairing_responder(now).unwrap();
+        let resp = desktop.pairing_responder(now).unwrap().0;
         let (_i, resp_hs) = drive_handshake(init, resp).unwrap();
         let phone_pub_b64 = BASE64URL_NOPAD.encode(resp_hs.get_remote_static().unwrap());
         let pid = devices.propose_pairing("phone", &phone_pub_b64, DeviceScope::Full, now);

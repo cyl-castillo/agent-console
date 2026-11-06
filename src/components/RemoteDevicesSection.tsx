@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ipc } from "../ipc/tauri";
 import { confirmDialog } from "../stores/confirmStore";
 import { useRemoteStore } from "../stores/remoteStore";
 import { useToastStore } from "../stores/toastStore";
@@ -64,11 +65,20 @@ export function RemoteDevicesSection() {
 
   const start = async (bind: "loopback" | "lan") => {
     if (bind === "lan") {
+      // F4 (M5): the human sees the exact address before it is bound; a
+      // public or VPN address is never offered.
+      const addr = await ipc.remoteLanAddress().catch(() => null);
+      if (!addr) {
+        showToast(
+          "No private LAN address on this machine's route — nothing to listen on (a public or VPN address is never bound).",
+          "error",
+        );
+        return;
+      }
       const ok = await confirmDialog({
-        title: "Listen on the LAN",
-        message:
-          "Every device on this network will be able to reach the listener. Only devices you pair here can speak to it (Noise, pinned keys), and a dangerous action is never approved from a device. The choice is recorded in the ledger.",
-        confirmLabel: "Listen on the LAN",
+        title: `Listen on ${addr}`,
+        message: `The listener will bind ${addr} — the private address this machine's network route uses — and every device on that network will be able to reach it. Only devices you pair here can speak to it (Noise, pinned keys), and only read-only requests can be allowed from a device. The choice is recorded in the ledger.`,
+        confirmLabel: `Listen on ${addr}`,
         danger: true,
       });
       if (!ok) return;
