@@ -4,13 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0b10" />
+    <!-- SEGURIDAD-MOVIL F3: no script but ours, no frame, no object; the
+         socket to the desktop is ws:/wss: (Noise above it); upgrade any
+         stray http reference. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests"
+    />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <title>Agent Console Companion</title>
     <meta name="description" content="Answer the decisions waiting on your agent-console desktop, with their evidence, from your phone. End-to-end encrypted; the agent stays on your machine." />
-    <script type="module" crossorigin src="/app/assets/index-Bw7wZPnI.js"></script>
-    <link rel="stylesheet" crossorigin href="/app/assets/index-CQ9gmuIZ.css">
+    <script type="module" crossorigin src="/app/assets/index-adDPZ5rA.js"></script>
+    <link rel="stylesheet" crossorigin href="/app/assets/index-uX7AgaZC.css">
   </head>
   <body>
     <div id="root"></div>
