@@ -193,6 +193,8 @@ pub fn run() {
             commands::hooks::hooks_install,
             commands::hooks::hooks_uninstall,
             commands::hooks::hooks_start_watcher,
+            commands::hooks::sandbox_status,
+            commands::hooks::sandbox_enable,
             commands::hooks::approval_respond,
             commands::permissions::permissions_snapshot,
             commands::permissions::permissions_add,

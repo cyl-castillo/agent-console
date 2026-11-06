@@ -52,6 +52,7 @@ pub mod remote_decisions;
 pub mod reviewer_service;
 pub mod rewind_service;
 pub mod roundtable_service;
+pub mod sandbox_service;
 pub mod scheduler_service;
 pub mod secure_channel;
 pub mod semantic_index;

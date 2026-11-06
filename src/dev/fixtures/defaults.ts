@@ -1515,6 +1515,14 @@ export const defaultFixtures: FixtureMap = {
   pr_autofix: undefined,
   // F8: the remote-decisions listener. Off by default; the spec starts it and
   // drives a pending pairing through `remote://changed`.
+  // SEGURIDAD-MOVIL F2: the engine's sandbox, off in the fixture so the
+  // Permissions section shows the recommendation; enabling flips it.
+  sandbox_status: { enabled: null, projectSettings: `${ROOT}/.claude/settings.json` },
+  sandbox_enable: {
+    enabled: true,
+    source: "project",
+    projectSettings: `${ROOT}/.claude/settings.json`,
+  },
   remote_status: remoteStatus(false),
   remote_server_start: (args: Record<string, unknown>) => ({
     ...remoteStatus(true),

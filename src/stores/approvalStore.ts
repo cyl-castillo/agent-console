@@ -4,6 +4,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ipc } from "../ipc/tauri";
 import { useAgentStatusStore } from "./agentStatusStore";
 import { useToastStore } from "./toastStore";
+import { useDeclinesStore } from "./declinesStore";
+import { useSessionStore } from "./sessionStore";
 import { notify, windowIsFocused } from "../lib/notify";
 import type { ApprovalRequest } from "../types/domain";
 
@@ -106,6 +108,39 @@ export async function attachApprovalListener(): Promise<UnlistenFn> {
   const un = await listen<ApprovalRequest>("approval://request", (e) => {
     useApprovalStore.getState()._enqueue(e.payload);
   });
+  // SEGURIDAD-MOVIL F2: an answer file the console never wrote reached the
+  // hook. The Rust side denied it, recorded it and interrupted the session;
+  // here it becomes a card to acknowledge and a loud toast, and the stale
+  // request leaves the queue.
+  const unForged = await listen<{
+    approvalId?: string;
+    tool?: string;
+    seen?: string;
+    expected?: string;
+    termId?: string | null;
+  }>("approval://forged", (e) => {
+    const p = e.payload ?? {};
+    if (p.approvalId) {
+      useApprovalStore.setState((s) => ({ queue: s.queue.filter((r) => r.id !== p.approvalId) }));
+    }
+    useToastStore
+      .getState()
+      .show(
+        `Something that was not you answered an approval (${p.tool ?? "tool"}: ${p.seen ?? "?"}). Denied and the session interrupted.`,
+        "error",
+      );
+    useDeclinesStore.getState().add({
+      seq: Date.now(),
+      ts: Date.now(),
+      caller: "agent-console",
+      kind: "escalate",
+      reason: `An approval for ${p.tool ?? "a tool"} was answered by something that was not you (it wrote "${p.seen ?? "?"}"; the console had written ${p.expected ?? "nothing"}). The answer was denied and the session interrupted. The agent's own shell is the only thing running as you that could do this.`,
+      suggestion:
+        "Turn the agent sandbox on (Settings → Trust → agent sandbox) so this cannot happen, then review what the session was doing.",
+      session: p.termId ?? undefined,
+      project: useSessionStore.getState().project?.root ?? "",
+    });
+  });
   // The hook gave up waiting on us (timeout, or an explicit "ask"): the CLI
   // decides now, in its own prompt. Drop the stale modal entry and say so —
   // an answer clicked here after this point would go nowhere.
@@ -139,6 +174,7 @@ export async function attachApprovalListener(): Promise<UnlistenFn> {
   return () => {
     window.removeEventListener("focus", onFocus);
     un();
+    unForged();
     unDeferred();
     unResolved();
   };

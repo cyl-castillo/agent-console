@@ -1035,6 +1035,40 @@ fn record_if_deferred(
     }
 }
 
+/// SEGURIDAD-MOVIL F2: before honouring an answer, tell the console what we
+/// picked up. The console knows what it wrote; an answer it never wrote was
+/// forged by something running as the user (the agent's own shell), and
+/// becomes a deny here. A console we cannot reach within the budget keeps
+/// the answer as is — availability over a second net the sandbox already
+/// provides when it is on.
+fn confirm_pickup(decision: Option<Value>, id: &str) -> Option<Value> {
+    let res = decision?;
+    let d = res.get("decision").and_then(|v| v.as_str()).unwrap_or("");
+    if d != "allow" && d != "deny" {
+        return Some(res);
+    }
+    let Some((port, token)) = inject_target() else {
+        return Some(res);
+    };
+    let body = json!({ "id": id, "decision": d }).to_string();
+    match post_loopback(
+        "/approval/pickup",
+        port,
+        &token,
+        &body,
+        Duration::from_millis(PICKUP_BUDGET_MS),
+    ) {
+        Some(v) if v.get("forged").and_then(|f| f.as_bool()) == Some(true) => Some(json!({
+            "id": id,
+            "decision": "deny",
+            "reason": "agent-console denied this: the approval file was not written by the console (forged)",
+        })),
+        _ => Some(res),
+    }
+}
+
+const PICKUP_BUDGET_MS: u64 = 400;
+
 /// Legacy approvals bridge (PreToolUse): fires on EVERY tool call. Kept for
 /// Codex, whose hooks table mirrors Claude's but has no PermissionRequest.
 fn run_pretooluse(session_dir: &Path) {
@@ -1053,7 +1087,7 @@ fn run_pretooluse(session_dir: &Path) {
         now_ms(),
         timeout_ms,
     );
-    let decision = await_decision(session_dir, &id, &req, timeout_ms);
+    let decision = confirm_pickup(await_decision(session_dir, &id, &req, timeout_ms), &id);
     record_if_deferred(
         session_dir,
         decision.as_ref(),
@@ -1083,7 +1117,7 @@ fn run_permissionrequest(session_dir: &Path) {
         now_ms(),
         timeout_ms,
     );
-    let decision = await_decision(session_dir, &id, &req, timeout_ms);
+    let decision = confirm_pickup(await_decision(session_dir, &id, &req, timeout_ms), &id);
     record_if_deferred(
         session_dir,
         decision.as_ref(),
@@ -2688,6 +2722,65 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("not reachable"));
+    }
+
+    /// A forged answer (the console says it never wrote it) becomes a deny;
+    /// a genuine one passes through; an unreachable console keeps it.
+    #[test]
+    fn confirm_pickup_turns_a_forged_answer_into_a_deny() {
+        fn server(forged: bool) -> u16 {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            std::thread::spawn(move || {
+                let (mut s, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]);
+                assert!(
+                    req.starts_with("POST /approval/pickup HTTP/1.1\r\n"),
+                    "{req}"
+                );
+                let body = format!(r#"{{"ok":true,"forged":{forged}}}"#);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                s.write_all(resp.as_bytes()).unwrap();
+            });
+            port
+        }
+        fn write_port_file_for_test(dir: &Path, port: u16, token: &str) {
+            let d = dir.join("agent-console");
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(
+                d.join("inject-port.json"),
+                json!({ "port": port, "token": token }).to_string(),
+            )
+            .unwrap();
+        }
+        static PICKUP_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = PICKUP_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("hb-pickup-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &dir);
+        let allow = json!({ "id": "x", "decision": "allow" });
+        // Forged → deny.
+        write_port_file_for_test(&dir, server(true), "sekrit");
+        let out = confirm_pickup(Some(allow.clone()), "x").unwrap();
+        assert_eq!(out["decision"], "deny");
+        assert!(out["reason"].as_str().unwrap().contains("forged"));
+        // Genuine → unchanged.
+        write_port_file_for_test(&dir, server(false), "sekrit");
+        assert_eq!(confirm_pickup(Some(allow.clone()), "x").unwrap(), allow);
+        // Unreachable console → unchanged.
+        write_port_file_for_test(&dir, 1, "sekrit");
+        assert_eq!(confirm_pickup(Some(allow.clone()), "x").unwrap(), allow);
+        // No answer stays no answer.
+        assert!(confirm_pickup(None, "x").is_none());
     }
 
     #[test]

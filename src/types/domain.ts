@@ -621,6 +621,15 @@ export interface RemoteStatus {
   gap?: DecisionGap;
 }
 
+/// SEGURIDAD-MOVIL F2: the engine's sandbox for the open project (mirrors
+/// Rust `SandboxStatus`). On, the agent's shell cannot write the console's
+/// answer files: a forged approval is impossible instead of detected.
+export interface SandboxStatus {
+  enabled?: boolean | null;
+  source?: "project-local" | "project" | "user" | string;
+  projectSettings: string;
+}
+
 /// F6: the project's approval policy as code (mirrors the Rust PolicyStatus).
 export interface PolicyRule {
   effect: "allow" | "ask" | "block" | string;
