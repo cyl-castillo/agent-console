@@ -479,6 +479,9 @@ enum Route {
     /// One relayed `tools/call` from `hook-bridge console-mcp` (the console
     /// as a server an agent drives).
     Console,
+    /// SEGURIDAD-MOVIL F2: the hook reports the answer it picked up; the
+    /// console says whether it wrote it.
+    ApprovalPickup,
 }
 
 /// Read one request: request line + headers, then exactly the body. Returns
@@ -501,6 +504,7 @@ fn read_request(stream: &mut TcpStream, expected_token: &str) -> Option<(Route, 
             Some(p) if is_post && (p == "/console" || p.starts_with("/console?")) => {
                 Some(Route::Console)
             }
+            Some(p) if is_post && p == "/approval/pickup" => Some(Route::ApprovalPickup),
             _ => None,
         }
     };
@@ -617,11 +621,38 @@ fn serve_console(stream: &mut TcpStream, app: &tauri::AppHandle, body: &str) {
     respond_json(stream, &answer.to_string());
 }
 
+/// `{"id","decision"}` from the hook → `{"ok":true,"forged":bool}`. On a
+/// forged answer the console records, interrupts and tells the hook to
+/// deny instead.
+fn serve_approval_pickup(stream: &mut TcpStream, app: &tauri::AppHandle, body: &str) {
+    let v: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => {
+            respond_json(stream, r#"{"ok":false}"#);
+            return;
+        }
+    };
+    let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
+    let decision = v.get("decision").and_then(|x| x.as_str()).unwrap_or("");
+    let forged = app.state::<AppState>().hooks.report_pickup(id, decision);
+    if let Some(expected) = &forged {
+        crate::services::hooks_service::on_forged_approval(app, id, decision, expected);
+    }
+    respond_json(
+        stream,
+        &serde_json::json!({ "ok": true, "forged": forged.is_some() }).to_string(),
+    );
+}
+
 fn serve_connection(stream: &mut TcpStream, app: &tauri::AppHandle) {
     let Some((route, body)) = read_request(stream, token()) else {
         respond_json(stream, NOTHING);
         return;
     };
+    if route == Route::ApprovalPickup {
+        serve_approval_pickup(stream, app, &body);
+        return;
+    }
     if route == Route::Mcp {
         serve_mcp(stream, app, &body);
         return;

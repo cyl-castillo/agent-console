@@ -2,6 +2,7 @@ use tauri::{AppHandle, State};
 
 use crate::error::AppResult;
 use crate::services::hooks_service::HooksStatus;
+use crate::services::sandbox_service::{self, SandboxStatus};
 use crate::state::AppState;
 
 #[tauri::command(async)]
@@ -60,4 +61,17 @@ pub fn approval_respond(
         );
     }
     Ok(())
+}
+
+/// SEGURIDAD-MOVIL F2: is the engine's sandbox on for this project? With
+/// it on, the agent's shell cannot write the console's answer files, so a
+/// forged approval is impossible rather than detected.
+#[tauri::command(async)]
+pub fn sandbox_status(project_root: String) -> AppResult<SandboxStatus> {
+    Ok(sandbox_service::status(std::path::Path::new(&project_root)))
+}
+
+#[tauri::command(async)]
+pub fn sandbox_enable(project_root: String) -> AppResult<SandboxStatus> {
+    sandbox_service::enable(std::path::Path::new(&project_root))
 }

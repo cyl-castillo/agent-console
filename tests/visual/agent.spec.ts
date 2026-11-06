@@ -602,6 +602,13 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   page,
 }) => {
   await open(page, "app-v2--settings-permissions");
+  // SEGURIDAD-MOVIL F2: the agent sandbox is the wall; the console says so
+  // and turns it on in one click.
+  const sandbox = page.getByTestId("sandbox-section");
+  await expect(sandbox.getByTestId("sandbox-state")).toHaveText("not set");
+  await sandbox.getByTestId("sandbox-enable").click();
+  await expect(sandbox.getByTestId("sandbox-state")).toHaveText("on · project", { timeout: 3000 });
+  await expect(sandbox.getByTestId("sandbox-enable")).toHaveCount(0);
   const section = page.getByTestId("remote-devices");
   await expect(section).toBeVisible({ timeout: 5000 });
   await expect(section.getByTestId("remote-state")).toHaveText("off");

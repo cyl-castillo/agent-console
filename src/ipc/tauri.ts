@@ -103,6 +103,7 @@ import type {
   PairedDevice,
   DeviceScope,
   PolicyStatus,
+  SandboxStatus,
 } from "../types/domain";
 
 export const ipc = {
@@ -320,6 +321,9 @@ export const ipc = {
   sponsorSet: (projectRoot: string, sponsor: Sponsor) =>
     invoke<Sponsor>("sponsor_set", { projectRoot, sponsor }),
   approvalsPending: () => invoke<ApprovalRequest[]>("approvals_pending"),
+  /// SEGURIDAD-MOVIL F2: the engine's sandbox flag for a project.
+  sandboxStatus: (projectRoot: string) => invoke<SandboxStatus>("sandbox_status", { projectRoot }),
+  sandboxEnable: (projectRoot: string) => invoke<SandboxStatus>("sandbox_enable", { projectRoot }),
 
   permissionsSnapshot: () => invoke<PermissionsSnapshot>("permissions_snapshot"),
   permissionsAdd: (
