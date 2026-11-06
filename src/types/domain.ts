@@ -586,6 +586,8 @@ export interface PendingPairing {
   publicKey: string;
   proposedScope: DeviceScope;
   createdMs: number;
+  /// F6: the four words the device shows too; approve only if they match.
+  sas: string;
 }
 export interface PairingStartResult {
   uri: string;

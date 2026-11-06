@@ -665,6 +665,7 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
           publicKey: "aXBob25lLWtleS1kZW1v",
           proposedScope: "readApprovals",
           createdMs: Date.now(),
+          sas: "kettle-orbit-mango-raven",
         },
       ],
     });
@@ -673,6 +674,8 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   const row = section.getByTestId("remote-pending-row");
   await expect(row).toBeVisible({ timeout: 3000 });
   await expect(row).toContainText("Carlos iPhone");
+  // F6: the four words to compare with the device's screen.
+  await expect(row.getByTestId("remote-pending-sas")).toHaveText("kettle-orbit-mango-raven");
   await row.getByRole("combobox", { name: /scope for Carlos iPhone/i }).selectOption("readOnly");
   await row.getByRole("button", { name: "approve as read only" }).click();
   await expect

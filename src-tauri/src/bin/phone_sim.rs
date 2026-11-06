@@ -156,12 +156,12 @@ async fn main() -> Result<()> {
                 .ok_or("the offer carries no address — pass it as the second argument")?;
             let mut client = PhoneClient::new()?;
             let mut sock = dial(&addr, ws).await?;
-            client
+            let sas = client
                 .pair(&mut sock, &offer, "phone-sim (reference)")
                 .await?;
             save(&client, &addr)?;
             println!(
-                "paired — approve \"phone-sim (reference)\" on the desktop, then `phone-sim pending`."
+                "paired — the desktop must show these four words on the pending pairing: {sas}\napprove \"phone-sim (reference)\" there only if they match, then `phone-sim pending`."
             );
         }
         Some("pending") => {

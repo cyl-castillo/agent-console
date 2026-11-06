@@ -282,6 +282,9 @@ async fn serve_pairing<S: AsyncRead + AsyncWrite + Unpin>(
         .ok_or_else(|| AppError::Other("no device key after pairing handshake".into()))?
         .to_vec();
     let phone_pub_b64 = BASE64URL_NOPAD.encode(&phone_pub);
+    // The short authentication string: both ends derive it from the
+    // handshake transcript, the human compares the screens (F6, M4).
+    let sas = crate::services::sas::sas_from_hash(hs.get_handshake_hash());
 
     let mut t = hs
         .into_transport_mode()
@@ -289,8 +292,13 @@ async fn serve_pairing<S: AsyncRead + AsyncWrite + Unpin>(
     let label_ct = read_frame_required(stream).await?;
     let label = String::from_utf8_lossy(&decrypt(&mut t, &label_ct)?).to_string();
 
-    let pending_id =
-        devices.propose_pairing(&label, &phone_pub_b64, DeviceScope::ReadApprovals, now_ms);
+    let pending_id = devices.propose_pairing_with_sas(
+        &label,
+        &phone_pub_b64,
+        DeviceScope::ReadApprovals,
+        now_ms,
+        &sas,
+    );
     // Tell the device it's pending the human's approval, then close.
     let ack = encrypt(&mut t, b"pending-approval")?;
     write_frame(stream, &ack).await?;
@@ -721,20 +729,23 @@ pub mod client {
             self.pinned_desktop.is_some()
         }
 
-        /// First-contact pairing over `stream`. On success, pins the desktop key.
-        /// The desktop holds the pairing pending until a human approves it.
+        /// First-contact pairing over `stream`. On success, pins the desktop key
+        /// and returns the short authentication string the desktop shows on
+        /// the pending pairing — show it; the human compares. The desktop
+        /// holds the pairing pending until a human approves it.
         pub async fn pair<S: AsyncRead + AsyncWrite + Unpin>(
             &mut self,
             stream: &mut S,
             offer: &PairingOffer,
             label: &str,
-        ) -> AppResult<()> {
+        ) -> AppResult<String> {
             let pinned = offer.responder_static_bytes()?;
             write_frame(stream, &serde_json::to_vec(&Hello::Pair).unwrap()).await?;
             let init = build_initiator(&self.keys.private, &offer.psk_bytes()?)?;
             let hs = handshake_over_stream(stream, init, true).await?;
             // Anti-MITM: the desktop we just spoke to must be the QR's desktop.
             verify_pinned_remote(&hs, &pinned)?;
+            let sas = crate::services::sas::sas_from_hash(hs.get_handshake_hash());
             let mut t = hs
                 .into_transport_mode()
                 .map_err(|e| AppError::Other(format!("transport: {e}")))?;
@@ -744,7 +755,7 @@ pub mod client {
                 return Err(AppError::Other("unexpected pairing ack".into()));
             }
             self.pinned_desktop = Some(pinned);
-            Ok(())
+            Ok(sas)
         }
 
         /// Reconnect (KK) and send one message, returning the reply. Consumes the
@@ -1102,7 +1113,7 @@ mod tests {
         let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
         let mut phone = PhoneClient::new().unwrap();
         let phone_b64 = phone.public_b64();
-        phone
+        let sas_on_phone = phone
             .pair(&mut sock, &offer, "Carlos iPhone")
             .await
             .unwrap();
@@ -1112,6 +1123,10 @@ mod tests {
         assert!(matches!(outcome, Outcome::PendingApproval { .. }));
         assert_eq!(devices.pending().len(), 1);
         assert_eq!(devices.pending()[0].public_key, phone_b64);
+        // F6: both screens show the same four words.
+        let shown = devices.pending()[0].sas.clone();
+        assert_eq!(shown.split('-').count(), 4, "{shown}");
+        assert_eq!(shown, sas_on_phone);
 
         server.abort();
     }
