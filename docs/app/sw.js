@@ -24,14 +24,30 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+function isShell(url) {
+  const p = new URL(url).pathname;
+  return (
+    p === BASE ||
+    p === `${BASE}index.html` ||
+    p === `${BASE}manifest.webmanifest` ||
+    p === `${BASE}icon.svg` ||
+    p === `${BASE}sw.js` ||
+    p.startsWith(`${BASE}assets/`)
+  );
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
   event.respondWith(
     fetch(req)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => undefined);
+        // Only a good response of the app shell is kept: never an error page,
+        // never anything outside the files we ship.
+        if (res.ok && isShell(req.url)) {
+          const copy = res.clone();
+          caches.open(SHELL).then((c) => c.put(req, copy)).catch(() => undefined);
+        }
         return res;
       })
       .catch(() => caches.match(req).then((hit) => hit || caches.match(BASE))),
