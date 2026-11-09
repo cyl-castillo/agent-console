@@ -279,8 +279,10 @@ restriction.
 
 ## Security obligations for the device implementation
 
-- Generate the identity keypair with a **CSPRNG**; store the private key in the
-  **OS keystore** (Keychain / Keystore), never in plaintext.
+- Generate the identity keypair with a **CSPRNG**; never store the private
+  key in plaintext: the OS keystore (Keychain / Keystore) in a native app;
+  in a web app, wrapped under a non-extractable WebCrypto key at the least,
+  and under a passkey with PRF (user verification) where the platform has it.
 - Treat the pinned desktop key as the source of truth; refuse a reconnect whose
   handshake doesn't authenticate it.
 - Render `tier`, `tierLabel`, `tierReason` and `evidence` exactly as received;
