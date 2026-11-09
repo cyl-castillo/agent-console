@@ -62,7 +62,7 @@ Apple, Mozilla) · a compromised dependency.
 | T1 | MITM on the network | Noise XXpsk3 with the desktop key pinned from the QR; the device verifies the key the moment it arrives (message 2), before its own key travels; KK on reconnect authenticates both sides with pinned keys | `secure_channel.rs`, `noise.ts` |
 | T2 | Replay | Fresh ephemerals per connection, Noise nonces, one request per connection | `transport.rs` |
 | T3 | Someone pairs to the desktop | One-time PSK with a 2-min TTL, spent only by a completed handshake; pairing creates a *pending* entry; trust needs a click with a scope; the **4-word SAS** derived from the handshake hash is shown on both screens and the human approves only if they match; pendings expire in 10 min, 8 at most, labels bounded | `pairing_service.rs`, `paired_devices_service.rs`, `sas.rs` |
-| T4 | Stolen phone / stolen device key | Scope per device; **only read-only requests can be allowed from a device**; deny is always possible; revoke forgets the key and the next connection is refused before any crypto; the device key lives in IndexedDB (no OS keystore in a web app — stated, see F7) | `remote_decisions::gate`, Trust → Remote devices |
+| T4 | Stolen phone / stolen device key | Scope per device; **only read-only requests can be allowed from a device**; deny is always possible; revoke forgets the key and the next connection is refused before any crypto; the device key is wrapped at rest under a non-extractable browser key (script cannot exfiltrate it), a PIN, or a passkey with PRF (the platform authenticator), and locks after the app has been in the background | `remote_decisions::gate`, Trust → Remote devices; companion `store/keyguard.ts` |
 | T5 | A device drives the agent | No prompts over the channel; the device's free text (`reason`) never reaches the hook or the model — a fixed sentence does; the text goes to the ledger bounded and control-free | `remote_decisions::decide` |
 | T6 | A dangerous action approved remotely | Tier computed on the desktop (shell allowlist of single commands, no chaining/redirection/substitution/xargs; irreversible patterns; sensitive paths; destructive tool servers), recomputed at `decide`; `remoteAllow` only for low | `remote_decisions::tier_for`, `lib/decisions.ts` |
 | T7 | The agent approves itself (same user) | The console remembers every answer it wrote; the hook reports what it picked up and a forged answer becomes a deny; a stray answer file is removed, recorded (`approval_forged`), the session interrupted; answers are exclusive, UUID-named, 0600 in a 0700 dir. **Prevention is the engine's sandbox** (`sandbox.enabled`, one click in Trust) | `hooks_service.rs`, `inject_service.rs`, `hook-bridge`, `sandbox_service.rs` |
@@ -79,9 +79,11 @@ Apple, Mozilla) · a compromised dependency.
   off, an agent that forges an answer *and* rewrites `inject-port.json` to
   its own server can tell its own hook the answer is genuine. The console
   detects the common case and says so in red; the sandbox is the wall.
-- **The device key is software-protected.** A web app has no keystore for
-  raw X25519 secrets. Compromise of the browser profile or an unlocked
-  phone = that device's rights (read-only approvals at most) until revoked.
+- **The device key's strongest guard needs PRF.** With the passkey guard a
+  copied browser profile is useless; with the default browser-key guard a
+  copied profile (not script) can still use the key, and a PIN only has to
+  be cracked offline. An unlocked phone inside the auto-lock window has
+  that device's rights (read-only approvals at most) until revoked.
 - **The pin check trusts the QR.** A sticker over the real QR pairs the
   phone to the attacker's desktop; the companion shows host and key
   fingerprint before dialling and the SAS afterwards, but a human who does
@@ -96,7 +98,7 @@ Apple, Mozilla) · a compromised dependency.
 
 Voice over the channel (needs an on-device second factor); a relay for
 "from anywhere without a VPN" (outbound-only, blind — designed, not built);
-a native build with the key in Keychain/Keystore (F7); an external audit.
+a native build with the key in Keychain/Keystore; an external audit.
 
 ## How this document is kept honest
 
