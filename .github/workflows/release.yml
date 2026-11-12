@@ -74,8 +74,14 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev
 
       - name: Rust setup
+        # Pinned: Cargo 1.100 lays out target/<profile>/build/<package>/ per
+        # package, and tauri-build 2.6.2 resolves its sidecar destination to
+        # that same build/ dir, so `build/hook-bridge` (the workspace crate's
+        # directory) collides with the sidecar copy and the build script
+        # panics with IsADirectory. Unpin once tauri-build handles the layout.
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.99.1
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
