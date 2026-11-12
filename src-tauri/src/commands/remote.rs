@@ -9,14 +9,13 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use data_encoding::BASE64URL_NOPAD;
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::paired_devices_service::{DeviceScope, PairedDevice, PendingPairing};
-use crate::services::remote_decisions::{ConsoleBridge, DecisionHandler};
+use crate::services::remote_decisions::{self, ConsoleBridge, DecisionGap, DecisionHandler};
 use crate::services::secure_channel::IdentityStore;
 use crate::services::transport::{self, ServerHandle};
 use crate::state::AppState;
@@ -43,16 +42,30 @@ fn project_root(state: &AppState) -> Option<String> {
         .map(|p| p.root.to_string_lossy().to_string())
 }
 
+/// Where `remote_*` lines go when no project is open: a ledger of the
+/// machine, so "every act goes to the ledger" holds without a project
+/// (F5, L6).
+pub fn global_ledger_root() -> String {
+    dirs::data_local_dir()
+        .map(|d| d.join("agent-console").join("global"))
+        .unwrap_or_else(|| std::path::PathBuf::from("agent-console-global"))
+        .to_string_lossy()
+        .to_string()
+}
+
 fn witness(state: &AppState, kind: &str, payload: serde_json::Value) {
-    if let Some(root) = project_root(state) {
-        let _ = state.testigo.on_remote(&root, now_ms(), kind, payload);
-    }
+    let root = project_root(state).unwrap_or_else(global_ledger_root);
+    let _ = state.testigo.on_remote(&root, now_ms(), kind, payload);
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteStatus {
     pub running: bool,
+    /// MOVIL F1b: the VAPID public key a browser subscribes with; absent
+    /// when neither the keystore nor the file could hold one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_public_key: Option<String>,
     /// `host:port` a device dials — the LAN address when bound to the LAN.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub addr: Option<String>,
@@ -66,9 +79,55 @@ pub struct RemoteStatus {
     pub identity_error: Option<String>,
     pub devices: Vec<PairedDevice>,
     pub pending: Vec<PendingPairing>,
+    /// MOVIL F0: the decisions of the last 7 days that never reached this
+    /// screen, from the open project's ledger. None without a project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gap: Option<DecisionGap>,
+}
+
+/// The ledger's window for the gap shown next to the devices.
+const GAP_WINDOW_DAYS: u32 = 7;
+
+/// The gap is read from the whole ledger: cache it briefly so a burst of
+/// status reads (the UI refreshing) does not become a disk read each.
+static GAP_CACHE: std::sync::Mutex<Option<(String, std::time::Instant, DecisionGap)>> =
+    std::sync::Mutex::new(None);
+const GAP_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn gap_of(state: &AppState) -> Option<DecisionGap> {
+    let root = project_root(state)?;
+    if let Some((r, at, gap)) = GAP_CACHE.lock().ok().and_then(|g| g.clone()) {
+        if r == root && at.elapsed() < GAP_CACHE_TTL {
+            return Some(gap);
+        }
+    }
+    let gap = gap_uncached(state, &root)?;
+    if let Ok(mut g) = GAP_CACHE.lock() {
+        *g = Some((root, std::time::Instant::now(), gap.clone()));
+    }
+    Some(gap)
+}
+
+fn gap_uncached(state: &AppState, root: &str) -> Option<DecisionGap> {
+    let root = root.to_string();
+    let events = state.testigo.list(&root, None, None).ok()?;
+    let pending: std::collections::HashSet<String> = state
+        .hooks
+        .pending_approvals()
+        .iter()
+        .filter_map(|r| r.get("id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let since = now_ms() - i64::from(GAP_WINDOW_DAYS) * 86_400_000;
+    Some(remote_decisions::decision_gap(
+        &events,
+        since,
+        &pending,
+        GAP_WINDOW_DAYS,
+    ))
 }
 
 fn status_of(state: &AppState) -> AppResult<RemoteStatus> {
+    state.paired_devices.prune_pending(now_ms());
     let guard = state.remote_server.lock();
     // The identity is loaded on first use; a locked keystore shows up here
     // as `identity_error`, not as a crash and not as a second identity.
@@ -78,12 +137,14 @@ fn status_of(state: &AppState) -> AppResult<RemoteStatus> {
     };
     Ok(RemoteStatus {
         running: guard.is_some(),
+        push_public_key: state.push.public_key(),
         addr: guard.as_ref().map(|h| h.addr().to_string()),
         bind: guard.as_ref().map(|h| h.bind().to_string()),
         identity_store,
         identity_error,
         devices: state.paired_devices.list_devices()?,
         pending: state.paired_devices.pending(),
+        gap: gap_of(state),
     })
 }
 
@@ -93,7 +154,27 @@ fn lan_ip() -> Option<IpAddr> {
     let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     s.connect("10.255.255.255:1").ok()?;
     let ip = s.local_addr().ok()?.ip();
-    (!ip.is_loopback() && !ip.is_unspecified()).then_some(ip)
+    (!ip.is_loopback() && !ip.is_unspecified() && is_private_v4(ip)).then_some(ip)
+}
+
+/// Only a private (RFC 1918) or CGNAT (100.64/10 — a tailnet) address is a
+/// "LAN": a public or otherwise routed address is never bound by that
+/// choice (F4, M5). The confirmation shows the exact address.
+fn is_private_v4(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_private() || (o[0] == 100 && (64..=127).contains(&o[1]))
+        }
+        IpAddr::V6(_) => false,
+    }
+}
+
+/// The address "listen on the LAN" would bind, so the confirmation can
+/// name it; None when the machine has no private address on its route.
+#[tauri::command(async)]
+pub fn remote_lan_address() -> Option<String> {
+    lan_ip().map(|ip| ip.to_string())
 }
 
 #[tauri::command(async)]
@@ -128,12 +209,7 @@ pub fn remote_pairing_start(state: State<'_, AppState>) -> AppResult<PairingStar
     };
     let now = now_ms();
     let offer = state.pairing()?.start_pairing(now, PAIRING_TTL_SECS);
-    let json = serde_json::to_string(&offer)
-        .map_err(|e| AppError::Other(format!("serialize offer: {e}")))?;
-    let uri = format!(
-        "agentconsole://pair?d={}&a={addr}",
-        BASE64URL_NOPAD.encode(json.as_bytes())
-    );
+    let uri = transport::client::offer_uri(&offer, &addr);
     let qr_svg = render_qr_svg(&uri)?;
     Ok(PairingStartResult {
         uri,
@@ -262,7 +338,9 @@ pub async fn remote_server_start(
     let host: IpAddr = match bind.as_str() {
         "loopback" => IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
         "lan" => lan_ip().ok_or_else(|| {
-            AppError::Other("no LAN address found on this machine (is it on a network?)".into())
+            AppError::Other(
+                "no private LAN address on this machine's route (a public or VPN address is never bound)".into(),
+            )
         })?,
         other => {
             return Err(AppError::InvalidArgument(format!(
@@ -305,9 +383,13 @@ pub async fn remote_server_start(
         pairing,
         devices,
         handler,
-        move |_out| {
-            // Nudge the UI to refresh its pending/devices lists.
-            let _ = notify.emit("remote://changed", ());
+        move |out| {
+            // Nudge the UI only when there is something new for it: a
+            // pairing to approve. A failed or probing connection must not
+            // make the webview re-read the ledger (F4, M4).
+            if matches!(out, Ok(transport::Outcome::PendingApproval { .. })) {
+                let _ = notify.emit("remote://changed", ());
+            }
         },
     ));
     *state.remote_server.lock() = Some(ServerHandle::new(addr, &bind, task));

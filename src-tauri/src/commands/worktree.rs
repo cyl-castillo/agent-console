@@ -232,3 +232,20 @@ pub fn worktree_setup_set(config: SetupConfig, state: State<'_, AppState>) -> Ap
     let repo = repo(&state)?;
     worktree_service::save_setup_config(&repo, &config)
 }
+
+/// The git repositories one level inside the open project folder (for a
+/// workspace that holds several projects): what a room can branch off when
+/// the folder itself is not a repo.
+#[tauri::command(async)]
+pub fn repos_in(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::services::worktree_service::NestedRepo>> {
+    let root = state
+        .inner
+        .lock()
+        .project
+        .as_ref()
+        .map(|p| p.root.clone())
+        .ok_or_else(|| AppError::Other("no project open".into()))?;
+    Ok(crate::services::worktree_service::repos_in(&root))
+}

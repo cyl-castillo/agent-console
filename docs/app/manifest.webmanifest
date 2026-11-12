@@ -1,0 +1,19 @@
+{
+  "name": "Agent Console Companion",
+  "short_name": "AC Companion",
+  "description": "The decisions waiting on your agent-console desktop, with their evidence, answered from your phone",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0b10",
+  "theme_color": "#0b0b10",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "scope": "./"
+}

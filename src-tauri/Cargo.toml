@@ -1,6 +1,6 @@
 [package]
 name = "agent-console"
-version = "0.94.3"
+version = "0.96.0"
 description = "Agent Console — minimalist AI-native console IDE"
 authors = ["Carlos Castillo"]
 license = "AGPL-3.0-only"
@@ -15,6 +15,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "phone-sim"
 path = "src/bin/phone_sim.rs"
+
+# The desktop end as a standalone responder, for device-app implementers
+# and the companion's end-to-end test (MOVIL F2).
+[[bin]]
+name = "desktop-sim"
+path = "src/bin/desktop_sim.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -52,6 +58,8 @@ cpal = "0.18"
 snow = "0.9"
 rand = "0.8"
 data-encoding = "2"
+# MOVIL F1a: the WebSocket upgrade for browsers (RFC 6455 accept key).
+sha1 = "0.10"
 # QR rendering for the pairing offer (SVG only; image backend disabled).
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # tracing_backend: whisper.cpp/ggml log lines go to tracing (debug level)
@@ -71,6 +79,11 @@ tokenizers = "0.23.1"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# MOVIL F1b: Web Push to a paired device — RFC 8291 (ECDH P-256 + HKDF +
+# AES-128-GCM) and RFC 8292 VAPID (ES256). RustCrypto, pure Rust.
+p256 = { version = "0.14", features = ["ecdh", "ecdsa"] }
+hkdf = "0.12"
+aes-gcm = "0.10"
 
 [dev-dependencies]
 # `test` unlocks tauri::test::{mock_builder, MockRuntime} for the terminal

@@ -1,22 +1,29 @@
 import { useEffect, useState } from "react";
+import { ipc } from "../ipc/tauri";
 import { confirmDialog } from "../stores/confirmStore";
 import { useRemoteStore } from "../stores/remoteStore";
 import { useToastStore } from "../stores/toastStore";
 import { Chip } from "../ui/Chip";
 import type { DeviceScope } from "../types/domain";
+import { gapSentence } from "../lib/decisionGap";
 
 const SCOPES: { value: DeviceScope; label: string; hint: string }[] = [
   { value: "readOnly", label: "read only", hint: "sees the queue, answers nothing" },
   {
     value: "readApprovals",
     label: "approvals",
-    hint: "allows low and medium; dangerous actions stay at the keyboard",
+    hint: "allows read-only requests; anything that changes the machine stays at the keyboard",
   },
-  { value: "full", label: "full", hint: "same as approvals today; prompts are not remote yet" },
+  { value: "full", label: "full", hint: "same as approvals today; prompts are never remote" },
 ];
 
 function scopeLabel(s: DeviceScope): string {
   return SCOPES.find((x) => x.value === s)?.label ?? s;
+}
+
+/// The push service's host, the only part of a subscription worth showing.
+function pushHost(endpoint: string): string {
+  return endpoint.split("://")[1]?.split("/")[0] ?? "?";
 }
 
 /// F8: who may answer decisions from a paired device, and where the desktop
@@ -58,11 +65,20 @@ export function RemoteDevicesSection() {
 
   const start = async (bind: "loopback" | "lan") => {
     if (bind === "lan") {
+      // F4 (M5): the human sees the exact address before it is bound; a
+      // public or VPN address is never offered.
+      const addr = await ipc.remoteLanAddress().catch(() => null);
+      if (!addr) {
+        showToast(
+          "No private LAN address on this machine's route — nothing to listen on (a public or VPN address is never bound).",
+          "error",
+        );
+        return;
+      }
       const ok = await confirmDialog({
-        title: "Listen on the LAN",
-        message:
-          "Every device on this network will be able to reach the listener. Only devices you pair here can speak to it (Noise, pinned keys), and a dangerous action is never approved from a device. The choice is recorded in the ledger.",
-        confirmLabel: "Listen on the LAN",
+        title: `Listen on ${addr}`,
+        message: `The listener will bind ${addr} — the private address this machine's network route uses — and every device on that network will be able to reach it. Only devices you pair here can speak to it (Noise, pinned keys), and only read-only requests can be allowed from a device. The choice is recorded in the ledger.`,
+        confirmLabel: `Listen on ${addr}`,
         danger: true,
       });
       if (!ok) return;
@@ -93,16 +109,24 @@ export function RemoteDevicesSection() {
       </div>
       <p className="wb-hint">
         A paired device sees the decisions waiting here, with their evidence, and answers. No chat,
-        no diffs. Dangerous actions are decided at this keyboard whatever the device's scope.
+        no diffs. From a device only read-only requests can be allowed; anything that changes the
+        machine is decided at this keyboard whatever the device's scope. A device that asks for push
+        is told only that decisions wait, and how many.
         {running && status?.addr && (
           <>
             {" "}
-            · dial <span className="font-code">{status.addr}</span>
+            · dial <span className="font-code">{status.addr}</span> (raw socket, or{" "}
+            <span className="font-code">ws://{status.addr}/</span> from a browser)
           </>
         )}
         {error && <> · {error}</>}
         {status?.identityError && <> · {status.identityError}</>}
       </p>
+      {gapSentence(status?.gap) && (
+        <p className="wb-hint" data-testid="remote-gap">
+          {gapSentence(status?.gap)}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {!running && (
           <>
@@ -161,7 +185,8 @@ export function RemoteDevicesSection() {
             <p className="m-0">
               Scan from the device, or paste the link into it. The offer is one-time and expires in{" "}
               <span className="font-code tabular-nums">{secondsLeft}s</span>; the device then shows
-              up below for your approval.
+              up below for your approval, with four words — approve only if the device shows the
+              same four.
               {status?.bind === "loopback" && (
                 <>
                   {" "}
@@ -193,6 +218,7 @@ export function RemoteDevicesSection() {
               key={p.id}
               label={p.label}
               publicKey={p.publicKey}
+              sas={p.sas}
               proposed={p.proposedScope}
               busy={busy}
               onApprove={(scope) => void run("Couldn't approve", () => approve(p.id, scope))}
@@ -234,6 +260,18 @@ export function RemoteDevicesSection() {
               <span className="text-caption text-muted-foreground">
                 {d.lastSeenMs ? `seen ${new Date(d.lastSeenMs).toLocaleString()}` : "never seen"}
               </span>
+              <Chip
+                tone={d.push ? "ok" : "neutral"}
+                mono
+                title={
+                  d.push
+                    ? `Pushed "N decisions wait" through ${pushHost(d.push.endpoint)} — never what the decisions are`
+                    : "The device has not asked for push; it sees the queue when it opens"
+                }
+                data-testid="remote-device-push"
+              >
+                {d.push ? `push · ${pushHost(d.push.endpoint)}` : "no push"}
+              </Chip>
               <button
                 className="wb-cta"
                 disabled={busy}
@@ -267,6 +305,7 @@ export function RemoteDevicesSection() {
 function PendingRow({
   label,
   publicKey,
+  sas,
   proposed,
   busy,
   onApprove,
@@ -274,6 +313,7 @@ function PendingRow({
 }: {
   label: string;
   publicKey: string;
+  sas: string;
   proposed: DeviceScope;
   busy: boolean;
   onApprove: (scope: DeviceScope) => void;
@@ -289,6 +329,15 @@ function PendingRow({
         wants to pair
       </Chip>
       <span className="min-w-0 flex-1 truncate text-foreground">{label}</span>
+      {sas && (
+        <span
+          className="rounded-1 border border-warn px-1.5 font-code text-caption text-foreground"
+          title="The device shows the same four words after pairing. If they differ, someone else answered the QR — reject."
+          data-testid="remote-pending-sas"
+        >
+          {sas}
+        </span>
+      )}
       <span className="font-code text-caption text-faint-foreground">
         {publicKey.slice(0, 10)}…
       </span>

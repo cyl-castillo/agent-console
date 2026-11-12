@@ -15,6 +15,7 @@ import type {
   RoundtableParticipant,
   RoundtableStatus,
   RoundtableTurn,
+  RoomMode,
 } from "../types/domain";
 
 export type RtPhase = "config" | "running" | "paused" | "awaiting" | "done" | "stopped" | "error";
@@ -46,8 +47,13 @@ export interface RtDraft {
   participants: RtParticipantDraft[];
   maxTurns: number;
   tokenBudget: number;
-  /// Working room: let agents edit the code in an isolated worktree.
+  /// Working room: let agents edit the code in an isolated worktree. Derived
+  /// from `mode === "branch"`; kept because the fan-out and job knobs read it.
   allowEdits: boolean;
+  /// SALAS-2026-11: converse | act | branch.
+  mode: RoomMode;
+  /// Branch mode when the folder is not a repo: the nested repo chosen.
+  repo: string | null;
   /// Job mode: the organizer drives the work through the connector.
   jobMode: boolean;
   /// Job mode: a reviewer must approve before the job closes.
@@ -73,6 +79,8 @@ const DEFAULT_DRAFT: RtDraft = {
   // fast, so start generous; cache reads are excluded from the count.
   tokenBudget: 1_000_000,
   allowEdits: false,
+  mode: "converse",
+  repo: null,
   jobMode: false,
   reviewRequired: false,
   maxCorrections: 2,
@@ -275,11 +283,13 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       role: p.role,
       roles: p.roles,
     }));
-    // Honest working-room flag: editing needs a git repo to branch + review
-    // against. Match the config toggle's own `!noRepo` guard (RoundtablePanel)
-    // and the backend's `allow_edits = branch.is_some()`, so we never light up
-    // the CoworkBar (Share) on a room that silently degraded to read-only.
-    const allowEdits = d.allowEdits && useChangesStore.getState().status?.isRepo !== false;
+    // Honest working-room flag: a branch room needs a git repo to branch +
+    // review against — the open folder, or a nested repo the human picked.
+    // Match the backend's `allow_edits = branch.is_some()`, so we never light
+    // up the CoworkBar (Share) on a room that silently degraded to read-only.
+    const repoOk = useChangesStore.getState().status?.isRepo !== false || !!d.repo;
+    const mode: RoomMode = d.mode === "branch" && !repoOk ? "converse" : d.mode;
+    const allowEdits = mode === "branch";
     // F9: a fan-out is not a conversation — it starts its own twin
     // worktrees and reports into the fan-outs list; the form stays.
     if (d.fanOut && allowEdits) {
@@ -297,6 +307,8 @@ export const useRoundtableStore = create<RoundtableState>((set, get) => ({
       maxTurns: Math.max(1, Math.min(60, d.maxTurns)),
       tokenBudget: Math.max(0, d.tokenBudget),
       allowEdits,
+      mode,
+      repo: mode === "branch" && d.repo ? d.repo : undefined,
       jobMode: d.jobMode,
       reviewRequired: d.jobMode && d.reviewRequired,
       maxCorrections: Math.max(0, Math.min(10, d.maxCorrections)),

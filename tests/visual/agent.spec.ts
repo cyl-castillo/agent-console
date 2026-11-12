@@ -602,10 +602,24 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   page,
 }) => {
   await open(page, "app-v2--settings-permissions");
+  // SEGURIDAD-MOVIL F2: the agent sandbox is the wall; the console says so
+  // and turns it on in one click.
+  const sandbox = page.getByTestId("sandbox-section");
+  await expect(sandbox.getByTestId("sandbox-state")).toHaveText("not set");
+  await sandbox.getByTestId("sandbox-enable").click();
+  await expect(sandbox.getByTestId("sandbox-state")).toHaveText("on · project", { timeout: 3000 });
+  await expect(sandbox.getByTestId("sandbox-enable")).toHaveCount(0);
   const section = page.getByTestId("remote-devices");
   await expect(section).toBeVisible({ timeout: 5000 });
   await expect(section.getByTestId("remote-state")).toHaveText("off");
   await expect(section).toContainText("Pixel (kitchen)");
+  // MOVIL F1b: a subscribed device shows the push service, never the endpoint.
+  await expect(section.getByTestId("remote-device-push")).toHaveText("push · fcm.googleapis.com");
+  await expect(section).not.toContainText("demo-subscription");
+  // MOVIL F0: the gap is the ledger's number, in words a human reads once.
+  await expect(section.getByTestId("remote-gap")).toHaveText(
+    "Last 7 days: 108 of 212 decisions timed out or were answered in the CLI before this screen saw them. The ones taken here waited 2 min at the 90th percentile and 31 h at most. A paired device catches them wherever you are.",
+  );
   await section.getByTestId("remote-start-loopback").click();
   await expect(section.getByTestId("remote-state")).toHaveText("listening · loopback", {
     timeout: 3000,
@@ -651,6 +665,7 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
           publicKey: "aXBob25lLWtleS1kZW1v",
           proposedScope: "readApprovals",
           createdMs: Date.now(),
+          sas: "kettle-orbit-mango-raven",
         },
       ],
     });
@@ -659,6 +674,8 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   const row = section.getByTestId("remote-pending-row");
   await expect(row).toBeVisible({ timeout: 3000 });
   await expect(row).toContainText("Carlos iPhone");
+  // F6: the four words to compare with the device's screen.
+  await expect(row.getByTestId("remote-pending-sas")).toHaveText("kettle-orbit-mango-raven");
   await row.getByRole("combobox", { name: /scope for Carlos iPhone/i }).selectOption("readOnly");
   await row.getByRole("button", { name: "approve as read only" }).click();
   await expect
@@ -675,13 +692,27 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
     .toMatchObject({ pendingId: "pend-1", scope: "readOnly" });
 });
 
+test("MOVIL F0: an empty Inbox names last week's unseen decisions and offers to pair a device", async ({
+  page,
+}) => {
+  await open(page, "app-v2--inbox-empty");
+  const gap = page.getByTestId("inbox-gap");
+  await expect(gap).toBeVisible({ timeout: 5000 });
+  await expect(gap).toContainText("108 of 212 decisions timed out or were answered in the CLI");
+  await page.getByRole("button", { name: "Pair a device" }).click();
+  await expect(page.getByTestId("remote-devices")).toBeVisible({ timeout: 5000 });
+  await expect(page.getByTestId("remote-devices").getByTestId("remote-gap")).toContainText(
+    "108 of 212",
+  );
+});
+
 test("F9: a fan-out compares the candidates' diffs, checks and verdicts; applying one is a confirmed merge", async ({
   page,
 }) => {
   await open(page, "app-v2--work-room");
   // The fan-out toggle only exists for a working room.
   await expect(page.getByTestId("rt-fanout-toggle")).toHaveCount(0);
-  await page.getByRole("checkbox", { name: /let agents edit the code/i }).check();
+  await page.getByTestId("rt-mode-branch").getByRole("radio").check();
   const toggle = page.getByTestId("rt-fanout-toggle");
   await expect(toggle).toBeVisible();
   await toggle.getByRole("checkbox").check();

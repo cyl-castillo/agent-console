@@ -112,6 +112,12 @@ pub struct RunCtx<'a> {
     /// …) speaking for this participant. `None` = a plain turn, exactly as
     /// before the connector existed.
     pub mcp: Option<McpAttach<'a>>,
+    /// Extra Claude `--allowedTools` patterns for this turn — a room that
+    /// acts (SALAS-2026-11) opens the user's own MCP servers (`mcp__jira`,
+    /// …) so a headless turn can comment a ticket instead of being auto-
+    /// denied. Codex follows its config.toml per server; OpenCode `--auto`
+    /// approves its own calls. Empty for a conversation.
+    pub extra_allowed_tools: &'a [String],
 }
 
 /// The `agent_console` MCP server a room turn is given: the hook-bridge
@@ -655,13 +661,19 @@ fn claude_args(ctx: &RunCtx) -> Vec<String> {
         args.push("--resume".into());
         args.push(r.into());
     }
+    // Headless `-p` auto-denies any tool that would need a prompt; the
+    // allow-list is what lets a room turn call `delegate_task` — and, in a
+    // room that acts, the user's own MCP servers. One comma-separated value.
+    let mut allowed: Vec<String> = Vec::new();
     if let Some(mcp) = &ctx.mcp {
         args.push("--mcp-config".into());
         args.push(mcp.claude_config_json());
-        // Headless `-p` auto-denies any tool that would need a prompt; the
-        // allow-list is what lets a read-only room turn call `delegate_task`.
+        allowed.push(format!("mcp__{MCP_SERVER_NAME}__*"));
+    }
+    allowed.extend(ctx.extra_allowed_tools.iter().cloned());
+    if !allowed.is_empty() {
         args.push("--allowedTools".into());
-        args.push(format!("mcp__{MCP_SERVER_NAME}__*"));
+        args.push(allowed.join(","));
     }
     args
 }
@@ -1325,6 +1337,7 @@ mod tests {
             prompt: "p",
             resume: None,
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: None,
         };
         let args = claude_args(&ctx);
@@ -1341,6 +1354,46 @@ mod tests {
     }
 
     #[test]
+    fn extra_allowed_tools_join_the_connector_in_one_allowed_tools_value() {
+        let extra = vec!["mcp__jira".to_string(), "mcp__linear".to_string()];
+        let bridge = std::path::Path::new("/opt/hook-bridge");
+        let ctx = RunCtx {
+            cwd: std::path::Path::new("."),
+            model: "",
+            tools: ToolPolicy::AcceptEdits,
+            prompt: "p",
+            resume: None,
+            child_slot: None,
+            mcp: Some(McpAttach {
+                bridge,
+                project: "/p",
+                job: "r-1",
+                caller: "p1",
+            }),
+            extra_allowed_tools: &extra,
+        };
+        let args = claude_args(&ctx);
+        let i = args.iter().position(|a| a == "--allowedTools").unwrap();
+        assert_eq!(
+            args[i + 1],
+            format!("mcp__{MCP_SERVER_NAME}__*,mcp__jira,mcp__linear")
+        );
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--permission-mode", "acceptEdits"]));
+        // Without the connector the extras still get the flag; with nothing, no flag.
+        let solo = RunCtx { mcp: None, ..ctx };
+        let args = claude_args(&solo);
+        let i = args.iter().position(|a| a == "--allowedTools").unwrap();
+        assert_eq!(args[i + 1], "mcp__jira,mcp__linear");
+        let none = RunCtx {
+            extra_allowed_tools: &[],
+            ..solo
+        };
+        assert!(!claude_args(&none).iter().any(|a| a == "--allowedTools"));
+    }
+
+    #[test]
     fn claude_argv_carries_no_prompt_and_reads_stdin() {
         let prompt = "A room prompt\nlong enough to matter & full of | shell < chars >";
         let ctx = RunCtx {
@@ -1350,6 +1403,7 @@ mod tests {
             prompt,
             resume: Some("sess-1"),
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: None,
         };
         let args = claude_args(&ctx);
@@ -1420,6 +1474,7 @@ mod tests {
             prompt: "p",
             resume: None,
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: Some(attach()),
         };
         let args = claude_args(&ctx);
@@ -1458,6 +1513,7 @@ mod tests {
             prompt: "p",
             resume: None,
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: None,
         };
         assert!(!claude_args(&ctx).iter().any(|a| a.contains("mcp")));
@@ -1475,6 +1531,7 @@ mod tests {
             prompt: "p",
             resume: Some("thread-1"),
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: Some(attach()),
         };
         let args = codex_exec_args(&ctx);
@@ -1500,6 +1557,7 @@ mod tests {
             prompt: "Read the README\nand report its title",
             resume: None,
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: None,
         };
         // A first turn creates the session by title; a later one continues it.
@@ -1588,6 +1646,7 @@ mod tests {
             prompt: "Call the tool agent_console_list_participants once and reply with ONLY the exact text it returned, quoted verbatim.",
             resume: None,
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: Some(attach),
         };
         let seen = std::cell::RefCell::new(Vec::<String>::new());
@@ -1699,6 +1758,7 @@ mod tests {
             prompt,
             resume: None,
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: None,
         };
         let args = codex_exec_args(&ctx);
@@ -1718,6 +1778,7 @@ mod tests {
             prompt,
             resume: Some("thread-123"),
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: None,
         };
         let args = codex_exec_args(&ctx);
@@ -1745,6 +1806,7 @@ mod tests {
             prompt: "Reply with exactly: PONG. Nothing else.",
             resume: None,
             child_slot: None,
+            extra_allowed_tools: &[],
             mcp: None,
         };
         let activity_kinds = std::cell::RefCell::new(Vec::<String>::new());

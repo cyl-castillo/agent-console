@@ -63,6 +63,53 @@ pub struct Participant {
     pub roles: Vec<String>,
 }
 
+/// What a room's agents may do (SALAS-2026-11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RoomMode {
+    /// Read and reason in the folder; nothing that needs a permission runs.
+    #[default]
+    Converse,
+    /// Edit in the folder and call the user's MCP servers; no worktree, no
+    /// diff review; shell still denied. Works without a git repo.
+    Act,
+    /// The working room: an isolated worktree on `room/<id>`, review & merge.
+    Branch,
+}
+
+impl RoomMode {
+    /// The turn policy for the mode and whether it needs a worktree.
+    pub fn policy(self) -> (ToolPolicy, bool) {
+        match self {
+            RoomMode::Converse => (ToolPolicy::ReadOnly, false),
+            RoomMode::Act => (ToolPolicy::AcceptEdits, false),
+            RoomMode::Branch => (ToolPolicy::AcceptEdits, true),
+        }
+    }
+}
+
+impl RoundtableConfig {
+    /// `mode` wins; a caller from before modes existed that says
+    /// `allow_edits: true` meant the working room.
+    pub fn effective_mode(&self) -> RoomMode {
+        match self.mode {
+            RoomMode::Converse if self.allow_edits => RoomMode::Branch,
+            m => m,
+        }
+    }
+}
+
+/// The user's MCP servers as Claude allow-list patterns (`mcp__<name>`), so a
+/// room that acts can call them. Best-effort: no `claude` on PATH ⇒ empty.
+fn mcp_allow_for(cwd: &Path) -> Vec<String> {
+    crate::services::mcp_service::list_names(Some(&cwd.to_string_lossy()))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|n| n != "agent_console")
+        .map(|n| format!("mcp__{n}"))
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoundtableConfig {
@@ -80,6 +127,20 @@ pub struct RoundtableConfig {
     /// read-only. Defaulted so existing/persisted configs still deserialize.
     #[serde(default)]
     pub allow_edits: bool,
+    /// SALAS-2026-11: what the agents may do. `converse` = read-only in the
+    /// folder (the default); `act` = edit files in the folder and call the
+    /// user's MCP servers, no branch, no diff review — what an analyst or a
+    /// QA needs to comment a ticket or touch a document; `branch` = the
+    /// working room (an isolated worktree on `room/<id>`, review and merge).
+    /// A config that only says `allow_edits: true` (older callers) means
+    /// `branch`; see `effective_mode`.
+    #[serde(default)]
+    pub mode: RoomMode,
+    /// `branch` mode in a folder that is not itself a git repo: the nested
+    /// repo (inside the project) the worktree branches off. `None` = the
+    /// project folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
     /// Job mode: the organizer gets the objective and drives the work through
     /// the connector; the room runs only the turns the queue asks for and, once
     /// it drains, reviews (if required) and closes. Off = round-robin
@@ -416,6 +477,12 @@ struct RunControl {
     /// the `branch`/`worktree` handles come back `None` but the branch still lives
     /// in the repo (so Share stays available; see `share`/`branch_exists`).
     allow_edits: bool,
+    /// What the agents may do (persisted); `allow_edits` = `mode == Branch`
+    /// that actually stood up its worktree.
+    mode: RoomMode,
+    /// Claude allow-list patterns for the user's MCP servers; empty when the
+    /// room only converses.
+    mcp_allow: Vec<String>,
     /// Shared disk store for crash-safe autosave of this room (see `autosave`).
     rooms: Arc<RoomsStore>,
     /// One-time room banner emitted when the driver starts — e.g. editing was
@@ -448,6 +515,7 @@ impl RunControl {
             resume,
             last_seen,
             allow_edits: self.allow_edits,
+            mode: Some(self.mode),
             total_tokens: self.total_tokens.load(Ordering::SeqCst),
             updated_at_ms: now_ms(),
             job: self.job.as_ref().map(|j| PersistedJob {
@@ -510,6 +578,9 @@ pub struct PersistedRoom {
     /// `serde(default)` → rooms saved before this field load as conversation rooms.
     #[serde(default)]
     pub allow_edits: bool,
+    /// SALAS-2026-11 mode; rooms saved before it load from `allow_edits`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<RoomMode>,
     #[serde(default)]
     pub total_tokens: u64,
     /// millis since epoch of the last write — drives sidebar ordering and retention.
@@ -907,30 +978,51 @@ impl RoundtableService {
         // turn committed onto `room/<id>` for the human to review and merge. A
         // conversation room runs read-only in the project root itself.
         let mut notice: Option<String> = None;
+        let mode = config.effective_mode();
+        // `branch` in a folder that is not a repo: the nested repo the human
+        // chose, confined to the project (never a path outside it).
+        let branch_repo: PathBuf = match (mode, config.repo.as_deref()) {
+            (RoomMode::Branch, Some(r)) => {
+                crate::services::path_guard::confine(Path::new(r), std::slice::from_ref(&repo))?
+            }
+            _ => repo.clone(),
+        };
         // Remembered BEFORE the worktree exists: it is what a job lands onto.
-        let base_branch = config
-            .allow_edits
-            .then(|| worktree_service::current_branch(&repo).ok())
+        let base_branch = (mode == RoomMode::Branch)
+            .then(|| worktree_service::current_branch(&branch_repo).ok())
             .flatten();
-        let (workspace, worktree, branch, tools) = if config.allow_edits {
-            let branch = format!("room/{id}");
-            let wt = room_worktree_path(&id);
-            match add_room_worktree(&repo, &wt, &branch) {
-                Ok(()) => (wt.clone(), Some(wt), Some(branch), ToolPolicy::AcceptEdits),
-                // No usable git repo (or no commits) — don't kill the room. Degrade
-                // to a read-only conversation so a non-git workspace (someone using
-                // the app only for Jira/GitLab/MCP) still works; the human just
-                // can't have agents edit without a repo to branch and review against.
-                Err(_) => {
-                    notice = Some(
-                        "Editing needs a git repo with at least one commit — running read-only."
-                            .into(),
-                    );
-                    (repo.clone(), None, None, ToolPolicy::ReadOnly)
+        let (workspace, worktree, branch, tools) = match mode {
+            RoomMode::Branch => {
+                let branch = format!("room/{id}");
+                let wt = room_worktree_path(&id);
+                match add_room_worktree(&branch_repo, &wt, &branch) {
+                    Ok(()) => (wt.clone(), Some(wt), Some(branch), ToolPolicy::AcceptEdits),
+                    // No usable git repo (or no commits) — don't kill the room. Degrade
+                    // to a read-only conversation so a non-git workspace (someone using
+                    // the app only for Jira/GitLab/MCP) still works; the human just
+                    // can't have agents edit without a repo to branch and review against.
+                    Err(_) => {
+                        notice = Some(
+                            "Editing on a branch needs a git repo with at least one commit — running read-only. Pick a repo inside the folder, or use “Act in the folder”."
+                                .into(),
+                        );
+                        (repo.clone(), None, None, ToolPolicy::ReadOnly)
+                    }
                 }
             }
+            RoomMode::Act => {
+                notice = Some(
+                    "Acting in the folder: edits land directly (no branch, no diff review); the user's MCP servers are open; shell stays off. Every tool call is in the ledger."
+                        .into(),
+                );
+                (repo.clone(), None, None, RoomMode::Act.policy().0)
+            }
+            RoomMode::Converse => (repo.clone(), None, None, RoomMode::Converse.policy().0),
+        };
+        let mcp_allow = if tools == ToolPolicy::AcceptEdits {
+            mcp_allow_for(&repo)
         } else {
-            (repo.clone(), None, None, ToolPolicy::ReadOnly)
+            Vec::new()
         };
 
         // A job takes a project slot or waits in the queue; a conversation room
@@ -957,6 +1049,12 @@ impl RoundtableService {
             // True only if a working room actually stood up its branch — a config
             // that asked to edit but degraded to read-only (no git repo) is not one.
             allow_edits: branch.is_some(),
+            mode: if tools == ToolPolicy::ReadOnly {
+                RoomMode::Converse
+            } else {
+                mode
+            },
+            mcp_allow,
             branch,
             rooms: self.rooms.clone(),
             notice,
@@ -1052,7 +1150,20 @@ impl RoundtableService {
         // Best-effort: on any failure this falls back to read-only, exactly the
         // prior behavior, so a resume never breaks.
         let allow_edits = room.allow_edits;
-        let (workspace, worktree, branch, tools) = reattach_room_worktree(&repo, &id, allow_edits);
+        let mode = room.mode.unwrap_or(if allow_edits {
+            RoomMode::Branch
+        } else {
+            RoomMode::Converse
+        });
+        let (workspace, worktree, branch, tools) = match mode {
+            RoomMode::Act => (repo.clone(), None, None, ToolPolicy::AcceptEdits),
+            _ => reattach_room_worktree(&repo, &id, allow_edits),
+        };
+        let mcp_allow = if tools == ToolPolicy::AcceptEdits {
+            mcp_allow_for(&repo)
+        } else {
+            Vec::new()
+        };
         // If it WAS a working room but the worktree couldn't be remounted, say so
         // once on resume: Share still works (by branch name), Sync needs the
         // worktree. Surfaced as the feed banner when the room next runs.
@@ -1088,6 +1199,8 @@ impl RoundtableService {
             worktree,
             branch,
             allow_edits,
+            mode,
+            mcp_allow,
             repo,
             rooms: self.rooms.clone(),
             notice,
@@ -1859,6 +1972,13 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                 resume: resume_id.as_deref(),
                 child_slot: Some(&control_t.child),
                 mcp,
+                // Only a turn that may act gets the user's MCP servers; a
+                // review or consultation turn (read-only) does not.
+                extra_allowed_tools: if tools == ToolPolicy::AcceptEdits {
+                    &control_t.mcp_allow
+                } else {
+                    &[]
+                },
             };
             engine_runner::runner_for(engine).run(&ctx, &on_activity)
         })
@@ -2695,6 +2815,14 @@ impl RoundtableService {
             max_turns,
             token_budget,
             allow_edits,
+            // A follow-up job inherits the parent's room kind: a working room
+            // spawns a working room, a conversation spawns a conversation.
+            mode: if allow_edits {
+                RoomMode::Branch
+            } else {
+                RoomMode::Converse
+            },
+            repo: None,
             job_mode: true,
             review_required,
             max_corrections,
@@ -4430,6 +4558,7 @@ mod tests {
             resume: HashMap::from([("p1".to_string(), "resume-token-p1".to_string())]),
             last_seen: HashMap::from([("p1".to_string(), 2usize)]),
             allow_edits: false,
+            mode: None,
             total_tokens: 4242,
             updated_at_ms,
             job: None,
@@ -4483,6 +4612,7 @@ mod tests {
             .save_room(
                 &PersistedRoom {
                     allow_edits: true,
+                    mode: None,
                     ..room("w", "editing room", 150)
                 },
                 p1,
@@ -4983,6 +5113,36 @@ mod tests {
         let _ = fs::remove_dir_all(&repo);
         let _ = fs::remove_dir_all(&remote);
         let _ = fs::remove_dir_all(&colab);
+    }
+
+    #[test]
+    fn room_mode_policy_and_compat_from_allow_edits() {
+        assert_eq!(RoomMode::Converse.policy(), (ToolPolicy::ReadOnly, false));
+        assert_eq!(RoomMode::Act.policy(), (ToolPolicy::AcceptEdits, false));
+        assert_eq!(RoomMode::Branch.policy(), (ToolPolicy::AcceptEdits, true));
+        let legacy: RoundtableConfig = serde_json::from_str(
+            r#"{"problem":"p","participants":[],"maxTurns":2,"tokenBudget":0,"allowEdits":true}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.effective_mode(), RoomMode::Branch);
+        let act: RoundtableConfig = serde_json::from_str(
+            r#"{"problem":"p","participants":[],"maxTurns":2,"tokenBudget":0,"mode":"act","repo":"/x"}"#,
+        )
+        .unwrap();
+        assert_eq!(act.effective_mode(), RoomMode::Act);
+        assert_eq!(act.repo.as_deref(), Some("/x"));
+        let plain: RoundtableConfig = serde_json::from_str(
+            r#"{"problem":"p","participants":[],"maxTurns":2,"tokenBudget":0}"#,
+        )
+        .unwrap();
+        assert_eq!(plain.effective_mode(), RoomMode::Converse);
+        // A persisted room from before modes loads as a conversation or a branch room.
+        let old: PersistedRoom = serde_json::from_str(
+            r#"{"version":1,"id":"r","problem":"p","participants":[],"transcript":[],"allowEdits":true,"updatedAtMs":1}"#,
+        )
+        .unwrap();
+        assert_eq!(old.mode, None);
+        assert!(old.allow_edits);
     }
 
     #[test]

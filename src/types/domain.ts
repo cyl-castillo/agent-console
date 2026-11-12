@@ -576,6 +576,9 @@ export interface PairedDevice {
   scope: DeviceScope;
   pairedAtMs: number;
   lastSeenMs?: number;
+  /// MOVIL F1b: the device asked to be pushed "N decisions wait". Only the
+  /// push service's host is shown; the endpoint is a capability URL.
+  push?: { endpoint: string; p256dh: string; auth: string };
 }
 export interface PendingPairing {
   id: string;
@@ -583,6 +586,8 @@ export interface PendingPairing {
   publicKey: string;
   proposedScope: DeviceScope;
   createdMs: number;
+  /// F6: the four words the device shows too; approve only if they match.
+  sas: string;
 }
 export interface PairingStartResult {
   uri: string;
@@ -590,8 +595,22 @@ export interface PairingStartResult {
   ttlSecs: number;
   expiresAtMs: number;
 }
+/// MOVIL F0: the decisions of the last `windowDays` that never reached the
+/// console, from the ledger (mirrors Rust `DecisionGap`).
+export interface DecisionGap {
+  windowDays: number;
+  requests: number;
+  decided: number;
+  pending: number;
+  unseen: number;
+  p90WaitMs?: number;
+  maxWaitMs?: number;
+}
 export interface RemoteStatus {
   running: boolean;
+  /// MOVIL F1b: the desktop's VAPID public key (base64url, 65 bytes) — what
+  /// a browser passes as `applicationServerKey` to subscribe.
+  pushPublicKey?: string;
   addr?: string;
   /// loopback · lan
   bind?: string;
@@ -601,6 +620,16 @@ export interface RemoteStatus {
   identityError?: string;
   devices: PairedDevice[];
   pending: PendingPairing[];
+  gap?: DecisionGap;
+}
+
+/// SEGURIDAD-MOVIL F2: the engine's sandbox for the open project (mirrors
+/// Rust `SandboxStatus`). On, the agent's shell cannot write the console's
+/// answer files: a forged approval is impossible instead of detected.
+export interface SandboxStatus {
+  enabled?: boolean | null;
+  source?: "project-local" | "project" | "user" | string;
+  projectSettings: string;
 }
 
 /// F6: the project's approval policy as code (mirrors the Rust PolicyStatus).
@@ -1133,8 +1162,16 @@ export interface RoundtableConfig {
   tokenBudget: number;
   /// Working room: agents may edit the code in an isolated worktree
   /// (AcceptEdits), each turn auto-committed on a room/<id> branch for the human
-  /// to review and merge. Off = conversation-only, read-only.
+  /// to review and merge. Off = conversation-only, read-only. Kept for older
+  /// callers; `mode` is what the room reads first.
   allowEdits: boolean;
+  /// SALAS-2026-11: what the agents may do — converse (read-only), act (edit
+  /// in the folder + the user's MCP servers, no branch) or branch (the
+  /// working room). Omitted = converse, or branch when allowEdits is set.
+  mode?: RoomMode;
+  /// Branch mode in a folder that is not itself a repo: the nested repo to
+  /// branch off (one of `repos_in`).
+  repo?: string;
   /// Job mode: the organizer gets the objective and drives the work through the
   /// connector; the room runs only the turns the queue asks for and, once it
   /// drains, reviews (if required) and closes. Omitted = conversation.
@@ -1146,6 +1183,16 @@ export interface RoundtableConfig {
   /// Working-room jobs: "confirm" (default) waits for you to land the merged,
   /// reviewed branch; "auto" lands by itself.
   closure?: "confirm" | "auto";
+}
+
+export type RoomMode = "converse" | "act" | "branch";
+
+/// A git repository one level inside the open folder (a workspace that holds
+/// several projects). Mirrors the Rust NestedRepo.
+export interface NestedRepo {
+  path: string;
+  name: string;
+  branch: string | null;
 }
 
 /// Job-mode state persisted with a room.

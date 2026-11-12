@@ -60,6 +60,7 @@ import type {
   RecentProject,
   RoomSummary,
   RoundtableConfig,
+  NestedRepo,
   ConnectorView,
   ConnectorPendingJob,
   JobsBoard,
@@ -102,6 +103,7 @@ import type {
   PairedDevice,
   DeviceScope,
   PolicyStatus,
+  SandboxStatus,
 } from "../types/domain";
 
 export const ipc = {
@@ -319,6 +321,9 @@ export const ipc = {
   sponsorSet: (projectRoot: string, sponsor: Sponsor) =>
     invoke<Sponsor>("sponsor_set", { projectRoot, sponsor }),
   approvalsPending: () => invoke<ApprovalRequest[]>("approvals_pending"),
+  /// SEGURIDAD-MOVIL F2: the engine's sandbox flag for a project.
+  sandboxStatus: (projectRoot: string) => invoke<SandboxStatus>("sandbox_status", { projectRoot }),
+  sandboxEnable: (projectRoot: string) => invoke<SandboxStatus>("sandbox_enable", { projectRoot }),
 
   permissionsSnapshot: () => invoke<PermissionsSnapshot>("permissions_snapshot"),
   permissionsAdd: (
@@ -436,6 +441,8 @@ export const ipc = {
   remoteServerStart: (bind: "loopback" | "lan", port?: number) =>
     invoke<RemoteStatus>("remote_server_start", { bind, port }),
   remoteServerStop: () => invoke<RemoteStatus>("remote_server_stop"),
+  /// The private address "listen on the LAN" would bind (null = none).
+  remoteLanAddress: () => invoke<string | null>("remote_lan_address"),
   remotePairingStart: () => invoke<PairingStartResult>("remote_pairing_start"),
   remoteApprove: (pendingId: string, scope?: DeviceScope) =>
     invoke<PairedDevice>("remote_approve", { pendingId, scope }),
@@ -646,6 +653,8 @@ export const ipc = {
   schedulerRunNow: (id: string) => invoke<RunRecord>("scheduler_run_now", { id }),
 
   roundtableStart: (config: RoundtableConfig) => invoke<string>("roundtable_start", { config }),
+  /// Git repos one level inside the open folder (a workspace of projects).
+  reposIn: () => invoke<NestedRepo[]>("repos_in"),
   roundtablePause: (id: string) => invoke<void>("roundtable_pause", { id }),
   roundtableResume: (id: string) => invoke<void>("roundtable_resume", { id }),
   roundtableInject: (id: string, message: string) =>

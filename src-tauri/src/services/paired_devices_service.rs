@@ -70,6 +70,10 @@ pub struct PairedDevice {
     pub paired_at_ms: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_ms: Option<i64>,
+    /// MOVIL F1b: the device's Web Push subscription, when it sent one.
+    /// Stored next to its key because a push is addressed to this device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push: Option<crate::services::push_service::PushSubscription>,
 }
 
 /// A handshake that completed but is awaiting the human's explicit approval on
@@ -82,6 +86,9 @@ pub struct PendingPairing {
     pub public_key: String,
     pub proposed_scope: DeviceScope,
     pub created_ms: i64,
+    /// F6: the four words the device shows too; approve only if they match.
+    #[serde(default)]
+    pub sas: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -204,6 +211,23 @@ impl PairedDevicesService {
         Self::write_file(&file)
     }
 
+    /// Store (or clear, with None) the device's push subscription.
+    pub fn set_push(
+        &self,
+        id: &str,
+        sub: Option<crate::services::push_service::PushSubscription>,
+    ) -> AppResult<()> {
+        let _g = self.file_lock.lock().unwrap();
+        let mut file = Self::load_file()?;
+        let dev = file
+            .devices
+            .iter_mut()
+            .find(|d| d.id == id)
+            .ok_or_else(|| AppError::NotFound(format!("device {id}")))?;
+        dev.push = sub;
+        Self::write_file(&file)
+    }
+
     pub fn touch(&self, id: &str, now_ms: i64) -> AppResult<()> {
         let _g = self.file_lock.lock().unwrap();
         let mut file = Self::load_file()?;
@@ -225,20 +249,49 @@ impl PairedDevicesService {
         proposed_scope: DeviceScope,
         now_ms: i64,
     ) -> String {
+        self.propose_pairing_with_sas(label, public_key, proposed_scope, now_ms, "")
+    }
+
+    /// `propose_pairing` with the short authentication string of the
+    /// handshake that produced it.
+    pub fn propose_pairing_with_sas(
+        &self,
+        label: &str,
+        public_key: &str,
+        proposed_scope: DeviceScope,
+        now_ms: i64,
+        sas: &str,
+    ) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         let mut pending = self.pending.lock().unwrap();
+        // A pending pairing the human never looked at is not a right to
+        // wait forever; and the slot is finite (a QR race fills it with
+        // junk otherwise).
+        pending.retain(|p| now_ms.saturating_sub(p.created_ms) < PENDING_TTL_MS);
+        if pending.len() >= PENDING_CAP {
+            pending.remove(0);
+        }
         pending.push(PendingPairing {
             id: id.clone(),
-            label: label.to_string(),
+            label: clean_label(label),
             public_key: public_key.to_string(),
             proposed_scope,
             created_ms: now_ms,
+            sas: sas.to_string(),
         });
         id
     }
 
     pub fn pending(&self) -> Vec<PendingPairing> {
         self.pending.lock().unwrap().clone()
+    }
+
+    /// Drop pendings older than the TTL (called by the UI's status reads).
+    pub fn prune_pending(&self, now_ms: i64) {
+        self.pending
+            .lock()
+            .unwrap()
+            .retain(|p| now_ms.saturating_sub(p.created_ms) < PENDING_TTL_MS);
     }
 
     /// Human approved on the desktop: move the pending pairing into the trusted
@@ -265,6 +318,7 @@ impl PairedDevicesService {
             scope: proposal.proposed_scope,
             paired_at_ms: now_ms,
             last_seen_ms: None,
+            push: None,
         };
         file.devices.push(device.clone());
         Self::write_file(&file)?;
@@ -276,6 +330,29 @@ impl PairedDevicesService {
     pub fn reject_pairing(&self, pending_id: &str) {
         let mut pending = self.pending.lock().unwrap();
         pending.retain(|p| p.id != pending_id);
+    }
+}
+
+/// How long a pairing waits for the human's click before it is forgotten.
+pub const PENDING_TTL_MS: i64 = 10 * 60 * 1000;
+/// How many pairings may wait at once.
+pub const PENDING_CAP: usize = 8;
+/// The label a device chose, as the UI and the ledger may show it: bounded,
+/// no control or format characters.
+pub fn clean_label(label: &str) -> String {
+    let cleaned: String = label
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+        })
+        .collect();
+    let trimmed = cleaned.trim();
+    let capped: String = trimmed.chars().take(64).collect();
+    if capped.is_empty() {
+        "unnamed device".into()
+    } else {
+        capped
     }
 }
 

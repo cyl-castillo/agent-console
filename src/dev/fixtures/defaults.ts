@@ -353,9 +353,29 @@ export function remoteStatus(running: boolean): RemoteStatus {
         scope: "readOnly",
         pairedAtMs: NOW - d(12),
         lastSeenMs: NOW - h(5),
+        push: {
+          endpoint: "https://fcm.googleapis.com/fcm/send/demo-subscription",
+          p256dh:
+            "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+          auth: "BTBZMqHH6r4Tts7J_aSIgg",
+        },
       },
     ],
+    pushPublicKey:
+      "BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8",
     pending: [],
+    // MOVIL F0: the week's gap as the ledger counts it — about half the
+    // requests were answered in the CLI or timed out before the Inbox saw
+    // them, and the slowest decision the console took waited a night.
+    gap: {
+      windowDays: 7,
+      requests: 212,
+      decided: 104,
+      pending: 0,
+      unseen: 108,
+      p90WaitMs: 90_000,
+      maxWaitMs: 110_520_000,
+    },
   };
 }
 
@@ -1099,6 +1119,10 @@ export const defaultFixtures: FixtureMap = {
   claude_session_exists: true,
   // git
   git_status: gitStatus,
+  repos_in: [
+    { path: `${ROOT}/api`, name: "api", branch: "main" },
+    { path: `${ROOT}/web`, name: "web", branch: "develop" },
+  ],
   git_branches: branches,
   git_diff_file: diffApi,
   git_recent_messages: ["Fix expired token fixture in auth test", "Add retry regression test"],
@@ -1491,6 +1515,14 @@ export const defaultFixtures: FixtureMap = {
   pr_autofix: undefined,
   // F8: the remote-decisions listener. Off by default; the spec starts it and
   // drives a pending pairing through `remote://changed`.
+  // SEGURIDAD-MOVIL F2: the engine's sandbox, off in the fixture so the
+  // Permissions section shows the recommendation; enabling flips it.
+  sandbox_status: { enabled: null, projectSettings: `${ROOT}/.claude/settings.json` },
+  sandbox_enable: {
+    enabled: true,
+    source: "project",
+    projectSettings: `${ROOT}/.claude/settings.json`,
+  },
   remote_status: remoteStatus(false),
   remote_server_start: (args: Record<string, unknown>) => ({
     ...remoteStatus(true),
@@ -1498,6 +1530,7 @@ export const defaultFixtures: FixtureMap = {
     addr: args.bind === "lan" ? "192.168.1.9:4870" : "127.0.0.1:4870",
   }),
   remote_server_stop: remoteStatus(false),
+  remote_lan_address: "192.168.1.9",
   remote_pairing_start: {
     uri: "agentconsole://pair?d=eyJkZW1vIjp0cnVlfQ&a=127.0.0.1:4870",
     qrSvg:

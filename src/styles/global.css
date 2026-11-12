@@ -6442,6 +6442,26 @@ select:focus-visible,
   flex: 1;
 }
 
+.rt-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0;
+  border: 0;
+}
+.rt-modes-legend {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint, var(--muted));
+  margin-bottom: 4px;
+}
+.rt-mode input[type="radio"] {
+  margin-top: 3px;
+}
+
 .rt-toggle {
   display: flex;
   align-items: center;

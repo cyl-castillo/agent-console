@@ -122,6 +122,11 @@ pub struct HooksRuntime {
     interrupt_script_path: PathBuf,
     watcher_started: Mutex<bool>,
     approvals_watcher_started: Mutex<bool>,
+    /// SEGURIDAD-MOVIL F2: every answer this console wrote, by request id.
+    /// The hook reports what it picked up; an answer the console never
+    /// wrote is a forged approval (something running as the user — the
+    /// agent's own shell — wrote the file) and is denied and interrupted.
+    answered: Mutex<HashMap<String, String>>,
 }
 
 /// Session dirs are keyed by PID and never reused, so every app run leaves one
@@ -176,6 +181,10 @@ impl HooksRuntime {
             }
         }
         fs::create_dir_all(session_dir.join("approvals"))?;
+        // The session dir carries tool inputs and the answer files: private
+        // to the user, not to the group (umask 0002 would make it 0775).
+        private_dir(&session_dir);
+        private_dir(&session_dir.join("approvals"));
         let script_path = ensure_hook_script(&cache, "userprompt-hook.cjs", USERPROMPT_HOOK)?;
         let pretooluse_script_path =
             ensure_hook_script(&cache, "pretooluse-hook.cjs", PRETOOLUSE_HOOK)?;
@@ -216,6 +225,7 @@ impl HooksRuntime {
             interrupt_script_path,
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
+            answered: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1134,16 +1144,97 @@ impl HooksRuntime {
                 "bad decision: {decision}"
             )));
         }
+        // The id names a file: only the UUID the hook minted is acceptable.
+        if uuid::Uuid::parse_str(id).is_err() {
+            return Err(AppError::InvalidArgument(
+                "approval id is not a UUID".into(),
+            ));
+        }
         let dir = self.session_dir.join("approvals");
         fs::create_dir_all(&dir)?;
+        let req_path = dir.join(format!("{id}.req.json"));
+        if !req_path.exists() {
+            return Err(AppError::InvalidArgument(
+                "that request is no longer pending".into(),
+            ));
+        }
         let path = dir.join(format!("{id}.res.json"));
         let body = json!({ "id": id, "decision": decision, "reason": reason });
-        // Write to a temp file then rename, so the polling hook never reads a partial JSON.
-        let tmp = dir.join(format!("{id}.res.tmp"));
-        fs::write(&tmp, body.to_string())?;
-        fs::rename(&tmp, &path)?;
+        // Write to a temp file, then LINK it into place: the hook never reads
+        // a partial JSON, and a second answer (keyboard vs device racing
+        // inside the hook's poll interval) fails with EEXIST instead of
+        // overwriting the first — one request, one answer.
+        let tmp = dir.join(format!("{id}.{}.res.tmp", std::process::id()));
+        write_private_file(&tmp, body.to_string().as_bytes())?;
+        let linked = fs::hard_link(&tmp, &path);
+        let _ = fs::remove_file(&tmp);
+        if let Err(e) = linked {
+            return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
+                AppError::InvalidArgument("that request was already answered".into())
+            } else {
+                e.into()
+            });
+        }
+        // The hook may have timed out between our check and the link: then
+        // the request is gone and our answer must not linger as an orphan.
+        if !req_path.exists() {
+            let _ = fs::remove_file(&path);
+            return Err(AppError::InvalidArgument(
+                "that request is no longer pending (the hook gave up)".into(),
+            ));
+        }
+        self.answered
+            .lock()
+            .insert(id.to_string(), decision.to_string());
         Ok(())
     }
+
+    /// The hook tells us what it picked up for `id`. `None` = genuine (we
+    /// wrote exactly that); `Some(expected)` = forged — we never answered,
+    /// or answered differently (`expected` is what we wrote, or "nothing").
+    pub fn report_pickup(&self, id: &str, decision: &str) -> Option<String> {
+        let mut map = self.answered.lock();
+        match map.remove(id) {
+            Some(ours) if ours == decision => None,
+            Some(ours) => Some(ours),
+            None => Some("nothing".into()),
+        }
+    }
+
+    /// Did this console write an answer for `id`? (The watcher uses it to
+    /// spot an answer file that is not ours.)
+    pub fn wrote_answer(&self, id: &str) -> bool {
+        self.answered.lock().contains_key(id)
+    }
+}
+
+/// Make a directory private to the user (0700). Best effort; non-unix
+/// relies on the per-user profile ACLs.
+fn private_dir(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+/// Write a file the user alone can read (0600 from creation).
+fn write_private_file(path: &Path, bytes: &[u8]) -> AppResult<()> {
+    use std::io::Write;
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(path)?;
+    f.write_all(bytes)?;
+    Ok(())
 }
 
 /// Merge hook entries into a hooks-table JSON file (created if missing; other
@@ -1197,7 +1288,7 @@ fn sync_hooks_between(
 
 /// Write settings.json via temp file + rename so a crash mid-write can never
 /// leave ~/.claude/settings.json truncated or half-serialized.
-fn write_settings_atomic(settings_path: &Path, settings: &Value) -> AppResult<()> {
+pub(crate) fn write_settings_atomic(settings_path: &Path, settings: &Value) -> AppResult<()> {
     let tmp = settings_path.with_extension("json.tmp");
     fs::write(&tmp, serde_json::to_string_pretty(settings).unwrap())?;
     fs::rename(&tmp, settings_path)?;
@@ -2379,6 +2470,67 @@ fn truncate_chars(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
+/// A forged approval: an answer file the console never wrote (or wrote
+/// differently) reached the hook. Loud, recorded and interrupted — the
+/// agent's own shell is the only thing running as the user that could have
+/// written it. Prevention is the engine's sandbox (Claude Code's
+/// `sandbox.enabled` blocks writes outside the project); this is the net
+/// when the sandbox is off.
+pub fn on_forged_approval(app: &AppHandle, id: &str, seen: &str, expected: &str) {
+    let state = app.state::<AppState>();
+    let req = state
+        .hooks
+        .pending_approvals()
+        .into_iter()
+        .find(|r| r.get("id").and_then(Value::as_str) == Some(id));
+    let tool = req
+        .as_ref()
+        .and_then(|r| r.get("tool").and_then(Value::as_str))
+        .unwrap_or("?")
+        .to_string();
+    let term_id = req
+        .as_ref()
+        .and_then(|r| r.get("termId").and_then(Value::as_str))
+        .map(String::from);
+    let payload = json!({
+        "approvalId": id,
+        "tool": tool,
+        "seen": seen,
+        "expected": expected,
+        "termId": term_id,
+    });
+    if let Some(r) = req.as_ref() {
+        if let Some(root) = event_root(r, &state) {
+            let _ =
+                state
+                    .testigo
+                    .on_remote(&root, now_ms_i64(), "approval_forged", payload.clone());
+        }
+    } else if let Some(root) = state
+        .inner
+        .lock()
+        .project
+        .as_ref()
+        .map(|p| p.root.to_string_lossy().to_string())
+    {
+        let _ = state
+            .testigo
+            .on_remote(&root, now_ms_i64(), "approval_forged", payload.clone());
+    }
+    // Interrupt the session the request came from: Escape to the CLI.
+    if let Some(t) = &term_id {
+        let _ = state.terminals.write_by_key(t, b"\x1b");
+    }
+    let _ = app.emit("approval://forged", &payload);
+}
+
+fn now_ms_i64() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
     let (watcher, rx, interval) = dir_wake_source(&dir, Duration::from_millis(100));
     let mut seen: HashSet<String> = HashSet::new();
@@ -2390,6 +2542,24 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
         let mut current: HashSet<String> = HashSet::new();
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
+            // SEGURIDAD-MOVIL F2: an answer file this console did not write
+            // is a forged approval. The hook also reports every pickup (so a
+            // file that lived less than one tick is caught there); this is
+            // the second net.
+            if let Some(id) = name.strip_suffix(".res.json") {
+                let state = app.state::<AppState>();
+                if !state.hooks.wrote_answer(id) && seen.insert(format!("forged:{id}")) {
+                    let decision = fs::read_to_string(e.path())
+                        .ok()
+                        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                        .and_then(|v| v.get("decision").and_then(Value::as_str).map(String::from))
+                        .unwrap_or_else(|| "?".into());
+                    // Remove it before the hook's next poll when we can.
+                    let _ = fs::remove_file(e.path());
+                    on_forged_approval(&app, id, &decision, "nothing");
+                }
+                continue;
+            }
             if !name.ends_with(".req.json") {
                 continue;
             }
@@ -2412,6 +2582,12 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
                 if let Some(root) = event_root(&v, &state) {
                     let _ = state.testigo.on_approval_request(&root, &v);
                 }
+                // MOVIL F1b: knock on the paired devices if this is still
+                // waiting once the debounce passes (the count is taken then).
+                let counter = app.clone();
+                state.push.knock(Box::new(move || {
+                    counter.state::<AppState>().hooks.pending_approvals().len()
+                }));
             }
             seen.insert(name);
         }
@@ -3770,5 +3946,97 @@ mod tests {
         let events = fs::read_to_string(session_dir.join("events.jsonl")).unwrap();
         assert_eq!(events.lines().count(), 4, "every run must log the prompt");
         assert!(events.contains("how do we cut a release"));
+    }
+
+    /// SEGURIDAD-MOVIL F2: one request, one answer, and only ours. A second
+    /// answer fails instead of overwriting; a non-UUID id and a request
+    /// that is not pending are refused; the pickup report tells a genuine
+    /// answer from a forged one; answer files are private.
+    #[test]
+    fn answers_are_exclusive_private_and_known_to_the_console() {
+        let _env = crate::test_support::lock_env();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("ac-answers-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", base.join("data"));
+        std::env::set_var("XDG_CACHE_HOME", base.join("cache"));
+        let hooks = HooksRuntime::new().unwrap();
+        let approvals = hooks.session_dir().join("approvals");
+        let id = uuid::Uuid::new_v4().to_string();
+        let write_req = |id: &str| {
+            std::fs::write(
+                approvals.join(format!("{id}.req.json")),
+                json!({ "id": id, "ts": 1, "tool": "Bash", "input": { "command": "ls" } })
+                    .to_string(),
+            )
+            .unwrap();
+        };
+        write_req(&id);
+
+        assert!(hooks.respond("not-a-uuid", "allow", None).is_err());
+        let ghost = uuid::Uuid::new_v4().to_string();
+        assert!(
+            hooks.respond(&ghost, "allow", None).is_err(),
+            "no request, no answer"
+        );
+
+        hooks.respond(&id, "deny", Some("no")).unwrap();
+        let res_path = approvals.join(format!("{id}.res.json"));
+        let res: Value =
+            serde_json::from_str(&std::fs::read_to_string(&res_path).unwrap()).unwrap();
+        assert_eq!(res["decision"], "deny");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&res_path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            assert_eq!(
+                std::fs::metadata(hooks.session_dir())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+        // A second answer — the device racing the keyboard — is refused.
+        let err = hooks.respond(&id, "allow", None).unwrap_err().to_string();
+        assert!(err.contains("already answered"), "{err}");
+        let res: Value =
+            serde_json::from_str(&std::fs::read_to_string(&res_path).unwrap()).unwrap();
+        assert_eq!(res["decision"], "deny", "the first answer stands");
+
+        // The hook reports what it read: ours → genuine; anything else → forged.
+        assert!(hooks.wrote_answer(&id));
+        assert_eq!(hooks.report_pickup(&id, "deny"), None);
+        assert!(
+            !hooks.wrote_answer(&id),
+            "a genuine pickup closes the entry"
+        );
+        assert_eq!(
+            hooks.report_pickup(&id, "allow").as_deref(),
+            Some("nothing"),
+            "we never answered this (again)"
+        );
+        let other = uuid::Uuid::new_v4().to_string();
+        write_req(&other);
+        hooks.respond(&other, "deny", None).unwrap();
+        assert_eq!(
+            hooks.report_pickup(&other, "allow").as_deref(),
+            Some("deny"),
+            "we wrote deny, the hook saw allow: forged"
+        );
+        // No tmp files left behind.
+        let leftovers: Vec<_> = std::fs::read_dir(&approvals)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
     }
 }

@@ -10,6 +10,9 @@ import {
   pendingApproval,
   ROOT,
   prOpenRed,
+  gitStatus,
+  defaultFixtures,
+  NOW,
 } from "../dev/fixtures/defaults";
 import { useBudgetStore } from "../stores/budgetStore";
 import { useLiveStatusStore } from "../stores/liveStatusStore";
@@ -218,6 +221,26 @@ export const SessionsBooting = scenario({
   },
   after: () => useTermSignalsStore.getState().markBooting("sess-auth"),
 });
+/// The folder changed since it was trusted: the agent is held in its
+/// terminal and the trust decision sits at the top of the conversation
+/// (a session started from the Jira queue landed exactly here).
+export const SessionsTrustFolder = scenario({
+  destination: "sessions",
+  fixtures: {
+    testigo_list: [],
+    term_spawn: (args: Record<string, unknown>) => `term-${String(args.termKey ?? "x")}`,
+    trust_status: {
+      ...(defaultFixtures.trust_status as Record<string, unknown>),
+      state: "changed",
+      decision: {
+        decision: "trusted",
+        digest: "old-digest",
+        ts: NOW - 3 * 86_400_000,
+        counts: { hooks: 0, mcp: 1, plugins: 0, rules: 0, instructions: 1, skills: 1, setup: 0 },
+      },
+    },
+  },
+});
 /// Focus mode: the terminal alone.
 export const SessionsFocus = scenario({
   destination: "sessions",
@@ -266,6 +289,13 @@ export const SessionsMany = scenario({
 });
 export const WorkJobs = scenario({ destination: "work", tab: "jobs" });
 export const WorkRoom = scenario({ destination: "work", tab: "roundtable" });
+/// SALAS-2026-11: the open folder is a workspace of repos, not a repo —
+/// "Act in the folder" works as is; "Edit code on a branch" asks which repo.
+export const WorkRoomWorkspace = scenario({
+  destination: "work",
+  tab: "roundtable",
+  fixtures: { git_status: { ...gitStatus, isRepo: false, branch: null, changes: [] } },
+});
 /// D11: a sponsor that decides low-risk requests alone, with a weekly budget.
 export const WorkJobsSponsor = scenario({
   destination: "work",

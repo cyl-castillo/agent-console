@@ -9,6 +9,10 @@ import { useShellStore } from "../../../stores/shellStore";
 import { isBooting, signalsFor, useTermSignalsStore } from "../../../stores/termSignalsStore";
 import type { TerminalSession } from "../../../stores/terminalsStore";
 import { useToastStore } from "../../../stores/toastStore";
+import { useSessionStore } from "../../../stores/sessionStore";
+import { useTrustStore } from "../../../stores/trustStore";
+import { trustNeedsDecision } from "../../../lib/trust";
+import { TrustDecision } from "../TrustDecision";
 import { Button } from "../../../ui/Button";
 import { ApprovalDecision } from "../ApprovalDecision";
 import { BudgetDecision } from "../BudgetDecision";
@@ -58,11 +62,27 @@ export function SessionCards({
   };
   const booting = isBooting(sig, now) && !sig.trust && !sig.login && !sig.notFound;
   const live = session.status === "live";
+  // F4's gate, where the session is: until the folder is trusted the agent
+  // is not launched and the terminal only prints a grey line. The Inbox has
+  // the same card, but a session started from Work (the Jira queue) or the
+  // palette lands here — and read as "the console opened without Claude".
+  const trustStatus = useTrustStore((s) => s.status);
+  const projectName = useSessionStore((s) => s.project?.name ?? "this folder");
+  const folderTrust = live && trustNeedsDecision(trustStatus) ? trustStatus : null;
   if (!onStage) return null;
 
   return (
     <>
-      {live && booting && (
+      {folderTrust && (
+        <div data-testid="card-trust-folder">
+          <TrustDecision status={folderTrust} projectName={projectName} />
+          <p className="px-4 pb-1 font-sans text-small text-muted-foreground">
+            {session.agent ?? "claude"} waits in this terminal until you answer; nothing runs before
+            that.
+          </p>
+        </div>
+      )}
+      {live && booting && !folderTrust && (
         <Card
           testid="card-boot"
           icon={<Loader2 size={16} className="animate-spin" aria-hidden />}

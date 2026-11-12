@@ -183,6 +183,22 @@ impl TerminalRegistry {
             .collect()
     }
 
+    /// Write to the terminal whose frontend id (`AGENT_CONSOLE_TERM_ID`)
+    /// is `term_key` — what a hook payload names as `termId`.
+    pub fn write_by_key(&self, term_key: &str, data: &[u8]) -> AppResult<()> {
+        let mut terms = self.lock_terms();
+        let term = terms
+            .values_mut()
+            .find(|h| h.term_key.as_deref() == Some(term_key))
+            .ok_or_else(|| {
+                AppError::InvalidArgument(format!("unknown terminal key: {term_key}"))
+            })?;
+        term.writer
+            .write_all(data)
+            .map_err(|e| AppError::Other(format!("write: {e}")))?;
+        Ok(())
+    }
+
     pub fn write(&self, id: &str, data: &[u8]) -> AppResult<()> {
         let mut terms = self.lock_terms();
         let term = terms

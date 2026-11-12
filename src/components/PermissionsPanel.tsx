@@ -6,6 +6,7 @@ import { PanelError } from "./PanelError";
 import { ProjectTrustSection } from "./ProjectTrustSection";
 import { PolicySection } from "./PolicySection";
 import { RemoteDevicesSection } from "./RemoteDevicesSection";
+import { SandboxSection } from "./SandboxSection";
 import type { StoredRule } from "../types/domain";
 
 type Scope = "project" | "global";
@@ -126,6 +127,7 @@ export function PermissionsPanel() {
     <div className="permissions-panel">
       <ProjectTrustSection />
       <PolicySection />
+      <SandboxSection />
       <RemoteDevicesSection />
       <div className="workbench-header workbench-header-slim">
         <span className="workbench-title">permissions</span>

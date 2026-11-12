@@ -367,6 +367,13 @@ impl TestigoService {
             .join("agent-console")
             .join("testigo");
         fs::create_dir_all(&dir)?;
+        // The ledger carries tool inputs: the user's, not the group's
+        // (SEGURIDAD-MOVIL F5, M2).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+        }
         Ok(dir)
     }
 
@@ -558,7 +565,14 @@ impl TestigoService {
         let mut line = serde_json::to_string(&ev)
             .map_err(|e| AppError::Other(format!("serialize proof event: {e}")))?;
         line.push('\n');
-        let mut f = OpenOptions::new().create(true).append(true).open(&path)?;
+        let mut opts = OpenOptions::new();
+        opts.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&path)?;
         f.write_all(line.as_bytes())?;
         drop(f);
         inner
@@ -1978,6 +1992,10 @@ pub fn anchor_head(repo: &Path, seq: u64, hash: &str, ts: i64) -> AppResult<()> 
 /// Bound a tool input to MAX_INPUT_BYTES of serialized JSON, replacing it with
 /// a marked preview when it's larger — approvals must never balloon the ledger.
 fn bounded_input(input: Value) -> Value {
+    // SEGURIDAD-MOVIL F5 (M2): file bodies become a digest (the diff lives
+    // in the snapshot, not here) and every string is redacted before the
+    // line is written — the ledger is what proof packets hand to reviewers.
+    let input = crate::services::redact::redact_value(digest_file_bodies(input));
     let s = input.to_string();
     if s.len() <= MAX_INPUT_BYTES {
         return input;
@@ -1989,10 +2007,61 @@ fn bounded_input(input: Value) -> Value {
     json!({ "truncated": true, "preview": &s[..end] })
 }
 
+/// `content`, `new_string`, `old_string` (and each `edits[]` entry's) are
+/// file bodies: keep their sha256 and length, never the text.
+fn digest_file_bodies(v: Value) -> Value {
+    fn digest(s: &str) -> Value {
+        use sha2::{Digest, Sha256};
+        let h = Sha256::digest(s.as_bytes());
+        json!({ "sha256": format!("{h:x}"), "bytes": s.len(), "redacted": "file body" })
+    }
+    match v {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(k, v)| {
+                    let v = match (k.as_str(), &v) {
+                        (
+                            "content" | "new_string" | "old_string" | "new_source",
+                            Value::String(s),
+                        ) => digest(s),
+                        ("edits", Value::Array(_)) => digest_file_bodies(v),
+                        _ => digest_file_bodies(v),
+                    };
+                    (k, v)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(digest_file_bodies).collect()),
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// SEGURIDAD-MOVIL F5: what the ledger keeps of a tool input — file
+    /// bodies as digests, secrets masked, the rest intact.
+    #[test]
+    fn ledger_inputs_carry_digests_not_bodies_and_no_secrets() {
+        let v = bounded_input(json!({
+            "file_path": "src/a.ts",
+            "content": "const token = 'abc';",
+            "edits": [{ "old_string": "a", "new_string": "b" }],
+            "command": "curl -H 'Authorization: Bearer xyz.123' https://x",
+            "env": { "DB_PASSWORD": "hunter2" }
+        }));
+        assert_eq!(v["file_path"], "src/a.ts");
+        assert_eq!(v["content"]["redacted"], "file body");
+        assert_eq!(v["content"]["bytes"], 20);
+        assert_eq!(v["edits"][0]["new_string"]["redacted"], "file body");
+        assert_eq!(
+            v["command"],
+            "curl -H 'Authorization: Bearer [redacted]' https://x"
+        );
+        assert_eq!(v["env"]["DB_PASSWORD"], "[redacted]");
+    }
 
     /// CHAT-2026-10 F2: a prompt on a terminal whose turn is still open
     /// (Esc in Claude, a killed session) closes that turn as cut short

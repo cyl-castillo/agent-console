@@ -10,15 +10,16 @@ ignore = [
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
     # zip <9 `extract()` issues (SUID/SGID bits kept, permissions applied
-    # through symlinks, symlink targets outside the destination). Our own
-    # `zip` is on 9 and unpacks entry by entry behind `enclosed_name`. What
-    # remains: zip 8 pinned by candle-core 0.11 (loads safetensors, never
-    # extracts an archive) and zip 4 pinned by tauri-plugin-updater 2.10
-    # (extracts only the update it downloaded, after verifying our minisign
-    # signature). Drop these when candle and the updater move to zip >= 9.
-    # RUSTSEC-2026-0429 (2026-10-22) is the same family: `extract()` sizes a
-    # symlink-target buffer from the declared size and aborts on a hostile
-    # archive. Same two pinned copies, same non-hostile inputs.
+    # through symlinks, symlink targets outside the destination, and
+    # 2026-0429: a symlink entry with a huge declared size aborts the
+    # process). Our own `zip` is on 9 and unpacks entry by entry behind
+    # `enclosed_name`. What remains: zip 8 pinned by candle-core 0.11 (loads
+    # safetensors, never extracts an archive) and zip 4 pinned by
+    # tauri-plugin-updater 2.10 (extracts only the update it downloaded,
+    # after verifying our minisign signature — an archive we signed). Drop
+    # these when candle and the updater move to zip >= 9 (checked 2026-11-04:
+    # candle-core 0.11 and updater 2.10.1 are the latest releases; Carlos OK'd
+    # the exception the same day).
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",

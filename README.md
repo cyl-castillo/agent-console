@@ -142,9 +142,14 @@ suggest-only, none of them able to block the core:
 ## Rooms & cowork
 
 A **room** is a shared conversation about one problem between you and N agents
-(Claude, Codex and/or OpenCode). In a **working room** (the "let them edit" toggle) the
-agents edit code in an isolated git worktree on a `room/<id>` branch, committing
-one checkpoint per turn — your own files stay untouched until you review and merge.
+(Claude, Codex and/or OpenCode). You choose what the agents may do: **converse**
+(read-only), **act in the folder** (edit files and use your MCP servers — comment a
+Jira ticket, move it, update a document; changes land directly, no branch, shell
+stays off, every call in the ledger; works without a git repo) or **edit code on a
+branch** — the **working room**, where agents edit in an isolated git worktree on a
+`room/<id>` branch, committing one checkpoint per turn; your own files stay
+untouched until you review and merge. A folder that is a workspace of several
+repos picks which repo the branch comes from.
 
 **Cowork with human colleagues** happens over the git remote you already use — no
 realtime sync, no extra infra. From a live working room:
@@ -177,7 +182,7 @@ branch name; you'll see a one-line notice.
 | ![Testigo verifier page in a browser reporting a valid Ed25519/DSSE signature and an intact hash chain for an exported proof packet](docs/shots/proof-verify.png) | ![The ledger map: one lane per session, one bar per turn, a tick per witnessed event; the selected turn's nine events — session start, prompt, tool results, an approval, a passing check, the turn's end — in the Inspector with the chain verified](docs/shots/ledger-map.png) |
 | **Proof packets verify in any browser** — signature, hash chain, and honest notes about what redaction does and doesn't prove. | **The ledger, as a map** — every session a lane, every turn a bar; click one to see exactly what was witnessed, hash by hash. |
 | ![The Inbox with the newer decisions: a pull request with red CI and two review comments offering Auto-fix and a merge that needs the human's word, a read-only approval, an unverified claim — "all tests pass" with no witnessed check — with a reviewer picker and Ask for evidence, and a session refused on the plan's quota offering to continue in OpenCode on a local Qwen model](docs/shots/inbox-verdicts.png) | ![Settings › Permissions: the workspace trusted with its digest, the approval policy as one JSON file compiled for Claude, Codex and OpenCode with two rules the engines cannot express listed, and the remote devices section listening on loopback with a phone waiting for approval and a paired read-only device](docs/shots/trust-policy.png) |
-| **Every claim gets a verdict** — the console checks what the agent said against what it ran; a red PR, an unverified "tests pass" and an exhausted quota are decisions, not surprises. | **Trust, as code** — the folder is trusted by digest, the approval policy is one versioned file compiled into what each engine enforces, and a paired phone can answer the low-risk decisions. |
+| **Every claim gets a verdict** — the console checks what the agent said against what it ran; a red PR, an unverified "tests pass" and an exhausted quota are decisions, not surprises. | **Trust, as code** — the folder is trusted by digest, the approval policy is one versioned file compiled into what each engine enforces, and a paired phone ([agent-console.dev/app](https://agent-console.dev/app/)) answers the low-risk decisions with their evidence and gets knocked when they wait. |
 | ![Room in fan-out mode: two agents ran alone on the same prompt in twin worktrees; the comparison table shows each one's diff size, checks with exit codes, the console's verdict — verified versus claim contradicted — and its last words, with apply and discard](docs/shots/fanout-compare.png) | ![Proof › Ledger after writing a compliance pack: the archive path, sessions, records, weeks, the IETF draft, audit trail verified, the policy hash and the archive's SHA-256](docs/shots/compliance-pack.png) |
 | **Fan out, then choose** — N agents, one prompt, twin worktrees; you compare evidence, not prose, and apply one. | **One zip for the auditor** — the audit trail (verified), the policy in force, verification by week and a manifest; same ledger, same bytes. |
 

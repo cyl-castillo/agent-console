@@ -473,6 +473,44 @@ const termOut = (page: Page, id: string, data: string) =>
     [id, data],
   );
 
+test("F4 gate in Sessions: the folder-trust card holds the launch in the conversation, answering it starts the agent", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--sessions-trust-folder");
+  const card = page.getByTestId("card-trust-folder");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Folder changed since you trusted it");
+  await expect(card).toContainText("waits in this terminal until you answer");
+  // Nothing launched: the terminal typed no agent command.
+  await page.waitForTimeout(1200);
+  const typed = () =>
+    page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+          }
+        ).__fixtures.invokeLog.filter(
+          (e) => e.cmd === "term_write" && /^(claude|codex|opencode)\b/.test(String(e.args.data)),
+        ).length,
+    );
+  expect(await typed()).toBe(0);
+  await card.getByRole("button", { name: "Trust this folder" }).click();
+  // The decision lands (fixture answers "trusted"): the card leaves and the
+  // held launch goes out.
+  await expect(card).toHaveCount(0);
+  await expect.poll(typed, { timeout: 5000 }).toBeGreaterThan(0);
+});
+
+test("a session started from another destination lands on Sessions", async ({ page }) => {
+  await openV2(page, "app-v2--inbox");
+  const shell = page.getByTestId("shell-v2");
+  await expect(shell).toHaveAttribute("data-destination", "inbox");
+  await page.getByRole("button", { name: "New session" }).first().click();
+  await expect(shell).toHaveAttribute("data-destination", "sessions");
+  await expect(page.getByTestId("conversation")).toBeVisible();
+});
+
 test("F3: the trust question, a login ask and a missing CLI surface as cards with a way in", async ({
   page,
 }) => {
@@ -830,6 +868,26 @@ test("v2 parity: below 900 px the side columns collapse, the list can be summone
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(shell).not.toHaveAttribute("data-narrow", "true");
   await expect(page.getByTestId("inspector")).toBeVisible();
+});
+
+test("SALAS: a room picks what its agents may do; a workspace of repos can still branch", async ({
+  page,
+}) => {
+  await openV2(page, "app-v2--work-room-workspace");
+  const modes = page.getByTestId("rt-modes");
+  await expect(modes).toBeVisible();
+  await expect(page.getByTestId("rt-mode-converse").getByRole("radio")).toBeChecked();
+  // Acting needs no repo and says what it opens.
+  await page.getByTestId("rt-mode-act").getByRole("radio").check();
+  await expect(page.getByTestId("rt-mode-act")).toContainText("MCP servers");
+  await expect(page.getByTestId("rt-repo-pick")).toHaveCount(0);
+  // Branching in a folder that is not a repo asks which nested repo to use.
+  await page.getByTestId("rt-mode-branch").getByRole("radio").check();
+  const pick = page.getByTestId("rt-repo-pick");
+  await expect(pick).toBeVisible();
+  await expect(pick.locator("option")).toHaveCount(3);
+  await pick.locator("select").selectOption({ label: "api · main" });
+  await expect(page.getByTestId("rt-fanout-toggle")).toBeVisible();
 });
 
 test("v2 parity: saved rooms live under Work and open the Room panel", async ({ page }) => {

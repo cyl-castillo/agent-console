@@ -1,91 +1,108 @@
-# Threat Model — Remote Decisions Client (was: Mobile Voice Companion)
+# Threat Model — Remote Decisions (desktop + companion)
 
-**Status (2026-10-23, COMPETENCIA-2026-10 F8):** the desktop side is implemented and in `main` — Noise pairing (`secure_channel.rs`), pinned devices with scopes (`paired_devices_service.rs`), the listener (`transport.rs`, loopback by default, LAN by the human's typed choice) and the **decisions-only** application protocol (`remote_decisions.rs`, `docs/pairing-protocol.md` v2). The device app is a separate repo. **Voice is deferred**: nothing a device sends is a prompt until an on-device second factor exists (T5).
-**Scope:** a paired device shows the decisions waiting on the user's own machine, with their evidence, and answers them.
-**One-line framing:** this is a *remote control for an arbitrary-code executor*. Any weakness is RCE-grade — design as if the channel is already compromised, and keep dangerous actions behind the keyboard regardless.
+**Status (2026-11-06, SEGURIDAD-MOVIL-2026-11):** rewritten to describe the
+system that exists, not the relay-and-voice design this file began as. The
+desktop side is in `main` (`secure_channel.rs`, `pairing_service.rs`,
+`paired_devices_service.rs`, `transport.rs`, `ws.rs`, `remote_decisions.rs`,
+`push_service.rs`); the device is the companion PWA at
+`agent-console.dev/app` (repo `agent-console-companion`). Voice and a relay
+are **not** part of it; both stay deferred and are listed at the end so
+nobody mistakes them for controls.
 
-## What is enforced today (desktop side)
+**One-line framing:** this is a *remote control for an arbitrary-code
+executor*. Any weakness is RCE-grade. Design as if the channel is already
+compromised: a device may allow only what cannot change the machine, and
+every act leaves a ledger line.
 
-| Control | Where |
-|---|---|
-| Noise XXpsk3 pairing with the desktop key pinned from the QR; KK reconnect; one-time PSK with TTL | `secure_channel.rs`, `transport.rs` |
-| A handshake only creates a **pending** pairing; trust needs a click on the desktop, with a scope; revoke = forget the key (next connection refused before any handshake) | `paired_devices_service.rs`, Trust → Remote devices |
-| **Dangerous actions are never approved from a device**: the desktop computes the tier (`tier_for`, same Bash rules as the Inbox card; every other tool medium) and `gate` refuses `allow` on a high tier whatever the scope; `deny` is always possible; `readOnly` devices may only look | `remote_decisions.rs` (tests: gate table + E2E over real TCP) |
-| The tier a device displays is the desktop's; `decide` re-reads the request as it stands now | `transport.rs::serve_reconnect` |
-| Listener bound to **127.0.0.1** by default; the LAN is a typed confirmation in the UI, binds the **one LAN address** the default route uses (never 0.0.0.0, so a public, hotspot or VPN interface is never exposed by that choice), and leaves a `remote_listener {bind: lan, addr}` ledger line; a bind switch records the stop too; the QR carries the dial address | `commands/remote.rs` |
-| Every act goes to the ledger: `remote_device {paired|scope|revoked}`, `remote_listener {start|stop}`, and each remote answer is an `approval_decision` with `via.remote = {deviceId, label}`; export IETF maps them as decisions | `testigo_service.rs`, `aat_export.rs` |
-| Desktop identity in the **OS keystore** (`keyring`), loaded on first use (never at launch); a marker file says the keystore holds it, so a locked or missing keystore is reported (`identity_error`) instead of silently minting a second identity that would break every paired device; the 0600 file is the fallback only when no keystore identity ever existed | `secure_channel.rs::load_or_create_identity_keyring`, `state.rs::pairing()` |
-| Frames capped at 64 KiB and the decisions reply at 40 items (`truncated` flag); the Inbox card leaves when a device answers (`approval://resolved`) so two humans never answer the same request | `transport.rs`, `approvalStore.ts` |
-
-Not done (tracked): relay / outbound-only transport (today LAN or a tunnel the user brings), per-message replay nonces beyond Noise's own counters, on-device biometric gate (the device app's job), prompts over the channel (needs T5's second factor).
-
-## System & data flow
+## The system
 
 ```
-🎤 Phone (push-to-talk) → on-device STT → [E2E-encrypted text] → Relay (blind cartero)
-   → outbound conn → Desktop agent-console → inject prompt → claude/codex (tools: shell, git, fs, deploy)
-   → spoken-summary pass → [E2E text] → Relay → Phone → TTS 🔊
+📱 companion PWA (initiator)               🖥️ agent-console (responder)
+   scans the QR (desktop key + one-time PSK)   Trust → Remote devices: listen, Pair
+   Noise XXpsk3 over WebSocket  ─────────────▶  pending pairing + 4-word SAS
+   human compares the 4 words on both screens   human approves with a scope
+   Noise KK reconnect, one request each ─────▶  pending / decide / sessions / push_info / subscribe
+   ◀── Web Push "N decisions wait" (count only) ─ knock after 15 s, ≤ 1/min
 ```
 
-- **Model B (relay):** desktop makes only **outbound** connections; nothing is exposed/bound to a public interface.
-- **Audio + transcription stay on the phone**; only encrypted *text* crosses the wire.
+Transport: one TCP port on the desktop, bound to `127.0.0.1` by default or
+to one private LAN/tailnet address by a typed choice (never `0.0.0.0`, never
+a public or VPN address); the same port serves raw sockets and WebSocket
+upgrades. From outside the LAN the user brings Tailscale; `tailscale serve`
+gives the `wss://` an installed PWA needs. Nothing of ours is exposed to the
+internet and no server of ours is in the path.
 
-## Assets (what an attacker wants)
-Source code & repos · credentials (Claude auth, **vault secrets**) · the ability to **run shell / `git push` / deploy Fixy to prod** · the dev machine itself · (multi-user) the relay reaching *many* machines · the **release-signing keys** (auto-updater).
+## Assets
+
+The ability to **run commands on the developer's machine** through the
+agent; the repos and credentials on it; the desktop identity key (pins every
+paired device); the device identity key (one device's right to answer);
+the ledger (what reviewers are shown); the published app (what every phone
+runs).
 
 ## Trust boundaries
-`phone app` ⟂ `relay (untrusted infra)` ⟂ `desktop endpoint` ⟂ `agent + its tools` ⟂ `prod/secrets`.
-The most important shift: voice **moves the human-approval boundary off the keyboard onto a noisy, identity-less channel.**
 
-## Actors
-Legit: device owner. Adversaries: relay operator / compromised relay · network MITM · thief of phone/token · **anyone within earshot** · malicious ambient/replayed audio · prompt-injection content · attacker of the release pipeline.
+`phone browser` ⟂ `network (LAN / tailnet)` ⟂ `desktop listener` ⟂
+`console (gate, ledger)` ⟂ `agent + its tools` ⟂ `machine`. The agent's
+tools run **as the user**: inside that boundary nothing of the console's is
+secret from the agent. Only the engine's sandbox draws a line there.
 
-## Threats → controls
+## Adversaries
 
-| # | Threat | Control |
-|---|--------|---------|
-| T1 | Relay reads/forges traffic | **E2E encryption**; relay sees only ciphertext. Messages **signed** so relay can't fabricate. TLS underneath. |
-| T2 | Replay (resend a captured "approve") | Per-message **nonce + sequence + expiry**. |
-| T3 | Attacker pairs to your agent | QR pairing with **ephemeral secret**, per-device keys, explicit confirm on desktop. |
-| T4 | Stolen phone/token = full machine control | Biometric to open app · token **rotation** · **remote device revocation** · per-device scopes. |
-| T5 | Dangerous action triggered remotely (deploy, `rm`, secrets) | **Never voice-only**: prod/secrets/destructive ops require **second factor** (on-screen tap + biometric). Aligns with the project's "confirm-before prod/secrets/external" policy. |
-| T6 | Anyone near the phone speaks commands | **Push-to-talk only**, never always-on/wake-word by default. |
-| T7 | Ambient / ultrasonic / replayed audio injection | Push-to-talk + on-screen confirm for anything irreversible. |
-| T8 | STT mishears → wrong/destructive command | Confirm irreversible actions; echo the parsed intent before acting. |
-| T9 | Desktop endpoint exposed to the internet | **Outbound-only**; never bind a public interface; validate & authenticate **every** message (don't trust the relay). |
-| T10 | Prompt injection escalates via agent tools | Least-privilege agent scopes; never treat transcribed text as shell; keep tool sandboxing. |
-| T11 | Secrets/code leak via cloud STT or spoken summaries | **On-device STT**; redact secrets from narrated output. |
-| T12 | (Multi-user) relay is a high-value mass target | Stateless, E2E (no plaintext), rate-limit/abuse controls, minimize metadata retention. |
-| T13 | (Multi-user) compromised release pipeline = mass RCE via auto-updater | **Sign releases**; protect signing keys; reproducible/verified builds. |
+Someone on the same network · someone who photographed the QR · a thief of
+the phone (unlocked, or with the browser's storage) · a malicious or buggy
+device app · a man-in-the-middle on the path · the agent itself under prompt
+injection · whoever can change the published app · the push relay (Google,
+Apple, Mozilla) · a compromised dependency.
 
-## Pairing — secure device binding (the trust anchor)
+## Threats → controls (what the code does)
 
-**Core insight:** trust must be bootstrapped **out-of-band**, because the relay is untrusted. The **QR shown on the desktop screen is that OOB channel** — authenticated by physical proximity (the attacker isn't looking at your monitor). If the QR carries the desktop's public key, the phone knows *who it's talking to before touching the relay* → **MITM becomes impossible**. **Do not invent crypto** — use the **Noise Protocol Framework** (à la WireGuard) or a **PAKE (SPAKE2, à la magic-wormhole)**. Primitives: X25519 (ECDH), Ed25519 (identity), HKDF, XChaCha20-Poly1305 (AEAD).
+| # | Threat | Control | Where |
+|---|---|---|---|
+| T1 | MITM on the network | Noise XXpsk3 with the desktop key pinned from the QR; the device verifies the key the moment it arrives (message 2), before its own key travels; KK on reconnect authenticates both sides with pinned keys | `secure_channel.rs`, `noise.ts` |
+| T2 | Replay | Fresh ephemerals per connection, Noise nonces, one request per connection | `transport.rs` |
+| T3 | Someone pairs to the desktop | One-time PSK with a 2-min TTL, spent only by a completed handshake; pairing creates a *pending* entry; trust needs a click with a scope; the **4-word SAS** derived from the handshake hash is shown on both screens and the human approves only if they match; pendings expire in 10 min, 8 at most, labels bounded | `pairing_service.rs`, `paired_devices_service.rs`, `sas.rs` |
+| T4 | Stolen phone / stolen device key | Scope per device; **only read-only requests can be allowed from a device**; deny is always possible; revoke forgets the key and the next connection is refused before any crypto; the device key is wrapped at rest under a non-extractable browser key (script cannot exfiltrate it), a PIN, or a passkey with PRF (the platform authenticator), and locks after the app has been in the background | `remote_decisions::gate`, Trust → Remote devices; companion `store/keyguard.ts` |
+| T5 | A device drives the agent | No prompts over the channel; the device's free text (`reason`) never reaches the hook or the model — a fixed sentence does; the text goes to the ledger bounded and control-free | `remote_decisions::decide` |
+| T6 | A dangerous action approved remotely | Tier computed on the desktop (shell allowlist of single commands, no chaining/redirection/substitution/xargs; irreversible patterns; sensitive paths; destructive tool servers), recomputed at `decide`; `remoteAllow` only for low | `remote_decisions::tier_for`, `lib/decisions.ts` |
+| T7 | The agent approves itself (same user) | The console remembers every answer it wrote; the hook reports what it picked up and a forged answer becomes a deny; a stray answer file is removed, recorded (`approval_forged`), the session interrupted; answers are exclusive, UUID-named, 0600 in a 0700 dir. **Prevention is the engine's sandbox** (`sandbox.enabled`, one click in Trust) | `hooks_service.rs`, `inject_service.rs`, `hook-bridge`, `sandbox_service.rs` |
+| T8 | Resource exhaustion from the network | 10 s to Hello + handshake, 5 min idle, 32 concurrent, accept back-off, 64 KiB frames, WebSocket origin allowlist, pong cap; UI nudged only by real pairings | `transport.rs`, `ws.rs` |
+| T9 | Secrets leave the machine | Summaries and ledger inputs redacted (headers, key=value, URL userinfo, PEM, token shapes); file bodies kept as digests; ledger 0700/0600; the push carries a count and nothing else | `redact.rs`, `testigo_service.rs`, `push_service.rs` |
+| T10 | SSRF through the push endpoint | https only, no IP literals, no localhost, known push services or hosts resolving only to public addresses, no redirects; `subscribe` needs `readApprovals` | `push_service.rs` |
+| T11 | A poisoned published app | https + HSTS at the edge (Cloudflare — operator setting), CSP (`default-src 'self'`, no inline script, `frame-ancestors 'none'`), worker caches only good shell responses; the page is static with no backend | `docs/app`, companion `index.html`, `sw.js` |
+| T12 | Push relay learns things | Payload is ciphertext of `{"type":"decisions","pending":N}`; the relay sees timing and that a knock happened | `push_service.rs` |
+| T13 | Ledger incomplete | Every remote act is a ledger line (`remote_listener`, `remote_device`, `approval_decision via.remote`, `approval_forged`), with a machine-level ledger when no project is open; the decision's line is written before the hook sees the answer | `commands/remote.rs`, `remote_decisions.rs` |
 
-**Decisions (locked):** confirmation = **QR + explicit desktop approval** (SAS optional, off by default); a freshly paired phone's default scope = **read + small/reversible approvals** (prod/secrets/destructive always require the second factor of T5).
+## What is NOT covered, said plainly
 
-**Protocol**
-1. Desktop (all local): long-term identity `ID_desktop` (created once, private key never leaves the machine) · an **ephemeral** pairing keypair `E` · a random rendezvous id `R` and high-entropy one-time secret `S`, **short TTL (~60s)**.
-2. Desktop shows a QR — revealed only by an action on the **unlocked** desktop — containing `relay_url`, `R`, **pubkey/fingerprint of `E`**, `S`.
-3. Phone scans → now authentically knows `E`'s pubkey + `S` (OOB satisfied).
-4. Authenticated handshake (Noise_XX or SPAKE2 over the relay at `R`): phone **pins the QR key** so a relay-injected key won't match; `S` additionally **binds** the handshake; derive session key `K`; exchange a **MAC over the full transcript** — if it verifies, no tampering.
-5. **Pin identities (TOFU done):** phone stores `ID_desktop`, desktop stores `ID_phone`; future sessions use these pinned keys (Noise_KK). `E` and `S` are discarded.
-6. **Human approval on the desktop:** even after a clean handshake, *"Pair phone 'X'?"* requires a local click — the final safety net.
+- **Same-user isolation without the sandbox.** With the engine's sandbox
+  off, an agent that forges an answer *and* rewrites `inject-port.json` to
+  its own server can tell its own hook the answer is genuine. The console
+  detects the common case and says so in red; the sandbox is the wall.
+- **The device key's strongest guard needs PRF.** With the passkey guard a
+  copied browser profile is useless; with the default browser-key guard a
+  copied profile (not script) can still use the key, and a PIN only has to
+  be cracked offline. An unlocked phone inside the auto-lock window has
+  that device's rights (read-only approvals at most) until revoked.
+- **The pin check trusts the QR.** A sticker over the real QR pairs the
+  phone to the attacker's desktop; the companion shows host and key
+  fingerprint before dialling and the SAS afterwards, but a human who does
+  not look is not protected.
+- **HTTPS at the edge is an operator setting**, not code: if Cloudflare's
+  "Always use HTTPS" and HSTS are off, a hotspot can serve a modified app.
+- **No external audit** of the protocol composition has been done.
+- **Hello is cleartext**: a LAN observer learns device public keys and
+  whether a desktop trusts them.
 
-**Why attackers fail:** relay/MITM can't substitute keys (pinned from QR) or forge the transcript MAC · eavesdropper sees only ciphertext · replay blocked by one-time `R` + ephemeral `E` + TTL + MAC · `S` can't be brute-forced offline (PAKE → one online guess) + relay rate-limit · stolen phone mitigated by biometric keystore + remote revoke + scopes.
+## Deferred (not controls, not promises)
 
-**Residual risk — the QR itself:** someone photographs the QR and races you. Layered mitigations: short TTL + one-time `R`/`S` (die the moment your phone finishes) · QR revealed only from the unlocked desktop · **the step-6 desktop approval** (a pairing you didn't approve never proceeds) · optional SAS (4-word code matching on both).
+Voice over the channel (needs an on-device second factor); a relay for
+"from anywhere without a VPN" (outbound-only, blind — designed, not built);
+a native build with the key in Keychain/Keystore; an external audit.
 
-**Hardening:** desktop **device list + revocation** (each phone has its own pinned key → revoke = forget that key) · **per-device scopes** set at pairing.
+## How this document is kept honest
 
-## Defense-in-depth principles
-1. E2E always — relay is a blind cartero. 2. Push-to-talk, never always-on. 3. Dangerous = strong second factor, never voice alone. 4. STT on-device; only text crosses the wire. 5. Per-device scopes + remote revocation. 6. Desktop outbound-only; never expose a port. 7. Sign releases / harden the updater.
-
-## Assumptions & out of scope
-**Assumes:** the user's desktop is running and trusted; the phone OS keypair/biometric store is sound; on-device STT is used. **Out of scope (for now):** cloud-hosted agent execution (Option A — running untrusted users' code is a separate, larger threat model); endpoint malware on an already-compromised desktop; supply chain of third-party deps.
-
-## Open questions to resolve before build
-- Exact second-factor UX for dangerous approvals (tap+biometric vs typed confirm)?
-- Default device scope (read/notify only, vs. allow small approvals, vs. full)?
-- Relay: rendezvous-only (P2P hole-punch, get out of the way) vs. always-forward?
-- Self-hosted relay for power users, or only the hosted one?
+Every control above names the code that enforces it. A change to that code
+updates this table in the same PR, and the adversarial review of
+`SEGURIDAD-MOVIL-2026-11.md` is repeated on each minor release of the
+channel by someone who did not write the change.

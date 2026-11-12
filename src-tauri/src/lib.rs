@@ -174,6 +174,7 @@ pub fn run() {
             commands::rewind::turn_rewind,
             commands::rewind::claude_session_exists,
             commands::worktree::worktree_create,
+            commands::worktree::repos_in,
             commands::worktree::worktree_suggest_branch,
             commands::worktree::worktree_status,
             commands::worktree::worktree_merge,
@@ -199,6 +200,8 @@ pub fn run() {
             commands::hooks::hooks_install,
             commands::hooks::hooks_uninstall,
             commands::hooks::hooks_start_watcher,
+            commands::hooks::sandbox_status,
+            commands::hooks::sandbox_enable,
             commands::hooks::approval_respond,
             commands::permissions::permissions_snapshot,
             commands::permissions::permissions_add,
@@ -286,6 +289,7 @@ pub fn run() {
             commands::remote::remote_set_scope,
             commands::remote::remote_server_start,
             commands::remote::remote_server_stop,
+            commands::remote::remote_lan_address,
             commands::fanout::fanout_start,
             commands::fanout::fanout_list,
             commands::fanout::fanout_get,
@@ -382,9 +386,27 @@ pub fn run() {
 
 // Public surface for the reference phone client (`phone-sim`) and any external
 // implementation of the remote-decisions protocol (docs/pairing-protocol.md).
+pub use crate::error::{AppError, AppResult};
 pub use crate::services::remote_decisions::RemoteDecision;
 pub use crate::services::transport::client as phone_protocol;
 pub use crate::services::transport::{ClientMessage, ServerMessage};
+pub use crate::services::ws::connect as ws_connect;
+
+/// What a desktop-side simulator needs to stand in for the app: the listener,
+/// the trust store and the decision handler contract. Used by the
+/// `desktop-sim` binary (an executable responder for device implementers)
+/// and nothing else; the app itself goes through `AppState`.
+pub mod device_sim {
+    pub use crate::services::paired_devices_service::{
+        DeviceScope, PairedDevice, PairedDevicesService,
+    };
+    pub use crate::services::pairing_service::PairingService;
+    pub use crate::services::push_service::PushSubscription;
+    pub use crate::services::remote_decisions::{
+        decision_from, DecisionHandler, RemoteDecision, RemoteSession,
+    };
+    pub use crate::services::transport::run_listener;
+}
 
 /// Test-only support shared across modules. Placed at the end of the crate so it
 /// doesn't trip clippy's `items_after_test_module` (a cfg(test) module followed
