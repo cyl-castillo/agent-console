@@ -109,6 +109,11 @@ jobs:
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
         with:
+          # Pinned: `stable` moved to 1.100.0 on 2026-11-12 and every backend
+          # job started failing in tauri-build (the sidecar copy finds a
+          # directory at target/<profile>/hook-bridge). Raise it on purpose,
+          # in a PR that shows the build green, not when upstream moves.
+          toolchain: 1.99.0
           components: clippy, rustfmt
 
       - name: Rust cache
