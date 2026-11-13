@@ -403,6 +403,47 @@ pub fn discard(repo: &Path, worktree: &Path, branch: &str, delete_branch: bool) 
 
 // ----- Per-project setup config (.claude/worktree-setup.json) -----
 
+/// True when the checkout holds anything git would lose with it: modified,
+/// staged or untracked files. An unreadable status counts as dirty.
+pub fn has_uncommitted_work(worktree: &Path) -> bool {
+    match git(
+        worktree,
+        &["status", "--porcelain", "--untracked-files=all"],
+    ) {
+        Ok(o) if o.status.success() => !o.stdout.is_empty(),
+        _ => true,
+    }
+}
+
+/// Remove the registered worktrees under `root` that are not in `keep`.
+/// Branches stay. A checkout with uncommitted work is never removed here:
+/// "no session references it" is also what a lost or unreadable session
+/// list looks like, and that must not cost anyone their work.
+pub fn prune_orphans(repo: &Path, root: &Path, keep: &[PathBuf]) -> AppResult<Vec<String>> {
+    let canon = |p: &str| {
+        let pb = PathBuf::from(p);
+        pb.canonicalize().unwrap_or(pb)
+    };
+    let mut removed = Vec::new();
+    for entry in list(repo)? {
+        let path = canon(&entry.path);
+        if !path.starts_with(root) || keep.contains(&path) {
+            continue;
+        }
+        if has_uncommitted_work(&path) {
+            tracing::warn!(
+                "worktrees: {} has uncommitted work and no session — left in place",
+                path.display()
+            );
+            continue;
+        }
+        if discard(repo, &path, &entry.branch, false).is_ok() {
+            removed.push(entry.path);
+        }
+    }
+    Ok(removed)
+}
+
 fn setup_config_path(repo: &Path) -> PathBuf {
     repo.join(".claude").join("worktree-setup.json")
 }
@@ -595,6 +636,38 @@ mod tests {
         assert_eq!(entries[0].branch, "agent/s1");
 
         cleanup(&[&dest, &repo]);
+    }
+
+    #[test]
+    fn pruning_orphans_never_removes_a_checkout_with_uncommitted_work() {
+        let repo = init_repo("prune");
+        let root = repo.parent().unwrap().canonicalize().unwrap();
+        let (clean, dirty, kept) = (
+            wt_dest(&repo, "clean"),
+            wt_dest(&repo, "dirty"),
+            wt_dest(&repo, "kept"),
+        );
+        create(&repo, &clean, "agent/clean", Some("main")).unwrap();
+        create(&repo, &dirty, "agent/dirty", Some("main")).unwrap();
+        create(&repo, &kept, "agent/kept", Some("main")).unwrap();
+        fs::write(dirty.join("wip.txt"), "hours of work").unwrap();
+
+        // The session list came back empty except for one: what a corrupt
+        // sessions.json looks like from here.
+        let keep = vec![kept.canonicalize().unwrap()];
+        let removed = prune_orphans(&repo, &root, &keep).unwrap();
+
+        assert_eq!(removed.len(), 1, "{removed:?}");
+        assert!(!clean.exists());
+        assert!(kept.exists());
+        assert_eq!(
+            fs::read_to_string(dirty.join("wip.txt")).unwrap(),
+            "hours of work"
+        );
+        let br = run(&["branch", "--list", "agent/clean"], &repo);
+        assert!(String::from_utf8_lossy(&br.stdout).contains("agent/clean"));
+
+        cleanup(&[&repo, &dirty, &kept]);
     }
 
     #[test]
