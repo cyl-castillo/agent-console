@@ -5,7 +5,7 @@ vi.mock("../ipc/tauri", () => ({
 }));
 
 import { ipc } from "../ipc/tauri";
-import { findBreaches, recordBudget } from "./budgetGuard";
+import { findBreaches, recordBudget, recordBudgetAnswer } from "./budgetGuard";
 import type { TerminalSession } from "../stores/terminalsStore";
 
 function session(id: string, status: TerminalSession["status"] = "live"): TerminalSession {
@@ -81,5 +81,20 @@ describe("recordBudget (D5 evidence)", () => {
       r = `threw ${String(e)}`;
     }
     expect(r).toBe(false);
+  });
+});
+
+describe("recordBudgetAnswer (an answer that lets spending go on)", () => {
+  const s = { id: "t1" };
+  it("tells a recorded answer from a project that does not witness from a ledger that failed", async () => {
+    const mock = vi.mocked(ipc.testigoBudgetEvent);
+    mock.mockClear();
+    mock.mockResolvedValueOnce(undefined as never);
+    expect(await recordBudgetAnswer("/p", s, 12, 10, "raise", 15)).toBe("recorded");
+    mock.mockRejectedValueOnce("testigo: witnessing disabled for this project");
+    expect(await recordBudgetAnswer("/p", s, 12, 10, "raise", 15)).toBe("unwitnessed");
+    mock.mockRejectedValueOnce("No space left on device (os error 28)");
+    expect(await recordBudgetAnswer("/p", s, 12, 10, "raise", 15)).toBe("failed");
+    expect(await recordBudgetAnswer(null, s, 12, 10, "raise", 15)).toBe("unwitnessed");
   });
 });

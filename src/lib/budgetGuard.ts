@@ -64,3 +64,34 @@ export async function recordBudget(
 export function currentCap(sessionId: string): number {
   return capFor(useBudgetStore.getState(), sessionId);
 }
+
+export type BudgetRecord = "recorded" | "unwitnessed" | "failed";
+
+/// For the answers that let spending go on (raise, summary, hand-over): the
+/// caller needs to tell "the project does not witness" (a declared state, the
+/// ledger says so itself) from "the ledger could not be written" (the
+/// decision would take effect with no record of who made it).
+export async function recordBudgetAnswer(
+  projectRoot: string | null | undefined,
+  session: Pick<TerminalSession, "id" | "agentSessionId">,
+  spent: number,
+  cap: number,
+  decision: BudgetDecisionKind,
+  newCap?: number,
+): Promise<BudgetRecord> {
+  if (!projectRoot) return "unwitnessed";
+  try {
+    await ipc.testigoBudgetEvent(
+      projectRoot,
+      session.id,
+      session.agentSessionId ?? undefined,
+      spent,
+      cap,
+      decision,
+      newCap,
+    );
+    return "recorded";
+  } catch (e) {
+    return /witnessing disabled/i.test(String(e)) ? "unwitnessed" : "failed";
+  }
+}
