@@ -194,7 +194,8 @@ pub fn set_active_repo(
 
 /// Remove managed worktree checkouts that no persisted session references any
 /// more (e.g. the app died before a session was cleaned up). Branches are kept
-/// — only the checkout dirs go. Returns the removed paths.
+/// — only the checkout dirs go, and never one with uncommitted work. Returns
+/// the removed paths.
 #[tauri::command(async)]
 pub fn worktree_prune_orphans(
     keep: Vec<String>,
@@ -203,22 +204,14 @@ pub fn worktree_prune_orphans(
     let repo = repo(&state)?;
     let root = worktree_root(&repo)?;
     let root = root.canonicalize().unwrap_or(root);
-    let canon = |p: &str| {
-        let pb = PathBuf::from(p);
-        pb.canonicalize().unwrap_or(pb)
-    };
-    let keep: Vec<PathBuf> = keep.iter().map(|p| canon(p)).collect();
-    let mut removed = Vec::new();
-    for entry in worktree_service::list(&repo)? {
-        let path = canon(&entry.path);
-        if !path.starts_with(&root) || keep.contains(&path) {
-            continue;
-        }
-        if worktree_service::discard(&repo, &path, &entry.branch, false).is_ok() {
-            removed.push(entry.path);
-        }
-    }
-    Ok(removed)
+    let keep: Vec<PathBuf> = keep
+        .iter()
+        .map(|p| {
+            let pb = PathBuf::from(p);
+            pb.canonicalize().unwrap_or(pb)
+        })
+        .collect();
+    worktree_service::prune_orphans(&repo, &root, &keep)
 }
 
 #[tauri::command(async)]
