@@ -330,12 +330,7 @@ impl HooksRuntime {
             fs::create_dir_all(parent)?;
         }
 
-        let mut settings: Value = if settings_path.exists() {
-            let txt = fs::read_to_string(&settings_path)?;
-            serde_json::from_str(&txt).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -499,11 +494,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = if settings_path.exists() {
-            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -551,7 +542,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = read_settings(&settings_path).unwrap_or(json!({}));
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -575,7 +566,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = read_settings(&settings_path).unwrap_or(json!({}));
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -608,11 +599,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = if settings_path.exists() {
-            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -645,11 +632,9 @@ impl HooksRuntime {
         if !settings_path.exists() {
             return Ok(());
         }
-        let mut settings: Value =
-            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}));
-        if !settings.is_object() {
+        let Ok(mut settings) = load_settings_for_write(&settings_path) else {
             return Ok(());
-        }
+        };
         let had_legacy =
             is_hook_installed(&settings_path, "PreToolUse", &self.pretooluse_script_path)
                 .unwrap_or(false);
@@ -688,11 +673,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = if settings_path.exists() {
-            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -741,11 +722,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = if settings_path.exists() {
-            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -783,11 +760,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = if settings_path.exists() {
-            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -852,11 +825,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = if settings_path.exists() {
-            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -896,11 +865,7 @@ impl HooksRuntime {
         if let Some(parent) = settings_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut settings: Value = if settings_path.exists() {
-            serde_json::from_str(&fs::read_to_string(&settings_path)?).unwrap_or(json!({}))
-        } else {
-            json!({})
-        };
+        let mut settings: Value = load_settings_for_write(&settings_path)?;
         if !settings.is_object() {
             settings = json!({});
         }
@@ -939,8 +904,10 @@ impl HooksRuntime {
             if !path.exists() {
                 continue;
             }
-            let txt = fs::read_to_string(&path)?;
-            let mut settings: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
+            // A file we cannot parse is the user's to fix, never ours to rewrite.
+            let Ok(mut settings) = load_settings_for_write(&path) else {
+                continue;
+            };
             if !settings.is_object() {
                 continue;
             }
@@ -987,8 +954,10 @@ impl HooksRuntime {
             if !path.exists() {
                 continue;
             }
-            let txt = fs::read_to_string(&path)?;
-            let mut settings: Value = serde_json::from_str(&txt).unwrap_or(json!({}));
+            // A file we cannot parse is the user's to fix, never ours to rewrite.
+            let Ok(mut settings) = load_settings_for_write(&path) else {
+                continue;
+            };
             if path == settings_path() {
                 restore_statusline(&mut settings, &self.statusline_script_path, &chain_path());
             }
@@ -1153,11 +1122,7 @@ fn merge_hooks_into(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut root: Value = if path.exists() {
-        serde_json::from_str(&fs::read_to_string(path)?).unwrap_or(json!({}))
-    } else {
-        json!({})
-    };
+    let mut root: Value = load_settings_for_write(path)?;
     if !root.is_object() {
         root = json!({});
     }
@@ -1196,6 +1161,13 @@ fn sync_hooks_between(
 /// leave ~/.claude/settings.json truncated or half-serialized.
 pub(crate) fn write_settings_atomic(settings_path: &Path, settings: &Value) -> AppResult<()> {
     let tmp = settings_path.with_extension("json.tmp");
+    // One generation of what was there before the console touched it.
+    if settings_path.exists() {
+        let _ = fs::copy(
+            settings_path,
+            settings_path.with_extension("json.agent-console.bak"),
+        );
+    }
     fs::write(&tmp, serde_json::to_string_pretty(settings).unwrap())?;
     fs::rename(&tmp, settings_path)?;
     Ok(())
@@ -1363,6 +1335,32 @@ fn chain_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("agent-console")
         .join("statusline-chain.json")
+}
+
+/// The settings file as the base for a write. A missing or empty file is an
+/// empty object. A file that exists and does not parse as a JSON object is an
+/// error: the caller must stop, because writing would replace everything the
+/// user had there (permissions, env, MCP servers, their own hooks) with ours.
+pub(crate) fn load_settings_for_write(path: &Path) -> AppResult<Value> {
+    if !path.exists() {
+        return Ok(json!({}));
+    }
+    let txt = fs::read_to_string(path)?;
+    let txt = txt.trim_start_matches('\u{feff}').trim();
+    if txt.is_empty() {
+        return Ok(json!({}));
+    }
+    match serde_json::from_str::<Value>(txt) {
+        Ok(v) if v.is_object() => Ok(v),
+        Ok(_) => Err(AppError::Other(format!(
+            "{} is not a JSON object — left untouched, hooks not installed",
+            path.display()
+        ))),
+        Err(e) => Err(AppError::Other(format!(
+            "{} is not valid JSON ({e}) — left untouched, hooks not installed. Fix the file and restart.",
+            path.display()
+        ))),
+    }
 }
 
 fn read_settings(path: &Path) -> Option<Value> {
@@ -2422,6 +2420,43 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_settings_file_that_does_not_parse_is_never_the_base_for_a_write() {
+        let dir = std::env::temp_dir().join(format!(
+            "ac-settings-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        // Missing and empty: a fresh object.
+        assert_eq!(load_settings_for_write(&path).unwrap(), json!({}));
+        fs::write(&path, "  \n").unwrap();
+        assert_eq!(load_settings_for_write(&path).unwrap(), json!({}));
+        // A BOM from a Windows editor is not corruption.
+        fs::write(&path, "\u{feff}{\"model\":\"opus\"}").unwrap();
+        assert_eq!(load_settings_for_write(&path).unwrap()["model"], "opus");
+        // A trailing comma, a half-written file, a non-object: stop.
+        for broken in [
+            "{\"permissions\":{\"allow\":[\"Bash(git:*)\"]},}",
+            "{\"permissions\":{\"al",
+            "[]",
+        ] {
+            fs::write(&path, broken).unwrap();
+            let err = load_settings_for_write(&path).unwrap_err().to_string();
+            assert!(err.contains("left untouched"), "{err}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), broken);
+        }
+        // A write keeps one generation of what was there.
+        fs::write(&path, "{\"model\":\"opus\"}").unwrap();
+        write_settings_atomic(&path, &json!({"model": "sonnet"})).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("settings.json.agent-console.bak")).unwrap(),
+            "{\"model\":\"opus\"}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_turns_usage_comes_from_the_engines_own_numbers_with_a_delta_per_turn() {
