@@ -16,6 +16,23 @@ describe("tierFor", () => {
     expect(tierFor(req("Bash", { command: "git status" })).tier).toBe("low");
     expect(tierFor(req("Bash", { command: "npm test -- --run x" })).tier).toBe("low");
     expect(tierFor(req("Bash", { command: "find . -name '*.ts'" })).tier).toBe("low");
+    // Readers that run or write through an option, and `env` as a shell:
+    // the same rows as the Rust evasion table.
+    for (const command of [
+      "env sh ./x.sh",
+      "less /etc/passwd",
+      "rg --pre ./x.sh foo",
+      "git diff --output=/home/u/.bashrc HEAD~1",
+      "git log --ext-diff -p",
+      "find . -maxdepth 0 -fprintf /home/u/.bashrc x",
+      "tree -o /home/u/.bashrc",
+      "git status | env sh",
+    ]) {
+      expect(tierFor(req("Bash", { command })).tier, command).not.toBe("low");
+    }
+    expect(tierFor(req("Bash", { command: "rg -n foo src" })).tier).toBe("low");
+    expect(tierFor(req("Bash", { command: "git diff --stat HEAD~1" })).tier).toBe("low");
+    expect(tierFor(req("WebFetch", { url: "https://example.com" })).tier).toBe("medium");
   });
   it("unknown commands are medium", () => {
     expect(tierFor(req("Bash", { command: "node scripts/migrate.js" })).tier).toBe("medium");
@@ -51,6 +68,11 @@ describe("tierFor", () => {
       "grep -rn foo src | wc -l",
       "find . -name '*.rs'",
       "cat README.md",
+      "pwd",
+      "git branch -a",
+      "git branch --list 'feat/*'",
+      "git branch --contains abc",
+      "git branch --show-current",
     ])
       expect(bash(c), c).toBe("low");
     for (const c of [
@@ -66,6 +88,28 @@ describe("tierFor", () => {
       "ls `rm -rf x`",
       "git log\nrm -rf /",
       "cat ~/.ssh/id_rsa | tee /tmp/x",
+      // Readers that run or write through an option, and `env` as a shell.
+      "env sh ./x.sh",
+      "env python3 ./x.py",
+      "less /etc/passwd",
+      "rg --pre ./x.sh foo",
+      "git diff --output=/home/u/.bashrc HEAD~1",
+      "git log --ext-diff -p",
+      "git grep -Osh foo",
+      "find . -maxdepth 0 -fprintf /home/u/.bashrc x",
+      "tree -o /home/u/.bashrc",
+      "tree -ao /home/u/.bashrc",
+      "git status | env sh",
+      // An assignment in front of a shell is not the allowlisted head.
+      "pwd=1 sh ./x.sh",
+      "cat=x python3 evil.py",
+      // `git branch` that deletes, moves, re-points, tracks or creates.
+      "git branch --delete main",
+      "git branch -D main",
+      "git branch -f main HEAD~5",
+      "git branch -m main x",
+      "git branch --set-upstream-to=origin/x",
+      "git branch new-branch",
     ])
       expect(bash(c), c).not.toBe("low");
     for (const c of [

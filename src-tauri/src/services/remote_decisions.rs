@@ -182,37 +182,70 @@ static HIGH_REASON: LazyLock<Regex> = LazyLock::new(|| {
         .expect("static regex")
 });
 
-/// The read-only allowlist: one simple command whose head is here. Code
-/// runners (`node -e`, `python -c`) are not: they are shells with another
-/// syntax. Mirrors `lib/decisions.ts`.
+/// The read-only allowlist: one simple command whose head is here, followed
+/// by whitespace or the end (`pwd=1 sh ./x.sh` is a shell with an assignment
+/// in front, not `pwd`). Code runners (`node -e`, `python -c`) are not: they
+/// are shells with another syntax. Mirrors `lib/decisions.ts`.
 static READ_ONLY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^\s*(ls|pwd|cat|head|tail|less|wc|echo|which|type|env|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|git\s+(status|log|diff|show|rev-parse|describe|blame|stash\s+list)|git\s+remote\s+-v|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))\b",
+        r"^\s*(ls|pwd|cat|head|tail|wc|echo|which|type|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|git\s+(status|log|diff|show|rev-parse|describe|blame|stash\s+list)|git\s+remote\s+-v|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))(?:\s|$)",
     )
     .expect("static regex")
 });
 
-/// The two allowlist entries `lib/decisions.ts` writes with a negative
-/// lookahead (`find` unless it deletes or executes, `git branch` unless it
-/// deletes) — the regex crate has none, so they are spelled out here.
-static FIND_HEAD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*find\b").expect("static"));
+/// `find` unless it deletes, executes or writes; `git branch` only when it
+/// lists (no flag that deletes, moves, copies or sets upstream, and no bare
+/// name, which creates a branch). Spelled out as separate expressions because
+/// the regex crate has no lookahead; `lib/decisions.ts` does the same.
+static FIND_HEAD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*find(?:\s|$)").expect("static"));
 static FIND_ACTS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s-(delete|exec|execdir|ok|okdir|fprint0?|fls)\b").expect("static")
+    Regex::new(r"\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b").expect("static")
 });
 static GIT_BRANCH_HEAD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*git\s+branch\b").expect("static"));
-static GIT_BRANCH_DELETE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*git\s+branch\s+-[a-zA-Z]*[dD]").expect("static"));
+    LazyLock::new(|| Regex::new(r"^\s*git\s+branch(?:\s|$)").expect("static"));
+static GIT_BRANCH_WRITES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\s(?:-[a-zA-Z]*[dDfFmMcCu][a-zA-Z]*|--(?:delete|force|move|copy|set-upstream-to(?:=\S*)?|unset-upstream|edit-description|track|no-track))(?:\s|$)",
+    )
+    .expect("static")
+});
+static GIT_BRANCH_LISTS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\s(?:--list|--contains|--no-contains|--merged|--no-merged|--points-at|--show-current|-[a-zA-Z]*l[a-zA-Z]*)(?:\s|=|$)",
+    )
+    .expect("static")
+});
+/// A non-option argument after the flags: a branch to create unless a
+/// listing flag gives it another meaning.
+static GIT_BRANCH_POSITIONAL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*git\s+branch(?:\s+-\S+)*\s+[^-\s]").expect("static"));
 /// Anything that chains, redirects, substitutes or backgrounds is not "one
 /// read-only command", whatever its head says.
 static COMPOUND: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[;&>`\n]|\$\(|<<|<\(|\|\|").expect("static"));
 static XARGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bxargs\b").expect("static"));
+/// Options that turn a reader into a runner or a writer: `rg --pre <cmd>`
+/// executes it per file, `git diff --output=<file>` writes one, `--ext-diff`
+/// runs the configured driver, `tree -o` writes. (`env` and `less` left the
+/// allowlist for the same reason: `env sh x.sh` is a shell.) Mirrors
+/// `READER_ESCAPES` in `lib/decisions.ts`.
+static READER_ESCAPES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^\s*rg\b.*\s--(pre|pre-glob|hostname-bin)\b|^\s*git\b.*\s--(output|ext-diff|textconv)\b|^\s*git\b.*\s-O\S|^\s*tree\b.*\s-[a-zA-Z]*o\b|^\s*file\b.*\s-[a-zA-Z]*C",
+    )
+    .expect("static")
+});
 
 fn read_only_head(segment: &str) -> bool {
+    if READER_ESCAPES.is_match(segment) {
+        return false;
+    }
     READ_ONLY.is_match(segment)
         || (FIND_HEAD.is_match(segment) && !FIND_ACTS.is_match(segment))
-        || (GIT_BRANCH_HEAD.is_match(segment) && !GIT_BRANCH_DELETE.is_match(segment))
+        || (GIT_BRANCH_HEAD.is_match(segment)
+            && !GIT_BRANCH_WRITES.is_match(segment)
+            && (!GIT_BRANCH_POSITIONAL.is_match(segment) || GIT_BRANCH_LISTS.is_match(segment)))
 }
 
 /// Read-only = no compound syntax, no xargs, and every pipe segment's head
@@ -1102,6 +1135,11 @@ mod tests {
             "grep -rn foo src | wc -l",
             "find . -name '*.rs'",
             "cat README.md",
+            "pwd",
+            "git branch -a",
+            "git branch --list 'feat/*'",
+            "git branch --contains abc",
+            "git branch --show-current",
         ] {
             assert_eq!(bash(c), "low", "{c}");
         }
@@ -1119,6 +1157,28 @@ mod tests {
             "ls `rm -rf x`",
             "git log\nrm -rf /",
             "cat ~/.ssh/id_rsa | tee /tmp/x",
+            // Readers that run or write through an option, and `env` as a shell.
+            "env sh ./x.sh",
+            "env python3 ./x.py",
+            "less /etc/passwd",
+            "rg --pre ./x.sh foo",
+            "git diff --output=/home/u/.bashrc HEAD~1",
+            "git log --ext-diff -p",
+            "git grep -Osh foo",
+            "find . -maxdepth 0 -fprintf /home/u/.bashrc x",
+            "tree -o /home/u/.bashrc",
+            "tree -ao /home/u/.bashrc",
+            "git status | env sh",
+            // An assignment in front of a shell is not the allowlisted head.
+            "pwd=1 sh ./x.sh",
+            "cat=x python3 evil.py",
+            // `git branch` that deletes, moves, re-points, tracks or creates.
+            "git branch --delete main",
+            "git branch -D main",
+            "git branch -f main HEAD~5",
+            "git branch -m main x",
+            "git branch --set-upstream-to=origin/x",
+            "git branch new-branch",
         ] {
             assert_ne!(bash(c), "low", "{c}");
         }
