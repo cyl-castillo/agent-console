@@ -325,6 +325,20 @@ fn principal_for(actor: &str) -> Value {
     }
 }
 
+/// The export derives fresh chains from whatever lines parse, and those are
+/// consistent by construction. Without this, a ledger with lines removed or
+/// edited would leave here as a "verified" audit trail.
+pub fn refuse_broken_ledger(testigo: &TestigoService, project_root: &str) -> AppResult<()> {
+    let report = testigo.verify(project_root)?;
+    if !report.ok {
+        return Err(AppError::Other(format!(
+            "The ledger's own hash chain is broken at seq {:?} — refusing to export it as an audit trail",
+            report.broken_at_seq
+        )));
+    }
+    Ok(())
+}
+
 /// Build one AAT session chain from a session's Testigo events (already in
 /// ledger order). Returns the records and the model last reported.
 fn build_session(term: &str, events: &[&ProofEvent], app_version: &str) -> AppResult<Vec<Value>> {
@@ -506,6 +520,7 @@ pub fn export(
     dest_dir: &Path,
     app_version: &str,
 ) -> AppResult<AatExportSummary> {
+    refuse_broken_ledger(testigo, project_root)?;
     let events = testigo.list(project_root, case_id, None)?;
     if events.is_empty() {
         return Err(AppError::Other(
@@ -737,7 +752,7 @@ Mapping from the Testigo ledger (the console's native chain):
 | turn_end | lifecycle | post_execution | success / failure / timeout |
 | agent_action (MCP) | tool_call | post_execution | success / denied |
 | agent_declined (MCP) | escalation | post_execution | escalated |
-| agent_identity, sponsor_set, experiment_started, experiment_result | lifecycle | concurrent | success |
+| agent_identity, sponsor_set, witness_set, experiment_started, experiment_result | lifecycle | concurrent | success |
 | review_verdict (reviewer agent) | decision | post_execution | success / failure (request_changes) / denied (block) |
 | review_decision (human) | decision | post_execution | success (override) / denied (accept) |
 | budget_reached | escalation | concurrent | escalated |

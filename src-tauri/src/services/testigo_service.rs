@@ -429,7 +429,38 @@ impl TestigoService {
         s: TestigoSettings,
     ) -> AppResult<TestigoSettings> {
         let mut inner = self.inner.lock();
+        let was_on = Self::settings_map(&mut inner)
+            .get(project_root)
+            .is_none_or(|p| p.witness);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let mark = |inner: &mut Inner, on: bool| {
+            Self::record(
+                inner,
+                project_root,
+                now,
+                "console".into(),
+                None,
+                "witness_set",
+                None,
+                None,
+                "human",
+                serde_json::json!({ "witness": on }),
+            )
+        };
+        // An intact chain must not hide an unrecorded period: switching the
+        // witness off is itself the last line written, and it has to land.
+        if was_on && !s.witness {
+            mark(&mut inner, false)?;
+        }
         Self::settings_map(&mut inner).insert(project_root.to_string(), s.clone());
+        if !was_on && s.witness {
+            if let Err(e) = mark(&mut inner, true) {
+                tracing::warn!("testigo: could not record witness_set on: {e}");
+            }
+        }
         let mut file = Self::load_settings_file();
         file.by_project.insert(project_root.to_string(), s.clone());
         drop(inner);
@@ -573,7 +604,21 @@ impl TestigoService {
             opts.mode(0o600);
         }
         let mut f = opts.open(&path)?;
-        f.write_all(line.as_bytes())?;
+        let before = f.metadata().map(|m| m.len()).ok();
+        // The line is whole and on disk before its hash becomes the tail. A
+        // partial line left behind (disk full, EIO) would be glued to the
+        // next append and break the chain for good, so it is cut back off.
+        if let Err(e) = f.write_all(line.as_bytes()).and_then(|_| f.sync_data()) {
+            drop(f);
+            if let Some(len) = before {
+                if let Ok(t) = OpenOptions::new().write(true).open(&path) {
+                    let _ = t.set_len(len);
+                }
+            }
+            // Re-derive (and re-heal) the tail from disk on the next append.
+            inner.tails.remove(project_root);
+            return Err(e.into());
+        }
         drop(f);
         inner
             .tails
@@ -3258,11 +3303,12 @@ mod tests {
         assert!(svc
             .on_prompt(root, 2, Some("t1"), None, Some("nope"), None, None)
             .is_err());
-        assert_eq!(
-            svc.list(root, None, None).unwrap().len(),
-            1,
-            "no new events"
-        );
+        // The switch itself is the last line: the gap is on the record.
+        let events = svc.list(root, None, None).unwrap();
+        assert_eq!(events.len(), 2, "the prompt and the switch, nothing after");
+        assert_eq!(events[1].kind, "witness_set");
+        assert_eq!(events[1].actor, "human");
+        assert_eq!(events[1].payload["witness"], false);
         assert!(svc.verify(root).unwrap().ok, "reads unaffected");
 
         // Round-trip: a fresh instance loads the persisted policy.
@@ -3280,6 +3326,36 @@ mod tests {
         )
         .unwrap();
         assert!(TestigoService::new().repo_marks(root));
+        // Switching back on is recorded too, and only once per change.
+        let events = svc2.list(root, None, None).unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].payload["witness"], true);
+        svc2.set_settings(
+            root,
+            TestigoSettings {
+                witness: true,
+                repo_marks: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(svc2.list(root, None, None).unwrap().len(), 3);
+
+        // An export refuses a ledger whose own chain no longer verifies:
+        // a removed line must not leave as a "verified" audit trail.
+        use crate::services::aat_export::refuse_broken_ledger;
+        assert!(refuse_broken_ledger(&svc2, root).is_ok());
+        let path = TestigoService::ledger_path(root).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let without_the_switch_off: String = text
+            .lines()
+            .enumerate()
+            .filter(|(i, _)| *i != 1)
+            .map(|(_, l)| format!("{l}\n"))
+            .collect();
+        std::fs::write(&path, without_the_switch_off).unwrap();
+        let err = refuse_broken_ledger(&TestigoService::new(), root).unwrap_err();
+        assert!(err.to_string().contains("refusing to export"), "{err}");
 
         let _ = std::fs::remove_dir_all(&base);
     }
