@@ -307,7 +307,11 @@ fn is_console_key(key: &str) -> bool {
 /// ship — never a name that makes the shell, the loader, git or an
 /// interpreter run something: `PROMPT_COMMAND`, `LD_PRELOAD`, `PATH`,
 /// `GIT_SSH_COMMAND`, `NODE_OPTIONS` and their kin execute code in the
-/// user's login shell before any trust decision is asked.
+/// user's login shell before any trust decision is asked. Nor a name that
+/// points the agent or its tools at another host or trust store
+/// (`ANTHROPIC_BASE_URL`, `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`): the first
+/// prompt would carry the user's token there. The user's own global vault
+/// may set any of these; a cloned repository may not.
 pub fn spawn_key_allowed(key: &str, scope: &Scope) -> bool {
     if validate_key(key).is_err() || is_console_key(key) {
         return false;
@@ -344,6 +348,38 @@ pub fn spawn_key_allowed(key: &str, scope: &Scope) -> bool {
         "CODEX_HOME",
         "COMSPEC",
         "PATHEXT",
+        // Where the agent and its tools send requests, and whom they trust.
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_TLS_REJECT_UNAUTHORIZED",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "CURL_CA_BUNDLE",
+        "REQUESTS_CA_BUNDLE",
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "YARN_REGISTRY",
+        "GOPROXY",
+        "GOTOOLCHAIN",
+        // Pagers, the loader and toolchains that run a configured command.
+        "LESSOPEN",
+        "LESSCLOSE",
+        "GCONV_PATH",
+        "GLIBC_TUNABLES",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "RUSTFLAGS",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "GOFLAGS",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "JDK_JAVA_OPTIONS",
+        "MAVEN_OPTS",
+        "GRADLE_OPTS",
+        "DOTNET_STARTUP_HOOKS",
     ];
     const PREFIX: &[&str] = &[
         "LD_",
@@ -353,6 +389,15 @@ pub fn spawn_key_allowed(key: &str, scope: &Scope) -> bool {
         "PYTHON",
         "BASH_FUNC",
         "NPM_CONFIG_",
+        // The agents' own namespaces: base URLs, config dirs, the shell Claude
+        // runs on Windows (`CLAUDE_CODE_GIT_BASH_PATH`), OpenCode's config.
+        "CLAUDE_",
+        "CODEX_",
+        "OPENCODE_",
+        "ANTHROPIC_",
+        "OPENAI_",
+        "CARGO_",
+        "RUSTUP_",
     ];
     let k = key.to_ascii_uppercase();
     !EXACT.contains(&k.as_str())
@@ -471,6 +516,16 @@ mod tests {
             "BASH_ENV",
             "PS1",
             "path",
+            "ANTHROPIC_BASE_URL",
+            "OPENAI_BASE_URL",
+            "HTTPS_PROXY",
+            "NODE_EXTRA_CA_CERTS",
+            "OPENCODE_CONFIG",
+            "CLAUDE_CODE_GIT_BASH_PATH",
+            "LESSOPEN",
+            "GLIBC_TUNABLES",
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "RUSTUP_TOOLCHAIN",
             "AGENT_CONSOLE_BRIDGE",
             "AGENT_CONSOLE_SESSION_DIR",
             "bad-name",
@@ -478,6 +533,7 @@ mod tests {
         let mut entries: Vec<serde_json::Value> = hostile.iter().map(|k| entry(k)).collect();
         entries.push(entry("AC_TEST_API_URL"));
         entries.push(entry("PSQL_HOST"));
+        entries.push(entry("NODE_ENV"));
         fs::write(
             project_path(&root),
             serde_json::json!({ "entries": entries }).to_string(),
@@ -490,6 +546,7 @@ mod tests {
         }
         assert_eq!(env.get("AC_TEST_API_URL").map(String::as_str), Some("x"));
         assert_eq!(env.get("PSQL_HOST").map(String::as_str), Some("x"));
+        assert_eq!(env.get("NODE_ENV").map(String::as_str), Some("x"));
 
         // Saving one through the app says why instead of silently dropping it.
         let err = upsert(
