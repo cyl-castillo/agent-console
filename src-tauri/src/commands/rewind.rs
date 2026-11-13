@@ -66,13 +66,13 @@ pub fn turn_rewind(
         .as_ref()
         .map(|p| p.root.to_string_lossy().to_string());
 
-    // 1+2. Backup, then restore — same contract as `snapshot_restore`: the
-    // backup is best-effort and never blocks, the restore failing aborts the
-    // whole rewind (nothing else has happened yet).
-    let backup_sha = snapshot_service::create(&repo_path, &format!("pre-restore-{}", now_nanos()))
-        .ok()
-        .flatten()
-        .map(|s| s.commit_sha);
+    // 1+2. Backup, then restore — same contract as `snapshot_restore`: no
+    // backup, no restore; either failing aborts the whole rewind (nothing
+    // else has happened yet).
+    let backup_sha = crate::commands::snapshot::safety_snapshot(
+        &repo_path,
+        &format!("pre-restore-{}", now_nanos()),
+    )?;
     snapshot_service::restore(&repo_path, &commit_sha)?;
 
     // 3. Fork the transcript, gated on `claude --version` (the trust marker
