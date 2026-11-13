@@ -38,8 +38,13 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Claude Code per-project state (skills, vault, VAULT.md, etc.) — local only
-.claude/
+# Claude Code per-project state (skills, vault, VAULT.md, etc.) — local only,
+# except the review harness, which is shared and is what the Harness Lab edits
+.claude/*
+!.claude/agents/
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/enterprise-review/
 
 # Testigo proof packets are local export artifacts; PRs carry them in the body
 proofpacks/
