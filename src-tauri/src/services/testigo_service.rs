@@ -945,7 +945,9 @@ impl TestigoService {
             payload["agentId"] = json!(id);
         }
         if let Some(c) = ids.command.filter(|s| !s.is_empty()) {
-            payload["command"] = json!(c);
+            // Same rule as the approval request for this very call: what the
+            // ledger keeps (and proof packets hand out) carries no credential.
+            payload["command"] = json!(crate::services::redact::redact_secrets(c));
         }
         if let Some(h) = ids.output_sha256.filter(|s| !s.is_empty()) {
             payload["outputSha256"] = json!(h);
@@ -966,7 +968,7 @@ impl TestigoService {
             payload["durationMs"] = json!(d);
         }
         if let Some(t) = ids.excerpt_tail.filter(|s| !s.is_empty()) {
-            payload["excerptTail"] = json!(t);
+            payload["excerptTail"] = json!(crate::services::redact::redact_secrets(t));
         }
         if let Some(v) = ids.observed_via.filter(|s| !s.is_empty()) {
             payload["observedVia"] = json!(v);
@@ -1019,7 +1021,7 @@ impl TestigoService {
                     session_id.map(String::from),
                     "agent",
                     json!({
-                        "command": cmd,
+                        "command": crate::services::redact::redact_secrets(cmd),
                         "kind": check_kind(cmd),
                         "status": status,
                         "exitCode": ids.exit_code,
@@ -2342,6 +2344,42 @@ mod tests {
         assert_eq!(cr.payload["command"], "cargo test --workspace");
         assert_eq!(cr.turn_id, ok.turn_id);
         assert_eq!(cr.seq, ok.seq + 1);
+        // A credential on the command line or in the output tail never
+        // reaches the ledger — on the tool_result or on its check_run.
+        let leaky = svc
+            .on_tool_result(
+                a,
+                13,
+                Some("t1"),
+                Some("s1"),
+                Some("Bash"),
+                Some("ok"),
+                false,
+                ToolResultIds {
+                    command: Some(
+                        "DATABASE_URL=postgres://app:hunter2pw@db/x npm test -- --token s3cr3tvalue",
+                    ),
+                    excerpt_tail: Some("Authorization: Bearer abcdef0123456789abcdef\n5 passed"),
+                    exit_code: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let line = serde_json::to_string(&leaky).unwrap();
+        let evs = svc.list(a, None, None).unwrap();
+        let cr2 = serde_json::to_string(evs.iter().rev().find(|e| e.kind == "check_run").unwrap())
+            .unwrap();
+        for secret in ["hunter2pw", "s3cr3tvalue", "abcdef0123456789abcdef"] {
+            assert!(
+                !line.contains(secret),
+                "tool_result leaked {secret}: {line}"
+            );
+            assert!(!cr2.contains(secret), "check_run leaked {secret}: {cr2}");
+        }
+        assert!(leaky.payload["excerptTail"]
+            .as_str()
+            .unwrap()
+            .contains("5 passed"));
         let failed = svc
             .on_tool_result(
                 a,
@@ -2386,7 +2424,7 @@ mod tests {
             .iter()
             .filter(|e| e.kind == "check_run")
             .count();
-        assert_eq!(checks, 2);
+        assert_eq!(checks, 3, "passed, the redacted one, failed");
 
         // A commit binds to the turn whose diff touched the staged files.
         let turn_a = svc
