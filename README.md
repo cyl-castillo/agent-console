@@ -192,9 +192,11 @@ branch name; you'll see a one-line notice.
   [Releases](https://github.com/cyl-castillo/agent-console/releases/latest), or
   on Arch: `yay -S agent-console-bin`.
 - **Windows**: `winget install CylCastillo.AgentConsole`, or the `-setup.exe`
-  from Releases. With a browser download, SmartScreen may warn about an
-  unknown publisher (the binaries aren't code-signed yet) — "More info → Run
-  anyway".
+  from Releases. Releases are Authenticode-signed (publisher *GoEncode LLC*)
+  once the signing account is live — see the code signing policy below. A
+  freshly signed publisher still earns SmartScreen reputation over its first
+  downloads, so "More info → Run anyway" may appear for a while; check the
+  signature in the file's Properties → Digital Signatures.
 - **macOS**: download the `.dmg`, drag the app to Applications, then **one
   extra step** — the app isn't notarized by Apple yet, so Gatekeeper blocks it
   with a misleading *"Agent Console is damaged and can't be opened"* message.
@@ -369,13 +371,20 @@ Non-financial support also counts: a ⭐ on the repo, a thoughtful issue, a work
 
 ## Code signing policy
 
-Free code signing on Windows provided by [SignPath.io](https://signpath.io/),
-certificate by [SignPath Foundation](https://signpath.org/).
+Windows binaries are signed with
+[Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/)
+(formerly Trusted Signing): a publicly trusted certificate issued to the
+identity-validated publisher *GoEncode LLC*, held in Microsoft's HSM, never on
+a developer machine. The release workflow signs the app, the `hook-bridge`
+sidecar, the NSIS installer and uninstaller and the MSI during `tauri build`;
+set-up and verification are in [docs/WINDOWS_SIGNING.md](docs/WINDOWS_SIGNING.md).
+Releases published before the account went live are unsigned. macOS builds
+are not notarized yet.
 
 Binaries are built exclusively from the source code in this repository by the
 public [release workflow](.github/workflows/release.yml) on GitHub Actions,
-from a pushed version tag. Every signed release requires manual approval by
-the approver below; nothing is signed automatically.
+from a pushed version tag; signing runs only inside that workflow, with
+credentials that exist only there.
 
 Team roles:
 
