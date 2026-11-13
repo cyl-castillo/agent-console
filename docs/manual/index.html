@@ -693,7 +693,7 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <h3>macOS says the app "is damaged and can't be opened"</h3>
         <p>It isn't damaged — the app isn't notarized by Apple yet, and Gatekeeper words it badly. Run <code>xattr -cr "/Applications/Agent Console.app"</code> once, or allow it under System Settings → Privacy &amp; Security → "Open Anyway". First launch only.</p>
         <h3>Windows SmartScreen warns about an unknown publisher</h3>
-        <p>The binaries aren't code-signed yet. "More info → Run anyway" — the installer is the one published on the GitHub Releases page.</p>
+        <p>Releases are Authenticode-signed by <strong>GoEncode LLC</strong> (Azure Artifact Signing) once the signing account is live; older releases are unsigned. Right-click the installer → Properties → Digital Signatures: a valid signature from GoEncode LLC means it is the one published on the GitHub Releases page, and SmartScreen is only still learning the publisher — "More info → Run anyway". No signature on a release that should carry one: do not run it, and open an issue.</p>
         <h3>Advisor / Learning fail with an authentication error</h3>
         <p>Your engine login expired. The error itself offers a <strong>Fix Claude login</strong> button, and the palette has <em>Fix Claude login</em> / <em>Fix Codex login</em> — each opens a terminal running the engine's interactive login flow.</p>
         <h3>A shortcut isn't doing what I expect</h3>

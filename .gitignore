@@ -59,3 +59,6 @@ storybook-static/
 tests/visual/out/
 tests/visual/*-snapshots/
 screenshots/
+
+# Generated in CI by the Windows code-signing step (release.yml)
+src-tauri/azure-signing.conf.json

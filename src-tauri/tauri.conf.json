@@ -30,6 +30,7 @@
     "active": true,
     "targets": "all",
     "category": "DeveloperTool",
+    "publisher": "GoEncode LLC",
     "shortDescription": "Minimalist AI-native console for directing agents inside a repository.",
     "longDescription": "Agent Console is a small, terminal-first desktop app that puts an integrated shell, git diff viewer, and Claude Code agent side-by-side. It is designed for developers who want to direct an agent — not write code in an IDE.",
     "icon": [

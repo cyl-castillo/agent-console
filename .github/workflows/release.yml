@@ -64,6 +64,16 @@ jobs:
             args: ''
 
     runs-on: ${{ matrix.platform }}
+    env:
+      # Azure Artifact Signing (Windows Authenticode). Repository VARIABLES,
+      # not secrets: the endpoint, account and certificate profile are public
+      # identifiers. Leave them unset and the Windows build ships unsigned, as
+      # before; set all three (plus the AZURE_* secrets below) and every
+      # Windows binary - app, hook-bridge sidecar, setup.exe, uninstaller,
+      # MSI - is signed during `tauri build`. See docs/WINDOWS_SIGNING.md.
+      AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -101,11 +111,41 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Windows code signing (Azure Artifact Signing, only when configured)
+        if: matrix.platform == 'windows-latest' && env.AZURE_SIGNING_ACCOUNT != ''
+        shell: bash
+        run: |
+          # The CLI wraps signtool with the Azure Artifact Signing dlib and
+          # authenticates with the AZURE_* secrets handed to the build step.
+          # Pinned: crates.io versions are immutable.
+          cargo install artifact-signing-cli --locked --version 0.12.0
+          # Tauri reads the sign command from the config; the object form keeps
+          # the description in one argument. Merged into tauri.conf.json via
+          # --config below, so forks and local builds never see it.
+          node -e '
+            const fs = require("fs");
+            const cfg = { bundle: { windows: { signCommand: {
+              cmd: "artifact-signing-cli",
+              args: ["-e", process.env.AZURE_SIGNING_ENDPOINT,
+                     "-a", process.env.AZURE_SIGNING_ACCOUNT,
+                     "-c", process.env.AZURE_SIGNING_PROFILE,
+                     "-d", "Agent Console", "%1"],
+            } } } };
+            fs.writeFileSync("src-tauri/azure-signing.conf.json", JSON.stringify(cfg, null, 2));
+          '
+          echo "TAURI_SIGN_CONFIG=--config src-tauri/azure-signing.conf.json" >> "$GITHUB_ENV"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Azure Artifact Signing credentials (an Entra app registration with
+          # the "Artifact Signing Certificate Profile Signer" role). Empty on
+          # forks and when signing is not configured; unused then.
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           # The app's public Entra client id for Teams sign-in (a repository
           # variable, not a secret — public clients have none). Empty until
           # the registration exists: the panel then asks the user for one.
@@ -131,7 +171,7 @@ jobs:
           # assets, after every build finished.
           includeUpdaterJson: false
           releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ env.TAURI_SIGN_CONFIG }}
 
   # Stage 3: single writer for the updater feed. Assembles latest.json from the
   # uploaded assets (+ their .sig companions) once all platform builds are done
