@@ -23,21 +23,33 @@ pub fn create(repo: &Path, id: &str) -> AppResult<Option<Snapshot>> {
         return Ok(None);
     }
 
-    let tmp_idx = repo.join(".git").join(format!("agent-console-idx-{id}"));
+    // The git dir of THIS checkout: `<repo>/.git` only in a main checkout
+    // opened at its root. In a linked worktree `.git` is a file, and in a
+    // subfolder there is none — both used to fail every snapshot.
+    let git_dir = git_dir(repo)?;
+    let tmp_idx = git_dir.join(format!("agent-console-idx-{id}"));
     let tmp_idx_str = tmp_idx.to_string_lossy().to_string();
 
-    // Try seed the temp index from HEAD; tolerate empty repos.
-    let _ = proc::command("git")
-        .env("GIT_INDEX_FILE", &tmp_idx_str)
-        .args(["read-tree", "HEAD"])
-        .current_dir(repo)
-        .output();
+    // Seed from the checkout's own index: it carries the stat cache, so
+    // `add -A` only hashes what changed instead of every tracked file. The
+    // result is the same tree either way (add -A makes the index match the
+    // working tree). No index yet (fresh repo): seed from HEAD, tolerating
+    // an empty repo.
+    if std::fs::copy(git_dir.join("index"), &tmp_idx).is_err() {
+        let _ = proc::command("git")
+            .env("GIT_INDEX_FILE", &tmp_idx_str)
+            .args(["read-tree", "HEAD"])
+            .current_dir(repo)
+            .output();
+    }
 
-    // Stage everything from working tree (honors .gitignore).
+    // Stage everything from working tree (honors .gitignore). From the top
+    // level, so a session opened in a subfolder still captures the checkout.
+    let top = toplevel(repo).unwrap_or_else(|| repo.to_path_buf());
     let add = proc::command("git")
         .env("GIT_INDEX_FILE", &tmp_idx_str)
         .args(["add", "-A"])
-        .current_dir(repo)
+        .current_dir(&top)
         .output()?;
     if !add.status.success() {
         cleanup(&tmp_idx);
@@ -299,6 +311,33 @@ fn is_git_repo(repo: &Path) -> AppResult<bool> {
     Ok(out.status.success())
 }
 
+fn git_dir(repo: &Path) -> AppResult<std::path::PathBuf> {
+    let out = proc::command("git")
+        .args(["rev-parse", "--absolute-git-dir"])
+        .current_dir(repo)
+        .output()?;
+    if !out.status.success() {
+        return Err(AppError::Other(format!(
+            "snapshot: no git dir: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(std::path::PathBuf::from(
+        String::from_utf8_lossy(&out.stdout).trim(),
+    ))
+}
+
+fn toplevel(repo: &Path) -> Option<std::path::PathBuf> {
+    let out = proc::command("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(repo)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()))
+}
+
 fn head_sha(repo: &Path) -> Option<String> {
     let out = proc::command("git")
         .args(["rev-parse", "HEAD"])
@@ -349,6 +388,63 @@ mod tests {
         fs::create_dir_all(&plain).unwrap();
         assert!(create(&plain, "x").unwrap().is_none());
         let _ = fs::remove_dir_all(&plain);
+    }
+
+    #[test]
+    fn snapshots_work_in_a_linked_worktree_and_from_a_subfolder() {
+        let repo = init_repo("wt");
+        fs::create_dir_all(repo.join("pkg")).unwrap();
+        fs::write(repo.join("pkg").join("a.txt"), "v1").unwrap();
+        git(&["add", "-A"], &repo);
+        git(&["commit", "-qm", "seed"], &repo);
+
+        // A linked worktree: `.git` is a file there, not a directory.
+        let wt = repo.with_file_name(format!(
+            "{}-linked",
+            repo.file_name().unwrap().to_string_lossy()
+        ));
+        git(
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "session",
+                wt.to_str().unwrap(),
+            ],
+            &repo,
+        );
+        fs::write(wt.join("pkg").join("a.txt"), "v2").unwrap();
+        fs::write(wt.join("new.txt"), "untracked").unwrap();
+        let snap = create(&wt, "wt-turn")
+            .unwrap()
+            .expect("worktree → snapshot");
+        // Taking it left the user's own index alone (nothing staged).
+        let staged = git(&["diff", "--cached", "--name-only"], &wt);
+        assert_eq!(String::from_utf8_lossy(&staged.stdout).trim(), "");
+        fs::write(wt.join("pkg").join("a.txt"), "v3").unwrap();
+        fs::remove_file(wt.join("new.txt")).unwrap();
+        restore(&wt, &snap.commit_sha).unwrap();
+        assert_eq!(
+            fs::read_to_string(wt.join("pkg").join("a.txt")).unwrap(),
+            "v2"
+        );
+        assert_eq!(fs::read_to_string(wt.join("new.txt")).unwrap(), "untracked");
+
+        // A session opened in a subfolder captures the whole checkout.
+        fs::write(repo.join("root.txt"), "outside the subfolder").unwrap();
+        let sub = create(&repo.join("pkg"), "sub-turn")
+            .unwrap()
+            .expect("subfolder → snapshot");
+        let listed = git(&["ls-tree", "-r", "--name-only", &sub.commit_sha], &repo);
+        let names = String::from_utf8_lossy(&listed.stdout).to_string();
+        assert!(
+            names.contains("root.txt") && names.contains("pkg/a.txt"),
+            "{names}"
+        );
+
+        let _ = fs::remove_dir_all(&wt);
+        let _ = fs::remove_dir_all(&repo);
     }
 
     #[test]
