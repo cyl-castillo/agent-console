@@ -16,9 +16,17 @@ export interface TierInfo {
 
 // One simple command whose head is here. Code runners (`node -e`,
 // `python -c`) are not: they are shells with another syntax. Mirrors
-// `remote_decisions.rs` (READ_ONLY / FIND_ACTS / GIT_BRANCH_DELETE).
+// `remote_decisions.rs` (READ_ONLY / FIND_ACTS / GIT_BRANCH_*).
 const READ_ONLY_HEAD =
-  /^\s*(ls|pwd|cat|head|tail|wc|echo|which|type|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|find(?![^|]*\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b)|git\s+(status|log|diff|show|branch(?!\s+-[a-zA-Z]*[dD])|remote\s+-v|rev-parse|describe|blame|stash\s+list)|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))\b/;
+  /^\s*(ls|pwd|cat|head|tail|wc|echo|which|type|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|find(?![^|]*\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b)|git\s+(status|log|diff|show|remote\s+-v|rev-parse|describe|blame|stash\s+list)|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))(?:\s|$)/;
+// `git branch` only when it lists: no flag that deletes, moves, copies or
+// sets upstream, and no bare name (which creates). Mirrors `GIT_BRANCH_*`.
+const GIT_BRANCH_HEAD = /^\s*git\s+branch(?:\s|$)/;
+const GIT_BRANCH_WRITES =
+  /\s(?:-[a-zA-Z]*[dDfFmMcCu][a-zA-Z]*|--(?:delete|force|move|copy|set-upstream-to(?:=\S*)?|unset-upstream|edit-description|track|no-track))(?:\s|$)/;
+const GIT_BRANCH_LISTS =
+  /\s(?:--list|--contains|--no-contains|--merged|--no-merged|--points-at|--show-current|-[a-zA-Z]*l[a-zA-Z]*)(?:\s|=|$)/;
+const GIT_BRANCH_POSITIONAL = /^\s*git\s+branch(?:\s+-\S+)*\s+[^-\s]/;
 // Anything that chains, redirects, substitutes or backgrounds is not "one
 // read-only command", whatever its head says.
 const COMPOUND = /[;&>`\n]|\$\(|<<|<\(|\|\|/;
@@ -27,17 +35,25 @@ const XARGS = /\bxargs\b/;
 // `git diff --output=<file>`, `--ext-diff`, `tree -o`). `env` and `less`
 // left the allowlist for the same reason. Mirrors `READER_ESCAPES` in Rust.
 const READER_ESCAPES =
-  /^\s*rg\b.*\s--(pre|pre-glob|hostname-bin)\b|^\s*git\b.*\s--(output|ext-diff|textconv)\b|^\s*git\b.*\s-O\S|^\s*tree\b.*\s-o\b|^\s*file\b.*\s-[a-zA-Z]*C/;
+  /^\s*rg\b.*\s--(pre|pre-glob|hostname-bin)\b|^\s*git\b.*\s--(output|ext-diff|textconv)\b|^\s*git\b.*\s-O\S|^\s*tree\b.*\s-[a-zA-Z]*o\b|^\s*file\b.*\s-[a-zA-Z]*C/;
+
+function readOnlyHead(seg: string): boolean {
+  if (READER_ESCAPES.test(seg)) return false;
+  if (GIT_BRANCH_HEAD.test(seg)) {
+    return (
+      !GIT_BRANCH_WRITES.test(seg) &&
+      (!GIT_BRANCH_POSITIONAL.test(seg) || GIT_BRANCH_LISTS.test(seg))
+    );
+  }
+  return READ_ONLY_HEAD.test(seg);
+}
 
 /// Read-only = no compound syntax, no xargs, and every pipe segment's head in
 /// the allowlist (`git log | head` is fine; `ls | xargs rm` is not).
 export function isReadOnlyCommand(cmd: string): boolean {
   if (COMPOUND.test(cmd) || XARGS.test(cmd)) return false;
   const segments = cmd.split("|");
-  return (
-    segments.length > 0 &&
-    segments.every((seg) => !READER_ESCAPES.test(seg.trim()) && READ_ONLY_HEAD.test(seg.trim()))
-  );
+  return segments.length > 0 && segments.every((seg) => readOnlyHead(seg.trim()));
 }
 
 /// Paths where a write runs code later (hooks, shells, keys) or holds
