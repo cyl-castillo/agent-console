@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { useBudgetStore } from "../../stores/budgetStore";
 import { useSessionStore } from "../../stores/sessionStore";
-import { recordBudget } from "../../lib/budgetGuard";
+import { recordBudget, recordBudgetAnswer } from "../../lib/budgetGuard";
+import { useToastStore } from "../../stores/toastStore";
 import { useTerminalsStore, type TerminalSession } from "../../stores/terminalsStore";
 import { useShellStore } from "../../stores/shellStore";
 import { useUIStore } from "../../stores/uiStore";
@@ -45,6 +46,24 @@ export function BudgetDecision({
     return mine[mine.length - 1];
   }, [events, session.id]);
   const handoff = useHandoff(session, lastTurn, "budget");
+  // An answer that lets spending go on takes effect only once it is on the
+  // record (or the project declared it does not witness). Stopping is never
+  // held back by the ledger.
+  const showToast = useToastStore((st) => st.show);
+  const recorded = async (decision: "summary" | "switch" | "raise", newCap?: number) => {
+    const r = await recordBudgetAnswer(root, session, spent, cap, decision, newCap);
+    if (r === "failed") {
+      showToast(
+        decision === "switch"
+          ? "The hand-over happened, but the ledger could not record it."
+          : "Couldn't record the decision in the ledger — nothing was changed. Try again.",
+        "error",
+      );
+      return false;
+    }
+    return true;
+  };
+
   return (
     <div className="px-3 py-1.5">
       <DecisionCard
@@ -79,12 +98,14 @@ export function BudgetDecision({
             label: "Ask for a summary",
             variant: "secondary",
             onClick: () => {
-              void recordBudget(root, session, spent, cap, "summary", cap + 1);
-              setCap(session.id, cap + 1);
-              sendToSession(session.id, "Summarize what you did and what is left, then stop.\r");
-              setActive(session.id);
-              goTo("sessions");
-              setCenterTab("terminal");
+              void (async () => {
+                if (!(await recorded("summary", cap + 1))) return;
+                setCap(session.id, cap + 1);
+                sendToSession(session.id, "Summarize what you did and what is left, then stop.\r");
+                setActive(session.id);
+                goTo("sessions");
+                setCenterTab("terminal");
+              })();
             },
           },
           {
@@ -99,7 +120,9 @@ export function BudgetDecision({
                 // takes the card out of the Inbox.
                 const ok = await handoff.run();
                 if (!ok) return;
-                void recordBudget(root, session, spent, cap, "switch");
+                // The new session already exists; the old one is stopped
+                // either way, so a failed record is reported, not blocking.
+                await recorded("switch");
                 sendToSession(session.id, "\x03");
                 markHandedOff(session.id);
               })();
@@ -109,8 +132,9 @@ export function BudgetDecision({
             label: `Raise to $${cap + raise}`,
             variant: "primary",
             onClick: () => {
-              void recordBudget(root, session, spent, cap, "raise", cap + raise);
-              setCap(session.id, cap + raise);
+              void (async () => {
+                if (await recorded("raise", cap + raise)) setCap(session.id, cap + raise);
+              })();
             },
           },
         ]}
