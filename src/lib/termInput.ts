@@ -2,6 +2,7 @@ import type { TermInputDetail } from "../components/Terminal";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useUIStore } from "../stores/uiStore";
 import { useToastStore } from "../stores/toastStore";
+import { copyText } from "./clipboard";
 
 /// Type text into the active session's agent input, switching to the terminal
 /// tab. `submit: true` appends the Enter that sends it; default is the
@@ -42,7 +43,7 @@ export async function typeIntoActiveSession(
   const active = sessions.find((s) => s.id === activeId);
   if (!active || active.status !== "live") {
     try {
-      await navigator.clipboard.writeText(trimmed);
+      await copyText(trimmed);
     } catch {
       /* ignore */
     }
