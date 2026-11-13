@@ -92,6 +92,16 @@ pub fn upsert(
 ) -> AppResult<VaultEntryView> {
     let key = key.trim().to_string();
     validate_key(&key)?;
+    if !spawn_key_allowed(&key, &scope) {
+        return Err(AppError::InvalidArgument(format!(
+            "{key} decides what runs in every terminal, so the vault does not inject it{}",
+            if scope == Scope::Project && !is_console_key(&key) {
+                " from a project file — set it in the global vault or in your shell"
+            } else {
+                ""
+            }
+        )));
+    }
     let path = store_path(project_root, &scope)?;
     let mut store = load_store(&path)?;
     let now = now_ms();
@@ -187,6 +197,9 @@ pub fn env_for_spawn(project_root: Option<&Path>) -> AppResult<BTreeMap<String, 
     // Global first, then project overrides.
     let global = load_store(&global_path()?)?;
     for e in &global.entries {
+        if !spawn_key_allowed(&e.key, &Scope::Global) {
+            continue;
+        }
         if let Ok(v) = read_value(e, Scope::Global) {
             out.insert(e.key.clone(), v);
         }
@@ -194,6 +207,15 @@ pub fn env_for_spawn(project_root: Option<&Path>) -> AppResult<BTreeMap<String, 
     if let Some(root) = project_root {
         let p = load_store(&project_path(root))?;
         for e in &p.entries {
+            // `.claude/vault.json` arrives with a cloned repository: its keys
+            // are someone else's input until proven otherwise.
+            if !spawn_key_allowed(&e.key, &Scope::Project) {
+                tracing::warn!(
+                    "vault: project entry {:?} not injected (reserved name)",
+                    e.key
+                );
+                continue;
+            }
             if let Ok(v) = read_value(e, Scope::Project) {
                 out.insert(e.key.clone(), v);
             }
@@ -272,6 +294,116 @@ fn keyring_entry(scope: &Scope, key: &str) -> AppResult<Entry> {
         }
     );
     Entry::new(&service, key).map_err(|e| AppError::Other(format!("keyring open: {e}")))
+}
+
+fn is_console_key(key: &str) -> bool {
+    key.to_ascii_uppercase().starts_with("AGENT_CONSOLE")
+}
+
+/// May this key be put in the environment of a spawned terminal?
+///
+/// Never the console's own variables (they carry the approvals bridge and
+/// the ledger's session dir). From a project file — which a repository can
+/// ship — never a name that makes the shell, the loader, git or an
+/// interpreter run something: `PROMPT_COMMAND`, `LD_PRELOAD`, `PATH`,
+/// `GIT_SSH_COMMAND`, `NODE_OPTIONS` and their kin execute code in the
+/// user's login shell before any trust decision is asked. Nor a name that
+/// points the agent or its tools at another host or trust store
+/// (`ANTHROPIC_BASE_URL`, `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`): the first
+/// prompt would carry the user's token there. The user's own global vault
+/// may set any of these; a cloned repository may not.
+pub fn spawn_key_allowed(key: &str, scope: &Scope) -> bool {
+    if validate_key(key).is_err() || is_console_key(key) {
+        return false;
+    }
+    if *scope == Scope::Global {
+        return true;
+    }
+    const EXACT: &[&str] = &[
+        "PATH",
+        "HOME",
+        "SHELL",
+        "IFS",
+        "ENV",
+        "BASH_ENV",
+        "PROMPT_COMMAND",
+        "ZDOTDIR",
+        "CDPATH",
+        "TMPDIR",
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "PERL5OPT",
+        "PERL5LIB",
+        "RUBYOPT",
+        "RUBYLIB",
+        "SSH_ASKPASS",
+        "SUDO_ASKPASS",
+        "EDITOR",
+        "VISUAL",
+        "PAGER",
+        "BROWSER",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+        "COMSPEC",
+        "PATHEXT",
+        // Where the agent and its tools send requests, and whom they trust.
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NODE_EXTRA_CA_CERTS",
+        "NODE_TLS_REJECT_UNAUTHORIZED",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "CURL_CA_BUNDLE",
+        "REQUESTS_CA_BUNDLE",
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "YARN_REGISTRY",
+        "GOPROXY",
+        "GOTOOLCHAIN",
+        // Pagers, the loader and toolchains that run a configured command.
+        "LESSOPEN",
+        "LESSCLOSE",
+        "GCONV_PATH",
+        "GLIBC_TUNABLES",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "RUSTFLAGS",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "GOFLAGS",
+        "JAVA_TOOL_OPTIONS",
+        "_JAVA_OPTIONS",
+        "JDK_JAVA_OPTIONS",
+        "MAVEN_OPTS",
+        "GRADLE_OPTS",
+        "DOTNET_STARTUP_HOOKS",
+    ];
+    const PREFIX: &[&str] = &[
+        "LD_",
+        "DYLD_",
+        "GIT_",
+        "PS",
+        "PYTHON",
+        "BASH_FUNC",
+        "NPM_CONFIG_",
+        // The agents' own namespaces: base URLs, config dirs, the shell Claude
+        // runs on Windows (`CLAUDE_CODE_GIT_BASH_PATH`), OpenCode's config.
+        "CLAUDE_",
+        "CODEX_",
+        "OPENCODE_",
+        "ANTHROPIC_",
+        "OPENAI_",
+        "CARGO_",
+        "RUSTUP_",
+    ];
+    let k = key.to_ascii_uppercase();
+    !EXACT.contains(&k.as_str())
+        && !PREFIX
+            .iter()
+            .any(|p| k.starts_with(p) && (*p != "PS" || k[2..].chars().all(|c| c.is_ascii_digit())))
 }
 
 fn validate_key(key: &str) -> AppResult<()> {
@@ -364,6 +496,75 @@ mod tests {
             .into_iter()
             .filter(|v| v.scope == Scope::Project)
             .collect()
+    }
+
+    #[test]
+    fn a_project_vault_file_cannot_inject_names_that_run_code() {
+        let root = temp_root("hostile");
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        // What a cloned repository can ship: no keychain, plain values.
+        let entry = |k: &str| serde_json::json!({ "key": k, "description": "", "secret": false, "value": "x", "scope": "project", "createdAtMs": 0, "updatedAtMs": 0 });
+        let hostile = [
+            "PROMPT_COMMAND",
+            "LD_PRELOAD",
+            "DYLD_INSERT_LIBRARIES",
+            "PATH",
+            "ZDOTDIR",
+            "GIT_SSH_COMMAND",
+            "NODE_OPTIONS",
+            "PYTHONSTARTUP",
+            "BASH_ENV",
+            "PS1",
+            "path",
+            "ANTHROPIC_BASE_URL",
+            "OPENAI_BASE_URL",
+            "HTTPS_PROXY",
+            "NODE_EXTRA_CA_CERTS",
+            "OPENCODE_CONFIG",
+            "CLAUDE_CODE_GIT_BASH_PATH",
+            "LESSOPEN",
+            "GLIBC_TUNABLES",
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "RUSTUP_TOOLCHAIN",
+            "AGENT_CONSOLE_BRIDGE",
+            "AGENT_CONSOLE_SESSION_DIR",
+            "bad-name",
+        ];
+        let mut entries: Vec<serde_json::Value> = hostile.iter().map(|k| entry(k)).collect();
+        entries.push(entry("AC_TEST_API_URL"));
+        entries.push(entry("PSQL_HOST"));
+        entries.push(entry("NODE_ENV"));
+        fs::write(
+            project_path(&root),
+            serde_json::json!({ "entries": entries }).to_string(),
+        )
+        .unwrap();
+
+        let env = env_for_spawn(Some(&root)).unwrap();
+        for k in hostile {
+            assert!(!env.contains_key(k), "{k} must not reach a terminal");
+        }
+        assert_eq!(env.get("AC_TEST_API_URL").map(String::as_str), Some("x"));
+        assert_eq!(env.get("PSQL_HOST").map(String::as_str), Some("x"));
+        assert_eq!(env.get("NODE_ENV").map(String::as_str), Some("x"));
+
+        // Saving one through the app says why instead of silently dropping it.
+        let err = upsert(
+            Some(&root),
+            Scope::Project,
+            "LD_PRELOAD".into(),
+            "".into(),
+            false,
+            Some("x".into()),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("every terminal"), "{err}");
+        // The user's own global vault may set PATH; never the console's variables.
+        assert!(spawn_key_allowed("PATH", &Scope::Global));
+        assert!(!spawn_key_allowed("AGENT_CONSOLE_BRIDGE", &Scope::Global));
+
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]
