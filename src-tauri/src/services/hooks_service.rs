@@ -5,7 +5,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,10 @@ pub struct HooksStatus {
     pub permissionrequest_installed: bool,
     /// Whether the installed CLI supports PermissionRequest at all.
     pub permissionrequest_supported: bool,
+    /// `claude --version` as seen by the console, or None when the probe
+    /// failed: then only the base hook events are written (see
+    /// CLAUDE_EVENT_FLOORS) and the UI says so.
+    pub claude_version: Option<String>,
     pub notification_installed: bool,
     /// Our statusLine stand-in is the configured command (chaining to the
     /// user's original, parked in statusline-chain.json). Claude only.
@@ -311,6 +315,7 @@ impl HooksRuntime {
             pretooluse_installed,
             permissionrequest_installed,
             permissionrequest_supported: permissionrequest_supported(),
+            claude_version: detect_claude_version().map(|(a, b, c)| format!("{a}.{b}.{c}")),
             notification_installed,
             statusline_installed,
             posttooluse_installed,
@@ -1398,28 +1403,36 @@ fn claude_supports(event: &str) -> bool {
     claude_event_supported(event, detect_claude_version())
 }
 
+/// How long a failed `claude --version` probe is remembered before the next
+/// ask retries: long enough that the ~10 asks of one startup cost one login
+/// shell, short enough that a CLI installed mid-session is seen soon.
+const CLAUDE_VERSION_RETRY_AFTER: Duration = Duration::from_secs(60);
+
 /// `claude --version` as a semver triple, bounded by
-/// CLAUDE_VERSION_PROBE_TIMEOUT and cached per process once it succeeds (the
-/// startup sequence asks several times; a login shell per ask adds up). A
-/// failed probe is NOT cached — the next ask retries — and is logged once,
-/// because its consequence (base hook set only) is otherwise invisible.
+/// CLAUDE_VERSION_PROBE_TIMEOUT. A success is cached for the process; a
+/// failure for CLAUDE_VERSION_RETRY_AFTER (the startup sequence asks about
+/// ten times, and a login shell per ask adds up to seconds of blocked
+/// setup). The first failure is logged, because its consequence (base hook
+/// set only) is otherwise invisible; `HooksStatus.claude_version` carries
+/// it to the UI.
 fn detect_claude_version() -> Option<(u64, u64, u64)> {
-    static CACHE: std::sync::OnceLock<Mutex<Option<(u64, u64, u64)>>> = std::sync::OnceLock::new();
+    type Probe = (Instant, Option<(u64, u64, u64)>);
+    static CACHE: std::sync::OnceLock<Mutex<Option<Probe>>> = std::sync::OnceLock::new();
     static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let cache = CACHE.get_or_init(|| Mutex::new(None));
-    if let Some(v) = *cache.lock() {
-        return Some(v);
+    match *cache.lock() {
+        Some((_, Some(v))) => return Some(v),
+        Some((at, None)) if at.elapsed() < CLAUDE_VERSION_RETRY_AFTER => return None,
+        _ => {}
     }
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let _ = tx.send(crate::services::rewind_service::claude_version());
     });
     let probed = rx.recv_timeout(CLAUDE_VERSION_PROBE_TIMEOUT).ok().flatten();
+    *cache.lock() = Some((Instant::now(), probed));
     match probed {
-        Some(v) => {
-            *cache.lock() = Some(v);
-            Some(v)
-        }
+        Some(v) => Some(v),
         None => {
             if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 tracing::warn!(

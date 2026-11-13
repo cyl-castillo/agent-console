@@ -204,6 +204,7 @@ export const hooksStatus: HooksStatus = {
   pretooluseInstalled: true,
   permissionrequestInstalled: true,
   permissionrequestSupported: true,
+  claudeVersion: "2.1.323",
   notificationInstalled: true,
   statuslineInstalled: true,
   posttooluseInstalled: true,
