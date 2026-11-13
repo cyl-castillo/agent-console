@@ -45,7 +45,7 @@ export function HarnessLabSection() {
       </p>
       <div className="wb-field-row" style={{ gap: 12, flexWrap: "wrap" }}>
         <span className="wb-hint" data-testid="lab-stats">
-          {summary.experiments.length} experiments · {summary.kept} kept · {summary.clean_runs}{" "}
+          {summary.experiments.length} experiments · {summary.kept} kept · {summary.cleanRuns}{" "}
           without touching the evaluator · {summary.heldout.tasks.length} hidden task
           {summary.heldout.tasks.length === 1 ? "" : "s"} (v{summary.heldout.version})
         </span>
@@ -82,6 +82,13 @@ export function HarnessLabSection() {
           }}
         />
       </label>
+      {summary.ignoredEditable.length > 0 && (
+        <div className="rt-banner" role="status">
+          git ignores {summary.ignoredEditable.join(", ")} in this repository. The lab works on a
+          git worktree, so it cannot see or score edits there: track those paths or remove them from
+          the list.
+        </div>
+      )}
       <label className="wb-field">
         <span className="wb-field-label">focus for the agent (optional)</span>
         <input

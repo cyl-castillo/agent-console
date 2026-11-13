@@ -166,6 +166,10 @@ pub struct LabSummary {
     /// study's "nights without an edit to the evaluator".
     pub clean_runs: usize,
     pub kept: usize,
+    /// Editable paths git cannot see in this repository (ignored, nothing
+    /// tracked under them). The lab works on a worktree and gates on a diff:
+    /// an edit there would neither reach the agent nor be measured.
+    pub ignored_editable: Vec<String>,
 }
 
 fn lab_dir(project_root: &str) -> AppResult<PathBuf> {
@@ -205,7 +209,9 @@ pub fn summary(project_root: &str) -> AppResult<LabSummary> {
         .filter(|e| e.finished_ms.is_some() && e.outside_files.is_empty())
         .count();
     let kept = st.experiments.iter().filter(|e| e.status == "kept").count();
+    let ignored_editable = invisible_editables(Path::new(project_root), &st.config.editable);
     Ok(LabSummary {
+        ignored_editable,
         config: st.config,
         heldout: st.heldout,
         experiments: st.experiments,
@@ -267,6 +273,37 @@ pub fn select_tasks(tasks: &[HeldOutTask], n: usize) -> Vec<HeldOutTask> {
 
 fn git(repo: &Path, args: &[&str]) -> AppResult<std::process::Output> {
     Ok(proc::command("git").args(args).current_dir(repo).output()?)
+}
+
+/// The editable entries git ignores here and tracks nothing under. A worktree
+/// never contains them and `git status` never reports them, so an experiment
+/// that edits one would be scored as "no change" after paying for the run.
+pub fn invisible_editables(repo: &Path, editable: &[String]) -> Vec<String> {
+    editable
+        .iter()
+        .filter(|e| {
+            let probe = match e.strip_suffix('/') {
+                Some(dir) => format!("{dir}/.harness-lab-probe"),
+                None => e.to_string(),
+            };
+            let ignored = git(repo, &["check-ignore", "-q", "--", &probe])
+                .map(|o| o.status.code() == Some(0))
+                .unwrap_or(false);
+            let tracked = git(repo, &["ls-files", "--", e.trim_end_matches('/')])
+                .map(|o| !o.stdout.is_empty())
+                .unwrap_or(true);
+            ignored && !tracked
+        })
+        .cloned()
+        .collect()
+}
+
+fn wall_ms(fallback: i64) -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(fallback)
+        .max(fallback)
 }
 
 fn changed_files(worktree: &Path) -> AppResult<Vec<String>> {
@@ -429,6 +466,22 @@ pub fn run_experiment_with(
         ));
     }
     let repo = Path::new(project_root);
+    // Before anything is spent: can git see what the agent may edit?
+    let invisible = invisible_editables(repo, &st.config.editable);
+    let visible: Vec<String> = st
+        .config
+        .editable
+        .iter()
+        .filter(|e| !invisible.contains(e))
+        .cloned()
+        .collect();
+    if visible.is_empty() {
+        return Err(AppError::Other(format!(
+            "Every editable path is ignored by git here ({}). The lab works on a git worktree and \
+             cannot see or measure edits to ignored files: track the harness or change the list.",
+            invisible.join(", ")
+        )));
+    }
     let n = st.experiments.len();
     let id = format!("hx-{}-{:03}", now_ms / 1000, n + 1);
     let parent = st
@@ -475,7 +528,8 @@ pub fn run_experiment_with(
     );
 
     let finish = |mut exp: Experiment, st: &mut LabState| -> AppResult<Experiment> {
-        exp.finished_ms = Some(now_ms);
+        let done_ms = wall_ms(now_ms);
+        exp.finished_ms = Some(done_ms);
         if let Some(slot) = st.experiments.iter_mut().find(|e| e.id == exp.id) {
             *slot = exp.clone();
         }
@@ -483,7 +537,7 @@ pub fn run_experiment_with(
         witness(
             testigo,
             project_root,
-            now_ms,
+            done_ms,
             "experiment_result",
             json!({
                 "id": exp.id, "parent": exp.parent_id, "status": exp.status, "stopReason": exp.stop_reason,
@@ -511,8 +565,17 @@ pub fn run_experiment_with(
         .trim()
         .to_string();
 
-    // Baseline on the unmodified harness (cached per held-out version + window).
-    let key = format!("{}:{}", st.heldout.version, selected_ids.join(","));
+    // Baseline on the unmodified harness, cached per held-out version, window
+    // and commit: a baseline measured on an older tree is not this
+    // experiment's control, and a stale low one would let noise be "kept".
+    let key = format!(
+        "{}:{}@{}",
+        st.heldout.version,
+        selected_ids.join(","),
+        base_commit
+    );
+    st.baselines
+        .retain(|k, _| k.ends_with(&format!("@{base_commit}")));
     let baseline = match st.baselines.get(&key) {
         Some(b) => b.clone(),
         None => {
@@ -526,7 +589,13 @@ pub fn run_experiment_with(
     exp.baseline = Some(baseline.clone());
 
     // The edit, under budget.
-    let prompt = edit_prompt(&st.config, parent.as_ref());
+    let prompt = edit_prompt(
+        &LabConfig {
+            editable: visible,
+            ..st.config.clone()
+        },
+        parent.as_ref(),
+    );
     let edit = agent_run::run_with_runner(
         &RunSpec {
             engine: Engine::Claude,
@@ -776,6 +845,90 @@ mod tests {
         let base = TempDir::new("data");
         std::env::set_var("XDG_DATA_HOME", base.path());
         f()
+    }
+
+    #[test]
+    fn a_harness_git_cannot_see_stops_the_run_before_anything_is_spent() {
+        with_lab_env(|| {
+            let (dir, root) = repo_with_harness();
+            fs::write(dir.path().join(".gitignore"), ".claude/\n").unwrap();
+            let all: Vec<String> = EDITABLE.iter().map(|s| s.to_string()).collect();
+            // CLAUDE.md is tracked; AGENTS.md is absent but not ignored (an
+            // experiment may create it); everything under .claude/ is blind.
+            assert_eq!(
+                invisible_editables(dir.path(), &all),
+                vec![
+                    ".claude/skills/",
+                    ".claude/agents/",
+                    ".claude/hooks/",
+                    ".claude/settings.json"
+                ]
+            );
+            assert_eq!(summary(&root).unwrap().ignored_editable.len(), 4);
+            set_heldout(
+                &root,
+                vec![HeldOutTask {
+                    id: "t1".into(),
+                    prompt: "do the task".into(),
+                    check: "true".into(),
+                }],
+            )
+            .unwrap();
+            set_config(
+                &root,
+                LabConfig {
+                    editable: vec![".claude/skills/".into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let testigo = TestigoService::new();
+            let fake = Fake { write: None };
+            let err = run_experiment_with(&testigo, &root, &fake, &fake, 1_000).unwrap_err();
+            assert!(err.to_string().contains("ignored by git"), "{err}");
+            assert!(load(&root).unwrap().experiments.is_empty());
+            assert!(testigo.list(&root, None, None).unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn a_baseline_is_only_reused_on_the_commit_it_was_measured_on() {
+        with_lab_env(|| {
+            let (dir, root) = repo_with_harness();
+            set_heldout(
+                &root,
+                vec![HeldOutTask {
+                    id: "t1".into(),
+                    prompt: "do the task".into(),
+                    check: "grep -q 'npm test' CLAUDE.md".into(),
+                }],
+            )
+            .unwrap();
+            let testigo = TestigoService::new();
+            let idle = Fake { write: None };
+            let first = run_experiment_with(&testigo, &root, &idle, &idle, 1_000).unwrap();
+            assert_eq!(first.baseline.as_ref().unwrap().passed, 0);
+            assert!(first.finished_ms.unwrap() > first.created_ms);
+            // main moves: the harness now passes the task on its own.
+            fs::write(dir.path().join("CLAUDE.md"), "# project\nnpm test\n").unwrap();
+            let g = |args: &[&str]| {
+                assert!(proc::command("git")
+                    .args(args)
+                    .current_dir(dir.path())
+                    .output()
+                    .unwrap()
+                    .status
+                    .success())
+            };
+            g(&["commit", "-qam", "teach npm test"]);
+            let editor = Fake {
+                write: Some(("CLAUDE.md", "# project\nnpm test\nand lint\n")),
+            };
+            let second = run_experiment_with(&testigo, &root, &editor, &idle, 2_000).unwrap();
+            assert_eq!(second.baseline.as_ref().unwrap().passed, 1);
+            assert_eq!(second.status, "reverted", "{:?}", second.stop_reason);
+            assert_eq!(load(&root).unwrap().baselines.len(), 1);
+        });
     }
 
     #[test]
