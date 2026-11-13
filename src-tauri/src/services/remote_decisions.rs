@@ -187,7 +187,7 @@ static HIGH_REASON: LazyLock<Regex> = LazyLock::new(|| {
 /// syntax. Mirrors `lib/decisions.ts`.
 static READ_ONLY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^\s*(ls|pwd|cat|head|tail|less|wc|echo|which|type|env|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|git\s+(status|log|diff|show|rev-parse|describe|blame|stash\s+list)|git\s+remote\s+-v|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))\b",
+        r"^\s*(ls|pwd|cat|head|tail|wc|echo|which|type|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|git\s+(status|log|diff|show|rev-parse|describe|blame|stash\s+list)|git\s+remote\s+-v|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))\b",
     )
     .expect("static regex")
 });
@@ -197,7 +197,7 @@ static READ_ONLY: LazyLock<Regex> = LazyLock::new(|| {
 /// deletes) — the regex crate has none, so they are spelled out here.
 static FIND_HEAD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*find\b").expect("static"));
 static FIND_ACTS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s-(delete|exec|execdir|ok|okdir|fprint0?|fls)\b").expect("static")
+    Regex::new(r"\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b").expect("static")
 });
 static GIT_BRANCH_HEAD: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*git\s+branch\b").expect("static"));
@@ -208,8 +208,22 @@ static GIT_BRANCH_DELETE: LazyLock<Regex> =
 static COMPOUND: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[;&>`\n]|\$\(|<<|<\(|\|\|").expect("static"));
 static XARGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bxargs\b").expect("static"));
+/// Options that turn a reader into a runner or a writer: `rg --pre <cmd>`
+/// executes it per file, `git diff --output=<file>` writes one, `--ext-diff`
+/// runs the configured driver, `tree -o` writes. (`env` and `less` left the
+/// allowlist for the same reason: `env sh x.sh` is a shell.) Mirrors
+/// `READER_ESCAPES` in `lib/decisions.ts`.
+static READER_ESCAPES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^\s*rg\b.*\s--(pre|pre-glob|hostname-bin)\b|^\s*git\b.*\s--(output|ext-diff|textconv)\b|^\s*git\b.*\s-O\S|^\s*tree\b.*\s-o\b|^\s*file\b.*\s-[a-zA-Z]*C",
+    )
+    .expect("static")
+});
 
 fn read_only_head(segment: &str) -> bool {
+    if READER_ESCAPES.is_match(segment) {
+        return false;
+    }
     READ_ONLY.is_match(segment)
         || (FIND_HEAD.is_match(segment) && !FIND_ACTS.is_match(segment))
         || (GIT_BRANCH_HEAD.is_match(segment) && !GIT_BRANCH_DELETE.is_match(segment))
@@ -1119,6 +1133,17 @@ mod tests {
             "ls `rm -rf x`",
             "git log\nrm -rf /",
             "cat ~/.ssh/id_rsa | tee /tmp/x",
+            // Readers that run or write through an option, and `env` as a shell.
+            "env sh ./x.sh",
+            "env python3 ./x.py",
+            "less /etc/passwd",
+            "rg --pre ./x.sh foo",
+            "git diff --output=/home/u/.bashrc HEAD~1",
+            "git log --ext-diff -p",
+            "git grep -Osh foo",
+            "find . -maxdepth 0 -fprintf /home/u/.bashrc x",
+            "tree -o /home/u/.bashrc",
+            "git status | env sh",
         ] {
             assert_ne!(bash(c), "low", "{c}");
         }

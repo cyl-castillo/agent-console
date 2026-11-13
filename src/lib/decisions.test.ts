@@ -16,6 +16,23 @@ describe("tierFor", () => {
     expect(tierFor(req("Bash", { command: "git status" })).tier).toBe("low");
     expect(tierFor(req("Bash", { command: "npm test -- --run x" })).tier).toBe("low");
     expect(tierFor(req("Bash", { command: "find . -name '*.ts'" })).tier).toBe("low");
+    // Readers that run or write through an option, and `env` as a shell:
+    // the same rows as the Rust evasion table.
+    for (const command of [
+      "env sh ./x.sh",
+      "less /etc/passwd",
+      "rg --pre ./x.sh foo",
+      "git diff --output=/home/u/.bashrc HEAD~1",
+      "git log --ext-diff -p",
+      "find . -maxdepth 0 -fprintf /home/u/.bashrc x",
+      "tree -o /home/u/.bashrc",
+      "git status | env sh",
+    ]) {
+      expect(tierFor(req("Bash", { command })).tier, command).not.toBe("low");
+    }
+    expect(tierFor(req("Bash", { command: "rg -n foo src" })).tier).toBe("low");
+    expect(tierFor(req("Bash", { command: "git diff --stat HEAD~1" })).tier).toBe("low");
+    expect(tierFor(req("WebFetch", { url: "https://example.com" })).tier).toBe("medium");
   });
   it("unknown commands are medium", () => {
     expect(tierFor(req("Bash", { command: "node scripts/migrate.js" })).tier).toBe("medium");

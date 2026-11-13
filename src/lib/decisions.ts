@@ -18,18 +18,26 @@ export interface TierInfo {
 // `python -c`) are not: they are shells with another syntax. Mirrors
 // `remote_decisions.rs` (READ_ONLY / FIND_ACTS / GIT_BRANCH_DELETE).
 const READ_ONLY_HEAD =
-  /^\s*(ls|pwd|cat|head|tail|less|wc|echo|which|type|env|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|find(?![^|]*\s-(delete|exec|execdir|ok|okdir|fprint0?|fls)\b)|git\s+(status|log|diff|show|branch(?!\s+-[a-zA-Z]*[dD])|remote\s+-v|rev-parse|describe|blame|stash\s+list)|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))\b/;
+  /^\s*(ls|pwd|cat|head|tail|wc|echo|which|type|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|find(?![^|]*\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b)|git\s+(status|log|diff|show|branch(?!\s+-[a-zA-Z]*[dD])|remote\s+-v|rev-parse|describe|blame|stash\s+list)|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))\b/;
 // Anything that chains, redirects, substitutes or backgrounds is not "one
 // read-only command", whatever its head says.
 const COMPOUND = /[;&>`\n]|\$\(|<<|<\(|\|\|/;
 const XARGS = /\bxargs\b/;
+// Options that turn a reader into a runner or a writer (`rg --pre <cmd>`,
+// `git diff --output=<file>`, `--ext-diff`, `tree -o`). `env` and `less`
+// left the allowlist for the same reason. Mirrors `READER_ESCAPES` in Rust.
+const READER_ESCAPES =
+  /^\s*rg\b.*\s--(pre|pre-glob|hostname-bin)\b|^\s*git\b.*\s--(output|ext-diff|textconv)\b|^\s*git\b.*\s-O\S|^\s*tree\b.*\s-o\b|^\s*file\b.*\s-[a-zA-Z]*C/;
 
 /// Read-only = no compound syntax, no xargs, and every pipe segment's head in
 /// the allowlist (`git log | head` is fine; `ls | xargs rm` is not).
 export function isReadOnlyCommand(cmd: string): boolean {
   if (COMPOUND.test(cmd) || XARGS.test(cmd)) return false;
   const segments = cmd.split("|");
-  return segments.length > 0 && segments.every((seg) => READ_ONLY_HEAD.test(seg.trim()));
+  return (
+    segments.length > 0 &&
+    segments.every((seg) => !READER_ESCAPES.test(seg.trim()) && READ_ONLY_HEAD.test(seg.trim()))
+  );
 }
 
 /// Paths where a write runs code later (hooks, shells, keys) or holds
@@ -133,21 +141,12 @@ export function tierFor(req: ApprovalRequest, perimeter?: Perimeter): TierInfo {
       };
     return { tier: "medium", label: "Edits a file", reason: rel ?? path };
   }
-  if (
-    [
-      "Read",
-      "Glob",
-      "Grep",
-      "LS",
-      "WebSearch",
-      "WebFetch",
-      "TodoWrite",
-      "Task",
-      "TaskOutput",
-    ].includes(tool)
-  ) {
+  if (["Read", "Glob", "Grep", "LS", "TodoWrite", "Task", "TaskOutput"].includes(tool)) {
     return { tier: "low", label: "Read-only", reason: tool };
   }
+  // Same tier as `remote_decisions.rs`: leaving the machine is never "read-only".
+  if (tool === "WebFetch" || tool === "WebSearch")
+    return { tier: "medium", label: "Reaches a host", reason: "outside the machine" };
   if (tool.startsWith("mcp__"))
     return MCP_DESTRUCTIVE.test(tool)
       ? { tier: "high", label: "Tool server: destructive or external", reason: tool }
