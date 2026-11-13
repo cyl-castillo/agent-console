@@ -342,6 +342,21 @@ async fn serve_reconnect<S: AsyncRead + AsyncWrite + Unpin>(
             break;
         };
         let plain = decrypt(&mut t, &ct)?;
+        // The device as the store has it NOW, on every message: a connection
+        // opened before a revoke or a scope change must not outlive it. A
+        // stolen phone with its socket up would otherwise keep reading the
+        // queue and deciding for as long as it pings.
+        let device = match devices.find_by_key(key_b64)? {
+            Some(d) => d,
+            None => {
+                let bye = serde_json::to_vec(&ServerMessage::Error {
+                    message: "this device was revoked".into(),
+                })
+                .map_err(|e| AppError::Other(e.to_string()))?;
+                let _ = write_frame(stream, &encrypt(&mut t, &bye)?).await;
+                return Err(AppError::Other("device revoked mid-session".into()));
+            }
+        };
         let reply = match serde_json::from_slice::<ClientMessage>(&plain) {
             Ok(ClientMessage::Ping) => ServerMessage::Pong,
             Ok(ClientMessage::Pending) => {
@@ -785,6 +800,42 @@ pub mod client {
             serde_json::from_slice(&reply).map_err(|e| AppError::Other(format!("bad reply: {e}")))
         }
 
+        /// Like `request`, but several messages over ONE connection, calling
+        /// `between(i)` after reply `i` (tests change the desktop's state there).
+        pub async fn request_seq<S: AsyncRead + AsyncWrite + Unpin>(
+            &self,
+            mut stream: S,
+            msgs: Vec<ClientMessage>,
+            mut between: impl FnMut(usize),
+        ) -> AppResult<Vec<ServerMessage>> {
+            let desktop = self
+                .pinned_desktop
+                .as_ref()
+                .ok_or_else(|| AppError::Other("not paired".into()))?;
+            let hello = serde_json::to_vec(&Hello::Reconnect {
+                key: self.public_b64(),
+            })
+            .unwrap();
+            write_frame(&mut stream, &hello).await?;
+            let init = build_initiator_known(&self.keys.private, desktop)?;
+            let hs = handshake_over_stream(&mut stream, init, true).await?;
+            let mut t = hs
+                .into_transport_mode()
+                .map_err(|e| AppError::Other(format!("transport: {e}")))?;
+            let mut replies = Vec::new();
+            for (i, msg) in msgs.into_iter().enumerate() {
+                let bytes = serde_json::to_vec(&msg).map_err(|e| AppError::Other(e.to_string()))?;
+                write_frame(&mut stream, &encrypt(&mut t, &bytes)?).await?;
+                let reply = decrypt(&mut t, &read_frame_required(&mut stream).await?)?;
+                replies.push(
+                    serde_json::from_slice(&reply)
+                        .map_err(|e| AppError::Other(format!("bad reply: {e}")))?,
+                );
+                between(i);
+            }
+            Ok(replies)
+        }
+
         /// The decisions waiting on the desktop.
         pub async fn pending<S: AsyncRead + AsyncWrite + Unpin>(
             &self,
@@ -1137,6 +1188,69 @@ mod tests {
     /// keyboard decides those) → deny the dangerous one (recorded). Then a
     /// read-only device may look but not answer. This is the executable
     /// spec the device app mirrors.
+    /// A connection opened while the device was paired must not survive the
+    /// revoke: the stolen-phone case, socket still up.
+    #[tokio::test]
+    async fn a_revoke_or_scope_change_reaches_a_connection_that_is_already_open() {
+        let _env = crate::test_support::lock_env();
+        isolated_data_dir();
+        let now = now_ms();
+        let pairing = Arc::new(PairingService::load().unwrap());
+        let devices = Arc::new(PairedDevicesService::new());
+        let handler = StubHandler::new();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let offer = pairing.start_pairing(now, 60);
+        let server = tokio::spawn(run_listener(
+            listener,
+            pairing.clone(),
+            devices.clone(),
+            handler.clone(),
+            move |_out| {},
+        ));
+        let mut phone = PhoneClient::new().unwrap();
+        let mut sock = tokio::net::TcpStream::connect(addr).await.unwrap();
+        phone.pair(&mut sock, &offer, "Stolen phone").await.unwrap();
+        drop(sock);
+        let pid = devices.pending()[0].id.clone();
+        let dev = devices.approve_pairing(&pid, now).unwrap();
+        let decide = |id: &str| ClientMessage::Decide {
+            id: id.into(),
+            decision: "deny".into(),
+            reason: None,
+        };
+
+        // Same socket: look, get down-scoped, try to answer, get revoked, look.
+        let (d, id) = (devices.clone(), dev.id.clone());
+        let replies = phone
+            .request_seq(
+                tokio::net::TcpStream::connect(addr).await.unwrap(),
+                vec![
+                    ClientMessage::Pending,
+                    decide("a-low"),
+                    ClientMessage::Pending,
+                ],
+                move |i| match i {
+                    0 => d.set_scope(&id, DeviceScope::ReadOnly).unwrap(),
+                    1 => d.revoke(&id).unwrap(),
+                    _ => {}
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(replies[0], ServerMessage::Decisions { .. }));
+        match &replies[1] {
+            ServerMessage::Error { message } => assert!(message.contains("only read"), "{message}"),
+            other => panic!("the new scope must apply on the open socket, got {other:?}"),
+        }
+        match &replies[2] {
+            ServerMessage::Error { message } => assert!(message.contains("revoked"), "{message}"),
+            other => panic!("a revoked device must be cut off, got {other:?}"),
+        }
+        assert!(handler.decided.lock().unwrap().is_empty());
+        server.abort();
+    }
+
     #[tokio::test]
     async fn reference_client_decides_over_tcp_within_the_gate() {
         let _env = crate::test_support::lock_env();
