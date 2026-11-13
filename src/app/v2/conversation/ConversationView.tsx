@@ -37,6 +37,7 @@ import {
   unwitnessed,
   type PendingPrompt,
 } from "./pendingPrompts";
+import { copyText } from "../../../lib/clipboard";
 
 /// Claude has no interrupt hook: after Esc the ledger's turn stays open until
 /// the next prompt closes it. Interrupt is taken at its word after this long
@@ -325,7 +326,7 @@ export function ConversationView() {
     setDraft(prompt);
   };
   const copy = (text: string) => {
-    void navigator.clipboard?.writeText(text).then(
+    void copyText(text).then(
       () => showToast("Summary copied", "success"),
       () => showToast("Couldn't copy", "error"),
     );

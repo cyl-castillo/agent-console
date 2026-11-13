@@ -6,6 +6,7 @@ import { useTerminalsStore } from "../stores/terminalsStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUIStore } from "../stores/uiStore";
 import { useShellStore } from "../stores/shellStore";
+import { copyText } from "../lib/clipboard";
 
 export function newSession(): void {
   const project = useSessionStore.getState().project;
@@ -21,8 +22,7 @@ export function copyProjectPath(): void {
   const project = useSessionStore.getState().project;
   if (!project) return;
   const show = useToastStore.getState().show;
-  navigator.clipboard
-    ?.writeText(project.root)
+  copyText(project.root)
     .then(() => show("Project path copied", "success"))
     .catch(() => show("Could not copy project path", "error"));
 }

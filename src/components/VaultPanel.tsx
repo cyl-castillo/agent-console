@@ -6,6 +6,7 @@ import { PanelError } from "./PanelError";
 import type { VaultEntryView } from "../types/domain";
 import { confirmDialog } from "../stores/confirmStore";
 import { useToastStore } from "../stores/toastStore";
+import { copyText } from "../lib/clipboard";
 
 type Scope = "project" | "global";
 
@@ -192,7 +193,7 @@ function VaultRow({
   const onCopy = async () => {
     try {
       const v = shown ?? (await reveal(entry.scope, entry.key));
-      await navigator.clipboard?.writeText(v);
+      await copyText(v);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch (e) {

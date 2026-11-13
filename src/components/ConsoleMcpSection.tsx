@@ -6,6 +6,7 @@ import { useToastStore } from "../stores/toastStore";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Field, Input } from "../ui/Field";
+import { copyText } from "../lib/clipboard";
 
 /// "This console as an MCP server": what to paste into Claude Code or Codex
 /// so an agent can drive this console — with its own name, which the ledger
@@ -35,7 +36,7 @@ export function ConsoleMcpSection() {
   }, [caller]);
 
   const copy = (text: string, what: string) => {
-    void navigator.clipboard?.writeText(text).then(
+    void copyText(text).then(
       () => showToast(`${what} copied`, "success"),
       () => showToast("Couldn't copy", "error"),
     );

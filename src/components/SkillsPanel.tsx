@@ -9,6 +9,7 @@ import type { Skill } from "../types/domain";
 import type { TermInputDetail } from "./Terminal";
 import { MarkdownText } from "./MarkdownText";
 import { confirmDialog } from "../stores/confirmStore";
+import { copyText } from "../lib/clipboard";
 
 type KindFilter = "all" | "skill" | "command" | "agent";
 
@@ -430,7 +431,7 @@ async function insertIntoTerminal(text: string): Promise<void> {
   if (!activeId) {
     // Fallback: copy so the user can paste manually.
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
     } catch {
       /* ignore */
     }
@@ -483,8 +484,7 @@ function SkillDetail({ skill, md, onBack }: { skill: Skill; md: string; onBack: 
   const [copied, setCopied] = useState(false);
 
   const onCopy = () => {
-    navigator.clipboard
-      ?.writeText(snippet.trim())
+    copyText(snippet.trim())
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1200);
