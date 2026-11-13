@@ -159,6 +159,19 @@ export function SkillsPanel() {
                     )}
                 </p>
               )}
+              {/* The CLI's version decides which hook events the console may
+                  write (older claudes reject unknown event names and refuse the
+                  whole settings file). When the probe fails the console writes
+                  the base set only — silently, unless we say it here. */}
+              {integrationActive && hooks && hooks.claudeVersion === null && (
+                <p className="wb-hint">
+                  Could not read <code>claude --version</code> from your login shell, so only the
+                  base hook events are installed: failure, model-switch and API-error observers
+                  (PostToolUseFailure, PostModelSwitch, StopFailure) stay off until the console can
+                  run <code>claude</code>. Check that it is on the PATH of your login shell (on
+                  macOS, <code>~/.zprofile</code> rather than <code>~/.zshrc</code>).
+                </p>
+              )}
               {/* Codex installed AFTER the bridge was enabled: install() only
                   wired the codex side if the CLI existed at that instant, so
                   codex approvals silently stay in the terminal while the line

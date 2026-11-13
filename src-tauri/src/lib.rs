@@ -112,6 +112,13 @@ pub fn run() {
             if let Err(e) = state.hooks.ensure_opencode_plugin_autoinstalled() {
                 tracing::warn!("hooks: opencode plugin auto-install failed: {e}");
             }
+            // Hook events the installed `claude` doesn't accept (written by
+            // an earlier Agent Console unconditionally) must go BEFORE the
+            // normalization below re-upserts whatever is installed: a CLI
+            // before 2.1.101 refuses to start while they're in the file.
+            if let Err(e) = state.hooks.prune_unsupported_claude_hooks() {
+                tracing::warn!("hooks: unsupported-event prune failed: {e}");
+            }
             // Migrate legacy bare-path hook commands to `node "<path>"` on
             // installs that predate the format (on Windows the old format
             // never executed at all — no shebangs in cmd.exe, and the path

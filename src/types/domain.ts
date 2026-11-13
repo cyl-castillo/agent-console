@@ -271,6 +271,9 @@ export interface HooksStatus {
   /// would ask). False on CLIs below the verified floor, which keep PreToolUse.
   permissionrequestInstalled: boolean;
   permissionrequestSupported: boolean;
+  /// `claude --version` as the console sees it; null when the probe failed,
+  /// in which case only the base hook events are written.
+  claudeVersion: string | null;
   notificationInstalled: boolean;
   /// Our statusLine stand-in is configured (chains to the user's own line).
   statuslineInstalled: boolean;
