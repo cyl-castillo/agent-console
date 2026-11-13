@@ -76,7 +76,8 @@ A change to one side without the others is a bug even when everything compiles.
   allowlist in `src/lib/markdownPolicy.ts`; anything else is sanitized
   (DOMPurify) before it reaches the DOM.
 - **UI** uses the primitives in `src/ui` and the generated tokens
-  (`tokens/` → `npm run tokens`); no raw hex colours, no new global CSS
+  (`tokens/` → `npm run tokens`); no new raw hex colours (they live only in
+  `src/styles/tokens.css` and the legacy `global.css`), no new global CSS
   classes, no `backdrop-filter`. Text must reach WCAG AA in both themes.
   Every interactive element is reachable by keyboard and has a name.
 
@@ -87,7 +88,9 @@ A change to one side without the others is a bug even when everything compiles.
   untracked personal notes (`*-2026-*.md`, `reports/`, `research_notes/`).
 - One change per PR; a second bug found on the way is a second PR.
 - Never merge, tag or release on your own. Open the PR and report.
-- Third-party GitHub Actions are pinned by commit SHA.
+- Pin a third-party GitHub Action you add or move by commit SHA
+  (`uses: owner/repo@<sha> # vN`). Today only the winget releaser is; the
+  actions still on a tag in `ci.yml` and `release.yml` predate this rule.
 
 ## Where things are
 
