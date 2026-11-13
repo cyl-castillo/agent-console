@@ -35,6 +35,8 @@ export const useHarnessLabStore = create<HarnessLabState>((set, get) => ({
     try {
       const config = await ipc.harnessLabSetConfig(project, { ...summary.config, ...patch });
       set({ summary: { ...summary, config }, error: null });
+      // Which paths git can see depends on the list just saved.
+      if (patch.editable) set({ summary: await ipc.harnessLabGet(project), error: null });
     } catch (e) {
       set({ error: String(e) });
     }

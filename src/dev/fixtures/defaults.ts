@@ -1226,7 +1226,8 @@ export const defaultFixtures: FixtureMap = {
         commit: "b2c3d4e5",
       },
     ],
-    clean_runs: 2,
+    cleanRuns: 2,
+    ignoredEditable: [".claude/hooks/"],
     kept: 1,
   },
   harness_lab_set_config: {

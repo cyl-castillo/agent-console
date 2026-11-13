@@ -990,8 +990,10 @@ export interface LabSummary {
   config: LabConfig;
   heldout: HeldOut;
   experiments: Experiment[];
-  clean_runs: number;
+  cleanRuns: number;
   kept: number;
+  /// Editable paths git ignores here: the lab can neither see nor score them.
+  ignoredEditable: string[];
 }
 
 /// What to do with a firing missed because the app was closed.
