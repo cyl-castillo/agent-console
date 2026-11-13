@@ -218,6 +218,7 @@ pub fn pack(
     dest_dir: &Path,
     app_version: &str,
 ) -> AppResult<ComplianceSummary> {
+    aat_export::refuse_broken_ledger(testigo, project_root)?;
     let events = testigo.list(project_root, case_id, None)?;
     if events.is_empty() {
         return Err(AppError::Other(
