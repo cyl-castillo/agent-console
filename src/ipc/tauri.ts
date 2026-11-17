@@ -66,6 +66,9 @@ import type {
   JobsBoard,
   OpencodeModel,
   RunRecord,
+  WatchExchange,
+  WatchGoal,
+  WatchSource,
   ShareResult,
   SyncResult,
   ReflectionResult,
@@ -651,6 +654,20 @@ export const ipc = {
   schedulerIsPaused: () => invoke<boolean>("scheduler_is_paused"),
   schedulerSetPaused: (paused: boolean) => invoke<void>("scheduler_set_paused", { paused }),
   schedulerRunNow: (id: string) => invoke<RunRecord>("scheduler_run_now", { id }),
+
+  // --- goal watch (experimental; reads the ledger, never writes it) ---
+  watchList: () => invoke<WatchGoal[]>("watch_list"),
+  watchStart: (title: string, demo: boolean) => invoke<WatchGoal>("watch_start", { title, demo }),
+  watchSetStatus: (id: string, status: "active" | "paused" | "stopped") =>
+    invoke<WatchGoal>("watch_set_status", { id, status }),
+  watchDelete: (id: string) => invoke<void>("watch_delete", { id }),
+  watchSetAlertState: (goalId: string, alertId: string, alertState: "new" | "seen" | "dismissed") =>
+    invoke<WatchGoal>("watch_set_alert_state", { goalId, alertId, alertState }),
+  watchEvidence: (goalId: string, alertId: string) =>
+    invoke<ProofEvent[]>("watch_evidence", { goalId, alertId }),
+  watchAsk: (goalId: string, question: string, focus: string | null) =>
+    invoke<WatchExchange>("watch_ask", { goalId, question, focus }),
+  watchSource: () => invoke<WatchSource>("watch_source"),
 
   roundtableStart: (config: RoundtableConfig) => invoke<string>("roundtable_start", { config }),
   /// Git repos one level inside the open folder (a workspace of projects).

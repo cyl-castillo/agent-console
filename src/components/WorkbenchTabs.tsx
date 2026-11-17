@@ -12,6 +12,7 @@ import { useNotesStore } from "../stores/notesStore";
 import { useMcpStore } from "../stores/mcpStore";
 import { useRoundtableStore } from "../stores/roundtableStore";
 import { useSchedulerStore } from "../stores/schedulerStore";
+import { openAlertCount, useWatchStore } from "../stores/watchStore";
 import { useModulesStore } from "../stores/modulesStore";
 import { parseRaw, classify } from "../permissions/rules";
 import { Icon, type IconName } from "./Icon";
@@ -78,6 +79,7 @@ export function WorkbenchTabs({
   const rtActive = useRoundtableStore((s) => s.phase === "running" || s.phase === "paused");
   const scheduledCount = useSchedulerStore((s) => s.jobs.filter((j) => j.enabled).length);
   const schedulerRunning = useSchedulerStore((s) => s.runningJobIds.length > 0);
+  const watchOpen = useWatchStore(openAlertCount);
   const pluginsCount = usePluginsStore((s) => s.installed.length);
   const mcpCount = useMcpStore((s) => s.servers.length);
   const flagged = useFlaggedRules();
@@ -137,6 +139,12 @@ export function WorkbenchTabs({
         : "Schedule — run skills/prompts/pipelines on a clock (suggest-only)",
       count: scheduledCount,
     },
+    watch: {
+      icon: "eye",
+      label: "Watch",
+      title: "Watch (experimental) — follow a goal and get one alert when a run fails a check",
+      count: watchOpen,
+    },
     trust: {
       icon: "key",
       label: "Trust",
@@ -156,7 +164,7 @@ export function WorkbenchTabs({
   const disabledModules = useModulesStore((s) => s.disabled);
   const allSections: { label: string; groups: WorkbenchGroupKey[] }[] = [
     { label: "Work", groups: ["tasks", "teams", "notes", "proof", "context"] },
-    { label: "Agents", groups: ["coach", "room", "schedule"] },
+    { label: "Agents", groups: ["coach", "room", "schedule", "watch"] },
     { label: "Config", groups: ["trust", "addons"] },
   ];
   const sections = allSections

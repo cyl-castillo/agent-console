@@ -32,6 +32,8 @@ import type {
   TestigoVerifyReport,
   VaultEntryView,
   VoiceStatus,
+  WatchExchange,
+  WatchGoal,
   WorkspaceContext,
   PrCheck,
   PrComment,
@@ -827,6 +829,108 @@ export const feedbackContext: FeedbackContext = {
   branch: "main",
 };
 
+/// Goal watch: one goal following the ledger, with one failed run and the
+/// question already asked about it.
+const watchTurn = "turn-watch-1";
+export const watchEvidence: ProofEvent[] = [
+  {
+    seq: 58,
+    ts: NOW - min(9),
+    caseId: "term:sess-auth",
+    turnId: watchTurn,
+    kind: "prompt",
+    termId: "sess-auth",
+    actor: "human",
+    payload: { prompt: "Apply the discount before tax instead of after" },
+    prevHash: "f".repeat(64),
+    hash: "a".repeat(64),
+  },
+  {
+    seq: 59,
+    ts: NOW - min(9),
+    caseId: "term:sess-auth",
+    turnId: watchTurn,
+    kind: "snapshot",
+    termId: "sess-auth",
+    actor: "system",
+    payload: { commitSha: "8b2e6d40c1f75a93e0d4b68a2c7f1953d6e4a0b8" },
+    prevHash: "a".repeat(64),
+    hash: "b".repeat(64),
+  },
+  {
+    seq: 61,
+    ts: NOW - min(7),
+    caseId: "term:sess-auth",
+    turnId: watchTurn,
+    kind: "check_run",
+    termId: "sess-auth",
+    actor: "agent",
+    payload: { command: "npm test -- totals", kind: "test", status: "failed", exitCode: 1 },
+    prevHash: "b".repeat(64),
+    hash: "c".repeat(64),
+  },
+  {
+    seq: 63,
+    ts: NOW - min(6),
+    caseId: "term:sess-auth",
+    turnId: watchTurn,
+    kind: "turn_end",
+    termId: "sess-auth",
+    actor: "agent",
+    payload: {
+      filesChanged: [
+        { status: "M", path: "src/totals.ts" },
+        { status: "M", path: "src/totals.test.ts" },
+      ],
+    },
+    prevHash: "c".repeat(64),
+    hash: "d".repeat(64),
+  },
+];
+
+export const watchGoal: WatchGoal = {
+  id: "goal-1",
+  title: "Close PR #142 today",
+  source: "ledger",
+  status: "active",
+  conditions: ["check_failed"],
+  createdMs: NOW - min(40),
+  cursorSeq: 64,
+  alerts: [
+    {
+      id: "alert-1",
+      condition: "check_failed",
+      key: watchTurn,
+      ts: NOW - min(7),
+      lastTs: NOW - min(7),
+      turnId: watchTurn,
+      termId: "sess-auth",
+      caseId: "term:sess-auth",
+      command: "npm test -- totals",
+      checkKind: "test",
+      exitCode: 1,
+      revision: "8b2e6d40c1f75a93e0d4b68a2c7f1953d6e4a0b8",
+      evidenceSeqs: [61],
+      state: "new",
+      notified: true,
+      recovered: false,
+    },
+  ],
+  thread: [
+    {
+      ts: NOW - min(5),
+      question: "¿Qué pasó en esa ejecución?",
+      answer:
+        "El pedido fue: «Apply the discount before tax instead of after». Falló `npm test -- totals` con código de salida 1 (seq 61). Partió de la revisión 8b2e6d40. Cambió: src/totals.ts, src/totals.test.ts.",
+      intent: "run_summary",
+      alertId: "alert-1",
+      evidenceSeqs: [58, 59, 61, 63],
+      missing: [],
+      candidates: [],
+    },
+  ],
+};
+
 export const jobs: Job[] = [
   {
     id: "job-nightly",
@@ -1606,6 +1710,32 @@ export const defaultFixtures: FixtureMap = {
   scheduler_list: jobs,
   scheduler_history: runHistory,
   scheduler_is_paused: false,
+  // goal watch (experimental)
+  watch_list: [watchGoal],
+  watch_source: { witness: true, headSeq: 64 },
+  watch_start: (args: Record<string, unknown>) => ({
+    ...watchGoal,
+    id: "goal-new",
+    title: String(args.title),
+    source: args.demo ? "demo" : "ledger",
+    alerts: [],
+    thread: [],
+  }),
+  watch_set_status: (args: Record<string, unknown>) => ({
+    ...watchGoal,
+    status: String(args.status),
+  }),
+  watch_delete: null,
+  watch_set_alert_state: (args: Record<string, unknown>) => ({
+    ...watchGoal,
+    alerts: watchGoal.alerts.map((a) => ({ ...a, state: String(args.alertState) })),
+  }),
+  watch_evidence: watchEvidence,
+  watch_ask: (args: Record<string, unknown>): WatchExchange => ({
+    ...watchGoal.thread[0],
+    ts: NOW,
+    question: String(args.question),
+  }),
   // rooms & jobs
   roundtable_list_rooms: rooms,
   // F10: OpenCode's live catalog, with one local open-weight model.

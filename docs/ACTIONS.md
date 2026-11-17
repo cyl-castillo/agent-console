@@ -30,6 +30,7 @@ palette registry and to this document.
 | `nav.roundtable` | Room |
 | `nav.jobs` | Jobs board |
 | `nav.schedule` | Schedule |
+| `nav.watch` | Watch (experimental module, off by default) |
 | `nav.transfer` | Export / import |
 | `nav.feedback` | Feedback |
 | `modules.configure` | the Modules modal |

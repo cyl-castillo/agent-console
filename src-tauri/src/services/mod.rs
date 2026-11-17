@@ -76,6 +76,7 @@ pub mod usage_service;
 pub mod vault_service;
 pub mod verification_rules;
 pub mod voice_service;
+pub mod watch_service;
 pub mod work_profile;
 pub mod workspace_archive;
 pub mod worktree_service;

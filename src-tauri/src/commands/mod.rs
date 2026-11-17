@@ -40,5 +40,6 @@ pub mod trust;
 pub mod usage;
 pub mod vault;
 pub mod voice;
+pub mod watch;
 pub mod workspace_archive;
 pub mod worktree;

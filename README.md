@@ -102,6 +102,9 @@ suggest-only, none of them able to block the core:
   words) and you apply one. A review is never by the agent that produced
   the work — another engine or model family, whoever picks the reviewer.
 - **Schedule** — agentic jobs on a clock, physically restricted to plan mode.
+- **Watch** *(experimental, off by default)* — state a goal for the project and
+  get one alert when a run fails a check, with the ledger lines behind it. It
+  reads the ledger and never writes it. See [docs/WATCH.md](docs/WATCH.md).
 - **Trust** — permissions + secrets vault: what the agent can touch, and
   the approval policy as one versioned file in the repo compiled into what
   Claude, Codex and OpenCode each enforce (its hash rides on every approval

@@ -45,6 +45,10 @@ pub fn run() {
             // app was closed, then runs due jobs on a calm poll. Suggest-only —
             // every job runs through plan-mode `claude`.
             state.scheduler.start(app.handle().clone());
+            // Goal watch (experimental): a read-only pass over the ledgers of
+            // projects that have an active goal. With no goal it reads one
+            // small JSON file every few seconds and nothing else.
+            state.watch.start_loop(app.handle().clone());
             // Register the lightweight UserPromptSubmit observer on first run so
             // session-name suggestions / resume binding / activity / snapshots
             // work without the user having to flip the integration toggle.
@@ -365,6 +369,14 @@ pub fn run() {
             commands::scheduler::scheduler_set_paused,
             commands::scheduler::scheduler_fire_event,
             commands::scheduler::scheduler_run_now,
+            commands::watch::watch_list,
+            commands::watch::watch_start,
+            commands::watch::watch_set_status,
+            commands::watch::watch_delete,
+            commands::watch::watch_set_alert_state,
+            commands::watch::watch_evidence,
+            commands::watch::watch_ask,
+            commands::watch::watch_source,
             commands::console_mcp::console_reply,
             commands::console_mcp::console_mcp_config,
             commands::voice::voice_enable,

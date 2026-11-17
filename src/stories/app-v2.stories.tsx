@@ -30,6 +30,8 @@ import { useTerminalsStore } from "../stores/terminalsStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUIStore } from "../stores/uiStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
+import { useModulesStore } from "../stores/modulesStore";
+import { useWatchStore } from "../stores/watchStore";
 import { WORKBENCH_TABS, type WorkbenchTab } from "../lib/workbenchTabs";
 import { destinationForTab } from "../app/v2/destinations";
 import type { Destination } from "../app/v2/destinations";
@@ -353,3 +355,14 @@ export const PanelAgenda = panel.agenda!;
 export const PanelNotes = panel.notes!;
 export const PanelTransfer = panel.transfer!;
 export const PanelFeedback = panel.feedback!;
+/// Watch is an experimental module (born off): the story switches it on and
+/// opens the alert, so the evidence view is on the visual and a11y contract.
+export const PanelWatch = scenario({
+  destination: "work",
+  after: async () => {
+    useModulesStore.getState().setEnabled("watch", true);
+    useWorkbenchStore.getState().setTab("watch");
+    await sleep(200);
+    await useWatchStore.getState().openAlert("goal-1", "alert-1");
+  },
+});

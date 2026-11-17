@@ -30,7 +30,7 @@ export const DESTINATIONS: DestinationDef[] = [
     label: "Work",
     icon: Briefcase,
     sections: [
-      { label: "Agents", tabs: ["jobs", "roundtable", "schedule"] },
+      { label: "Agents", tabs: ["jobs", "roundtable", "schedule", "watch"] },
       { label: "Queue", tabs: ["jira", "agenda", "teams"] },
       { label: "Notes", tabs: ["notes"] },
     ],
@@ -74,6 +74,7 @@ export const TAB_LABELS: Record<WorkbenchTab, string> = {
   mcp: "MCP servers",
   transfer: "Export / import",
   feedback: "Feedback",
+  watch: "Watch",
 };
 
 export function destinationForTab(tab: WorkbenchTab): Destination {

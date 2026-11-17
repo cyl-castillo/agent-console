@@ -4,6 +4,32 @@ import { MODULES, moduleForTab } from "../lib/modules";
 import { WORKBENCH_GROUPS, type WorkbenchGroupKey, type WorkbenchTab } from "../lib/workbenchTabs";
 
 const STORAGE_KEY = "agent-console.modules.v1";
+/// Experimental modules are born off, so for them the ENABLED set is what
+/// persists: the ones the user switched on.
+const OPT_IN_KEY = "agent-console.modules.optin.v1";
+
+const isExperimental = (k: WorkbenchGroupKey) => MODULES.some((m) => m.key === k && m.experimental);
+
+function loadOptIn(): WorkbenchGroupKey[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(OPT_IN_KEY) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (k): k is WorkbenchGroupKey =>
+        typeof k === "string" && isExperimental(k as WorkbenchGroupKey),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/// What is hidden right now: what the user switched off, plus every
+/// experimental module they have not switched on.
+function effective(off: WorkbenchGroupKey[], optIn: WorkbenchGroupKey[]): WorkbenchGroupKey[] {
+  const stay = off.filter((k) => !isExperimental(k));
+  const dormant = MODULES.filter((m) => m.experimental && !optIn.includes(m.key)).map((m) => m.key);
+  return [...stay, ...dormant];
+}
 
 /// The DISABLED set is what persists (not the enabled one) so a module added
 /// in a future version is born enabled for existing users.
@@ -24,9 +50,9 @@ function load(): WorkbenchGroupKey[] {
   }
 }
 
-function persist(disabled: WorkbenchGroupKey[]) {
+function persist(key: string, value: WorkbenchGroupKey[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(disabled));
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {
     /* ignore */
   }
@@ -39,13 +65,22 @@ interface ModulesState {
 }
 
 export const useModulesStore = create<ModulesState>((set, get) => ({
-  disabled: load(),
+  disabled: effective(load(), loadOptIn()),
   setEnabled: (key, enabled) => {
     const mod = MODULES.find((m) => m.key === key);
     if (!mod || mod.locked) return;
     const disabled = get().disabled.filter((k) => k !== key);
     if (!enabled) disabled.push(key);
-    persist(disabled);
+    if (mod.experimental) {
+      const optIn = loadOptIn().filter((k) => k !== key);
+      if (enabled) optIn.push(key);
+      persist(OPT_IN_KEY, optIn);
+    } else {
+      persist(
+        STORAGE_KEY,
+        disabled.filter((k) => !isExperimental(k)),
+      );
+    }
     set({ disabled });
   },
   isEnabled: (key) => !get().disabled.includes(key),
