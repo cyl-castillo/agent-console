@@ -1647,3 +1647,63 @@ export interface ConsoleMcpConfig {
   codexToml: string;
   tools: string[];
 }
+
+/// Goal watch (experimental; mirrors the Rust `watch_service`). An alert is
+/// what the human is told, with the ledger lines that justify it.
+export interface WatchAlert {
+  id: string;
+  /// Which rule fired. Only "check_failed" exists.
+  condition: string;
+  key: string;
+  ts: number;
+  lastTs: number;
+  turnId?: string | null;
+  termId?: string | null;
+  caseId: string;
+  command: string;
+  checkKind: string;
+  exitCode?: number | null;
+  /// The snapshot the run started from, when the ledger has one.
+  revision?: string | null;
+  /// `seq` of every check_run line that fed this alert.
+  evidenceSeqs: number[];
+  /// "new" | "seen" | "dismissed"
+  state: string;
+  notified: boolean;
+  /// Found on the catch-up pass after launch (it happened while closed).
+  recovered: boolean;
+}
+
+/// One question and its answer, kept so the thread survives a restart.
+export interface WatchExchange {
+  ts: number;
+  question: string;
+  answer: string;
+  /// "run_summary" | "status" | "ambiguous" | "no_alerts" | "unknown"
+  intent: string;
+  alertId?: string | null;
+  evidenceSeqs: number[];
+  missing: string[];
+  /// Alert ids to choose from when "that run" could be more than one.
+  candidates: string[];
+}
+
+export interface WatchGoal {
+  id: string;
+  title: string;
+  /// "ledger" | "demo"
+  source: string;
+  /// "active" | "paused" | "stopped"
+  status: string;
+  conditions: string[];
+  createdMs: number;
+  cursorSeq?: number | null;
+  alerts: WatchAlert[];
+  thread: WatchExchange[];
+}
+
+export interface WatchSource {
+  /// False when witnessing is off for the project: nothing can be followed.
+  witness: boolean;
+  headSeq?: number | null;
+}

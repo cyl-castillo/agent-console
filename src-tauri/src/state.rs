@@ -41,6 +41,8 @@ pub struct AppState {
     /// F9: fan-outs (N agents, one prompt, twin worktrees).
     pub fanout: crate::services::fanout_service::FanOutService,
     pub scheduler: SchedulerService,
+    /// Goal watch (experimental): follows ledger runs against a stated goal.
+    pub watch: crate::services::watch_service::WatchService,
     pub voice: VoiceService,
     pub tts: TtsService,
     /// Connector: agent-facing delegation/question/review queue behind the
@@ -87,6 +89,7 @@ impl AppState {
             roundtable: RoundtableService::new(),
             fanout: crate::services::fanout_service::FanOutService::new(),
             scheduler: SchedulerService::new(),
+            watch: crate::services::watch_service::WatchService::new(),
             voice: VoiceService::default(),
             tts: TtsService::default(),
             connector: crate::services::connector_service::ConnectorService::new(),

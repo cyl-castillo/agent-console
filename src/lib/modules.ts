@@ -18,9 +18,15 @@ export interface ModuleInfo {
   /// Locked modules cannot be switched off. Trust (permissions + vault) is
   /// the only one: what the agent may touch is safety, not a feature.
   locked: boolean;
+  /// Experimental modules are born OFF: they appear only after the user
+  /// switches them on in Modules. Everything else is born on.
+  experimental: boolean;
 }
 
-const META: Record<WorkbenchGroupKey, { label: string; description: string; locked?: boolean }> = {
+const META: Record<
+  WorkbenchGroupKey,
+  { label: string; description: string; locked?: boolean; experimental?: boolean }
+> = {
   tasks: { label: "Tasks", description: "Jira queue and the unified agenda" },
   teams: { label: "Teams", description: "Read the Microsoft Teams messages sent to you" },
   notes: { label: "Notes", description: "Per-project sticky-note scratchpad" },
@@ -29,6 +35,11 @@ const META: Record<WorkbenchGroupKey, { label: string; description: string; lock
   coach: { label: "Coach", description: "Skills, advisor suggestions and learning" },
   room: { label: "Room", description: "Multi-agent conversation room" },
   schedule: { label: "Schedule", description: "Agent jobs on a clock (suggest-only)" },
+  watch: {
+    label: "Watch",
+    description: "Experimental: follow a goal and get one alert when a run fails a check",
+    experimental: true,
+  },
   trust: {
     label: "Trust",
     description: "Permissions and vault — what the agent can touch",
@@ -42,6 +53,7 @@ export const MODULES: ModuleInfo[] = WORKBENCH_GROUPS.map((g) => ({
   label: META[g.key].label,
   description: META[g.key].description,
   locked: !!META[g.key].locked,
+  experimental: !!META[g.key].experimental,
 }));
 
 /// The module a tab belongs to; null for groupless tabs (transfer, feedback),

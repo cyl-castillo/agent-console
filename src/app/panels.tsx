@@ -17,6 +17,7 @@ import { SkillsPanel } from "../components/SkillsPanel";
 import { TeamsPanel } from "../components/TeamsPanel";
 import { TurnsPanel } from "../components/TurnsPanel";
 import { VaultPanel } from "../components/VaultPanel";
+import { WatchPanel } from "../components/WatchPanel";
 import type { WorkbenchTab } from "../lib/workbenchTabs";
 
 /// The one place that maps a workbench tab id to its panel component; both
@@ -61,5 +62,7 @@ export function WorkbenchPanel({ tab }: { tab: WorkbenchTab }) {
       return <ExportImportPanel />;
     case "feedback":
       return <FeedbackPanel />;
+    case "watch":
+      return <WatchPanel />;
   }
 }

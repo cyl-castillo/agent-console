@@ -159,6 +159,13 @@ const ACTIONS: PaletteAction[] = [
     run: () => emit("ac:open-workbench-tab", "agenda"),
   },
   {
+    id: "nav.watch",
+    label: "Open Watch",
+    hint: "Workbench → Watch (experimental: follow a goal, one alert per failed run)",
+    keywords: ["goal", "follow", "alert", "objetivo", "seguimiento"],
+    run: () => emit("ac:open-workbench-tab", "watch"),
+  },
+  {
     id: "nav.notes",
     label: "Open Notes",
     hint: "Workbench → Notes (per-project scratchpad)",
