@@ -32,6 +32,7 @@ import { useUIStore } from "../stores/uiStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
 import { useModulesStore } from "../stores/modulesStore";
 import { useWatchStore } from "../stores/watchStore";
+import { useAssistantStore } from "../stores/assistantStore";
 import { WORKBENCH_TABS, type WorkbenchTab } from "../lib/workbenchTabs";
 import { destinationForTab } from "../app/v2/destinations";
 import type { Destination } from "../app/v2/destinations";
@@ -364,5 +365,16 @@ export const PanelWatch = scenario({
     useWorkbenchStore.getState().setTab("watch");
     await sleep(200);
     await useWatchStore.getState().openAlert("goal-1", "alert-1");
+  },
+});
+/// The assistant is an experimental module (born off): the story switches it
+/// on and asks once, so a real exchange is on the visual and a11y contract.
+export const PanelAssistant = scenario({
+  destination: "work",
+  after: async () => {
+    useModulesStore.getState().setEnabled("assistant", true);
+    useWorkbenchStore.getState().setTab("assistant");
+    await sleep(200);
+    await useAssistantStore.getState().ask("Where do I see what the agent did in the last turn?");
   },
 });

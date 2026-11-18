@@ -105,6 +105,10 @@ suggest-only, none of them able to block the core:
 - **Watch** *(experimental, off by default)* — state a goal for the project and
   get one alert when a run fails a check, with the ledger lines behind it. It
   reads the ledger and never writes it. See [docs/WATCH.md](docs/WATCH.md).
+- **Assistant** *(experimental, off by default)* — ask the console how it
+  works or tell it where to go, in your words. One turn of your own agent,
+  confined to reading the console and navigating it; every call it makes is
+  in the ledger under its own identity. See [docs/ASSISTANT.md](docs/ASSISTANT.md).
 - **Trust** — permissions + secrets vault: what the agent can touch, and
   the approval policy as one versioned file in the repo compiled into what
   Claude, Codex and OpenCode each enforce (its hash rides on every approval

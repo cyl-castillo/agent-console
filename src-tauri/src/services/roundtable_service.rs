@@ -1963,6 +1963,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                 project: &project_t,
                 job: &id_t,
                 caller: &caller_t,
+                server: engine_runner::McpServerKind::Connector,
             });
             let ctx = RunCtx {
                 cwd: &cwd,

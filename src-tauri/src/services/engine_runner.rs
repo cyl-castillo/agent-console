@@ -129,10 +129,23 @@ pub struct McpAttach<'a> {
     pub bridge: &'a Path,
     /// Project root the room belongs to.
     pub project: &'a str,
-    /// Room id.
+    /// Room id. Empty for the console server, which has no room.
     pub job: &'a str,
     /// Participant id this server speaks for.
     pub caller: &'a str,
+    /// Which of the bridge's two MCP servers the turn is given.
+    pub server: McpServerKind,
+}
+
+/// The bridge serves two MCP servers under the same name: the room connector
+/// (`delegate_task`, `ask_user`, …) and the console itself (`console_state`,
+/// `invoke_action`, …). A turn gets one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum McpServerKind {
+    #[default]
+    Connector,
+    /// `hook-bridge console-mcp`: what the built-in assistant drives.
+    Console,
 }
 
 /// Name both CLIs register the server under; tool names become
@@ -140,16 +153,36 @@ pub struct McpAttach<'a> {
 pub const MCP_SERVER_NAME: &str = "agent_console";
 
 impl McpAttach<'_> {
-    fn bridge_args(&self) -> [String; 7] {
-        [
-            "mcp".into(),
-            "--project".into(),
-            self.project.into(),
-            "--job".into(),
-            self.job.into(),
-            "--caller".into(),
-            self.caller.into(),
-        ]
+    fn bridge_args(&self) -> Vec<String> {
+        match self.server {
+            McpServerKind::Connector => vec![
+                "mcp".into(),
+                "--project".into(),
+                self.project.into(),
+                "--job".into(),
+                self.job.into(),
+                "--caller".into(),
+                self.caller.into(),
+            ],
+            // The console server takes no `--job` (the bridge refuses one).
+            McpServerKind::Console => vec![
+                "console-mcp".into(),
+                "--project".into(),
+                self.project.into(),
+                "--caller".into(),
+                self.caller.into(),
+            ],
+        }
+    }
+
+    /// The connector resolves an OpenCode caller from its session id; the
+    /// console server is addressed by argv alone and needs no such entry.
+    fn opencode_identity(&self) -> Option<OpencodeIdentity> {
+        (self.server == McpServerKind::Connector).then(|| OpencodeIdentity {
+            project: self.project.to_string(),
+            job: self.job.to_string(),
+            caller: self.caller.to_string(),
+        })
     }
 
     /// `--mcp-config` takes a path OR an inline JSON document; inline keeps
@@ -480,12 +513,15 @@ impl OpencodeRunner {
     fn run_legacy(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
         // The connector rides on `opencode.json` of the working folder, not
         // on argv; written before the run so a fresh OpenCode picks it up.
-        let identity = ctx.mcp.as_ref().map(|mcp| OpencodeIdentity {
-            project: mcp.project.to_string(),
-            job: mcp.job.to_string(),
-            caller: mcp.caller.to_string(),
-        });
-        if let Some(mcp) = &ctx.mcp {
+        let identity = ctx.mcp.as_ref().and_then(McpAttach::opencode_identity);
+        // Only the connector: the console server is never written into the
+        // folder's `opencode.json`, so on this legacy path a console turn
+        // runs without its tools (the ACP path carries them in `session/new`).
+        if let Some(mcp) = ctx
+            .mcp
+            .as_ref()
+            .filter(|m| m.server == McpServerKind::Connector)
+        {
             crate::services::opencode_service::ensure_config_entry(
                 ctx.cwd,
                 mcp.bridge,
@@ -1007,11 +1043,7 @@ impl EngineRunner for OpencodeRunner {
         if std::env::var_os("AGENT_CONSOLE_OPENCODE_LEGACY").is_some() {
             return self.run_legacy(ctx, on_activity);
         }
-        let identity = ctx.mcp.as_ref().map(|mcp| OpencodeIdentity {
-            project: mcp.project.to_string(),
-            job: mcp.job.to_string(),
-            caller: mcp.caller.to_string(),
-        });
+        let identity = ctx.mcp.as_ref().and_then(McpAttach::opencode_identity);
         if let (Some(id), Some(sid)) = (&identity, ctx.resume) {
             register_opencode_session(sid, id.clone());
         }
@@ -1369,6 +1401,7 @@ mod tests {
                 project: "/p",
                 job: "r-1",
                 caller: "p1",
+                server: McpServerKind::Connector,
             }),
             extra_allowed_tools: &extra,
         };
@@ -1462,6 +1495,7 @@ mod tests {
             project: "/home/u/proj",
             job: "room-42",
             caller: "p2",
+            server: McpServerKind::Connector,
         }
     }
 
@@ -1638,6 +1672,7 @@ mod tests {
             project: &dir.to_string_lossy(),
             job: "room-live-test",
             caller: "p1",
+            server: McpServerKind::Connector,
         };
         let ctx = RunCtx {
             cwd: &dir,

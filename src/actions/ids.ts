@@ -26,6 +26,7 @@ export const ACTION_IDS = [
   "nav.jobs",
   "nav.schedule",
   "nav.watch",
+  "nav.assistant",
   "nav.transfer",
   "modules.configure",
   // Git

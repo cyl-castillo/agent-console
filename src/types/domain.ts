@@ -1648,6 +1648,17 @@ export interface ConsoleMcpConfig {
   tools: string[];
 }
 
+/// One reply of the console's assistant (`assistant_ask`).
+export interface AssistantReply {
+  text: string;
+  /// The engine's session id: pass it back to continue the conversation.
+  sessionId: string | null;
+  tokens: number;
+  costUsd: number;
+  /// False when the turn ran without the console's tools (no hook bridge).
+  toolsAttached: boolean;
+}
+
 /// Goal watch (experimental; mirrors the Rust `watch_service`). An alert is
 /// what the human is told, with the ledger lines that justify it.
 export interface WatchAlert {

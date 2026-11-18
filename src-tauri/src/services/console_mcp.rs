@@ -130,6 +130,14 @@ impl ConsoleMcp {
         if !req.arguments.is_object() && !req.arguments.is_null() {
             return Err("Invalid arguments".into());
         }
+        // The built-in assistant is confined to its own subset, whatever
+        // the bridge advertised: the list is enforced here, not in a prompt.
+        if !crate::services::assistant_service::tool_allowed(&req.caller, &req.name) {
+            return Err(format!(
+                "{} is not available to the console assistant",
+                req.name
+            ));
+        }
         if req.name == "invoke_action" {
             let id = arg_str(&req.arguments, "id").ok_or("Missing action id")?;
             if !action_allowed(id) {

@@ -40,6 +40,11 @@ const META: Record<
     description: "Experimental: follow a goal and get one alert when a run fails a check",
     experimental: true,
   },
+  assistant: {
+    label: "Assistant",
+    description: "Experimental: ask the console how it works or where to go, in your words",
+    experimental: true,
+  },
   trust: {
     label: "Trust",
     description: "Permissions and vault — what the agent can touch",

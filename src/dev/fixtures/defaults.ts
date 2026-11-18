@@ -1710,6 +1710,16 @@ export const defaultFixtures: FixtureMap = {
   scheduler_list: jobs,
   scheduler_history: runHistory,
   scheduler_is_paused: false,
+  // console assistant (experimental)
+  assistant_ask: (args: Record<string, unknown>) => ({
+    text: /ledger|proof/i.test(String(args.message))
+      ? "The ledger is under **Proof → Ledger**. I opened it for you."
+      : "You can see what each turn did under **Proof → Turns**: tool calls, checks and the verification verdict.",
+    sessionId: "assistant-demo-1",
+    tokens: 412,
+    costUsd: 0,
+    toolsAttached: true,
+  }),
   // goal watch (experimental)
   watch_list: [watchGoal],
   watch_source: { witness: true, headSeq: 64 },

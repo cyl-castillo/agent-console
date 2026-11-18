@@ -26,7 +26,7 @@ use std::time::Duration;
 use crate::error::{AppError, AppResult};
 use crate::services::claude_cli;
 use crate::services::engine_runner::{
-    self, ActivitySink, ChildSlot, Engine, EngineRunner, RunCtx, ToolPolicy,
+    self, ActivitySink, ChildSlot, Engine, EngineRunner, McpAttach, RunCtx, ToolPolicy,
 };
 
 /// Default silence an unattended turn may keep before it is killed. Long
@@ -83,9 +83,23 @@ pub fn run(spec: &RunSpec) -> AppResult<RunOutcome> {
     run_with_runner(spec, engine_runner::runner_for(spec.engine))
 }
 
+/// Same turn, given one of the bridge's MCP servers (`None` = a plain turn):
+/// what the console's assistant runs on.
+pub fn run_attached(spec: &RunSpec, mcp: Option<McpAttach>) -> AppResult<RunOutcome> {
+    run_inner(spec, engine_runner::runner_for(spec.engine), mcp)
+}
+
 /// Same, with the adapter injected (tests use a fake that parks a child).
 pub fn run_with_runner(spec: &RunSpec, runner: &dyn EngineRunner) -> AppResult<RunOutcome> {
-    match attempt(spec, runner, spec.model.unwrap_or("")) {
+    run_inner(spec, runner, None)
+}
+
+fn run_inner(
+    spec: &RunSpec,
+    runner: &dyn EngineRunner,
+    mcp: Option<McpAttach>,
+) -> AppResult<RunOutcome> {
+    match attempt(spec, runner, spec.model.unwrap_or(""), mcp) {
         Ok(o) => Ok(o),
         Err(e) => {
             // The configured model predates the installed CLI: retry once on
@@ -98,7 +112,7 @@ pub fn run_with_runner(spec: &RunSpec, runner: &dyn EngineRunner) -> AppResult<R
             tracing::warn!(
                 "agent_run: configured model unknown to this CLI; retrying with {alias}"
             );
-            let mut o = attempt(spec, runner, alias)?;
+            let mut o = attempt(spec, runner, alias, mcp)?;
             o.model_fallback = Some(alias);
             Ok(o)
         }
@@ -114,7 +128,12 @@ pub fn retry_alias_for(engine: Engine, chosen: Option<&str>, error: &str) -> Opt
     claude_cli::unknown_model_in(error).and_then(|id| claude_cli::family_alias(&id))
 }
 
-fn attempt(spec: &RunSpec, runner: &dyn EngineRunner, model: &str) -> AppResult<RunOutcome> {
+fn attempt(
+    spec: &RunSpec,
+    runner: &dyn EngineRunner,
+    model: &str,
+    mcp: Option<McpAttach>,
+) -> AppResult<RunOutcome> {
     let slot = Arc::new(ChildSlot::default());
     let last_activity = Arc::new(AtomicU64::new(now_ms()));
     let done = Arc::new(AtomicBool::new(false));
@@ -153,7 +172,7 @@ fn attempt(spec: &RunSpec, runner: &dyn EngineRunner, model: &str) -> AppResult<
         resume: spec.resume,
         child_slot: Some(&slot),
         extra_allowed_tools: &[],
-        mcp: None,
+        mcp,
     };
     let result = runner.run(&ctx, &sink);
     done.store(true, Ordering::SeqCst);

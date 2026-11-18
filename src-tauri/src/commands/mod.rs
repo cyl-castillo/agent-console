@@ -1,4 +1,5 @@
 pub mod advisor;
+pub mod assistant;
 pub mod console_mcp;
 pub mod context;
 pub mod diagnostics;
