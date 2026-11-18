@@ -269,6 +269,7 @@ const ALIASES: Record<string, string[]> = {
   "nav.jobs": ["jobs", "trabajos"],
   "nav.schedule": ["schedule", "agendador", "programador"],
   "nav.watch": ["watch", "seguimiento", "objetivo"],
+  "nav.assistant": ["assistant", "asistente"],
   "nav.transfer": ["transfer", "transferencia"],
   "modules.configure": ["configurar modulos", "modulos", "configure modules", "modules"],
   "git.commit": ["commit", "hacer commit", "commitear", "git commit", "hace commit"],

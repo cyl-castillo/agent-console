@@ -28,7 +28,7 @@ afterEach(() => {
 describe("modules store", () => {
   it("defaults to everything enabled except experimental modules", async () => {
     const { useModulesStore, isTabEnabled } = await freshStore();
-    expect(useModulesStore.getState().disabled).toEqual(["watch"]);
+    expect(useModulesStore.getState().disabled).toEqual(["watch", "assistant"]);
     expect(isTabEnabled("watch")).toBe(false);
     expect(useModulesStore.getState().isEnabled("notes")).toBe(true);
     expect(isTabEnabled("jira")).toBe(true);
@@ -44,7 +44,7 @@ describe("modules store", () => {
     expect(isTabEnabled("agenda")).toBe(false);
     expect(isTabEnabled("notes")).toBe(true);
     expect(JSON.parse(data.get("agent-console.modules.v1")!)).toEqual(["tasks"]);
-    expect(useModulesStore.getState().disabled).toEqual(["watch", "tasks"]);
+    expect(useModulesStore.getState().disabled).toEqual(["watch", "assistant", "tasks"]);
     useModulesStore.getState().setEnabled("tasks", true);
     expect(isTabEnabled("jira")).toBe(true);
     expect(JSON.parse(data.get("agent-console.modules.v1")!)).toEqual([]);
@@ -63,7 +63,7 @@ describe("modules store", () => {
       "agent-console.modules.v1": JSON.stringify(["trust", "gone-module", "room"]),
     });
     const { useModulesStore } = await freshStore();
-    expect(useModulesStore.getState().disabled).toEqual(["room", "watch"]);
+    expect(useModulesStore.getState().disabled).toEqual(["room", "watch", "assistant"]);
   });
 
   it("an experimental module is born off, opts in, and stays in after a reload", async () => {
@@ -83,16 +83,16 @@ describe("modules store", () => {
     // A non-experimental key in the opt-in list is ignored.
     data.set("agent-console.modules.optin.v1", JSON.stringify(["room", "nope"]));
     store = await freshStore();
-    expect(store.useModulesStore.getState().disabled).toEqual(["watch"]);
+    expect(store.useModulesStore.getState().disabled).toEqual(["watch", "assistant"]);
   });
 
   it("survives corrupt storage and a missing localStorage", async () => {
     stubStorage({ "agent-console.modules.v1": "not json{" });
     let store = await freshStore();
-    expect(store.useModulesStore.getState().disabled).toEqual(["watch"]);
+    expect(store.useModulesStore.getState().disabled).toEqual(["watch", "assistant"]);
     vi.unstubAllGlobals(); // node env: bare localStorage access now throws
     store = await freshStore();
-    expect(store.useModulesStore.getState().disabled).toEqual(["watch"]);
+    expect(store.useModulesStore.getState().disabled).toEqual(["watch", "assistant"]);
     expect(() => store.useModulesStore.getState().setEnabled("room", false)).not.toThrow();
   });
 

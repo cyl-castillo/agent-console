@@ -145,6 +145,11 @@ export function WorkbenchTabs({
       title: "Watch (experimental) — follow a goal and get one alert when a run fails a check",
       count: watchOpen,
     },
+    assistant: {
+      icon: "message-square",
+      label: "Assistant",
+      title: "Assistant (experimental) — ask the console how it works or where to go",
+    },
     trust: {
       icon: "key",
       label: "Trust",
@@ -164,7 +169,7 @@ export function WorkbenchTabs({
   const disabledModules = useModulesStore((s) => s.disabled);
   const allSections: { label: string; groups: WorkbenchGroupKey[] }[] = [
     { label: "Work", groups: ["tasks", "teams", "notes", "proof", "context"] },
-    { label: "Agents", groups: ["coach", "room", "schedule", "watch"] },
+    { label: "Agents", groups: ["coach", "room", "schedule", "watch", "assistant"] },
     { label: "Config", groups: ["trust", "addons"] },
   ];
   const sections = allSections

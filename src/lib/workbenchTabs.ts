@@ -24,6 +24,7 @@ export const WORKBENCH_TABS = [
   "turns",
   "proof",
   "watch",
+  "assistant",
 ] as const;
 
 export type WorkbenchTab = (typeof WORKBENCH_TABS)[number];
@@ -51,6 +52,7 @@ export const WORKBENCH_GROUPS = [
   { key: "schedule", tabs: ["schedule"] },
   // Experimental and off until the user switches it on (see modules.ts).
   { key: "watch", tabs: ["watch"] },
+  { key: "assistant", tabs: ["assistant"] },
   { key: "trust", tabs: ["permissions", "vault"] },
   { key: "addons", tabs: ["plugins", "mcp"] },
 ] as const;

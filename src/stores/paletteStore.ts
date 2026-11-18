@@ -166,6 +166,13 @@ const ACTIONS: PaletteAction[] = [
     run: () => emit("ac:open-workbench-tab", "watch"),
   },
   {
+    id: "nav.assistant",
+    label: "Open Assistant",
+    hint: "Work → Assistant (experimental: ask the console how it works or where to go)",
+    keywords: ["help", "ask", "how", "ayuda", "asistente", "preguntar"],
+    run: () => emit("ac:open-workbench-tab", "assistant"),
+  },
+  {
     id: "nav.notes",
     label: "Open Notes",
     hint: "Workbench → Notes (per-project scratchpad)",

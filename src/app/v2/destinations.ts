@@ -33,6 +33,7 @@ export const DESTINATIONS: DestinationDef[] = [
       { label: "Agents", tabs: ["jobs", "roundtable", "schedule", "watch"] },
       { label: "Queue", tabs: ["jira", "agenda", "teams"] },
       { label: "Notes", tabs: ["notes"] },
+      { label: "Help", tabs: ["assistant"] },
     ],
   },
   {
@@ -75,6 +76,7 @@ export const TAB_LABELS: Record<WorkbenchTab, string> = {
   transfer: "Export / import",
   feedback: "Feedback",
   watch: "Watch",
+  assistant: "Assistant",
 };
 
 export function destinationForTab(tab: WorkbenchTab): Destination {

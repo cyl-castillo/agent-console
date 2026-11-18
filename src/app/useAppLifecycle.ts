@@ -6,6 +6,7 @@ import { attachGitWatcherListener } from "../stores/changesStore";
 import { attachVoiceListeners, attachVoiceApprovalWatcher } from "../stores/voiceStore";
 import { attachSchedulerListeners } from "../stores/schedulerStore";
 import { attachWatchListeners } from "../stores/watchStore";
+import { attachAssistantListeners } from "../stores/assistantStore";
 import { attachInjectListener } from "../stores/injectStore";
 import { attachHooksHealthListeners } from "../stores/hooksHealthStore";
 import { attachLiveStatusListener } from "../stores/liveStatusStore";
@@ -69,6 +70,7 @@ export function useAppLifecycle(): void {
     adopt(attachVoiceListeners());
     adopt(attachSchedulerListeners());
     adopt(attachWatchListeners());
+    adopt(attachAssistantListeners());
     adopt(attachInjectListener());
     adopt(attachHooksHealthListeners());
     adopt(attachLiveStatusListener());

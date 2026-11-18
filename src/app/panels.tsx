@@ -1,5 +1,6 @@
 import { AdvisorPanel } from "../components/AdvisorPanel";
 import { AgendaPanel } from "../components/AgendaPanel";
+import { AssistantPanel } from "../components/AssistantPanel";
 import { ContextPanel } from "../components/ContextPanel";
 import { ExportImportPanel } from "../components/ExportImportPanel";
 import { FeedbackPanel } from "../components/FeedbackPanel";
@@ -64,5 +65,7 @@ export function WorkbenchPanel({ tab }: { tab: WorkbenchTab }) {
       return <FeedbackPanel />;
     case "watch":
       return <WatchPanel />;
+    case "assistant":
+      return <AssistantPanel />;
   }
 }

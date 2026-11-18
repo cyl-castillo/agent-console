@@ -215,6 +215,7 @@ pub fn run() {
             commands::usage::session_usage,
             commands::advisor::advisor_analyze,
             commands::advisor::advisor_create_skill,
+            commands::assistant::assistant_ask,
             commands::learning::learning_reflect,
             commands::learning::learning_curate,
             commands::learning::activity_list,

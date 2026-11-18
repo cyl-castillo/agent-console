@@ -1375,6 +1375,38 @@ impl McpServer {
     }
 }
 
+/// The identity of the console's built-in assistant, and the subset of the
+/// console's tools it is shown. Lockstep with `assistant_service::CALLER` and
+/// `assistant_service::TOOLS` in the app, which is where the subset is
+/// enforced: hiding a tool here only keeps the model from reaching for it.
+const ASSISTANT_CALLER: &str = "console-assistant";
+const ASSISTANT_TOOLS: &[&str] = &[
+    "console_state",
+    "list_actions",
+    "invoke_action",
+    "list_sessions",
+    "session_events",
+    "memory_search",
+    "ledger_verify",
+    "verification_status",
+];
+
+/// What `tools/list` answers for this process's identity.
+fn tools_for(identity: &McpIdentity) -> Vec<Value> {
+    let tools = identity.server.tools();
+    if identity.server == McpServer::Console && identity.caller == ASSISTANT_CALLER {
+        return tools
+            .into_iter()
+            .filter(|t| {
+                t["name"]
+                    .as_str()
+                    .is_some_and(|n| ASSISTANT_TOOLS.contains(&n))
+            })
+            .collect();
+    }
+    tools
+}
+
 /// The console's tools. Lockstep with `console_mcp::TOOL_NAMES` in the app.
 fn console_tools() -> Vec<Value> {
     vec![
@@ -1776,7 +1808,7 @@ fn mcp_handle_line(identity: &McpIdentity, relay: &dyn McpRelay, line: &str) -> 
             });
         }
         "ping" => response["result"] = json!({}),
-        "tools/list" => response["result"] = json!({ "tools": identity.server.tools() }),
+        "tools/list" => response["result"] = json!({ "tools": tools_for(identity) }),
         "tools/call" => response["result"] = mcp_call(identity, relay, &params),
         _ => {
             response["error"] = json!({ "code": -32601, "message": "Method not implemented" });
@@ -2862,6 +2894,36 @@ mod tests {
         assert_eq!(McpIdentity::from_args(McpServer::Console, &with_job), None);
         let no_caller = ["--project", "/proj"].map(String::from);
         assert_eq!(McpIdentity::from_args(McpServer::Console, &no_caller), None);
+    }
+
+    /// The built-in assistant sees a read-and-navigate subset: nothing that
+    /// types into a session, opens one, reviews or declines.
+    #[test]
+    fn the_assistant_is_shown_only_its_subset_of_the_console_tools() {
+        let id = McpIdentity {
+            caller: ASSISTANT_CALLER.into(),
+            ..console_identity()
+        };
+        let names: Vec<String> = tools_for(&id)
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        let mut expected: Vec<String> = ASSISTANT_TOOLS.iter().map(|s| s.to_string()).collect();
+        let mut got = names.clone();
+        expected.sort();
+        got.sort();
+        assert_eq!(got, expected, "every listed tool exists on the server");
+        for hidden in ["send_prompt", "new_session", "decline", "request_review"] {
+            assert!(!names.iter().any(|n| n == hidden), "{hidden}");
+        }
+        // Any other caller of the console server still sees all of it, and
+        // the name means nothing on the connector.
+        assert_eq!(tools_for(&console_identity()).len(), console_tools().len());
+        let room = McpIdentity {
+            caller: ASSISTANT_CALLER.into(),
+            ..identity()
+        };
+        assert_eq!(tools_for(&room).len(), mcp_tools().len());
     }
 
     #[test]
