@@ -72,7 +72,7 @@ pub fn remember(path: &Path) -> AppResult<()> {
     let file = RecentsFile { entries };
     let json = serde_json::to_string_pretty(&file)
         .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-    fs::write(recents_path()?, json)?;
+    crate::services::persistence::write_atomic(&recents_path()?, json.as_bytes())?;
     Ok(())
 }
 
@@ -86,6 +86,6 @@ pub fn forget(path: &str) -> AppResult<()> {
     let file = RecentsFile { entries };
     let json = serde_json::to_string_pretty(&file)
         .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-    fs::write(recents_path()?, json)?;
+    crate::services::persistence::write_atomic(&recents_path()?, json.as_bytes())?;
     Ok(())
 }

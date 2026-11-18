@@ -200,39 +200,22 @@ impl WatchService {
     }
 
     fn load_file() -> AppResult<WatchFile> {
-        let path = Self::path("json")?;
-        if !path.exists() {
-            return Ok(WatchFile::default());
-        }
-        let txt = fs::read_to_string(&path)
-            .map_err(|e| AppError::Other(format!("read watch.json: {e}")))?;
-        if txt.trim().is_empty() {
-            return Ok(WatchFile::default());
-        }
-        match serde_json::from_str::<WatchFile>(&txt) {
-            Ok(file) => Ok(file),
-            Err(e) => {
-                if let Ok(btxt) = fs::read_to_string(Self::path("json.bak")?) {
-                    if let Ok(file) = serde_json::from_str::<WatchFile>(&btxt) {
-                        return Ok(file);
-                    }
-                }
-                Err(AppError::Other(format!("parse watch.json: {e}")))
-            }
-        }
+        crate::services::persistence::load_json_store(
+            &Self::path("json")?,
+            &Self::path("json.bak")?,
+            "watch.json",
+        )
     }
 
     fn write_file(file: &WatchFile) -> AppResult<()> {
-        let path = Self::path("json")?;
         let json = serde_json::to_string_pretty(file)
             .map_err(|e| AppError::Other(format!("serialize watch.json: {e}")))?;
-        let tmp = Self::path("json.tmp")?;
-        fs::write(&tmp, json.as_bytes())?;
-        if path.exists() {
-            let _ = fs::copy(&path, Self::path("json.bak")?);
-        }
-        fs::rename(&tmp, &path)?;
-        Ok(())
+        crate::services::persistence::save_json_store(
+            &Self::path("json")?,
+            &Self::path("json.bak")?,
+            &Self::path("json.tmp")?,
+            &json,
+        )
     }
 
     /// Read-modify-write one goal under the lock.

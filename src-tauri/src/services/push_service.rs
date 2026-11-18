@@ -322,23 +322,31 @@ pub fn origin_of(url: &str) -> AppResult<String> {
     Ok(format!("{scheme}://{host}"))
 }
 
+/// Owner-only, and atomic: the bytes go to a 0600 temp file that is renamed
+/// over the target, so a crash mid-write cannot leave a truncated file.
 #[cfg(unix)]
 fn write_private(path: &PathBuf, bytes: &[u8]) -> AppResult<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    let tmp = path.with_file_name(name);
     let mut f = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .mode(0o600)
-        .open(path)?;
+        .open(&tmp)?;
     f.write_all(bytes)?;
+    f.sync_all()?;
+    drop(f);
+    fs::rename(&tmp, path)?;
     Ok(())
 }
 
 #[cfg(not(unix))]
 fn write_private(path: &PathBuf, bytes: &[u8]) -> AppResult<()> {
-    fs::write(path, bytes)?;
+    crate::services::persistence::write_atomic(path, bytes)?;
     Ok(())
 }
 

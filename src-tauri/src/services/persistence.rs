@@ -9,9 +9,12 @@
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
-use crate::error::AppResult;
+use serde::de::DeserializeOwned;
+
+use crate::error::{AppError, AppResult};
 
 /// Stable per-project filename: a human-readable prefix (last path segment)
 /// plus a hash of the full root, so two projects sharing a basename never
@@ -53,6 +56,127 @@ pub fn trim_jsonl(path: &Path, keep: usize) -> AppResult<()> {
     let tmp = path.with_extension("jsonl.tmp");
     fs::write(&tmp, format!("{kept}\n"))?;
     fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// `<file>.tmp` next to `path`: same directory, so the rename that follows
+/// never crosses a filesystem.
+fn tmp_sibling(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".tmp");
+    path.with_file_name(name)
+}
+
+/// Rename, retrying briefly. On Windows, antivirus and indexers lock a file
+/// that was just written and the rename fails for a moment; without the
+/// retry every save in that window is lost (issue #72).
+fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut last = None;
+    for attempt in 0..3 {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = Some(e);
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                }
+            }
+        }
+    }
+    Err(last.expect("loop ran"))
+}
+
+/// Write the bytes and flush them to disk before returning. Without the
+/// flush, a power cut after the rename can leave the new name pointing at an
+/// empty file — which is how a store ends up with a blank main file.
+fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = fs::File::create(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
+}
+
+/// Replace `path` with `bytes` so that a reader, or a crash at any point,
+/// sees either the old content or the new one — never a half-written file.
+/// No-op when the file already holds exactly these bytes.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if fs::read(path).ok().as_deref() == Some(bytes) {
+        return Ok(());
+    }
+    let tmp = tmp_sibling(path);
+    write_synced(&tmp, bytes)?;
+    rename_with_retry(&tmp, path)
+}
+
+fn is_blank(bytes: &[u8]) -> bool {
+    bytes.iter().all(u8::is_ascii_whitespace)
+}
+
+fn parses_as_json(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<serde::de::IgnoredAny>(bytes).is_ok()
+}
+
+/// Load a JSON store that keeps a `.bak` of its last good state.
+///
+/// - No main file: the store has never been written → `T::default()`.
+/// - Main file blank (truncated by a crash or a full disk) or unparseable:
+///   that is damage, not "no data" — recover from the `.bak`. A blank main
+///   with no usable `.bak` is an empty store; an unparseable one is an error,
+///   so the caller cannot mistake unreadable history for none and write over
+///   it.
+pub fn load_json_store<T: DeserializeOwned + Default>(
+    path: &Path,
+    bak: &Path,
+    name: &str,
+) -> AppResult<T> {
+    if !path.exists() {
+        return Ok(T::default());
+    }
+    let txt = fs::read_to_string(path).map_err(|e| AppError::Other(format!("read {name}: {e}")))?;
+    let from_bak = || {
+        fs::read_to_string(bak)
+            .ok()
+            .filter(|b| !b.trim().is_empty())
+            .and_then(|b| serde_json::from_str::<T>(&b).ok())
+    };
+    if txt.trim().is_empty() {
+        return Ok(match from_bak() {
+            Some(file) => {
+                tracing::warn!("{name} was blank; recovered from its backup");
+                file
+            }
+            None => T::default(),
+        });
+    }
+    match serde_json::from_str::<T>(&txt) {
+        Ok(file) => Ok(file),
+        Err(e) => match from_bak() {
+            Some(file) => {
+                tracing::warn!("{name} did not parse ({e}); recovered from its backup");
+                Ok(file)
+            }
+            None => Err(AppError::Other(format!("parse {name}: {e}"))),
+        },
+    }
+}
+
+/// Save a JSON store atomically, keeping the previous state as `.bak`.
+///
+/// The `.bak` is the last resort of `load_json_store`, so it is only ever
+/// replaced by a main file that is itself good: a blank or unparseable main
+/// (the very thing the backup exists for) is never copied over it. No-op
+/// when nothing changed, so a periodic save does not rewrite the file.
+pub fn save_json_store(path: &Path, bak: &Path, tmp: &Path, json: &str) -> AppResult<()> {
+    let current = fs::read(path).ok();
+    if current.as_deref() == Some(json.as_bytes()) {
+        return Ok(());
+    }
+    write_synced(tmp, json.as_bytes())?;
+    if let Some(cur) = &current {
+        if !is_blank(cur) && parses_as_json(cur) {
+            let _ = fs::copy(path, bak);
+        }
+    }
+    rename_with_retry(tmp, path)?;
     Ok(())
 }
 
@@ -103,5 +227,140 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), after);
 
         let _ = fs::remove_file(&path);
+    }
+
+    #[derive(Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+    struct Store {
+        #[serde(default)]
+        items: Vec<String>,
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("ac-persist-{tag}-{}-{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn paths(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+        (
+            dir.join("s.json"),
+            dir.join("s.json.bak"),
+            dir.join("s.json.tmp"),
+        )
+    }
+
+    fn store(items: &[&str]) -> String {
+        serde_json::to_string_pretty(&Store {
+            items: items.iter().map(|s| s.to_string()).collect(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_blank_main_file_is_recovered_from_the_backup_and_never_replaces_it() {
+        let dir = scratch("blank");
+        let (path, bak, tmp) = paths(&dir);
+        save_json_store(&path, &bak, &tmp, &store(&["one"])).unwrap();
+        save_json_store(&path, &bak, &tmp, &store(&["one", "two"])).unwrap();
+        // A crash truncated the main file.
+        fs::write(&path, "").unwrap();
+
+        let loaded: Store = load_json_store(&path, &bak, "s.json").unwrap();
+        assert_eq!(
+            loaded.items,
+            vec!["one"],
+            "the last good state, from the .bak"
+        );
+
+        // The next save must not push the blank file over the good backup.
+        save_json_store(&path, &bak, &tmp, &store(&["one", "three"])).unwrap();
+        let kept: Store = serde_json::from_str(&fs::read_to_string(&bak).unwrap()).unwrap();
+        assert_eq!(kept.items, vec!["one"], ".bak still holds the good state");
+        let now: Store = load_json_store(&path, &bak, "s.json").unwrap();
+        assert_eq!(now.items, vec!["one", "three"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_corrupt_main_file_never_replaces_the_backup_either() {
+        let dir = scratch("corrupt");
+        let (path, bak, tmp) = paths(&dir);
+        save_json_store(&path, &bak, &tmp, &store(&["a"])).unwrap();
+        save_json_store(&path, &bak, &tmp, &store(&["a", "b"])).unwrap();
+        fs::write(&path, "{ half a wri").unwrap();
+
+        let loaded: Store = load_json_store(&path, &bak, "s.json").unwrap();
+        assert_eq!(loaded.items, vec!["a"]);
+        save_json_store(&path, &bak, &tmp, &store(&["a", "c"])).unwrap();
+        assert!(
+            parses_as_json(&fs::read(&bak).unwrap()),
+            ".bak is still good JSON"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_tells_no_data_from_unreadable_data() {
+        let dir = scratch("states");
+        let (path, bak, _tmp) = paths(&dir);
+        // Never written: empty store.
+        assert_eq!(
+            load_json_store::<Store>(&path, &bak, "s.json").unwrap(),
+            Store::default()
+        );
+        // Blank, no backup: empty store.
+        fs::write(&path, "  \n").unwrap();
+        assert_eq!(
+            load_json_store::<Store>(&path, &bak, "s.json").unwrap(),
+            Store::default()
+        );
+        // Corrupt, no usable backup: an error, never a silent empty store.
+        fs::write(&path, "{ nope").unwrap();
+        fs::write(&bak, "also nope").unwrap();
+        assert!(load_json_store::<Store>(&path, &bak, "s.json").is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_the_same_content_does_not_touch_the_file() {
+        let dir = scratch("same");
+        let (path, bak, tmp) = paths(&dir);
+        save_json_store(&path, &bak, &tmp, &store(&["x"])).unwrap();
+        assert!(!bak.exists(), "first save has nothing to back up");
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        save_json_store(&path, &bak, &tmp, &store(&["x"])).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
+        assert!(!bak.exists(), "an unchanged save makes no backup");
+        assert!(!tmp.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_no_temp_behind() {
+        let dir = scratch("atomic");
+        let path = dir.join("config.json");
+        write_atomic(&path, b"first").unwrap();
+        write_atomic(&path, b"second").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"second");
+        assert!(!tmp_sibling(&path).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_write_that_cannot_finish_leaves_the_old_file_whole() {
+        let dir = scratch("fail");
+        let path = dir.join("config.json");
+        write_atomic(&path, b"good").unwrap();
+        // The temp name is taken by a directory: the write fails before the
+        // rename, as a full disk or a permission error would make it.
+        fs::create_dir(tmp_sibling(&path)).unwrap();
+        assert!(write_atomic(&path, b"new").is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"good");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -86,7 +86,7 @@ pub fn write_md(
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, content)?;
+    crate::services::persistence::write_atomic(&path, content.as_bytes())?;
     Ok(file_stat(&path))
 }
 
