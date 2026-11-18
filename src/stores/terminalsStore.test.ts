@@ -146,6 +146,32 @@ describe("persist payload", () => {
     expect(sb.endsWith("END")).toBe(true);
   });
 
+  // Issue #138: the cap cut by UTF-16 code unit, so an emoji sitting on the
+  // boundary left half a surrogate pair at the head. serde_json refuses a
+  // lone surrogate, and with it the save of every session in the project.
+  const hasLoneSurrogate = (s: string) =>
+    /[\uD800-\uDFFF]/.test(s.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, ""));
+
+  it("the cap never leaves half an emoji in the saved scrollback (issue #138)", async () => {
+    const id = useTerminalsStore.getState().add("/repo");
+    // 49_999 code units after the rocket: the cap of 50_000 lands on its low half.
+    useTerminalsStore.getState().appendOutput(id, "y".repeat(20_000) + "🚀" + "x".repeat(49_999));
+    await useTerminalsStore.getState().persist();
+    const sb = world.saved[world.saved.length - 1].payload[0].scrollback;
+    expect(hasLoneSurrogate(sb)).toBe(false);
+    expect(sb).toBe("x".repeat(49_999));
+  });
+
+  it("a scrollback that already holds a lone surrogate saves repaired", async () => {
+    world.listResult = [{ ...persisted("stuck"), scrollback: "\uDE80 tail of an old cut" }];
+    await useTerminalsStore.getState().hydrate("/repo");
+    world.saved = [];
+    await useTerminalsStore.getState().persist();
+    const sb = world.saved[world.saved.length - 1].payload[0].scrollback;
+    expect(hasLoneSurrogate(sb)).toBe(false);
+    expect(sb.endsWith(" tail of an old cut")).toBe(true);
+  });
+
   it("save failures toast on the first and every 10th — never silently", async () => {
     useTerminalsStore.getState().add("/repo");
     world.saveError = "disk full";
@@ -240,6 +266,15 @@ describe("markStopped (PTY exited mid-run)", () => {
     const sb = useTerminalsStore.getState().sessions[0].initialScrollback;
     expect(sb.length).toBeLessThanOrEqual(50_000);
     expect(sb.endsWith("END")).toBe(true);
+  });
+
+  it("the folded scrollback is cut on a character boundary too (issue #138)", () => {
+    const id = useTerminalsStore.getState().add("/repo");
+    useTerminalsStore.getState().appendOutput(id, "🚀" + "x".repeat(49_999));
+    useTerminalsStore.getState().markStopped(id);
+    const sb = useTerminalsStore.getState().sessions[0].initialScrollback;
+    expect(sb.charCodeAt(0)).toBe("x".charCodeAt(0));
+    expect(sb.length).toBe(49_999);
   });
 
   it("is a no-op for stopped and unknown sessions (a closing session can't be resurrected)", async () => {

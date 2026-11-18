@@ -127,21 +127,29 @@ impl TerminalRegistry {
             let app = app.clone();
             thread::spawn(move || {
                 let mut buf = [0u8; 4096];
+                let mut carry: Vec<u8> = Vec::new();
+                let emit = |data: String| {
+                    if data.is_empty() {
+                        return;
+                    }
+                    let _ = app.emit(
+                        "term://output",
+                        TermOutput {
+                            id: id.clone(),
+                            data,
+                        },
+                    );
+                };
                 loop {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
-                        Ok(n) => {
-                            let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                            let _ = app.emit(
-                                "term://output",
-                                TermOutput {
-                                    id: id.clone(),
-                                    data: chunk,
-                                },
-                            );
-                        }
+                        Ok(n) => emit(decode_utf8_stream(&mut carry, &buf[..n])),
                         Err(_) => break,
                     }
+                }
+                // Bytes of a character the shell never finished.
+                if !carry.is_empty() {
+                    emit(String::from_utf8_lossy(&carry).into_owned());
                 }
             });
         }
@@ -245,12 +253,92 @@ fn default_shell() -> String {
     }
 }
 
+/// Decodes one read of PTY output as UTF-8 without breaking a character
+/// that straddles two reads: an incomplete sequence at the end is held in
+/// `carry` and prepended to the next read. Bytes that are invalid (not just
+/// incomplete) become U+FFFD, as `from_utf8_lossy` would make them.
+fn decode_utf8_stream(carry: &mut Vec<u8>, bytes: &[u8]) -> String {
+    carry.extend_from_slice(bytes);
+    let mut out = String::with_capacity(carry.len());
+    let mut pos = 0;
+    loop {
+        match std::str::from_utf8(&carry[pos..]) {
+            Ok(s) => {
+                out.push_str(s);
+                pos = carry.len();
+                break;
+            }
+            Err(e) => {
+                let valid = pos + e.valid_up_to();
+                out.push_str(&String::from_utf8_lossy(&carry[pos..valid]));
+                match e.error_len() {
+                    Some(n) => {
+                        out.push('\u{FFFD}');
+                        pos = valid + n;
+                    }
+                    // Incomplete, not invalid: wait for the rest.
+                    None => {
+                        pos = valid;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    carry.drain(..pos);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
     use tauri::Listener;
+
+    #[test]
+    fn a_character_split_across_two_reads_arrives_whole() {
+        let rocket = "🚀".as_bytes(); // 4 bytes
+        for cut in 1..rocket.len() {
+            let mut carry = Vec::new();
+            let first = decode_utf8_stream(&mut carry, &[b"ok ", &rocket[..cut]].concat());
+            let second = decode_utf8_stream(&mut carry, &[&rocket[cut..], b" done"].concat());
+            assert_eq!(first, "ok ", "cut at {cut}");
+            assert_eq!(second, "🚀 done", "cut at {cut}");
+            assert!(carry.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_read_of_whole_characters_holds_nothing_back() {
+        let mut carry = Vec::new();
+        assert_eq!(
+            decode_utf8_stream(&mut carry, "añ ✓ 🚀\r\n".as_bytes()),
+            "añ ✓ 🚀\r\n"
+        );
+        assert!(carry.is_empty());
+    }
+
+    #[test]
+    fn invalid_bytes_become_replacement_characters_and_do_not_stall() {
+        let mut carry = Vec::new();
+        // 0xFF can never start a sequence; 0xC3 followed by 'x' is a broken one.
+        let out = decode_utf8_stream(&mut carry, &[b'a', 0xFF, b'b', 0xC3, b'x']);
+        assert_eq!(out, "a\u{FFFD}b\u{FFFD}x");
+        assert!(carry.is_empty());
+    }
+
+    #[test]
+    fn one_byte_at_a_time_decodes_the_same_text() {
+        let text = "línea 🚀 uno\r\n✅ ok 👩‍💻\r\n";
+        let mut carry = Vec::new();
+        let mut out = String::new();
+        for b in text.as_bytes() {
+            out.push_str(&decode_utf8_stream(&mut carry, std::slice::from_ref(b)));
+        }
+        assert_eq!(out, text);
+        assert!(carry.is_empty());
+    }
 
     fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
         tauri::test::mock_builder()
