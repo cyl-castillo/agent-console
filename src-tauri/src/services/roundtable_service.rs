@@ -674,6 +674,10 @@ pub struct SyncResult {
     pub message: String,
 }
 
+/// Version of this store's file on disk (its top-level `schemaVersion`).
+/// Raise it only together with a migration from every earlier version.
+const STORE_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct RoomsFile {
     #[serde(default)]
@@ -732,6 +736,7 @@ impl RoomsStore {
             &Self::path()?,
             &Self::bak_path()?,
             "rooms.json",
+            Some(STORE_SCHEMA_VERSION),
         )
     }
 
@@ -739,13 +744,13 @@ impl RoomsStore {
     /// then rename the temp over the target. A crash mid-write can only damage
     /// the temp file, never the live rooms.json.
     fn write_file(file: &RoomsFile) -> AppResult<()> {
-        let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize rooms.json: {e}")))?;
         crate::services::persistence::save_json_store(
             &Self::path()?,
             &Self::bak_path()?,
             &Self::tmp_path()?,
-            &json,
+            "rooms.json",
+            Some(STORE_SCHEMA_VERSION),
+            file,
         )
     }
 

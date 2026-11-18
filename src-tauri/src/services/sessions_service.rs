@@ -62,6 +62,10 @@ pub struct PersistedSession {
     pub allowed_hosts: Option<Vec<String>>,
 }
 
+/// Version of this store's file on disk (its top-level `schemaVersion`).
+/// Raise it only together with a migration from every earlier version.
+const STORE_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SessionsFile {
     #[serde(default)]
@@ -151,6 +155,7 @@ impl SessionsService {
             &Self::path()?,
             &Self::bak_path()?,
             "sessions.json",
+            Some(STORE_SCHEMA_VERSION),
         )
     }
 
@@ -158,13 +163,13 @@ impl SessionsService {
     /// file, then rename the temp over the target. A crash mid-write can only
     /// damage the temp file, never the live sessions.json.
     fn write_file(file: &SessionsFile) -> AppResult<()> {
-        let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize sessions.json: {e}")))?;
         crate::services::persistence::save_json_store(
             &Self::path()?,
             &Self::bak_path()?,
             &Self::tmp_path()?,
-            &json,
+            "sessions.json",
+            Some(STORE_SCHEMA_VERSION),
+            file,
         )
     }
 
@@ -198,6 +203,9 @@ impl SessionsService {
         }
         match Self::load_file() {
             Ok(file) => Ok((Self::pick(&file, project_root), None)),
+            // History from a newer build is not corrupt: quarantining it
+            // would hide it from that build. Report it and leave it be.
+            Err(e) if crate::services::persistence::is_newer_schema(&e) => Err(e),
             Err(_) => {
                 let path = Self::path()?;
                 let ts = std::time::SystemTime::now()

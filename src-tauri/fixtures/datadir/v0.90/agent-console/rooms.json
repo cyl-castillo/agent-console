@@ -1,0 +1,26 @@
+{
+  "by_project": {
+    "/proj/demo": [
+      {
+        "version": 1,
+        "id": "room-1",
+        "problem": "why does the auth test fail on CI only?",
+        "participants": [
+          { "id": "p1", "name": "Claude", "engine": "claude", "model": "sonnet", "role": "reviewer" },
+          { "id": "p2", "name": "Codex", "engine": "codex", "model": "gpt-5", "role": "" }
+        ],
+        "transcript": [
+          { "authorId": "you", "authorName": "You", "engine": null, "model": "", "text": "look at the token expiry", "turn": 1 },
+          { "authorId": "p1", "authorName": "Claude", "engine": "claude", "model": "sonnet", "text": "the fixture clock is frozen", "turn": 1 }
+        ],
+        "resume": { "p1": "sess-abc" },
+        "lastSeen": { "p1": 2 },
+        "allowEdits": true,
+        "totalTokens": 1234,
+        "updatedAtMs": 1790000500000,
+        "baseBranch": "main"
+      }
+    ]
+  },
+  "job_settings": {}
+}

@@ -91,6 +91,10 @@ pub struct PendingPairing {
     pub sas: String,
 }
 
+/// Version of this store's file on disk (its top-level `schemaVersion`).
+/// Raise it only together with a migration from every earlier version.
+const STORE_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct DevicesFile {
     #[serde(default)]
@@ -137,18 +141,19 @@ impl PairedDevicesService {
             &Self::path()?,
             &Self::bak_path()?,
             "paired-devices.json",
+            Some(STORE_SCHEMA_VERSION),
         )
     }
 
     /// Atomic write: temp file → back up current good file → rename over target.
     fn write_file(file: &DevicesFile) -> AppResult<()> {
-        let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize paired-devices.json: {e}")))?;
         crate::services::persistence::save_json_store(
             &Self::path()?,
             &Self::bak_path()?,
             &Self::tmp_path()?,
-            &json,
+            "paired-devices.json",
+            Some(STORE_SCHEMA_VERSION),
+            file,
         )
     }
 
