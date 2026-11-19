@@ -7,11 +7,14 @@ import { assessCommand } from "../permissions/rules";
 import { readScreen } from "../lib/termScreen";
 import { sendKeysToActiveSession, typeIntoActiveSession } from "../lib/termInput";
 import { useApprovalStore } from "../stores/approvalStore";
+import { useAssistantStore } from "../stores/assistantStore";
+import { useModulesStore } from "../stores/modulesStore";
 import { availablePaletteActions, runPaletteAction } from "../stores/paletteStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUIStore } from "../stores/uiStore";
 import { useVoiceStore } from "../stores/voiceStore";
+import { firstSentences } from "./announce";
 import {
   analyzeScreen,
   helpGroups,
@@ -33,6 +36,7 @@ export function voiceContext(): VoiceContext {
       .map((s) => ({ id: s.id, name: s.name, cwd: s.cwd })),
     activeSessionId: active,
     commands: availablePaletteActions(),
+    assistant: useModulesStore.getState().isEnabled("assistant"),
   };
 }
 
@@ -42,6 +46,33 @@ function cue(kind: "ack" | "error" | "done"): void {
 
 function toast(msg: string, level: "info" | "success" | "error" = "info"): void {
   useToastStore.getState().show(msg, level);
+}
+
+/// Hand spoken words to the console's assistant and say its answer back.
+/// The panel comes forward so the whole answer is on screen; the voice says
+/// only its first two sentences — a spoken line is heard once, not scanned.
+/// The assistant is the same confined one the panel talks to: speaking to it
+/// grants nothing typing does not.
+export async function askAssistantAloud(text: string): Promise<void> {
+  const es = useVoiceStore.getState().lang.startsWith("es");
+  if (useAssistantStore.getState().status === "working") {
+    cue("error");
+    toast(es ? "El asistente sigue con lo anterior" : "The assistant is still on the last one");
+    return;
+  }
+  await runPaletteAction("nav.assistant");
+  const reply = await useAssistantStore.getState().ask(text);
+  // Voice switched off, or the user took the floor, while it was thinking:
+  // the answer stays on screen and nothing is said over them.
+  if (useVoiceStore.getState().phase !== "ready") return;
+  if (reply === null) {
+    cue("error");
+    return;
+  }
+  void useVoiceStore
+    .getState()
+    .say(firstSentences(reply, 2))
+    .catch(() => {});
 }
 
 /// Resolve and perform. Returns the action taken (for tests and the pill).
@@ -127,8 +158,14 @@ async function perform(action: VoiceAction, ctx: VoiceContext): Promise<void> {
       if (ok) cue(action.submit ? "done" : "ack");
       return;
     }
+    case "assistant": {
+      cue("ack");
+      // Not awaited: a turn takes seconds and the mic must be free meanwhile.
+      void askAssistantAloud(action.text);
+      return;
+    }
     case "help": {
-      const groups = helpGroups(ctx.lang);
+      const groups = helpGroups(ctx.lang, ctx.assistant);
       toast(groups.map((g) => `${g.title}: ${g.phrases.join(" · ")}`).join("\n"), "info");
       void useVoiceStore
         .getState()

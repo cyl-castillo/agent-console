@@ -41,7 +41,9 @@ interface AssistantState {
   toolsAttached: boolean;
   tokens: number;
 
-  ask: (text: string) => Promise<void>;
+  /// Resolves to the reply's text, or null when the turn did not run or
+  /// failed (the error is in `messages`).
+  ask: (text: string) => Promise<string | null>;
   reset: () => void;
   _onActivity: (kind: string, label: string) => void;
 }
@@ -68,9 +70,9 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
 
   ask: async (raw) => {
     const text = raw.trim();
-    if (!text || get().status === "working") return;
+    if (!text || get().status === "working") return null;
     const root = useSessionStore.getState().project?.root ?? null;
-    if (!root) return;
+    if (!root) return null;
     if (get().project !== root) {
       generation += 1;
       set({ project: root, ...empty });
@@ -85,7 +87,8 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
     }));
     try {
       const reply = await ipc.assistantAsk(text, engine, get().sessionId);
-      if (mine !== generation) return;
+      if (mine !== generation) return null;
+      const answer = reply.text || "(the assistant returned no text)";
       set((s) => ({
         status: "idle",
         activity: null,
@@ -97,13 +100,14 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
           {
             id: nextId(),
             role: "assistant",
-            text: reply.text || "(the assistant returned no text)",
+            text: answer,
             atMs: Date.now(),
           },
         ],
       }));
+      return reply.text || null;
     } catch (err) {
-      if (mine !== generation) return;
+      if (mine !== generation) return null;
       set((s) => ({
         status: "idle",
         activity: null,
@@ -117,6 +121,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
           },
         ],
       }));
+      return null;
     }
   },
 

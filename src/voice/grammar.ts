@@ -41,6 +41,8 @@ export interface VoiceContext {
   activeSessionId: string | null;
   /// Palette actions available right now.
   commands: VoiceCommandDef[];
+  /// The Assistant module is switched on: "asistente, …" asks it.
+  assistant?: boolean;
 }
 
 export type VoiceAction =
@@ -50,6 +52,8 @@ export type VoiceAction =
   | { kind: "palette"; id: string; label: string }
   | { kind: "session"; id: string; name: string }
   | { kind: "dictate"; text: string; submit: boolean }
+  /// Free speech for the console's assistant (the module must be on).
+  | { kind: "assistant"; text: string }
   | { kind: "help" }
   | { kind: "silence" }
   | { kind: "unknown"; heard: string; reason: "nothing-to-confirm" | "no-match" | "too-short" };
@@ -469,6 +473,21 @@ const SUBMIT_SUFFIXES = [
   "send it",
   "enviar",
 ];
+/// Said first, these hand the rest of the utterance to the assistant. The
+/// word alone stays what it was: the name of the panel.
+const ASSISTANT_PREFIXES = ["oye asistente", "hey assistant", "asistente", "assistant"];
+
+/// The raw text after a normalized prefix, without the separators speech-to-
+/// text puts there ("Asistente, abrí…").
+function afterPrefix(raw: string, prefix: string): string {
+  const idx = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .indexOf(prefix);
+  return raw.slice(idx + prefix.length).replace(/^[\s:,.]+/, "");
+}
+
 const HELP_PHRASES = [
   "que puedo decir",
   "que puedo hacer",
@@ -495,9 +514,20 @@ export function resolveVoice(transcript: string, ctx: VoiceContext): VoiceAction
   for (const p of DICTATE_PREFIXES) {
     if (norm === p) return { kind: "unknown", heard: raw, reason: "too-short" };
     if (norm.startsWith(p + " ")) {
-      const idx = raw.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").indexOf(p);
-      const rest = raw.slice(idx + p.length).replace(/^[\s:,.]+/, "");
+      const rest = afterPrefix(raw, p);
       return dictation(rest);
+    }
+  }
+
+  // "Asistente, …": everything after the word is a question for it, in the
+  // speaker's own words. Only with the module on; off, the grammar is the
+  // one it always was.
+  if (ctx.assistant) {
+    for (const p of ASSISTANT_PREFIXES) {
+      if (norm.startsWith(p + " ")) {
+        const rest = afterPrefix(raw, p);
+        if (rest) return { kind: "assistant", text: rest };
+      }
     }
   }
 
@@ -596,7 +626,7 @@ export interface HelpGroup {
   phrases: string[];
 }
 
-export function helpGroups(lang: string): HelpGroup[] {
+export function helpGroups(lang: string, assistant = false): HelpGroup[] {
   const es = lang.startsWith("es");
   return es
     ? [
@@ -627,6 +657,9 @@ export function helpGroups(lang: string): HelpGroup[] {
           phrases: ["escribí: …", "… y mandá", "(tres palabras o más se dictan solas)"],
         },
         { title: "Voz", phrases: ["callate", "qué puedo decir"] },
+        ...(assistant
+          ? [{ title: "Asistente", phrases: ["asistente, ¿dónde veo qué hizo el agente?"] }]
+          : []),
       ]
     : [
         {
@@ -648,6 +681,9 @@ export function helpGroups(lang: string): HelpGroup[] {
           phrases: ["type: …", "… and send", "(three words or more are dictated)"],
         },
         { title: "Voice", phrases: ["quiet", "what can I say"] },
+        ...(assistant
+          ? [{ title: "Assistant", phrases: ["assistant, where do I see what the agent did?"] }]
+          : []),
       ];
 }
 

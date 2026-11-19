@@ -5,7 +5,7 @@ import type { ApprovalRequest } from "../types/domain";
 // The store touches the backend and sibling stores at import time — isolate.
 // The command executor pulls the palette (and with it DOM-touching stores);
 // its grammar has its own tests under src/voice.
-vi.mock("../voice/execute", () => ({ runVoiceCommand: vi.fn() }));
+vi.mock("../voice/execute", () => ({ runVoiceCommand: vi.fn(), askAssistantAloud: vi.fn() }));
 vi.mock("../ipc/tauri", () => ({
   ipc: {
     voiceEnable: vi.fn(),
@@ -38,7 +38,7 @@ vi.mock("../permissions/rules", () => ({
 }));
 
 import { ipc } from "../ipc/tauri";
-import { runVoiceCommand } from "../voice/execute";
+import { askAssistantAloud, runVoiceCommand } from "../voice/execute";
 import { parseYesNo, speechFor, useVoiceStore } from "./voiceStore";
 
 const mocked = vi.mocked(ipc);
@@ -156,6 +156,19 @@ describe("voiceStore state machine", () => {
 
     expect(useVoiceStore.getState().phase).toBe("ready");
     expect(runVoiceCommand).toHaveBeenCalledWith("hola mundo");
+  });
+
+  it("a take started from the assistant's talk button goes to the assistant, not the grammar", async () => {
+    useVoiceStore.setState({ phase: "ready", approvalStage: null });
+    mocked.voicePttStart.mockResolvedValue(undefined as never);
+    await useVoiceStore.getState().pttStart("assistant");
+    mocked.voicePttStop.mockResolvedValue(" mandá " as never);
+    await useVoiceStore.getState().pttStop();
+
+    expect(askAssistantAloud).toHaveBeenCalledWith("mandá");
+    expect(runVoiceCommand).not.toHaveBeenCalled();
+    // The next take is the grammar's again.
+    expect(useVoiceStore.getState().pttTarget).toBeNull();
   });
 
   it("pttStop with an empty transcript routes nothing", async () => {
