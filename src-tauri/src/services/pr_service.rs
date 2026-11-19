@@ -604,6 +604,7 @@ mod tests {
         payload: Value,
     ) -> ProofEvent {
         ProofEvent {
+            schema_version: 1,
             seq,
             ts: seq as i64 * 1000,
             case_id: case.into(),

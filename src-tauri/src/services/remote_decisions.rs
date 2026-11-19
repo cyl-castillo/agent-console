@@ -1009,6 +1009,7 @@ mod tests {
 
     fn ev(kind: &str, ts: i64, id: &str) -> ProofEvent {
         ProofEvent {
+            schema_version: 1,
             seq: 0,
             ts,
             case_id: "term:t1".into(),
@@ -1503,6 +1504,7 @@ mod tests {
     #[test]
     fn decision_carries_the_ledgers_evidence() {
         let ev = |seq: u64, kind: &str, term: &str, payload: Value| ProofEvent {
+            schema_version: 1,
             seq,
             ts: seq as i64,
             case_id: format!("term:{term}"),

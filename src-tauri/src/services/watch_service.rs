@@ -1131,6 +1131,7 @@ pub fn demo_events(origin_ms: i64, now: i64) -> Vec<ProofEvent> {
         .into_iter()
         .enumerate()
         .map(|(i, (offset, kind, turn, actor, payload))| ProofEvent {
+            schema_version: 1,
             seq: i as u64,
             ts: origin_ms + offset,
             case_id: DEMO_CASE.into(),
@@ -1153,6 +1154,7 @@ mod tests {
 
     fn ev(seq: u64, kind: &str, turn: Option<&str>, payload: Value) -> ProofEvent {
         ProofEvent {
+            schema_version: 1,
             seq,
             ts: 1_000 + seq as i64,
             case_id: "term:t1".into(),

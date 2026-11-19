@@ -139,7 +139,9 @@ export function ProofPanel() {
             className={`wb-status ${report.ok ? "ok" : "off"}`}
             title={
               report.ok
-                ? `Hash chain verified: ${report.total} events`
+                ? report.newerSchemaAtSeq != null
+                  ? `Hash chain verified: ${report.total} events. From seq ${report.newerSchemaAtSeq} on, a newer Agent Console wrote this ledger; update to read those events and keep recording`
+                  : `Hash chain verified: ${report.total} events`
                 : `Chain broken at seq ${report.brokenAtSeq}`
             }
           >

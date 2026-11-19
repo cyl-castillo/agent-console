@@ -324,6 +324,9 @@ export interface TestigoVerifyReport {
   total: number;
   brokenAtSeq?: number;
   tornTail: boolean;
+  /// First line written in a format newer than this build knows: the bytes
+  /// hash and link, but this build cannot vouch for what they mean.
+  newerSchemaAtSeq?: number;
 }
 
 /// Result of exporting a signed proof packet (mirrors the Rust ExportSummary).
