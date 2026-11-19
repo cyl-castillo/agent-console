@@ -1345,7 +1345,7 @@ impl RoundtableService {
     }
 
     /// Drop a finished room. Idempotent. A working room's worktree CHECKOUT is
-    /// torn down here (no orphaned dirs left in temp), but its `room/<id>` branch
+    /// torn down here (no orphaned dirs left behind), but its `room/<id>` branch
     /// — and so every per-turn commit — stays in the repo for the human to merge
     /// or delete later.
     pub fn discard(&self, id: &str) -> AppResult<()> {
@@ -3426,11 +3426,97 @@ pub(crate) fn is_safe_model(model: &str) -> bool {
 
 // ----- Working-room worktrees (collaborative: one shared, isolated checkout) -----
 
-/// Where a working room's isolated checkout lives. The commits land on the
-/// `room/<id>` branch (in the repo's object store), so the work survives even if
-/// this temp dir is cleared.
+/// Where working-room checkouts lived up to v0.98: the OS temp dir, which a
+/// reboot (or a tmp cleaner) empties under a room that is still open.
+fn legacy_rooms_root() -> PathBuf {
+    std::env::temp_dir().join("agent-console-rooms")
+}
+
+/// Where working-room checkouts live: next to the rest of the app's state,
+/// which nothing but the app clears. Falls back to the temp dir only when the
+/// platform reports no data dir.
+fn rooms_root() -> PathBuf {
+    match dirs::data_local_dir() {
+        Some(d) => d.join("agent-console").join("rooms-wt"),
+        None => legacy_rooms_root(),
+    }
+}
+
+/// The room id as one safe path component. Ids are minted by the console
+/// (`r-<millis>-<hex>`), but a reopened room's id is read back from disk.
+fn room_dir_name(id: &str) -> String {
+    let slug = crate::services::fs_names::sanitize_slug(id);
+    if slug.is_empty() {
+        "room".to_string()
+    } else {
+        slug
+    }
+}
+
+fn room_worktree_path_in(root: &Path, id: &str) -> PathBuf {
+    root.join(room_dir_name(id))
+}
+
+/// Where a working room's isolated checkout lives. Every turn is committed on
+/// `room/<id>`, so the commits survive without it; what the checkout holds is
+/// whatever the turn in progress has not committed yet.
 fn room_worktree_path(id: &str) -> PathBuf {
-    std::env::temp_dir().join("agent-console-rooms").join(id)
+    room_worktree_path_in(&rooms_root(), id)
+}
+
+/// Create the folder that holds the checkouts, readable by the user only: a
+/// checkout is a full copy of the repo's working tree.
+fn ensure_rooms_root(dir: &Path) {
+    let _ = fs::create_dir_all(dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+    }
+}
+
+fn git_ok(cwd: &Path, args: &[&str]) -> bool {
+    proc::command("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn git_line(cwd: &Path, args: &[&str]) -> Option<String> {
+    let out = proc::command("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// The repo's shared `.git` dir as seen from `cwd`, canonical. Equal for a
+/// repo and for every worktree that belongs to it.
+fn git_common_dir(cwd: &Path) -> Option<PathBuf> {
+    let raw = PathBuf::from(git_line(cwd, &["rev-parse", "--git-common-dir"])?);
+    let abs = if raw.is_absolute() {
+        raw
+    } else {
+        cwd.join(raw)
+    };
+    fs::canonicalize(abs).ok()
+}
+
+/// True when `wt` is a working checkout of `repo` sitting on `branch`.
+fn is_live_worktree(repo: &Path, wt: &Path, branch: &str) -> bool {
+    if !wt.join(".git").exists() {
+        return false;
+    }
+    let same_repo = match (git_common_dir(repo), git_common_dir(wt)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    };
+    same_repo && git_line(wt, &["rev-parse", "--abbrev-ref", "HEAD"]).as_deref() == Some(branch)
 }
 
 /// Create the working room's worktree on a fresh `room/<id>` branch off HEAD.
@@ -3441,7 +3527,20 @@ fn room_worktree_path(id: &str) -> PathBuf {
 /// worktree registrations. Rooms accumulated branches forever before this
 /// (the W3 gap): 50-room retention evicted the record but kept the branch.
 pub(crate) fn gc_room_branch(repo: &Path, room_id: &str) {
+    gc_room_branch_at(repo, room_id, &room_worktree_path(room_id));
+}
+
+fn gc_room_branch_at(repo: &Path, room_id: &str, wt: &Path) {
     let branch = format!("room/{room_id}");
+    // The checkout goes first (a branch checked out somewhere cannot be
+    // deleted) and WITHOUT `--force`: git refuses when it holds changes no
+    // turn committed, and then it stays on disk with its branch.
+    if wt.exists() {
+        let _ = proc::command("git")
+            .args(["worktree", "remove", &wt.to_string_lossy()])
+            .current_dir(repo)
+            .output();
+    }
     let _ = proc::command("git")
         .args(["branch", "-d", &branch])
         .current_dir(repo)
@@ -3454,7 +3553,7 @@ pub(crate) fn gc_room_branch(repo: &Path, room_id: &str) {
 
 fn add_room_worktree(repo: &Path, path: &Path, branch: &str) -> AppResult<()> {
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        ensure_rooms_root(parent);
     }
     let out = proc::command("git")
         .args([
@@ -3483,7 +3582,7 @@ fn add_room_worktree(repo: &Path, path: &Path, branch: &str) -> AppResult<()> {
 /// commits already live in the repo.
 fn add_existing_worktree(repo: &Path, path: &Path, branch: &str) -> AppResult<()> {
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        ensure_rooms_root(parent);
     }
     let out = proc::command("git")
         .args(["worktree", "add", &path.to_string_lossy(), branch])
@@ -3511,16 +3610,66 @@ fn reattach_room_worktree(
     id: &str,
     allow_edits: bool,
 ) -> (PathBuf, Option<PathBuf>, Option<String>, ToolPolicy) {
+    reattach_room_worktree_at(
+        repo,
+        id,
+        allow_edits,
+        &room_worktree_path(id),
+        &room_worktree_path_in(&legacy_rooms_root(), id),
+    )
+}
+
+/// `wt` is where the checkout belongs; `legacy` is where a build up to v0.98
+/// would have left it (the temp dir).
+fn reattach_room_worktree_at(
+    repo: &Path,
+    id: &str,
+    allow_edits: bool,
+    wt: &Path,
+    legacy: &Path,
+) -> (PathBuf, Option<PathBuf>, Option<String>, ToolPolicy) {
     let readonly = (repo.to_path_buf(), None, None, ToolPolicy::ReadOnly);
     let branch = format!("room/{id}");
     if !allow_edits || !branch_exists(repo, &branch) {
         return readonly;
     }
-    let wt = room_worktree_path(id);
-    // A prior session's temp checkout is usually gone after a reboot, but its
-    // `.git/worktrees` registration can linger and would make `worktree add`
-    // refuse. Prune it; then clear any leftover dir (safe — it's our own temp
-    // namespace under `agent-console-rooms/`).
+    let live = |path: &Path| {
+        (
+            path.to_path_buf(),
+            Some(path.to_path_buf()),
+            Some(branch.clone()),
+            ToolPolicy::AcceptEdits,
+        )
+    };
+    // A checkout left in the temp dir by an older build and still intact:
+    // move it, with whatever it holds, instead of checking out a fresh one.
+    if legacy != wt && !wt.exists() && is_live_worktree(repo, legacy, &branch) {
+        if let Some(parent) = wt.parent() {
+            ensure_rooms_root(parent);
+        }
+        let _ = proc::command("git")
+            .args([
+                "worktree",
+                "move",
+                &legacy.to_string_lossy(),
+                &wt.to_string_lossy(),
+            ])
+            .current_dir(repo)
+            .output();
+    }
+    // The checkout survived the last session (the app was closed or crashed
+    // with the room open): keep it. A turn cut short left edits no commit
+    // holds yet, and the next turn's checkpoint picks them up. A merge that
+    // was left half done is backed out — it is repeatable, the edits are not.
+    if is_live_worktree(repo, wt, &branch) {
+        if git_ok(wt, &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]) {
+            let _ = git_ok(wt, &["merge", "--abort"]);
+        }
+        return live(wt);
+    }
+    // No usable checkout. A registration whose folder is gone would make
+    // `worktree add` refuse, so prune; then clear a leftover that is not a
+    // checkout of this branch (our own namespace) and mount a fresh one.
     let _ = proc::command("git")
         .args(["worktree", "prune"])
         .current_dir(repo)
@@ -3530,16 +3679,16 @@ fn reattach_room_worktree(
             .args(["worktree", "remove", "--force", &wt.to_string_lossy()])
             .current_dir(repo)
             .output();
-        let _ = fs::remove_dir_all(&wt);
+        let _ = fs::remove_dir_all(wt);
     }
-    match add_existing_worktree(repo, &wt, &branch) {
-        Ok(()) => (wt.clone(), Some(wt), Some(branch), ToolPolicy::AcceptEdits),
+    match add_existing_worktree(repo, wt, &branch) {
+        Ok(()) => live(wt),
         Err(_) => readonly,
     }
 }
 
 /// Tear down a working room's checkout. Keeps the `room/<id>` branch (and its
-/// commits) — only the temp checkout is removed.
+/// commits) — only the checkout is removed.
 fn remove_room_worktree(repo: &Path, path: &Path) {
     let _ = proc::command("git")
         .args(["worktree", "remove", "--force", &path.to_string_lossy()])
@@ -3901,6 +4050,12 @@ mod tests {
 
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// A checkout path under the temp dir: these tests must never write into
+    /// the real data dir of whoever runs them.
+    fn scratch_wt(id: &str) -> PathBuf {
+        room_worktree_path_in(&std::env::temp_dir().join("agent-console-rooms-t"), id)
+    }
 
     /// Branch GC is deliberately conservative: merged room branches go, a
     /// branch with unreviewed commits survives (`-d`, never `-D`), and a
@@ -4779,7 +4934,7 @@ mod tests {
         };
 
         // Create the working-room worktree on a fresh branch off HEAD.
-        let wt = room_worktree_path(&format!("wt-{nanos}"));
+        let wt = scratch_wt(&format!("wt-{nanos}"));
         add_room_worktree(&repo, &wt, "room/wt-test").unwrap();
         assert!(wt.join("seed.txt").exists(), "worktree checks out HEAD");
         assert_eq!(count("room/wt-test"), 1);
@@ -4833,7 +4988,7 @@ mod tests {
 
         let id = format!("reattach-{nanos}");
         let branch = format!("room/{id}");
-        let wt = room_worktree_path(&id);
+        let wt = scratch_wt(&id);
         // Stand up a working room, make a committed edit, then end the session
         // (checkout removed; branch + commit survive) — exactly a reopened room.
         add_room_worktree(&repo, &wt, &branch).unwrap();
@@ -4843,7 +4998,11 @@ mod tests {
         assert!(!wt.exists(), "session ended: no live checkout");
 
         // Reattach: the reopened working room gets its worktree back.
-        let (workspace, worktree, branch_out, tools) = reattach_room_worktree(&repo, &id, true);
+        let legacy = scratch_wt(&format!("legacy-{nanos}"));
+        let reattach = |id: &str, edits: bool, wt: &Path| {
+            reattach_room_worktree_at(&repo, id, edits, wt, &legacy)
+        };
+        let (workspace, worktree, branch_out, tools) = reattach(&id, true, &wt);
         assert_eq!(
             worktree.as_deref(),
             Some(wt.as_path()),
@@ -4861,14 +5020,55 @@ mod tests {
         );
 
         // A conversation room (allow_edits=false) stays read-only, untouched.
-        let (_, ro_wt, ro_branch, ro_tools) = reattach_room_worktree(&repo, &id, false);
+        let (_, ro_wt, ro_branch, ro_tools) = reattach(&id, false, &wt);
         assert!(ro_wt.is_none() && ro_branch.is_none());
         assert!(matches!(ro_tools, ToolPolicy::ReadOnly));
         // A working room whose branch is gone → no reattach, read-only fallback.
-        let (_, gone_wt, _, gone_tools) =
-            reattach_room_worktree(&repo, &format!("no-such-{nanos}"), true);
+        let gone = format!("no-such-{nanos}");
+        let (_, gone_wt, _, gone_tools) = reattach(&gone, true, &scratch_wt(&gone));
         assert!(gone_wt.is_none(), "no branch → read-only");
         assert!(matches!(gone_tools, ToolPolicy::ReadOnly));
+
+        // The app closed (or crashed) with the room open: the checkout is
+        // still there, holding an edit no turn committed. Reopening keeps it.
+        fs::write(wt.join("half.txt"), "a turn cut short").unwrap();
+        let (_, kept, _, _) = reattach(&id, true, &wt);
+        assert_eq!(kept.as_deref(), Some(wt.as_path()));
+        assert_eq!(
+            fs::read_to_string(wt.join("half.txt")).unwrap(),
+            "a turn cut short",
+            "an uncommitted edit survives a reopen"
+        );
+
+        // Deleting the room does not take that edit with it either: the
+        // checkout is only removed once it is clean.
+        gc_room_branch_at(&repo, &id, &wt);
+        assert!(wt.join("half.txt").exists(), "a dirty checkout is kept");
+        assert!(branch_exists(&repo, &branch), "and so is its branch");
+        commit_worktree(&wt, "the rest of the turn");
+        git(&["merge", "-q", &branch], &repo);
+        gc_room_branch_at(&repo, &id, &wt);
+        assert!(!wt.exists(), "a clean checkout goes");
+        assert!(!branch_exists(&repo, &branch), "with its merged branch");
+
+        // A room left open by a build up to v0.98 has its checkout in the
+        // temp dir. Reopening moves it to the data dir, uncommitted edit and
+        // all, instead of mounting a fresh one.
+        let old_id = format!("old-{nanos}");
+        let old_branch = format!("room/{old_id}");
+        let old_home = scratch_wt(&format!("tmp-{nanos}"));
+        let new_home = scratch_wt(&format!("data-{nanos}"));
+        add_room_worktree(&repo, &old_home, &old_branch).unwrap();
+        fs::write(old_home.join("wip.txt"), "not committed").unwrap();
+        let (_, moved, _, _) =
+            reattach_room_worktree_at(&repo, &old_id, true, &new_home, &old_home);
+        assert_eq!(moved.as_deref(), Some(new_home.as_path()));
+        assert!(!old_home.exists(), "nothing left in the temp dir");
+        assert_eq!(
+            fs::read_to_string(new_home.join("wip.txt")).unwrap(),
+            "not committed"
+        );
+        remove_room_worktree(&repo, &new_home);
 
         remove_room_worktree(&repo, &wt);
         let _ = fs::remove_dir_all(&repo);
@@ -4946,7 +5146,7 @@ mod tests {
 
         // The room's live worktree on a fresh branch, pushed to the remote.
         let branch = "room/sync-test";
-        let wt = room_worktree_path(&format!("sync-{nanos}"));
+        let wt = scratch_wt(&format!("sync-{nanos}"));
         add_room_worktree(&repo, &wt, branch).unwrap();
         git(&["push", "-q", "-u", "origin", branch], &repo);
 
@@ -5051,7 +5251,7 @@ mod tests {
 
         // The room's live worktree on a fresh branch.
         let branch = "room/share-test";
-        let wt = room_worktree_path(&format!("share-{nanos}"));
+        let wt = scratch_wt(&format!("share-{nanos}"));
         add_room_worktree(&repo, &wt, branch).unwrap();
 
         // Share pushes the branch to the remote.
@@ -5143,7 +5343,7 @@ mod tests {
         let plain = std::env::temp_dir().join(format!("ac-norepo-test-{nanos}"));
         fs::create_dir_all(&plain).unwrap();
 
-        let wt = room_worktree_path(&format!("norepo-{nanos}"));
+        let wt = scratch_wt(&format!("norepo-{nanos}"));
         let res = add_room_worktree(&plain, &wt, "room/norepo-test");
         assert!(
             res.is_err(),
