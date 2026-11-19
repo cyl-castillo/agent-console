@@ -340,6 +340,15 @@ export interface TestigoExportSummary {
   timestampTsa?: string;
 }
 
+/// Whether this install can sign packets (mirrors the Rust SigningKeyStatus).
+/// `missing`: it signed before and the keychain no longer has that key.
+export interface SigningKeyStatus {
+  state: "ready" | "none" | "missing";
+  keyId?: string;
+  /// The key this install last signed with, when it is not `keyId`.
+  recordedKeyId?: string;
+}
+
 /// D3: an IETF Agent Audit Trail export (draft-sharif-agent-audit-trail-08):
 /// one JSONL chain per session plus index, README and a standalone verifier.
 export interface AatExportSummary {

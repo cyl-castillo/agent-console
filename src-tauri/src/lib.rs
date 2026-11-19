@@ -325,6 +325,8 @@ pub fn run() {
             commands::review::review_decide,
             commands::review::verification_decide,
             commands::testigo::testigo_public_key,
+            commands::testigo::testigo_signing_key_status,
+            commands::testigo::testigo_signing_key_create,
             commands::testigo::testigo_get_settings,
             commands::testigo::testigo_set_settings,
             commands::plugins::plugins_list_installed,

@@ -49,6 +49,7 @@ import type {
   ProofEvent,
   TestigoVerifyReport,
   TestigoExportSummary,
+  SigningKeyStatus,
   TestigoExportPreview,
   TestigoSettings,
   TurnRewindResult,
@@ -599,6 +600,9 @@ export const ipc = {
       caseId: caseId ?? null,
     }),
   testigoPublicKey: () => invoke<{ keyId: string; publicKey: string }>("testigo_public_key"),
+  testigoSigningKeyStatus: () => invoke<SigningKeyStatus>("testigo_signing_key_status"),
+  testigoSigningKeyCreate: (projectRoot: string) =>
+    invoke<SigningKeyStatus>("testigo_signing_key_create", { projectRoot }),
   testigoGetSettings: (projectRoot: string) =>
     invoke<TestigoSettings>("testigo_get_settings", { projectRoot }),
   testigoSetSettings: (projectRoot: string, settings: TestigoSettings) =>

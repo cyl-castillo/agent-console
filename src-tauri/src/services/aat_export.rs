@@ -228,6 +228,17 @@ fn map_kind(e: &ProofEvent) -> Mapped {
             outcome: "success",
             phase: "pre_execution",
         },
+        // The signing identity: a first key is the console's doing, a
+        // replacement for a lost one is the human's word.
+        "signing_key_created" => Mapped {
+            action_type: if e.actor == "human" {
+                "decision"
+            } else {
+                "lifecycle"
+            },
+            outcome: "success",
+            phase: "pre_execution",
+        },
         // F7: the PR link is an observation; the auto-fix hand-off and the
         // merge word are decisions (a human override is escalated, not
         // success — the packet shows the gate was not met by evidence).
@@ -742,6 +753,7 @@ Mapping from the Testigo ledger (the console's native chain):
 | verification_decision | decision | post_execution | success (accept) / escalated (evidence_requested) |
 | trust_decision | decision | pre_execution | success (trusted) / denied (declined) |
 | policy_set | decision | pre_execution | success (the approval policy in force; its hash rides on later approval_decision lines) |
+| signing_key_created | lifecycle (first key) / decision (the human replaced a key the keychain lost) | pre_execution | success (key ids only; `previousKeyId` names the key earlier packets carry) |
 | pr_link | lifecycle | post_execution | success (the PR bound to the branch's commits, turns and verdicts) |
 | fanout_result | lifecycle | post_execution | success (N agents on the same prompt in twin worktrees: each one's diff, checks and verdict) |
 | fanout_decision | decision | post_execution | success (the human applied one candidate, or discarded all) |

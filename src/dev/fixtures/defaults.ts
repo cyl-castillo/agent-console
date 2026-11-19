@@ -1247,6 +1247,8 @@ export const defaultFixtures: FixtureMap = {
   testigo_verify: verifyReport,
   testigo_get_settings: testigoSettings,
   testigo_public_key: { keyId: "ac-demo-2026", publicKey: "MCowBQYDK2VwAyEA…" },
+  testigo_signing_key_status: { state: "ready", keyId: "ac-demo-2026" },
+  testigo_signing_key_create: { state: "ready", keyId: "ac-demo-2026" },
   testigo_export_preview: {
     caseId: "case-2026-10-13",
     entries: proofEvents.map((e) => ({
