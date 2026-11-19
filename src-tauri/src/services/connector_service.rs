@@ -472,17 +472,18 @@ impl ConnectorService {
             &Self::path()?,
             &Self::bak_path()?,
             "connector.json",
+            None,
         )
     }
 
     fn write_file(file: &ConnectorFile) -> AppResult<()> {
-        let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize connector.json: {e}")))?;
         crate::services::persistence::save_json_store(
             &Self::path()?,
             &Self::bak_path()?,
             &Self::tmp_path()?,
-            &json,
+            "connector.json",
+            None,
+            file,
         )
     }
 

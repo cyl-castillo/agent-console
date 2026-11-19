@@ -176,6 +176,10 @@ pub struct RunRecord {
     pub cost_usd: f64,
 }
 
+/// Version of this store's file on disk (its top-level `schemaVersion`).
+/// Raise it only together with a migration from every earlier version.
+const STORE_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct SchedulerFile {
     #[serde(default)]
@@ -250,17 +254,18 @@ impl SchedulerService {
             &Self::path()?,
             &Self::bak_path()?,
             "scheduler.json",
+            Some(STORE_SCHEMA_VERSION),
         )
     }
 
     fn write_file(file: &SchedulerFile) -> AppResult<()> {
-        let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize scheduler.json: {e}")))?;
         crate::services::persistence::save_json_store(
             &Self::path()?,
             &Self::bak_path()?,
             &Self::tmp_path()?,
-            &json,
+            "scheduler.json",
+            Some(STORE_SCHEMA_VERSION),
+            file,
         )
     }
 

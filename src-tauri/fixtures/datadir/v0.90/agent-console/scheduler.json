@@ -1,0 +1,25 @@
+{
+  "by_project": {
+    "/proj/demo": [
+      {
+        "id": "j-daily",
+        "name": "morning review",
+        "enabled": true,
+        "trigger": { "type": "daily", "hour": 9, "minute": 30 },
+        "action": { "type": "prompt", "text": "summarize yesterday's commits" },
+        "onMissed": "skip",
+        "cooldownMs": 60000,
+        "createdAtMs": 1790000000000,
+        "lastRunMs": 1790000400000,
+        "consecutiveFailures": 0
+      },
+      {
+        "id": "j-skill",
+        "name": "weekly audit",
+        "enabled": false,
+        "trigger": { "type": "weekly", "weekday": 1, "hour": 8, "minute": 0 },
+        "action": { "type": "skill", "name": "audit", "args": "--quick" }
+      }
+    ]
+  }
+}

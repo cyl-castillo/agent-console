@@ -115,6 +115,37 @@ fn parses_as_json(bytes: &[u8]) -> bool {
     serde_json::from_slice::<serde::de::IgnoredAny>(bytes).is_ok()
 }
 
+/// Marker inside the error a store returns for a file written by a newer
+/// build. Callers that recover from unreadable files (quarantine, start
+/// fresh) must not do so for this one: see `is_newer_schema`.
+pub const NEWER_SCHEMA: &str = "was written by a newer Agent Console";
+
+/// True when `e` is the "written by a newer build" refusal.
+pub fn is_newer_schema(e: &AppError) -> bool {
+    e.to_string().contains(NEWER_SCHEMA)
+}
+
+/// The top-level `schemaVersion` of a store file, without building the whole
+/// document. Absent in files written before stores were versioned: those
+/// are schema 1 by definition.
+fn schema_version_of(txt: &str) -> Option<u64> {
+    #[derive(serde::Deserialize)]
+    struct Peek {
+        #[serde(default, rename = "schemaVersion")]
+        schema_version: Option<u64>,
+    }
+    serde_json::from_str::<Peek>(txt).ok()?.schema_version
+}
+
+/// The store's own fields with `schemaVersion` written first.
+#[derive(serde::Serialize)]
+struct Stamped<'a, T: serde::Serialize> {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    #[serde(flatten)]
+    store: &'a T,
+}
+
 /// Load a JSON store that keeps a `.bak` of its last good state.
 ///
 /// - No main file: the store has never been written → `T::default()`.
@@ -127,11 +158,23 @@ pub fn load_json_store<T: DeserializeOwned + Default>(
     path: &Path,
     bak: &Path,
     name: &str,
+    schema: Option<u32>,
 ) -> AppResult<T> {
     if !path.exists() {
         return Ok(T::default());
     }
     let txt = fs::read_to_string(path).map_err(|e| AppError::Other(format!("read {name}: {e}")))?;
+    // A file from a NEWER version may hold fields this build would drop on
+    // the next save. Refuse it — and do not fall back to the .bak, which
+    // would bring older data forward and then overwrite the newer file.
+    if let (Some(supported), Some(found)) = (schema, schema_version_of(&txt)) {
+        if found > u64::from(supported) {
+            return Err(AppError::Other(format!(
+                "{name} {NEWER_SCHEMA} (schema {found}, this build reads up to {supported}); \
+                 it was left untouched"
+            )));
+        }
+    }
     let from_bak = || {
         fs::read_to_string(bak)
             .ok()
@@ -160,12 +203,29 @@ pub fn load_json_store<T: DeserializeOwned + Default>(
 }
 
 /// Save a JSON store atomically, keeping the previous state as `.bak`.
+/// With `schema`, the file carries that number as its top-level
+/// `schemaVersion`.
 ///
 /// The `.bak` is the last resort of `load_json_store`, so it is only ever
 /// replaced by a main file that is itself good: a blank or unparseable main
 /// (the very thing the backup exists for) is never copied over it. No-op
 /// when nothing changed, so a periodic save does not rewrite the file.
-pub fn save_json_store(path: &Path, bak: &Path, tmp: &Path, json: &str) -> AppResult<()> {
+pub fn save_json_store<T: serde::Serialize>(
+    path: &Path,
+    bak: &Path,
+    tmp: &Path,
+    name: &str,
+    schema: Option<u32>,
+    store: &T,
+) -> AppResult<()> {
+    let json = match schema {
+        Some(schema_version) => serde_json::to_string_pretty(&Stamped {
+            schema_version,
+            store,
+        }),
+        None => serde_json::to_string_pretty(store),
+    }
+    .map_err(|e| AppError::Other(format!("serialize {name}: {e}")))?;
     let current = fs::read(path).ok();
     if current.as_deref() == Some(json.as_bytes()) {
         return Ok(());
@@ -254,23 +314,30 @@ mod tests {
         )
     }
 
-    fn store(items: &[&str]) -> String {
-        serde_json::to_string_pretty(&Store {
+    fn store(items: &[&str]) -> Store {
+        Store {
             items: items.iter().map(|s| s.to_string()).collect(),
-        })
-        .unwrap()
+        }
     }
 
     #[test]
     fn a_blank_main_file_is_recovered_from_the_backup_and_never_replaces_it() {
         let dir = scratch("blank");
         let (path, bak, tmp) = paths(&dir);
-        save_json_store(&path, &bak, &tmp, &store(&["one"])).unwrap();
-        save_json_store(&path, &bak, &tmp, &store(&["one", "two"])).unwrap();
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &store(&["one"])).unwrap();
+        save_json_store(
+            &path,
+            &bak,
+            &tmp,
+            "s.json",
+            Some(1),
+            &store(&["one", "two"]),
+        )
+        .unwrap();
         // A crash truncated the main file.
         fs::write(&path, "").unwrap();
 
-        let loaded: Store = load_json_store(&path, &bak, "s.json").unwrap();
+        let loaded: Store = load_json_store(&path, &bak, "s.json", Some(1)).unwrap();
         assert_eq!(
             loaded.items,
             vec!["one"],
@@ -278,10 +345,18 @@ mod tests {
         );
 
         // The next save must not push the blank file over the good backup.
-        save_json_store(&path, &bak, &tmp, &store(&["one", "three"])).unwrap();
+        save_json_store(
+            &path,
+            &bak,
+            &tmp,
+            "s.json",
+            Some(1),
+            &store(&["one", "three"]),
+        )
+        .unwrap();
         let kept: Store = serde_json::from_str(&fs::read_to_string(&bak).unwrap()).unwrap();
         assert_eq!(kept.items, vec!["one"], ".bak still holds the good state");
-        let now: Store = load_json_store(&path, &bak, "s.json").unwrap();
+        let now: Store = load_json_store(&path, &bak, "s.json", Some(1)).unwrap();
         assert_eq!(now.items, vec!["one", "three"]);
         let _ = fs::remove_dir_all(&dir);
     }
@@ -290,13 +365,13 @@ mod tests {
     fn a_corrupt_main_file_never_replaces_the_backup_either() {
         let dir = scratch("corrupt");
         let (path, bak, tmp) = paths(&dir);
-        save_json_store(&path, &bak, &tmp, &store(&["a"])).unwrap();
-        save_json_store(&path, &bak, &tmp, &store(&["a", "b"])).unwrap();
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &store(&["a"])).unwrap();
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &store(&["a", "b"])).unwrap();
         fs::write(&path, "{ half a wri").unwrap();
 
-        let loaded: Store = load_json_store(&path, &bak, "s.json").unwrap();
+        let loaded: Store = load_json_store(&path, &bak, "s.json", Some(1)).unwrap();
         assert_eq!(loaded.items, vec!["a"]);
-        save_json_store(&path, &bak, &tmp, &store(&["a", "c"])).unwrap();
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &store(&["a", "c"])).unwrap();
         assert!(
             parses_as_json(&fs::read(&bak).unwrap()),
             ".bak is still good JSON"
@@ -310,19 +385,19 @@ mod tests {
         let (path, bak, _tmp) = paths(&dir);
         // Never written: empty store.
         assert_eq!(
-            load_json_store::<Store>(&path, &bak, "s.json").unwrap(),
+            load_json_store::<Store>(&path, &bak, "s.json", Some(1)).unwrap(),
             Store::default()
         );
         // Blank, no backup: empty store.
         fs::write(&path, "  \n").unwrap();
         assert_eq!(
-            load_json_store::<Store>(&path, &bak, "s.json").unwrap(),
+            load_json_store::<Store>(&path, &bak, "s.json", Some(1)).unwrap(),
             Store::default()
         );
         // Corrupt, no usable backup: an error, never a silent empty store.
         fs::write(&path, "{ nope").unwrap();
         fs::write(&bak, "also nope").unwrap();
-        assert!(load_json_store::<Store>(&path, &bak, "s.json").is_err());
+        assert!(load_json_store::<Store>(&path, &bak, "s.json", Some(1)).is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -330,10 +405,10 @@ mod tests {
     fn saving_the_same_content_does_not_touch_the_file() {
         let dir = scratch("same");
         let (path, bak, tmp) = paths(&dir);
-        save_json_store(&path, &bak, &tmp, &store(&["x"])).unwrap();
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &store(&["x"])).unwrap();
         assert!(!bak.exists(), "first save has nothing to back up");
         let before = fs::metadata(&path).unwrap().modified().unwrap();
-        save_json_store(&path, &bak, &tmp, &store(&["x"])).unwrap();
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &store(&["x"])).unwrap();
         assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before);
         assert!(!bak.exists(), "an unchanged save makes no backup");
         assert!(!tmp.exists());
@@ -361,6 +436,48 @@ mod tests {
         fs::create_dir(tmp_sibling(&path)).unwrap();
         assert!(write_atomic(&path, b"new").is_err());
         assert_eq!(fs::read(&path).unwrap(), b"good");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_saved_store_carries_its_schema_version_and_old_files_read_as_schema_one() {
+        let dir = scratch("schema");
+        let (path, bak, tmp) = paths(&dir);
+        // A file from before stores were versioned: no schemaVersion at all.
+        fs::write(&path, r#"{"items":["from 0.90"]}"#).unwrap();
+        let old: Store = load_json_store(&path, &bak, "s.json", Some(1)).unwrap();
+        assert_eq!(old.items, vec!["from 0.90"]);
+
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &old).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(raw["schemaVersion"], 1);
+        assert_eq!(
+            raw["items"][0], "from 0.90",
+            "the store's own fields stay top-level"
+        );
+        let again: Store = load_json_store(&path, &bak, "s.json", Some(1)).unwrap();
+        assert_eq!(again, old);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_from_a_newer_build_is_refused_and_left_untouched() {
+        let dir = scratch("newer");
+        let (path, bak, tmp) = paths(&dir);
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &store(&["old"])).unwrap();
+        save_json_store(&path, &bak, &tmp, "s.json", Some(1), &store(&["old", "er"])).unwrap();
+        let newer = r#"{"schemaVersion":2,"items":["x"],"fieldThisBuildDoesNotKnow":true}"#;
+        fs::write(&path, newer).unwrap();
+
+        let err = load_json_store::<Store>(&path, &bak, "s.json", Some(1)).unwrap_err();
+        assert!(is_newer_schema(&err), "{err}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), newer, "not rewritten");
+        // An ordinary parse failure is NOT mistaken for a newer file.
+        fs::write(&path, "{ nope").unwrap();
+        fs::write(&bak, "nope").unwrap();
+        let plain = load_json_store::<Store>(&path, &bak, "s.json", Some(1)).unwrap_err();
+        assert!(!is_newer_schema(&plain));
         let _ = fs::remove_dir_all(&dir);
     }
 }

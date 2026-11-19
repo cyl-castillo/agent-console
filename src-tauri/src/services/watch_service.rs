@@ -156,6 +156,10 @@ pub struct TickOutcome {
     pub changed: Vec<String>,
 }
 
+/// Version of this store's file on disk (its top-level `schemaVersion`).
+/// Raise it only together with a migration from every earlier version.
+const STORE_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct WatchFile {
@@ -204,17 +208,18 @@ impl WatchService {
             &Self::path("json")?,
             &Self::path("json.bak")?,
             "watch.json",
+            Some(STORE_SCHEMA_VERSION),
         )
     }
 
     fn write_file(file: &WatchFile) -> AppResult<()> {
-        let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize watch.json: {e}")))?;
         crate::services::persistence::save_json_store(
             &Self::path("json")?,
             &Self::path("json.bak")?,
             &Self::path("json.tmp")?,
-            &json,
+            "watch.json",
+            Some(STORE_SCHEMA_VERSION),
+            file,
         )
     }
 

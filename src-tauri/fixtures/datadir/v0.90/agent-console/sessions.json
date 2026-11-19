@@ -1,0 +1,31 @@
+{
+  "by_project": {
+    "/proj/demo": [
+      {
+        "id": "s-one",
+        "name": "fix auth test",
+        "cwd": "/proj/demo",
+        "createdAtMs": 1790000000000,
+        "scrollback": "$ npm test\r\n✓ 14 passed 🚀\r\n",
+        "agent": "claude",
+        "claudeSessionId": "0c1d2e3f-legacy-key",
+        "model": "sonnet",
+        "lastActiveMs": 1790000300000
+      },
+      {
+        "id": "s-two",
+        "name": "shell 2",
+        "cwd": "/proj/demo",
+        "createdAtMs": 1790000100000,
+        "scrollback": "",
+        "agent": "codex",
+        "agentSessionId": "codex-thread-9",
+        "archived": true,
+        "worktree": { "path": "/proj/demo-wt/s-two", "branch": "session/s-two", "baseBranch": "main" }
+      }
+    ],
+    "/proj/other": [
+      { "id": "o-one", "name": "shell 1", "cwd": "/proj/other", "createdAtMs": 1790000200000 }
+    ]
+  }
+}

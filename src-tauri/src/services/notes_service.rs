@@ -29,6 +29,10 @@ pub struct Note {
     pub updated_at_ms: u64,
 }
 
+/// Version of this store's file on disk (its top-level `schemaVersion`).
+/// Raise it only together with a migration from every earlier version.
+const STORE_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct NotesFile {
     #[serde(default)]
@@ -73,19 +77,20 @@ impl NotesService {
             &Self::path()?,
             &Self::bak_path()?,
             "notes.json",
+            Some(STORE_SCHEMA_VERSION),
         )
     }
 
     /// Atomic write: temp file → back up the live (known-good) file → rename.
     /// A crash mid-write can only ever damage the temp file.
     fn write_file(file: &NotesFile) -> AppResult<()> {
-        let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize notes.json: {e}")))?;
         crate::services::persistence::save_json_store(
             &Self::path()?,
             &Self::bak_path()?,
             &Self::tmp_path()?,
-            &json,
+            "notes.json",
+            Some(STORE_SCHEMA_VERSION),
+            file,
         )
     }
 
