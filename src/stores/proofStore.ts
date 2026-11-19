@@ -12,6 +12,7 @@ import type {
   ProofEvent,
   TestigoVerifyReport,
   TestigoExportSummary,
+  SigningKeyStatus,
   AatExportSummary,
   AatVerifyReport,
   ComplianceSummary,
@@ -172,6 +173,9 @@ interface ProofState {
   report: TestigoVerifyReport | null;
   exporting: string | null;
   lastExport: TestigoExportSummary | null;
+  /// Whether this install can sign. `missing` blocks exports until the human
+  /// restores the keychain or asks for a new key.
+  signingKey: SigningKeyStatus | null;
   /// D3: last IETF audit-trail export plus the console's own re-verification
   /// of every chain it wrote (a third party runs the same check offline).
   lastAat: { summary: AatExportSummary; reports: [string, AatVerifyReport][] } | null;
@@ -206,6 +210,9 @@ interface ProofState {
   toggleRedact: (seq: number) => void;
   /// Step 2: sign and write the packet with the chosen redactions.
   confirmExport: () => Promise<void>;
+  refreshSigningKey: () => Promise<void>;
+  /// The human's explicit word: replace a key the keychain lost.
+  replaceSigningKey: () => Promise<void>;
   cancelExport: () => void;
   selectCase: (caseId: string | null) => void;
   setSettings: (patch: Partial<TestigoSettings>) => Promise<void>;
@@ -475,6 +482,30 @@ export const useProofStore = create<ProofState>((set, get) => ({
   selectedCase: null,
   review: null,
   settings: null,
+  signingKey: null,
+
+  refreshSigningKey: async () => {
+    // Informational: a keychain that cannot be read shows up on export.
+    let signingKey: SigningKeyStatus | null = null;
+    try {
+      signingKey = await ipc.testigoSigningKeyStatus();
+    } catch {
+      signingKey = null;
+    }
+    set({ signingKey });
+  },
+
+  replaceSigningKey: async () => {
+    const root = get().projectRoot;
+    if (!root) return;
+    try {
+      const signingKey = await ipc.testigoSigningKeyCreate(root);
+      set({ signingKey, error: null });
+      await get().load(root);
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
 
   load: async (projectRoot) => {
     // Another ledger: drop what belongs to the previous one instead of showing
@@ -497,6 +528,7 @@ export const useProofStore = create<ProofState>((set, get) => ({
       if (get().projectRoot !== projectRoot) return;
       set({ events, report, settings });
       feedLedgerCosts(events);
+      void get().refreshSigningKey();
     } catch (e) {
       if (get().projectRoot !== projectRoot) return;
       set({ error: String(e) });
@@ -597,6 +629,8 @@ export const useProofStore = create<ProofState>((set, get) => ({
       set({ lastExport, exporting: null, review: null });
     } catch (e) {
       set({ exporting: null, error: String(e) });
+      // The usual reason a signature fails: say which state the key is in.
+      void get().refreshSigningKey();
     }
   },
 

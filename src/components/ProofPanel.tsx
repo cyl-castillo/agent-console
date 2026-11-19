@@ -80,6 +80,9 @@ export function ProofPanel() {
   const cancelExport = useProofStore((s) => s.cancelExport);
   const selectCase = useProofStore((s) => s.selectCase);
   const rewindToTurn = useProofStore((s) => s.rewindToTurn);
+  const signingKey = useProofStore((s) => s.signingKey);
+  const replaceSigningKey = useProofStore((s) => s.replaceSigningKey);
+  const [confirmNewKey, setConfirmNewKey] = useState(false);
   const sessions = useTerminalsStore((s) => s.sessions);
   // Turn awaiting rewind confirmation. Our own Modal, NOT window.confirm():
   // WebKitGTK can skip the native dialog and return without ever asking —
@@ -170,6 +173,31 @@ export function ProofPanel() {
 
       <div className="workbench-body">
         {error && <p className="wb-hint wb-error">{error}</p>}
+
+        {signingKey?.state === "missing" && (
+          <section className="wb-section" role="alert">
+            <p className="wb-hint wb-error">
+              The key this install signs packets with is no longer in the system keychain
+              {signingKey.recordedKeyId && (
+                <>
+                  {" "}
+                  (key id{" "}
+                  <code title={signingKey.recordedKeyId}>
+                    {signingKey.recordedKeyId.slice(0, 16)}…
+                  </code>
+                  )
+                </>
+              )}
+              . Nothing can be signed until it is back. If the keychain is locked or was replaced,
+              unlock or restore it and re-verify.
+            </p>
+            <p>
+              <button className="wb-link" onClick={() => setConfirmNewKey(true)}>
+                create a new signing key…
+              </button>
+            </p>
+          </section>
+        )}
 
         {review && (
           <section className="wb-section">
@@ -594,6 +622,39 @@ export function ProofPanel() {
               receiver verifies in a browser, no install.
             </p>
           </section>
+        )}
+
+        {confirmNewKey && (
+          <Modal
+            onClose={() => setConfirmNewKey(false)}
+            className="wt-modal"
+            ariaLabel="Create a new signing key"
+          >
+            <h3>Create a new signing key?</h3>
+            <p className="wt-modal-line">
+              Packets you already handed out stay valid, but they carry the old key id. New packets
+              will carry a different one, so whoever verifies them needs the new id from you.
+            </p>
+            <p className="wt-modal-line">
+              The change is recorded in this project's ledger with both ids. It cannot be undone
+              from here: if the old key comes back later, the new one stays in use.
+            </p>
+            <div className="wt-modal-actions">
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  setConfirmNewKey(false);
+                  void replaceSigningKey();
+                }}
+              >
+                Create new key
+              </button>
+              <span className="spacer" />
+              <button className="btn btn-ghost" onClick={() => setConfirmNewKey(false)}>
+                Cancel
+              </button>
+            </div>
+          </Modal>
         )}
 
         {rewindTarget && (

@@ -53,31 +53,224 @@ pub struct ExportSummary {
     pub git_commit: Option<String>,
 }
 
-/// Load the ed25519 signing seed from the OS keychain, generating and storing
-/// one on first export. The private key never leaves the keychain entry.
-pub(crate) fn load_or_create_seed() -> AppResult<[u8; 32]> {
-    let entry = Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .map_err(|e| AppError::Other(format!("keyring open: {e}")))?;
-    match entry.get_password() {
-        Ok(b64) => {
-            let bytes = B64
-                .decode(b64.trim())
-                .map_err(|e| AppError::Other(format!("stored key decode: {e}")))?;
-            bytes
-                .try_into()
-                .map_err(|_| AppError::Other("stored key has wrong length".into()))
+/// What the keychain did for one lookup. `Ok(None)` is "no such entry".
+type SeedGet<'a> = &'a dyn Fn() -> AppResult<Option<String>>;
+type SeedSet<'a> = &'a dyn Fn(&str) -> AppResult<()>;
+
+/// Marks an error as "the key this install signed with is gone".
+pub const SIGNING_KEY_MISSING: &str = "signing key is no longer in the system keychain";
+
+/// The public half of the install's signing identity, kept next to the rest
+/// of the app's state. It holds no secret: it exists so a keychain that comes
+/// back empty is told apart from an install that never had a key.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct KeyRecord {
+    schema_version: u32,
+    key_id: String,
+    created_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SigningKeyStatus {
+    /// `ready` (key in the keychain), `none` (never had one — the first
+    /// export creates it) or `missing` (had one, the keychain no longer does).
+    pub state: String,
+    /// The key in the keychain, when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+    /// The key this install last signed with, when it is not the one above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_key_id: Option<String>,
+}
+
+/// A key this call created, and the one it replaces when there was one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyCreated {
+    pub key_id: String,
+    pub previous_key_id: Option<String>,
+}
+
+fn key_record_path() -> AppResult<std::path::PathBuf> {
+    let dir = dirs::data_local_dir()
+        .ok_or_else(|| AppError::Other("no data_local dir".into()))?
+        .join("agent-console");
+    fs::create_dir_all(&dir)?;
+    Ok(dir.join("signing-key.json"))
+}
+
+fn read_key_record(path: &Path) -> Option<KeyRecord> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+fn write_key_record(path: &Path, key_id: &str) -> AppResult<()> {
+    let rec = KeyRecord {
+        schema_version: 1,
+        key_id: key_id.to_string(),
+        created_at_ms: now_ms(),
+    };
+    let bytes = serde_json::to_vec_pretty(&rec)
+        .map_err(|e| AppError::Other(format!("signing key record: {e}")))?;
+    crate::services::persistence::write_atomic(path, &bytes)?;
+    Ok(())
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn decode_seed(b64: &str) -> AppResult<[u8; 32]> {
+    let bytes = B64
+        .decode(b64.trim())
+        .map_err(|e| AppError::Other(format!("stored key decode: {e}")))?;
+    bytes
+        .try_into()
+        .map_err(|_| AppError::Other("stored key has wrong length".into()))
+}
+
+fn seed_key_id(seed: &[u8; 32]) -> String {
+    key_id(&SigningKey::from_bytes(seed).verifying_key())
+}
+
+fn mint_seed(set: SeedSet, record: &Path) -> AppResult<[u8; 32]> {
+    let mut seed = [0u8; 32];
+    getrandom::getrandom(&mut seed).map_err(|e| AppError::Other(format!("entropy: {e}")))?;
+    set(&B64.encode(seed))?;
+    write_key_record(record, &seed_key_id(&seed))?;
+    Ok(seed)
+}
+
+/// The signing seed, and the key this call had to create when the install
+/// never had one. A keychain that comes back empty on an install that HAS
+/// signed before is an error, never a fresh key: packets already handed out
+/// carry the old key id, and a silent replacement would leave the receiver
+/// comparing them against an identity nobody announced.
+fn resolve_seed(
+    get: SeedGet,
+    set: SeedSet,
+    record: &Path,
+) -> AppResult<([u8; 32], Option<KeyCreated>)> {
+    match get()? {
+        Some(b64) => {
+            let seed = decode_seed(&b64)?;
+            let kid = seed_key_id(&seed);
+            // An install from before the record existed adopts its key here.
+            if read_key_record(record).map(|r| r.key_id) != Some(kid.clone()) {
+                write_key_record(record, &kid)?;
+            }
+            Ok((seed, None))
         }
-        Err(keyring::Error::NoEntry) => {
-            let mut seed = [0u8; 32];
-            getrandom::getrandom(&mut seed)
-                .map_err(|e| AppError::Other(format!("entropy: {e}")))?;
-            entry
-                .set_password(&B64.encode(seed))
-                .map_err(|e| AppError::Other(format!("keyring store: {e}")))?;
-            Ok(seed)
+        None => match read_key_record(record) {
+            Some(rec) => Err(AppError::Other(format!(
+                "{SIGNING_KEY_MISSING} (key id {}). Packets signed so far carry that id. \
+                 Unlock or restore the keychain, or create a new signing key from Proof.",
+                rec.key_id
+            ))),
+            None => {
+                let seed = mint_seed(set, record)?;
+                let created = KeyCreated {
+                    key_id: seed_key_id(&seed),
+                    previous_key_id: None,
+                };
+                Ok((seed, Some(created)))
+            }
+        },
+    }
+}
+
+fn status_of(get: SeedGet, record: &Path) -> AppResult<SigningKeyStatus> {
+    let recorded = read_key_record(record).map(|r| r.key_id);
+    Ok(match get()? {
+        Some(b64) => {
+            let kid = seed_key_id(&decode_seed(&b64)?);
+            SigningKeyStatus {
+                state: "ready".into(),
+                recorded_key_id: recorded.filter(|r| *r != kid),
+                key_id: Some(kid),
+            }
         }
+        None => SigningKeyStatus {
+            state: if recorded.is_some() {
+                "missing"
+            } else {
+                "none"
+            }
+            .into(),
+            key_id: None,
+            recorded_key_id: recorded,
+        },
+    })
+}
+
+/// Replace a key the keychain lost. Refuses while a key is still there: this
+/// is the answer to `missing`, not a way to rotate a working identity.
+fn replace_missing_seed(get: SeedGet, set: SeedSet, record: &Path) -> AppResult<KeyCreated> {
+    if get()?.is_some() {
+        return Err(AppError::Other(
+            "the signing key is in the keychain; nothing to replace".into(),
+        ));
+    }
+    let previous_key_id = read_key_record(record).map(|r| r.key_id);
+    let seed = mint_seed(set, record)?;
+    Ok(KeyCreated {
+        key_id: seed_key_id(&seed),
+        previous_key_id,
+    })
+}
+
+fn keychain_entry() -> AppResult<Entry> {
+    Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
+        .map_err(|e| AppError::Other(format!("keyring open: {e}")))
+}
+
+fn keychain_get() -> AppResult<Option<String>> {
+    match keychain_entry()?.get_password() {
+        Ok(b64) => Ok(Some(b64)),
+        Err(keyring::Error::NoEntry) => Ok(None),
         Err(e) => Err(AppError::Other(format!("keyring read: {e}"))),
     }
+}
+
+fn keychain_set(b64: &str) -> AppResult<()> {
+    keychain_entry()?
+        .set_password(b64)
+        .map_err(|e| AppError::Other(format!("keyring store: {e}")))
+}
+
+/// The ed25519 signing seed from the OS keychain, plus the key this call
+/// created when the install never had one. The private key never leaves the
+/// keychain entry.
+pub(crate) fn load_seed() -> AppResult<([u8; 32], Option<KeyCreated>)> {
+    resolve_seed(&keychain_get, &keychain_set, &key_record_path()?)
+}
+
+/// For callers with no ledger at hand to record a first key in.
+pub(crate) fn load_or_create_seed() -> AppResult<[u8; 32]> {
+    Ok(load_seed()?.0)
+}
+
+/// Whether the install can sign, without creating anything.
+pub fn signing_key_status() -> AppResult<SigningKeyStatus> {
+    status_of(&keychain_get, &key_record_path()?)
+}
+
+/// The human's explicit answer to a lost key: a new one, recorded in the
+/// project's ledger with the id it replaces.
+pub fn create_signing_key(testigo: &TestigoService, project_root: &str) -> AppResult<KeyCreated> {
+    let created = replace_missing_seed(&keychain_get, &keychain_set, &key_record_path()?)?;
+    // A project with witnessing off refuses the line; the key still exists.
+    let _ = testigo.on_signing_key(
+        project_root,
+        now_ms(),
+        &created,
+        "replaced_missing",
+        "human",
+    );
+    Ok(created)
 }
 
 /// keyid = sha256 hex of the raw public key — the short string publishers
@@ -148,7 +341,11 @@ pub fn export(
     dest_dir: &Path,
     manual_redact: &[u64],
 ) -> AppResult<ExportSummary> {
-    let seed = load_or_create_seed()?;
+    let (seed, created) = load_seed()?;
+    if let Some(created) = &created {
+        // Before the segment is selected, so the packet carries the line.
+        let _ = testigo.on_signing_key(project_root, now_ms(), created, "first_export", "console");
+    }
     let tsa = testigo.settings(project_root).timestamp_tsa;
     export_with_seed(
         testigo,
@@ -647,6 +844,78 @@ impl TestigoService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An in-memory keychain: these tests must never reach the real one.
+    fn keychain(start: Option<&str>) -> std::cell::RefCell<Option<String>> {
+        std::cell::RefCell::new(start.map(str::to_string))
+    }
+
+    #[test]
+    fn a_lost_signing_key_is_reported_not_replaced() {
+        let dir =
+            std::env::temp_dir().join(format!("ac-signkey-{}-{}", std::process::id(), now_ms()));
+        fs::create_dir_all(&dir).unwrap();
+        let record = dir.join("signing-key.json");
+        let kc = keychain(None);
+        let get = || Ok(kc.borrow().clone());
+        let set = |v: &str| {
+            *kc.borrow_mut() = Some(v.to_string());
+            Ok(())
+        };
+
+        // Never had a key: nothing is created just by asking.
+        assert_eq!(status_of(&get, &record).unwrap().state, "none");
+        assert!(kc.borrow().is_none() && !record.exists());
+
+        // First use creates it and says so.
+        let (seed, created) = resolve_seed(&get, &set, &record).unwrap();
+        let first = seed_key_id(&seed);
+        assert_eq!(created.unwrap().key_id, first);
+        let st = status_of(&get, &record).unwrap();
+        assert_eq!(
+            (st.state.as_str(), st.key_id.as_deref()),
+            ("ready", Some(first.as_str()))
+        );
+        // The record holds the public id only, never the seed.
+        let on_disk = fs::read_to_string(&record).unwrap();
+        assert!(on_disk.contains(&first));
+        assert!(!on_disk.contains(kc.borrow().as_deref().unwrap()));
+
+        // Second use: same key, nothing created.
+        let (again, created) = resolve_seed(&get, &set, &record).unwrap();
+        assert_eq!(seed_key_id(&again), first);
+        assert!(created.is_none());
+        // A working key cannot be replaced.
+        assert!(replace_missing_seed(&get, &set, &record).is_err());
+
+        // The keychain comes back empty (reinstalled OS, another user, a
+        // locked collection). The install does NOT quietly sign as someone else.
+        *kc.borrow_mut() = None;
+        let err = resolve_seed(&get, &set, &record).unwrap_err().to_string();
+        assert!(
+            err.contains(SIGNING_KEY_MISSING) && err.contains(&first),
+            "{err}"
+        );
+        assert!(kc.borrow().is_none(), "nothing was written to the keychain");
+        let st = status_of(&get, &record).unwrap();
+        assert_eq!(st.state, "missing");
+        assert_eq!(st.recorded_key_id.as_deref(), Some(first.as_str()));
+
+        // The human asks for a new one: it names the key it replaces.
+        let created = replace_missing_seed(&get, &set, &record).unwrap();
+        assert_eq!(created.previous_key_id.as_deref(), Some(first.as_str()));
+        assert_ne!(created.key_id, first);
+        let (seed, none) = resolve_seed(&get, &set, &record).unwrap();
+        assert_eq!(seed_key_id(&seed), created.key_id);
+        assert!(none.is_none());
+
+        // An install from before the record existed adopts the key it has.
+        fs::remove_file(&record).unwrap();
+        resolve_seed(&get, &set, &record).unwrap();
+        assert_eq!(read_key_record(&record).unwrap().key_id, created.key_id);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
     use ed25519_dalek::Verifier;
     use std::time::{SystemTime, UNIX_EPOCH};
 

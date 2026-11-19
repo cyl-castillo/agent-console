@@ -203,6 +203,23 @@ pub fn testigo_public_key() -> AppResult<serde_json::Value> {
     testigo_export::public_key_info()
 }
 
+/// Whether this install can sign packets. Creates nothing.
+#[tauri::command(async)]
+pub fn testigo_signing_key_status() -> AppResult<testigo_export::SigningKeyStatus> {
+    testigo_export::signing_key_status()
+}
+
+/// The human's answer to a signing key the keychain lost: a new one, recorded
+/// in this project's ledger. Refused while the old key is still there.
+#[tauri::command(async)]
+pub fn testigo_signing_key_create(
+    project_root: String,
+    state: State<'_, AppState>,
+) -> AppResult<testigo_export::SigningKeyStatus> {
+    testigo_export::create_signing_key(&state.testigo, &project_root)?;
+    testigo_export::signing_key_status()
+}
+
 /// Bind a terminal session to a named case — called by the frontend when a
 /// session is seeded from a Jira ticket, so the ticket→session lineage is
 /// part of the evidence chain.

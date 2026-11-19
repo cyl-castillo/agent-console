@@ -1525,6 +1525,36 @@ impl TestigoService {
         )
     }
 
+    /// The install's signing identity changed: a first key (`first_export`,
+    /// actor console) or the human's replacement for one the keychain lost
+    /// (`replaced_missing`, with the id it replaces). Public ids only.
+    pub fn on_signing_key(
+        &self,
+        project_root: &str,
+        ts: i64,
+        created: &crate::services::testigo_export::KeyCreated,
+        reason: &str,
+        actor: &str,
+    ) -> AppResult<ProofEvent> {
+        let mut inner = self.inner.lock();
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            "unbound".into(),
+            None,
+            "signing_key_created",
+            None,
+            None,
+            actor,
+            json!({
+                "keyId": created.key_id,
+                "previousKeyId": created.previous_key_id,
+                "reason": reason,
+            }),
+        )
+    }
+
     /// F7: the pull request side of the ledger. `pr_link` (actor console)
     /// binds a PR to the branch's commits, turns and verdicts as they stood;
     /// `pr_autofix` (human) says which review comments were handed to the

@@ -8,6 +8,8 @@ vi.mock("../ipc/tauri", () => ({
     testigoList: vi.fn().mockResolvedValue([]),
     testigoVerify: vi.fn().mockResolvedValue(null),
     testigoGetSettings: vi.fn().mockResolvedValue(null),
+    testigoSigningKeyStatus: vi.fn().mockResolvedValue({ state: "ready", keyId: "k1" }),
+    testigoSigningKeyCreate: vi.fn(),
     testigoExportAat: vi.fn(),
     testigoVerifyAat: vi.fn(),
     ledgerRootFor: vi.fn(),
@@ -848,5 +850,37 @@ describe("exportAat (D3: IETF audit trail)", () => {
     expect(s.error).toContain("Nothing to export");
     expect(s.exporting).toBeNull();
     expect(s.lastAat).toBeNull();
+  });
+});
+
+describe("a signing key the keychain lost", () => {
+  beforeEach(() => {
+    useProofStore.getState().clear();
+    vi.mocked(ipc.testigoList).mockReset().mockResolvedValue([]);
+    vi.mocked(ipc.testigoSigningKeyCreate).mockReset();
+  });
+
+  it("is shown after loading the ledger, and never replaced by loading", async () => {
+    vi.mocked(ipc.testigoSigningKeyStatus).mockResolvedValue({
+      state: "missing",
+      recordedKeyId: "old",
+    });
+    await useProofStore.getState().load("/work/central");
+    await vi.waitFor(() => expect(useProofStore.getState().signingKey?.state).toBe("missing"));
+    expect(ipc.testigoSigningKeyCreate).not.toHaveBeenCalled();
+  });
+
+  it("is replaced only when the human asks, in the ledger being shown", async () => {
+    await useProofStore.getState().load("/work/central");
+    vi.mocked(ipc.testigoSigningKeyCreate).mockResolvedValue({ state: "ready", keyId: "new" });
+    await useProofStore.getState().replaceSigningKey();
+    expect(ipc.testigoSigningKeyCreate).toHaveBeenCalledWith("/work/central");
+  });
+
+  it("a refused replacement is reported", async () => {
+    await useProofStore.getState().load("/work/central");
+    vi.mocked(ipc.testigoSigningKeyCreate).mockRejectedValue("the signing key is in the keychain");
+    await useProofStore.getState().replaceSigningKey();
+    expect(useProofStore.getState().error).toContain("in the keychain");
   });
 });
