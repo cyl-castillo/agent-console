@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AgentKind } from "../agents/profiles";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type {
+  AssistantLogSummary,
+  AssistantProposalSet,
   AssistantReply,
   ConsoleMcpConfig,
   LinkedFolder,
@@ -619,8 +621,25 @@ export const ipc = {
 
   /// One turn of the console's assistant. `resume` is the previous reply's
   /// `sessionId`; null starts a new conversation.
-  assistantAsk: (message: string, engine: AgentKind, resume: string | null) =>
-    invoke<AssistantReply>("assistant_ask", { message, engine, model: null, resume }),
+  /// `remember` writes the turn to the local learning log (the human's
+  /// opt-in); `spoken` marks a question that came by voice.
+  assistantAsk: (
+    message: string,
+    engine: AgentKind,
+    resume: string | null,
+    remember = false,
+    spoken = false,
+  ) =>
+    invoke<AssistantReply>("assistant_ask", {
+      turn: { message, engine, model: null, resume, remember, spoken },
+    }),
+  assistantLogSummary: () => invoke<AssistantLogSummary>("assistant_log_summary"),
+  assistantLogRate: (id: string, rating: "up" | "down" | null) =>
+    invoke<void>("assistant_log_rate", { id, rating }),
+  assistantLogClear: () => invoke<void>("assistant_log_clear"),
+  /// One turn of the engine over the log: where the console falls short.
+  assistantPropose: (engine: AgentKind) =>
+    invoke<AssistantProposalSet>("assistant_propose", { engine, model: null }),
 
   advisorAnalyze: () => invoke<AdvisorAnalysisResult>("advisor_analyze"),
   advisorCreateSkill: (scope: "project" | "user", name: string, skillMdContent: string) =>

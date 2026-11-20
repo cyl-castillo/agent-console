@@ -1657,6 +1657,35 @@ export interface AssistantReply {
   costUsd: number;
   /// False when the turn ran without the console's tools (no hook bridge).
   toolsAttached: boolean;
+  /// The turn's id in the learning log, when the human keeps one.
+  logId?: string | null;
+}
+
+/// One gap the assistant's learning log points at (`assistant_propose`).
+export interface AssistantProposal {
+  /// "product" | "guide" | "tooling" | "voice".
+  kind: string;
+  title: string;
+  rationale: string;
+  evidence: string[];
+}
+
+export interface AssistantProposalSet {
+  at: number;
+  /// How many logged turns the engine read.
+  analyzed: number;
+  proposals: AssistantProposal[];
+}
+
+/// The assistant's learning log of the open project (`assistant_log_summary`).
+export interface AssistantLogSummary {
+  entries: number;
+  failed: number;
+  ratedUp: number;
+  ratedDown: number;
+  /// Where the JSONL file is on this machine.
+  path: string;
+  lastProposals: AssistantProposalSet | null;
 }
 
 /// Goal watch (experimental; mirrors the Rust `watch_service`). An alert is

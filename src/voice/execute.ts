@@ -61,7 +61,7 @@ export async function askAssistantAloud(text: string): Promise<void> {
     return;
   }
   await runPaletteAction("nav.assistant");
-  const reply = await useAssistantStore.getState().ask(text);
+  const reply = await useAssistantStore.getState().ask(text, { spoken: true });
   // Voice switched off, or the user took the floor, while it was thinking:
   // the answer stays on screen and nothing is said over them.
   if (useVoiceStore.getState().phase !== "ready") return;

@@ -77,7 +77,36 @@ start a new one.
 | Codex | a `-c mcp_servers.agent_console=…` override |
 | OpenCode | `session/new` over ACP. On the legacy `opencode run` fallback the server cannot be attached: the assistant answers from its guide and the panel says so |
 
+## Learning log (opt-in)
+
+The **Learning** tab of the panel has one switch: *Keep a learning log of what
+I ask*. It is **off by default**.
+
+When it is on, each turn is appended to a file on this machine
+(`<local data dir>/agent-console/assistant-log/<project>.jsonl`, the panel
+shows the exact path): the question, the answer, the console tools it called,
+whether it failed, the engine, the tokens, whether you spoke it, and your
+rating. Every text goes through the same secret redaction as the ledger's
+exports before it is written. Turns that fail are kept too — they are the
+clearest sign of a gap.
+
+- **Rate an answer** with *Helpful* / *Not helpful* under it (only replies
+  that were logged can be rated).
+- **Propose improvements** runs one turn of your own engine, with no console
+  tools, over the last 80 turns of the log and returns up to eight gaps: in
+  the product, in the assistant's guide, a missing tool, or voice. They are
+  proposals to read. Nothing is filed, sent or changed.
+- **Delete the log** removes the file and its proposals.
+
+The log is **not the ledger** and is never exported with it: the ledger still
+records only that a turn (`assistant_turn`) or a review of the log
+(`assistant_propose`) ran, never your words. Nothing in the log leaves the
+machine except as the prompt of that one turn of the engine you already use.
+
+It is also the data that will tell, later, whether a model trained on how this
+console is used is worth building. Nothing is trained today.
+
 ## Not in this phase
 
-Stopping a turn in flight, a conversation that survives a restart,
-acting on a session (sending a prompt), and learning from what you asked.
+Stopping a turn in flight, a conversation that survives a restart, acting on a
+session (sending a prompt), and applying a proposal automatically.

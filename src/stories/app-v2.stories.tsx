@@ -378,3 +378,20 @@ export const PanelAssistant = scenario({
     await useAssistantStore.getState().ask("Where do I see what the agent did in the last turn?");
   },
 });
+/// The learning log of the assistant: the opt-in, what it holds and the last
+/// proposals drawn from it.
+export const PanelAssistantLearning = scenario({
+  destination: "work",
+  after: async () => {
+    useModulesStore.getState().setEnabled("assistant", true);
+    useWorkbenchStore.getState().setTab("assistant");
+    useAssistantStore.getState().setRemember(true);
+    await sleep(200);
+    await useAssistantStore.getState().ask("Where do I see what the agent did in the last turn?");
+    const tab = Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]')).find(
+      (t) => t.textContent === "Learning",
+    );
+    tab?.click();
+    await sleep(200);
+  },
+});

@@ -4,7 +4,8 @@ import { profileFor } from "../agents/profiles";
 import { ASSISTANT_MAX_CHARS, useAssistantStore } from "../stores/assistantStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useVoiceStore } from "../stores/voiceStore";
-import { Button, Chip, EmptyState, Field, Spinner, Textarea } from "../ui";
+import { Button, Chip, EmptyState, Field, Spinner, Tabs, Textarea } from "../ui";
+import { AssistantLearning } from "./AssistantLearning";
 import { MarkdownText } from "../ui/MarkdownText";
 import { cn } from "@/lib/cn";
 
@@ -28,7 +29,9 @@ export function AssistantPanel() {
   const tokens = useAssistantStore((s) => s.tokens);
   const ask = useAssistantStore((s) => s.ask);
   const reset = useAssistantStore((s) => s.reset);
+  const rate = useAssistantStore((s) => s.rate);
   const [draft, setDraft] = useState("");
+  const [view, setView] = useState<"chat" | "learning">("chat");
   const endRef = useRef<HTMLDivElement>(null);
   const working = status === "working";
   const voicePhase = useVoiceStore((s) => s.phase);
@@ -102,120 +105,166 @@ export function AssistantPanel() {
         )}
       </div>
 
-      <div
-        className="min-h-0 flex-1 overflow-auto p-3"
-        role="log"
-        aria-label="Conversation with the assistant"
-        aria-live="polite"
+      <Tabs
+        value={view}
+        onValueChange={setView}
+        label="Assistant"
+        className="min-h-0 flex-1"
+        items={[
+          { value: "chat", label: "Conversation" },
+          { value: "learning", label: "Learning" },
+        ]}
       >
-        {messages.length === 0 && !working && (
-          <EmptyState
-            title="Ask the console"
-            description="Each question runs one turn of your own agent, so it spends tokens from your plan like any other turn."
-            action={
-              <div className="flex flex-col items-stretch gap-1">
-                {EXAMPLES.map((q) => (
-                  <Button key={q} size="sm" onClick={() => send(q)}>
-                    {q}
-                  </Button>
-                ))}
+        {{
+          chat: (
+            <div className="flex h-full min-h-0 flex-col">
+              <div
+                className="min-h-0 flex-1 overflow-auto p-3"
+                role="log"
+                aria-label="Conversation with the assistant"
+                aria-live="polite"
+              >
+                {messages.length === 0 && !working && (
+                  <EmptyState
+                    title="Ask the console"
+                    description="Each question runs one turn of your own agent, so it spends tokens from your plan like any other turn."
+                    action={
+                      <div className="flex flex-col items-stretch gap-1">
+                        {EXAMPLES.map((q) => (
+                          <Button key={q} size="sm" onClick={() => send(q)}>
+                            {q}
+                          </Button>
+                        ))}
+                      </div>
+                    }
+                  />
+                )}
+                <ul className="m-0 flex list-none flex-col gap-3 p-0">
+                  {messages.map((m) => (
+                    <li
+                      key={m.id}
+                      data-testid={`assistant-message-${m.role}`}
+                      className={cn(
+                        "rounded-2 border px-3 py-2",
+                        m.role === "user" && "border-border bg-surface-2",
+                        m.role === "assistant" && "border-transparent",
+                        m.role === "error" && "border-danger text-danger",
+                      )}
+                    >
+                      <div className="mb-1 text-caption font-medium text-muted-foreground">
+                        {m.role === "user"
+                          ? "You"
+                          : m.role === "assistant"
+                            ? "Assistant"
+                            : "Could not answer"}
+                      </div>
+                      {m.role === "assistant" ? (
+                        <>
+                          <MarkdownText text={m.text} />
+                          {m.logId && (
+                            <div className="mt-2 flex items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                aria-pressed={m.rating === "up"}
+                                onClick={() => void rate(m.id, "up")}
+                                data-testid="assistant-rate-up"
+                              >
+                                {m.rating === "up" ? "Helpful ✓" : "Helpful"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                aria-pressed={m.rating === "down"}
+                                onClick={() => void rate(m.id, "down")}
+                                data-testid="assistant-rate-down"
+                              >
+                                {m.rating === "down" ? "Not helpful ✓" : "Not helpful"}
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="m-0 whitespace-pre-wrap break-words">{m.text}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {working && (
+                  <p
+                    className="m-0 mt-3 flex items-center gap-2 text-small text-muted-foreground"
+                    role="status"
+                    data-testid="assistant-activity"
+                  >
+                    <Spinner />
+                    {activity ?? "Working…"}
+                  </p>
+                )}
+                {!toolsAttached && (
+                  <p className="m-0 mt-3 text-small text-[var(--warn-ink)]" role="status">
+                    This build has no hook bridge, so the assistant answered from its guide and
+                    could not look at or drive the console.
+                  </p>
+                )}
+                <div ref={endRef} />
               </div>
-            }
-          />
-        )}
-        <ul className="m-0 flex list-none flex-col gap-3 p-0">
-          {messages.map((m) => (
-            <li
-              key={m.id}
-              data-testid={`assistant-message-${m.role}`}
-              className={cn(
-                "rounded-2 border px-3 py-2",
-                m.role === "user" && "border-border bg-surface-2",
-                m.role === "assistant" && "border-transparent",
-                m.role === "error" && "border-danger text-danger",
-              )}
-            >
-              <div className="mb-1 text-caption font-medium text-muted-foreground">
-                {m.role === "user"
-                  ? "You"
-                  : m.role === "assistant"
-                    ? "Assistant"
-                    : "Could not answer"}
-              </div>
-              {m.role === "assistant" ? (
-                <MarkdownText text={m.text} />
-              ) : (
-                <p className="m-0 whitespace-pre-wrap break-words">{m.text}</p>
-              )}
-            </li>
-          ))}
-        </ul>
-        {working && (
-          <p
-            className="m-0 mt-3 flex items-center gap-2 text-small text-muted-foreground"
-            role="status"
-            data-testid="assistant-activity"
-          >
-            <Spinner />
-            {activity ?? "Working…"}
-          </p>
-        )}
-        {!toolsAttached && (
-          <p className="m-0 mt-3 text-small text-[var(--warn-ink)]" role="status">
-            This build has no hook bridge, so the assistant answered from its guide and could not
-            look at or drive the console.
-          </p>
-        )}
-        <div ref={endRef} />
-      </div>
 
-      <form onSubmit={submit} className="flex flex-col gap-2 border-t border-border p-3">
-        <Field
-          label="Ask or tell the assistant"
-          description="Enter sends, Shift+Enter adds a line."
-        >
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="Take me to the permissions"
-            maxLength={ASSISTANT_MAX_CHARS}
-            rows={2}
-            data-testid="assistant-input"
-          />
-        </Field>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={!draft.trim()}
-            loading={working}
-            data-testid="assistant-send"
-          >
-            Send
-          </Button>
-          {voiceOn ? (
-            <Button
-              type="button"
-              aria-pressed={listening}
-              disabled={working || voicePhase === "transcribing"}
-              onPointerDown={talkStart}
-              onPointerUp={talkEnd}
-              onPointerLeave={talkEnd}
-              onPointerCancel={talkEnd}
-              onKeyDown={talkKeyDown}
-              onKeyUp={talkKeyUp}
-              data-testid="assistant-talk"
-            >
-              {listening ? "Listening… release to send" : "Hold to talk"}
-            </Button>
-          ) : (
-            <span className="text-caption text-muted-foreground">
-              Turn voice on (Ctrl+Shift+V) to talk to it; it answers aloud.
-            </span>
-          )}
-        </div>
-      </form>
+              <form onSubmit={submit} className="flex flex-col gap-2 border-t border-border p-3">
+                <Field
+                  label="Ask or tell the assistant"
+                  description="Enter sends, Shift+Enter adds a line."
+                >
+                  <Textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={onKeyDown}
+                    placeholder="Take me to the permissions"
+                    maxLength={ASSISTANT_MAX_CHARS}
+                    rows={2}
+                    data-testid="assistant-input"
+                  />
+                </Field>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={!draft.trim()}
+                    loading={working}
+                    data-testid="assistant-send"
+                  >
+                    Send
+                  </Button>
+                  {voiceOn ? (
+                    <Button
+                      type="button"
+                      aria-pressed={listening}
+                      disabled={working || voicePhase === "transcribing"}
+                      onPointerDown={talkStart}
+                      onPointerUp={talkEnd}
+                      onPointerLeave={talkEnd}
+                      onPointerCancel={talkEnd}
+                      onKeyDown={talkKeyDown}
+                      onKeyUp={talkKeyUp}
+                      data-testid="assistant-talk"
+                    >
+                      {listening ? "Listening… release to send" : "Hold to talk"}
+                    </Button>
+                  ) : (
+                    <span className="text-caption text-muted-foreground">
+                      Turn voice on (Ctrl+Shift+V) to talk to it; it answers aloud.
+                    </span>
+                  )}
+                </div>
+              </form>
+            </div>
+          ),
+          learning: (
+            <div className="h-full min-h-0 overflow-auto">
+              <AssistantLearning />
+            </div>
+          ),
+        }}
+      </Tabs>
     </div>
   );
 }

@@ -68,6 +68,9 @@ pub struct AssistantReply {
     /// False when the sidecar is missing: the answer came from the guide
     /// alone and the assistant could not look at or drive the console.
     pub tools_attached: bool,
+    /// The turn's id in the learning log, when the human keeps one: what a
+    /// rating refers to.
+    pub log_id: Option<String>,
 }
 
 /// Trim, refuse empty and oversized input.
@@ -159,6 +162,7 @@ pub fn ask(spec: &AskSpec) -> AppResult<AssistantReply> {
         tokens: out.tokens,
         cost_usd: out.cost_usd,
         tools_attached,
+        log_id: None,
     })
 }
 
