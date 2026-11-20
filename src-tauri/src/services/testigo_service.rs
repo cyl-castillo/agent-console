@@ -27,6 +27,12 @@ use crate::error::{AppError, AppResult};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProofEvent {
+    /// The line format this record was written in. Lines from before the
+    /// field existed are version 1 and stay byte-identical when re-serialized
+    /// (the field is not written for them). It sits first so `hash` remains
+    /// the final member, and it is covered by the hash like every other byte.
+    #[serde(default = "legacy_schema", skip_serializing_if = "is_legacy_schema")]
+    pub schema_version: u32,
     pub seq: u64,
     /// Epoch milliseconds (from the hook payload when present, else 0).
     pub ts: i64,
@@ -51,6 +57,37 @@ pub struct ProofEvent {
     pub payload: Value,
     pub prev_hash: String,
     pub hash: String,
+}
+
+/// The line format this build writes. Version 1 is every line written up to
+/// v0.98 (no `schemaVersion` member); version 2 is the same record with the
+/// member present. A build reads every version up to its own.
+pub const LEDGER_SCHEMA_VERSION: u32 = 2;
+
+fn legacy_schema() -> u32 {
+    1
+}
+
+fn is_legacy_schema(v: &u32) -> bool {
+    *v == 1
+}
+
+/// The `schemaVersion` a raw line declares, without requiring the rest of
+/// the line to have a shape this build knows.
+fn declared_schema(line: &str) -> Option<u32> {
+    #[derive(Deserialize)]
+    struct Peek {
+        #[serde(rename = "schemaVersion")]
+        v: Option<u32>,
+    }
+    serde_json::from_str::<Peek>(line).ok()?.v
+}
+
+fn newer_ledger(v: u32) -> AppError {
+    AppError::Other(format!(
+        "testigo: this ledger was written by a newer Agent Console (line format {v}, this build \
+         knows up to {LEDGER_SCHEMA_VERSION}). Nothing was changed; update the app to keep recording."
+    ))
 }
 
 /// `"hash":"<64 lowercase hex>"}` as the FINAL member of the line, tolerating
@@ -105,6 +142,11 @@ pub struct VerifyReport {
     pub broken_at_seq: Option<u64>,
     /// A crash-torn final line exists. Tolerated (the chain up to it is intact).
     pub torn_tail: bool,
+    /// First line written in a format newer than this build knows. Its
+    /// bytes still hash and link (that is what `ok` says); what it means is
+    /// not something this build can vouch for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newer_schema_at_seq: Option<u64>,
 }
 
 /// Tool inputs can be arbitrarily large (file writes); the ledger keeps a
@@ -505,6 +547,16 @@ impl TestigoService {
         if path.exists() {
             let content = fs::read_to_string(&path)?;
             let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+            // A newer build wrote here. Never append an older line format
+            // after a newer one, and never mistake a line this build cannot
+            // parse for a crash-torn tail and cut it off.
+            if let Some(v) = lines
+                .iter()
+                .filter_map(|l| declared_schema(l))
+                .find(|v| *v > LEDGER_SCHEMA_VERSION)
+            {
+                return Err(newer_ledger(v));
+            }
             let torn_tail = lines
                 .last()
                 .is_some_and(|l| serde_json::from_str::<ProofEvent>(l).is_err());
@@ -578,6 +630,7 @@ impl TestigoService {
             None => (0, "genesis".to_string()),
         };
         let mut ev = ProofEvent {
+            schema_version: LEDGER_SCHEMA_VERSION,
             seq,
             ts,
             case_id,
@@ -1950,14 +2003,21 @@ impl TestigoService {
                 total: 0,
                 broken_at_seq: None,
                 torn_tail: false,
+                newer_schema_at_seq: None,
             });
         }
         let content = fs::read_to_string(&path)?;
         let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
         let mut prev: Option<(u64, String)> = None;
         let mut total = 0usize;
+        let mut newer_schema_at_seq: Option<u64> = None;
         for (i, line) in lines.iter().enumerate() {
             let parsed = serde_json::from_str::<ProofEvent>(line);
+            if newer_schema_at_seq.is_none()
+                && declared_schema(line).is_some_and(|v| v > LEDGER_SCHEMA_VERSION)
+            {
+                newer_schema_at_seq = Some(prev.as_ref().map(|(s, _)| s + 1).unwrap_or(0));
+            }
             let Ok(ev) = parsed else {
                 if i == lines.len() - 1 {
                     return Ok(VerifyReport {
@@ -1965,6 +2025,7 @@ impl TestigoService {
                         total,
                         broken_at_seq: None,
                         torn_tail: true,
+                        newer_schema_at_seq,
                     });
                 }
                 return Ok(VerifyReport {
@@ -1972,6 +2033,7 @@ impl TestigoService {
                     total,
                     broken_at_seq: Some(prev.map(|(s, _)| s + 1).unwrap_or(0)),
                     torn_tail: false,
+                    newer_schema_at_seq,
                 });
             };
             let expected_prev = prev
@@ -1991,6 +2053,7 @@ impl TestigoService {
                     total,
                     broken_at_seq: Some(ev.seq),
                     torn_tail: false,
+                    newer_schema_at_seq,
                 });
             }
             prev = Some((ev.seq, ev.hash));
@@ -2001,6 +2064,7 @@ impl TestigoService {
             total,
             broken_at_seq: None,
             torn_tail: false,
+            newer_schema_at_seq,
         })
     }
 }

@@ -440,6 +440,7 @@ mod tests {
 
     fn event(seq: u64, kind: &str, payload: Value) -> ProofEvent {
         ProofEvent {
+            schema_version: 1,
             seq,
             ts: seq as i64,
             case_id: "c".into(),

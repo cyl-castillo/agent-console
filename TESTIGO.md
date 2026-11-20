@@ -103,6 +103,13 @@ ProofEvent {
   prev_hash, hash     // hash-chain sobre JSON canónico (JCS)
 }
 ```
+- **Versión del formato de línea** (`schemaVersion`, primer miembro, cubierto por el hash):
+  una línea sin el campo es formato 1 (todo lo escrito hasta v0.98); desde v0.99 las líneas
+  nuevas llevan `"schemaVersion":2`, que es el mismo registro con el campo presente. `hash`
+  sigue siendo el último miembro. Un ledger puede mezclar formatos y verifica igual, porque el
+  recómputo es sobre los bytes crudos de cada línea. Una build no agrega líneas a un ledger
+  que contiene un formato más nuevo que el suyo, ni lo trunca; `verify` informa desde qué
+  `seq` empieza lo que no conoce. Fixtures: `src-tauri/fixtures/ledgers/`.
 - Persistencia: JSONL append-only por proyecto en `~/.local/share/agent-console/proof/`,
   calcado de `activity_service.rs` (atomic, crash-safe) pero **sin trim** (retención = valor).
 - Anclaje barato: head hash publicado como `refs/agent-console/proof-head` y como trailer en
