@@ -167,7 +167,7 @@ pub fn write(project_root: &Path, name: &str, content: &str) -> AppResult<PathBu
     let dir = skill_dir(project_root, name)?;
     fs::create_dir_all(&dir)?;
     let path = dir.join("SKILL.md");
-    fs::write(&path, content)?;
+    crate::services::persistence::write_atomic(&path, content.as_bytes())?;
     Ok(path)
 }
 

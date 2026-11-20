@@ -468,54 +468,22 @@ impl ConnectorService {
     }
 
     fn load_file() -> AppResult<ConnectorFile> {
-        let path = Self::path()?;
-        if !path.exists() {
-            return Ok(ConnectorFile::default());
-        }
-        let txt = fs::read_to_string(&path)
-            .map_err(|e| AppError::Other(format!("read connector.json: {e}")))?;
-        if txt.trim().is_empty() {
-            return Ok(ConnectorFile::default());
-        }
-        match serde_json::from_str::<ConnectorFile>(&txt) {
-            Ok(file) => Ok(file),
-            Err(e) => {
-                if let Ok(bak) = Self::bak_path() {
-                    if let Ok(btxt) = fs::read_to_string(&bak) {
-                        if let Ok(file) = serde_json::from_str::<ConnectorFile>(&btxt) {
-                            return Ok(file);
-                        }
-                    }
-                }
-                Err(AppError::Other(format!("parse connector.json: {e}")))
-            }
-        }
+        crate::services::persistence::load_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            "connector.json",
+        )
     }
 
     fn write_file(file: &ConnectorFile) -> AppResult<()> {
-        let path = Self::path()?;
         let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-        let tmp = Self::tmp_path()?;
-        fs::write(&tmp, json.as_bytes())?;
-        if path.exists() {
-            if let Ok(bak) = Self::bak_path() {
-                let _ = fs::copy(&path, &bak);
-            }
-        }
-        let mut last = None;
-        for attempt in 0..3 {
-            match fs::rename(&tmp, &path) {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    last = Some(e);
-                    if attempt < 2 {
-                        std::thread::sleep(std::time::Duration::from_millis(80));
-                    }
-                }
-            }
-        }
-        Err(last.expect("loop ran").into())
+            .map_err(|e| AppError::Other(format!("serialize connector.json: {e}")))?;
+        crate::services::persistence::save_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            &Self::tmp_path()?,
+            &json,
+        )
     }
 
     /// Read-modify-write one project's connector state under the lock. The
