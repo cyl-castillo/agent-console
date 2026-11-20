@@ -31,6 +31,7 @@ import type {
   TestigoSettings,
   TestigoVerifyReport,
   VaultEntryView,
+  AssistantLogSummary,
   VoiceStatus,
   WatchExchange,
   WatchGoal,
@@ -1139,6 +1140,39 @@ export const jobsBoard: JobsBoard = {
   busy: 1,
 };
 
+export const assistantLog: AssistantLogSummary = {
+  entries: 42,
+  failed: 3,
+  ratedUp: 11,
+  ratedDown: 4,
+  path: "/home/dev/.local/share/agent-console/assistant-log/demo-0123456789abcdef.jsonl",
+  lastProposals: {
+    at: 1_794_000_000_000,
+    analyzed: 42,
+    proposals: [
+      {
+        kind: "product",
+        title: "Stop an assistant turn in flight",
+        rationale:
+          "Three turns were abandoned by starting a new conversation while the assistant was still working.",
+        evidence: ["asked to cancel a long answer", "started over mid-turn twice"],
+      },
+      {
+        kind: "guide",
+        title: "Explain where a session's worktree lives",
+        rationale: "Asked four times; the assistant answered from the guide without the path.",
+        evidence: ["asked where the worktree folder is"],
+      },
+      {
+        kind: "voice",
+        title: "Accept “asistenta” as the wake word",
+        rationale: "Two spoken questions were dictated into the composer instead.",
+        evidence: [],
+      },
+    ],
+  },
+};
+
 export const voice: VoiceStatus = {
   enabled: false,
   capturing: false,
@@ -1711,15 +1745,23 @@ export const defaultFixtures: FixtureMap = {
   scheduler_history: runHistory,
   scheduler_is_paused: false,
   // console assistant (experimental)
-  assistant_ask: (args: Record<string, unknown>) => ({
-    text: /ledger|proof/i.test(String(args.message))
-      ? "The ledger is under **Proof → Ledger**. I opened it for you."
-      : "You can see what each turn did under **Proof → Turns**: tool calls, checks and the verification verdict.",
-    sessionId: "assistant-demo-1",
-    tokens: 412,
-    costUsd: 0,
-    toolsAttached: true,
-  }),
+  assistant_ask: (args: Record<string, unknown>) => {
+    const turn = (args.turn ?? {}) as { message?: string; remember?: boolean };
+    return {
+      text: /ledger|proof/i.test(String(turn.message))
+        ? "The ledger is under **Proof → Ledger**. I opened it for you."
+        : "You can see what each turn did under **Proof → Turns**: tool calls, checks and the verification verdict.",
+      sessionId: "assistant-demo-1",
+      tokens: 412,
+      costUsd: 0,
+      toolsAttached: true,
+      logId: turn.remember ? "log-demo-1" : null,
+    };
+  },
+  assistant_log_summary: assistantLog,
+  assistant_log_rate: null,
+  assistant_log_clear: null,
+  assistant_propose: assistantLog.lastProposals,
   // goal watch (experimental)
   watch_list: [watchGoal],
   watch_source: { witness: true, headSeq: 64 },
