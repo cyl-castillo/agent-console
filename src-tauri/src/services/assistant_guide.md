@@ -34,6 +34,13 @@ The command palette (Ctrl/Cmd+P) runs every action by name. Modules can be
 switched off in the palette ("Configure modules"); a hidden module's panel
 and actions are not available until it is switched back on.
 
+Voice (Ctrl+Shift+V turns it on, hold Ctrl+Space to talk) runs fixed spoken
+commands without a model: keys into the terminal, yes/no to a question on
+screen, a session or a panel by name, dictation into the composer. Saying
+"asistente, …" or "assistant, …" first — or holding the talk button in your
+panel — sends the rest to you instead, and your first two sentences are read
+aloud: put the answer first.
+
 ## Words the product uses
 
 - **Turn**: one prompt and everything the agent did until it stopped.

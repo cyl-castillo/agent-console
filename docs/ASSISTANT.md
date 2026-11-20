@@ -5,13 +5,32 @@ Ask the console how it works, or tell it where to go, in your own words:
 "¿qué sesiones necesitan mi atención?". One optional agent answers and moves
 around the app for you.
 
-This is phase 1 (text). The module is **off by default** and nothing else in
-the console depends on it.
+You can type to it or talk to it. The module is **off by default** and nothing
+else in the console depends on it.
 
 ## Switch it on
 
 Command palette → **Configure Modules** → **Assistant**. The panel appears
 under **Work → Assistant**, and as the action `nav.assistant`.
+
+## Talk to it
+
+With voice mode on (Ctrl+Shift+V — see the README's Voice section; speech is
+transcribed on this machine):
+
+- **"Asistente, …" / "Assistant, …"** from anywhere, on the usual push-to-talk
+  (hold Ctrl+Space). Everything after the word goes to the assistant in your
+  own words. The word alone still just opens the panel.
+- **Hold to talk** in the panel: the whole take goes to the assistant, with no
+  command grammar in between.
+
+The panel comes forward with the full answer and the console says its first
+two sentences aloud. Take the mic again and it stops talking.
+
+Speaking grants nothing typing does not: it is the same confined assistant,
+and the fixed voice commands ("mandá", "sí", "abrí changes") keep working
+without a model, exactly as before. With the module off, "asistente" is an
+ordinary word again.
 
 ## What it is
 
@@ -60,5 +79,5 @@ start a new one.
 
 ## Not in this phase
 
-Voice, stopping a turn in flight, a conversation that survives a restart,
+Stopping a turn in flight, a conversation that survives a restart,
 acting on a session (sending a prompt), and learning from what you asked.

@@ -145,4 +145,13 @@ describe("console assistant", () => {
     useAssistantStore.getState()._onActivity("tool", "console_state");
     expect(useAssistantStore.getState().activity).toBe("Using console state…");
   });
+
+  it("resolves to the reply's text, and to null when the turn fails or cannot run", async () => {
+    expect(await useAssistantStore.getState().ask("where is the ledger?")).toBe(
+      "It is under Proof.",
+    );
+    expect(await useAssistantStore.getState().ask("   ")).toBeNull();
+    world.project = null;
+    expect(await useAssistantStore.getState().ask("anyone?")).toBeNull();
+  });
 });

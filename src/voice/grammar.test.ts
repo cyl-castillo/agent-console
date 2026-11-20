@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   analyzeScreen,
+  helpGroups,
   normalize,
   parseOption,
   parseYesNo,
@@ -232,5 +233,43 @@ describe("resolveVoice: help and silence", () => {
     expect(resolveVoice("¿qué puedo decir?", ctx())).toEqual({ kind: "help" });
     expect(resolveVoice("what can I say", ctx({ lang: "en" }))).toEqual({ kind: "help" });
     expect(resolveVoice("callate", ctx())).toEqual({ kind: "silence" });
+  });
+});
+
+describe("the assistant (free speech, only with its module on)", () => {
+  const on = ctx({ assistant: true });
+
+  it("hands everything after the word to the assistant, in the speaker's words", () => {
+    expect(resolveVoice("Asistente, ¿dónde veo qué hizo el agente?", on)).toEqual({
+      kind: "assistant",
+      text: "¿dónde veo qué hizo el agente?",
+    });
+    expect(resolveVoice("oye asistente abrí el ledger", on)).toEqual({
+      kind: "assistant",
+      text: "abrí el ledger",
+    });
+    expect(
+      resolveVoice("Assistant: open the ledger", ctx({ lang: "en", assistant: true })),
+    ).toEqual({ kind: "assistant", text: "open the ledger" });
+  });
+
+  it("leaves the grammar as it was while the module is off", () => {
+    expect(resolveVoice("asistente abrí el ledger ahora", ctx()).kind).toBe("dictate");
+  });
+
+  it("does not take the floor from a command or from a word that only starts like it", () => {
+    expect(resolveVoice("mandá", on)).toEqual({ kind: "keys", data: "\r", label: "enter" });
+    expect(resolveVoice("escribí: asistente hola", on)).toEqual({
+      kind: "dictate",
+      text: "asistente hola",
+      submit: false,
+    });
+    expect(resolveVoice("asistentes de todo tipo hay", on).kind).toBe("dictate");
+    expect(resolveVoice("asistente", on).kind).not.toBe("assistant");
+  });
+
+  it("lists itself in the help only when it is on", () => {
+    expect(helpGroups("es", true).some((g) => g.title === "Asistente")).toBe(true);
+    expect(helpGroups("es").some((g) => g.title === "Asistente")).toBe(false);
   });
 });

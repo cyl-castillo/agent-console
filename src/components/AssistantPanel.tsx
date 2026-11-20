@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 
 import { profileFor } from "../agents/profiles";
 import { ASSISTANT_MAX_CHARS, useAssistantStore } from "../stores/assistantStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { useVoiceStore } from "../stores/voiceStore";
 import { Button, Chip, EmptyState, Field, Spinner, Textarea } from "../ui";
 import { MarkdownText } from "../ui/MarkdownText";
 import { cn } from "@/lib/cn";
@@ -30,6 +31,25 @@ export function AssistantPanel() {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const working = status === "working";
+  const voicePhase = useVoiceStore((s) => s.phase);
+  const voiceOn = voicePhase !== "off" && voicePhase !== "loading";
+  const listening = voicePhase === "listening";
+  // Hold to talk: the take goes straight to the assistant, in the speaker's
+  // own words — no command grammar in between.
+  const talkStart = () => void useVoiceStore.getState().pttStart("assistant");
+  const talkEnd = () => void useVoiceStore.getState().pttStop();
+  const talkKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+      e.preventDefault();
+      talkStart();
+    }
+  };
+  const talkKeyUp = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      talkEnd();
+    }
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ block: "end" });
@@ -164,7 +184,7 @@ export function AssistantPanel() {
             data-testid="assistant-input"
           />
         </Field>
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="submit"
             variant="primary"
@@ -174,6 +194,26 @@ export function AssistantPanel() {
           >
             Send
           </Button>
+          {voiceOn ? (
+            <Button
+              type="button"
+              aria-pressed={listening}
+              disabled={working || voicePhase === "transcribing"}
+              onPointerDown={talkStart}
+              onPointerUp={talkEnd}
+              onPointerLeave={talkEnd}
+              onPointerCancel={talkEnd}
+              onKeyDown={talkKeyDown}
+              onKeyUp={talkKeyUp}
+              data-testid="assistant-talk"
+            >
+              {listening ? "Listening… release to send" : "Hold to talk"}
+            </Button>
+          ) : (
+            <span className="text-caption text-muted-foreground">
+              Turn voice on (Ctrl+Shift+V) to talk to it; it answers aloud.
+            </span>
+          )}
         </div>
       </form>
     </div>

@@ -7,7 +7,7 @@ import { useToastStore } from "./toastStore";
 import { assessCommand } from "../permissions/rules";
 import type { ApprovalRequest, VoiceModelProgress } from "../types/domain";
 import { parseYesNo } from "../voice/grammar";
-import { runVoiceCommand } from "../voice/execute";
+import { askAssistantAloud, runVoiceCommand } from "../voice/execute";
 import { turnAnnouncement } from "../voice/announce";
 import { describeTurnFailure } from "../lib/turnFailure";
 import { useTerminalsStore } from "./terminalsStore";
@@ -30,7 +30,10 @@ interface VoiceState {
   approvalStage: "speaking" | "listening" | null;
   error: string | null;
   toggle: () => Promise<void>;
-  pttStart: () => Promise<void>;
+  /// Who the take in progress is for: the grammar (null) or, from its own
+  /// talk button, the console's assistant.
+  pttTarget: "assistant" | null;
+  pttStart: (to?: "assistant") => Promise<void>;
   pttStop: () => Promise<void>;
   /// Abort a hold without typing anything (e.g. window lost focus mid-hold).
   pttCancel: () => Promise<void>;
@@ -48,6 +51,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   speaking: false,
   approvalStage: null,
   error: null,
+  pttTarget: null,
 
   toggle: async () => {
     const { phase } = get();
@@ -71,9 +75,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     }
   },
 
-  pttStart: async () => {
+  pttStart: async (to) => {
     if (get().phase !== "ready" || get().approvalStage) return;
-    set({ phase: "listening", speaking: false });
+    set({ phase: "listening", speaking: false, pttTarget: to ?? null });
     try {
       // The backend cuts off any speech before opening the mic (barge-in);
       // the cue tells the user the floor is theirs.
@@ -87,7 +91,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   pttStop: async () => {
     if (get().phase !== "listening") return;
-    set({ phase: "transcribing" });
+    const to = get().pttTarget;
+    set({ phase: "transcribing", pttTarget: null });
     try {
       const text = (await ipc.voicePttStop()).trim();
       // A command when it reads like one (keys, a panel, a session, yes/no to
@@ -96,7 +101,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       // of doing nothing.
       if (text) {
         void ipc.voiceEarcon("done").catch(() => {});
-        await runVoiceCommand(text);
+        // The assistant's turn is not awaited: the mic is free meanwhile.
+        if (to === "assistant") void askAssistantAloud(text);
+        else await runVoiceCommand(text);
       } else {
         void ipc.voiceEarcon("error").catch(() => {});
         useToastStore
