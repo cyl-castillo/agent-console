@@ -52,6 +52,41 @@ A change to one side without the others is a bug even when everything compiles.
   `src-tauri/src/services/engine_runner.rs`). "Not supported on X" is an
   acceptable answer only when written down in the PR and visible in the UI.
 
+## Close the contract before you finish
+
+The task will usually name one side only ("add a command that…", "add a
+palette action…"). The other sides are still part of the task: do them
+unasked, in the same change. Before reporting, run `git status --short` and
+check the diff against this list; every name you added must show up in every
+place its contract names.
+
+- Added or changed a command `foo_bar` → `grep -rn "foo_bar" src-tauri/src/lib.rs src/ipc/tauri.ts src/dev/fixtures/defaults.ts`
+  must hit all three (handler path `commands::<area>::foo_bar` in
+  `generate_handler!`, a camelCase wrapper `fooBar` that invokes `"foo_bar"`,
+  a fixture keyed `foo_bar`), and its argument/return types live in
+  `src/types/domain.ts`, not inline. Write it as
+  `#[tauri::command(async)]` or `pub async fn`, then run
+  `scripts/check-ipc-sync.sh`.
+- Added an action id `area.verb` → `grep -rn '"area.verb"\|`area.verb`' src/actions/ids.ts src/stores/paletteStore.ts docs/ACTIONS.md`
+  must hit all three (`src/actions/ids.test.ts` fails otherwise). If it should
+  be reachable by voice, add its phrases in `src/voice/grammar.ts`. Existing
+  ids keep their exact spelling.
+- Added a ledger event kind → emitted via `TestigoService`, an arm in
+  `map_kind` in `src-tauri/src/services/aat_export.rs`, a row in the mapping
+  table of the README that file writes, and a rendering in
+  `src/app/v2/proof/`.
+- Touched anything that talks to an agent → handled (or explicitly declined
+  in the UI) for Claude, Codex and OpenCode in `src/agents/profiles.ts` and
+  `src-tauri/src/services/engine_runner.rs`.
+- Edited `CLAUDE.md` → same edit in `AGENTS.md`.
+
+Then run the gate row for every area the diff touches (both rows when it
+touches `src/` and `src-tauri/`), to completion, and fix what fails — also
+`npm run format:check` / `cargo fmt --check` failures, which are fixed with
+`npm run format` / `cargo fmt`, not reported. "Done" in your final message
+means: contract sides listed, gates named with their real exit status, and
+anything you could not run said so.
+
 ## Rules that are not negotiable
 
 - **Secrets** live in the OS keychain (`vault_service`, `keyring`). Never in
