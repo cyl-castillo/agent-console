@@ -2,43 +2,59 @@
 
 [![Testigo: intent-to-proof](https://img.shields.io/badge/Testigo-intent--to--proof-2ea44f?logo=github)](https://github.com/cyl-castillo/testigo)
 
-A minimalist, AI-native console for directing agents inside a repository.
+**Direct coding agents in your repository, with a verifiable record of what they did.**
+
+Agent Console is a desktop app that runs the real agent CLIs (Claude Code,
+Codex or OpenCode, per session) next to a shell and a git diff. A human
+approves each risky step, any turn can be rewound, and every prompt, approval,
+tool result and diff lands in a hash-chained ledger. The verdict on a turn
+comes from what the console witnessed, never from what the agent said it did.
+
+- **Evidence, not claims.** A turn is *verified* only when a check passed with
+  exit 0 after the last edit, *claim contradicted* when "tests pass" sits over
+  a failed or empty run, *unverified* when nothing ran. The ledger exports as
+  signed proof packets anyone verifies in a browser, or as an IETF Agent Audit
+  Trail a third party verifies offline. Agent Console is the reference
+  implementation of [**Testigo**](https://github.com/cyl-castillo/testigo), an
+  open intent-to-proof protocol. What the record does not cover yet is stated
+  under [Safety model](#safety-model).
+- **A human decides.** Per-tool approval before anything risky runs, with the
+  decision on the record; a snapshot before each turn and one-click restore
+  that never moves HEAD or your branches.
+- **Local-first.** No accounts, no cloud sync, no telemetry. The agent talks
+  to its provider exactly as its CLI does on its own.
+
+Not an IDE and not a chat client: you direct the agent and verify its work
+here, and edit code in your own editor.
+
 Home: [agent-console.dev](https://agent-console.dev) · for agents and LLMs:
 [llms.txt](https://agent-console.dev/llms.txt). Not to be confused with
 [buhuipao/agent-console](https://github.com/buhuipao/agent-console), a Rust TUI
 that finds and resumes Codex and Claude Code sessions — different project,
 same slug.
 
-Not an IDE. Not a chat client. A small terminal-first desktop app that pairs the Claude Code CLI with an integrated shell, a git diff viewer, and per-turn snapshots — so you can drive an agent through real work without losing control.
-
-Every session is witnessed: agent-console is the reference implementation of
-[**Testigo**](https://github.com/cyl-castillo/testigo), an open intent-to-proof
-protocol — prompts, human approvals, tool results and per-turn diffs land in a
-hash-chained evidence ledger, exportable as signed proof packets anyone can
-verify in a browser.
-
 ![A full agent turn in Agent Console: the conversation shows the prompt, the tool calls and the agent's reply streaming in as markdown while the terminal underneath runs the CLI, and the Inspector holds the turn's detail](docs/shots/hero-session.png)
 
+What happens to one turn:
+
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ my-repo · javascript · vite · /home/me/code/my-repo                  │
-├──────────┬─────────────────────────────────────┬─────────────────────┤
-│ Files    │ [Terminal] [Changes (3)]            │ Agent               │
-│          │ ─────────────────────────────────── │ ─────────────────── │
-│ src/     │ $ npm test                          │ you ↶restore        │
-│  api.ts  │ ✓ 14 passed                         │ "fix the failing    │
-│  app.ts  │                                     │  user-auth test"    │
-│ tests/   │                                     │                     │
-│ README   │                                     │ ▸ Read tests/auth   │
-│          │                                     │ ✓ Read tests/auth   │
-│          │                                     │ ✓ Edit src/api.ts   │
-│          │                                     │ ✓ Bash: npm test    │
-│          │                                     │                     │
-│          │                                     │ claude: fixed —     │
-│          │                                     │ token was expired   │
-│          │                                     │                     │
-│          │                                     │ [type a task…]      │
-└──────────┴─────────────────────────────────────┴─────────────────────┘
+ you ── prompt ─────────▶  agent CLI  (Claude Code · Codex · OpenCode)
+          snapshot of the      │
+          working tree         │ wants to run a tool
+                               ▼
+                          approval  ◀── you allow or deny
+                               │
+                               ▼
+                          tool result (exit code) · checks · diff
+                               │
+                               ▼
+          hash-chained ledger: prompt, approval, result, end of turn
+                               │
+              ┌────────────────┴─────────────────┐
+              ▼                                  ▼
+   verdict computed by the console     proof packet / audit trail
+   verified · unverified ·             anyone can verify, offline
+   claim contradicted
 ```
 
 ## Vision
@@ -49,6 +65,7 @@ The center of the app is the chat, the terminal, and the git diff — not a code
 
 Principles:
 
+- **Evidence over claims** — what happened is what was witnessed.
 - **Terminal-first, agent-first, diff-first.**
 - **Lightweight** — Tauri + Rust, not Electron.
 - **Cross-platform** by design (Linux/macOS/Windows), Linux-first in practice.
@@ -77,7 +94,9 @@ The center of the screen is deliberately small, and it hasn't grown since v0.1:
 
 ## The workbench (the control plane)
 
-Around that core sits a side panel of nine workbench tabs — all local, all
+Everything else is optional. It lives under five destinations (Inbox,
+Sessions, Work, Proof, Settings) as twelve modules you can switch off one by
+one; only Trust stays on, and the experimental ones start off. All local, all
 suggest-only, none of them able to block the core:
 
 - **Tasks** — your Jira queue as one-click seeded agent sessions, plus an
@@ -221,8 +240,9 @@ branch name; you'll see a one-line notice.
 
 ## Requirements
 
-- **Claude Code CLI** installed and authenticated:
-  `npm install -g @anthropic-ai/claude-code` then `claude` once to log in.
+- **At least one agent CLI**, installed and logged in: Claude Code
+  (`npm install -g @anthropic-ai/claude-code`, then `claude` once), Codex or
+  OpenCode. The setup doctor in Getting Started checks what is present.
 - **Node.js ≥ 20** (the bundled PreToolUse hook is a Node script).
 - **git** ≥ 2.30.
 - Rust toolchain (only for building from source).
@@ -252,18 +272,18 @@ The dev process spawns the Rust app, opens a Tauri window, and hot-reloads the R
 npm run tauri build
 ```
 
-Output on Linux (Ubuntu 24.04):
+Output on Linux (`<version>` is the one in `package.json`):
 
 ```
 src-tauri/target/release/bundle/
-├── deb/Agent Console_0.1.0_amd64.deb       # install with: sudo apt install ./*.deb
-├── appimage/agent-console_0.1.0_amd64.AppImage
-└── rpm/Agent Console-0.1.0-1.x86_64.rpm
+├── deb/Agent Console_<version>_amd64.deb       # install with: sudo apt install ./*.deb
+├── appimage/agent-console_<version>_amd64.AppImage
+└── rpm/Agent Console-<version>-1.x86_64.rpm
 ```
 
 The `.deb` declares `nodejs` as a runtime dep (needed for the PreToolUse hook). On other distros, AppImage works as a self-contained binary.
 
-macOS and Windows builds use the same command; bundle output varies (`.dmg` / `.msi`).
+macOS and Windows builds use the same command; bundle output varies (`.dmg` / `.msi` and `-setup.exe`).
 
 ## Keyboard shortcuts
 
@@ -302,42 +322,39 @@ Two layers, both on by default:
 
 For non-git repos, only layer 1 applies — there is no snapshot to make.
 
+**What the record does not cover yet.** The console, its hooks and the ledger
+run as your user, the same user the agent runs as. The hash chain makes a
+later edit detectable and the exported packets are signed, but the ledger by
+itself does not stop an agent that sets out to forge its own record on that
+account. Today the thing that keeps an agent away from those files is Claude
+Code's sandbox (Settings → Trust → Permissions), which is optional. Treat the
+ledger as a witness, not as a firewall; closing that gap is in progress.
+
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│ React + TS + Zustand                        │
-│  ┌─────────┬─────────────┬─────────────┐    │
-│  │FileTree │Terminal/Diff│  AgentChat  │    │
-│  └─────────┴─────────────┴─────────────┘    │
-│            ▲                                │
-│            │ invoke() + events              │
-└────────────┼────────────────────────────────┘
-┌────────────┼────────────────────────────────┐
-│ Rust (Tauri 2)                              │
-│            ▼                                │
-│  ┌──────────────┐  ┌─────────────────────┐ │
-│  │project_mgr   │  │terminal_runner (PTY)│ │
-│  ├──────────────┤  ├─────────────────────┤ │
-│  │git_service   │  │snapshot_service     │ │
-│  ├──────────────┤  ├─────────────────────┤ │
-│  │projects_svc  │  │permission_bridge    │ │
-│  └──────────────┘  └─────────────────────┘ │
-│  ┌─────────────────────────────────────┐    │
-│  │agent_session                         │   │
-│  │  spawns: claude -p                   │   │
-│  │   --input/output-format stream-json  │   │
-│  │   --permission-mode default          │   │
-│  │   --settings <hooks.json>            │   │
-│  │   env AGENT_CONSOLE_HOOK_DIR=...     │   │
-│  └─────────────────────────────────────┘   │
-└─────────────────────────────────────────────┘
-        │
-        ▼
-   PreToolUse hook (bundled Node script)
-        │
-        ▼  req-*.json / res-*.json
-   shared dir polled by permission_bridge
+┌────────────────────────────────────────────────────────────────┐
+│ React + TypeScript + Zustand  (src/)                           │
+│  shell: Inbox · Sessions · Work · Proof · Settings             │
+│            ▲ invoke() + events, typed in src/ipc/tauri.ts      │
+└────────────┼───────────────────────────────────────────────────┘
+┌────────────┼───────────────────────────────────────────────────┐
+│ Rust, Tauri 2  (src-tauri/): thin commands/, one service per   │
+│            ▼                 concern in services/              │
+│  terminal_runner (PTY)   runs each session's agent CLI         │
+│  hooks_service           installs the hooks, answers approvals │
+│  snapshot_service        per-turn refs and restore             │
+│  testigo_service         the hash-chained ledger               │
+│  verification_rules      verdicts, from ledger events only     │
+│  engine_runner           headless turns for rooms and jobs     │
+│  vault_service           secrets, in the OS keychain           │
+│  transport               paired devices (Noise), loopback      │
+└────────────────────────────────────────────────────────────────┘
+        ▲ events.jsonl and approvals/<id>.req.json / .res.json
+        │ in the session's directory
+   hook-bridge  (bundled native sidecar, a no-op outside the console)
+        ▲ hooks: prompt, permission request, tool result, stop
+   agent CLI  (Claude Code, Codex; OpenCode through a witness plugin)
 ```
 
 ## Roadmap
