@@ -10,7 +10,9 @@
 //!
 //! - the console's hooks, pointing at the root-owned bridge, with
 //!   `allowManagedHooksOnly` so no other hook runs and `onFailure: "block"`
-//!   on the approval hook so a crash, a timeout or garbage denies;
+//!   on the two hooks that decide, so a crash, a timeout or garbage denies:
+//!   the guard on every tool (`PreToolUse`, which sends a high-tier request
+//!   to a person whatever the session's mode) and the approval hook;
 //! - `allowManagedPermissionRulesOnly`, so an allow rule the agent writes
 //!   into a settings file it can reach authorizes nothing;
 //! - deny rules for the console's own state and the managed tier itself;
@@ -47,10 +49,15 @@ const DROPIN_NAME: &str = "50-agent-console.json";
 /// cancels it (and, with `onFailure: "block"`, denies).
 const APPROVAL_HOOK_TIMEOUT_S: u64 = 600;
 
-/// Hook events of the drop-in, with whether a failure must block. Only the
-/// approval hook decides anything; the rest record.
+/// Seconds the guard may take. It classifies and exits; anything slower is
+/// a broken bridge, and under `onFailure: "block"` that denies.
+const GUARD_HOOK_TIMEOUT_S: u64 = 10;
+
+/// Hook events of the drop-in, with whether a failure must block. The guard
+/// (PreToolUse) and the approval hook decide; the rest record.
 const EVENTS: &[(&str, bool)] = &[
     ("UserPromptSubmit", false),
+    ("PreToolUse", true),
     ("PermissionRequest", true),
     ("PostToolUse", false),
     ("PostToolUseFailure", false),
@@ -133,17 +140,21 @@ pub fn dropin_settings(
         if !hooks_service::claude_event_supported(event, Some(version)) {
             continue;
         }
+        // PreToolUse is the guard, not the legacy approvals bridge
+        // (`pretooluse`): that one answers every request itself, and then
+        // PermissionRequest never sees one. The guard only escalates.
+        let (mode, timeout) = if *event == "PreToolUse" {
+            ("guard", GUARD_HOOK_TIMEOUT_S)
+        } else {
+            (hooks_service::bridge_mode(event), APPROVAL_HOOK_TIMEOUT_S)
+        };
         let mut hook = json!({
             "type": "command",
-            "command": format!(
-                "\"{}\" {}",
-                bridge.to_string_lossy(),
-                hooks_service::bridge_mode(event)
-            ),
+            "command": format!("\"{}\" {mode}", bridge.to_string_lossy()),
         });
         if *blocking {
             hook["onFailure"] = json!("block");
-            hook["timeout"] = json!(APPROVAL_HOOK_TIMEOUT_S);
+            hook["timeout"] = json!(timeout);
         }
         hooks.insert(
             (*event).to_string(),
@@ -444,31 +455,37 @@ mod tests {
     }
 
     #[test]
-    fn only_the_approval_hook_blocks_on_failure_and_every_hook_is_the_root_owned_bridge() {
+    fn the_guard_and_the_approval_hook_block_on_failure_and_every_hook_is_the_root_owned_bridge() {
         let s = settings();
         let hooks = s["hooks"].as_object().unwrap();
         for (event, entries) in hooks {
             let hook = &entries[0]["hooks"][0];
             assert_eq!(entries[0]["matcher"], "*");
+            let command = hook["command"].as_str().unwrap();
             assert!(
-                hook["command"]
-                    .as_str()
-                    .unwrap()
-                    .starts_with("\"/opt/agent-console/hook-bridge\" "),
+                command.starts_with("\"/opt/agent-console/hook-bridge\" "),
                 "{event}"
             );
-            if event == "PermissionRequest" {
-                assert_eq!(hook["onFailure"], "block");
-                assert_eq!(
-                    hook["command"],
-                    "\"/opt/agent-console/hook-bridge\" permissionrequest"
-                );
-            } else {
-                assert!(hook.get("onFailure").is_none(), "{event} only records");
+            match event.as_str() {
+                // Every tool, before it runs: the guard, never the legacy
+                // approvals bridge (which would answer in PermissionRequest's place).
+                "PreToolUse" => {
+                    assert_eq!(command, "\"/opt/agent-console/hook-bridge\" guard");
+                    assert_eq!(hook["onFailure"], "block");
+                    assert_eq!(hook["timeout"], 10);
+                }
+                "PermissionRequest" => {
+                    assert_eq!(
+                        command,
+                        "\"/opt/agent-console/hook-bridge\" permissionrequest"
+                    );
+                    assert_eq!(hook["onFailure"], "block");
+                }
+                _ => assert!(hook.get("onFailure").is_none(), "{event} only records"),
             }
         }
-        // No PreToolUse: with it, PermissionRequest never sees a request.
-        assert!(!hooks.contains_key("PreToolUse"));
+        assert!(hooks.contains_key("PreToolUse"));
+        assert!(hooks.contains_key("PermissionRequest"));
         assert!(hooks.contains_key("PostToolUse"));
     }
 

@@ -41,6 +41,7 @@ ed25519-dalek = "2"
 base64 = "0.22"
 getrandom = "0.2"
 regex = "1"
+risk-tier = { path = "risk-tier" }
 anyhow = "1"
 thiserror = "1"
 parking_lot = "0.12"
@@ -91,4 +92,4 @@ aes-gcm = "0.10"
 tauri = { version = "2", features = ["test"] }
 
 [workspace]
-members = ["hook-bridge"]
+members = ["hook-bridge", "risk-tier"]

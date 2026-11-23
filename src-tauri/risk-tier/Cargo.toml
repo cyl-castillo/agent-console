@@ -1,0 +1,10 @@
+[package]
+name = "risk-tier"
+version = "0.1.0"
+license = "AGPL-3.0-only"
+edition = "2021"
+description = "Agent Console risk tiers for tool requests, shared by the app and the hook bridge"
+
+[dependencies]
+regex = "1"
+serde_json = "1"

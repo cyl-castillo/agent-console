@@ -70,6 +70,7 @@ dependencies = [
  "rand 0.8.6",
  "regex",
  "reqwest 0.12.28",
+ "risk-tier",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -2699,6 +2700,7 @@ dependencies = [
 name = "hook-bridge"
 version = "0.1.0"
 dependencies = [
+ "risk-tier",
  "serde_json",
  "sha2 0.10.9",
  "uuid",
@@ -5151,6 +5153,14 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "risk-tier"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde_json",
 ]
 
 [[package]]
