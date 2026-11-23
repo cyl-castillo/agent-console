@@ -263,14 +263,14 @@ test("the sponsor policy decides low-risk requests alone; the human sees the res
         ).__fixtures.emit("approval://request", payload),
       p,
     );
-  // Low tier (npm test): taken by the policy, witnessed with the policy name.
+  // Low tier (git status; a runner like npm test is medium): taken by the policy, witnessed with the policy name.
   await emit({
     id: "apr-9001",
     ts: Date.now(),
     sessionDir: "/home/demo/.claude",
     cwd: "/home/demo/code/demo-playground",
     tool: "Bash",
-    input: { command: "npm test -- --run" },
+    input: { command: "git status" },
     termId: "sess-auth",
   });
   await expect
