@@ -1038,32 +1038,47 @@ fn record_if_deferred(
 /// SEGURIDAD-MOVIL F2: before honouring an answer, tell the console what we
 /// picked up. The console knows what it wrote; an answer it never wrote was
 /// forged by something running as the user (the agent's own shell), and
-/// becomes a deny here. A console we cannot reach within the budget keeps
-/// the answer as is — availability over a second net the sandbox already
-/// provides when it is on.
+/// becomes a deny here.
+///
+/// An `allow` is honoured only when the console says, in so many words, that
+/// it wrote it (`"forged": false`). No port file, a console that does not
+/// answer within the budget, or a reply without that member all mean "not
+/// confirmed": the allow is dropped and the hook reports no decision, so the
+/// CLI asks the human itself (or auto-denies where it cannot prompt). Removing
+/// `inject-port.json` used to be enough to get a forged allow honoured.
+///
+/// A `deny` needs no confirmation: honouring one nobody wrote blocks a tool,
+/// it never runs one. Whoever can read the port file can also stand in for
+/// the console; that is the engine sandbox's job to prevent, not this check's.
 fn confirm_pickup(decision: Option<Value>, id: &str) -> Option<Value> {
     let res = decision?;
     let d = res.get("decision").and_then(|v| v.as_str()).unwrap_or("");
     if d != "allow" && d != "deny" {
         return Some(res);
     }
-    let Some((port, token)) = inject_target() else {
-        return Some(res);
-    };
     let body = json!({ "id": id, "decision": d }).to_string();
-    match post_loopback(
-        "/approval/pickup",
-        port,
-        &token,
-        &body,
-        Duration::from_millis(PICKUP_BUDGET_MS),
-    ) {
-        Some(v) if v.get("forged").and_then(|f| f.as_bool()) == Some(true) => Some(json!({
+    let reply = inject_target().and_then(|(port, token)| {
+        post_loopback(
+            "/approval/pickup",
+            port,
+            &token,
+            &body,
+            Duration::from_millis(PICKUP_BUDGET_MS),
+        )
+    });
+    match reply
+        .as_ref()
+        .and_then(|v| v.get("forged"))
+        .and_then(Value::as_bool)
+    {
+        Some(true) => Some(json!({
             "id": id,
             "decision": "deny",
             "reason": "agent-console denied this: the approval file was not written by the console (forged)",
         })),
-        _ => Some(res),
+        Some(false) => Some(res),
+        None if d == "deny" => Some(res),
+        None => None,
     }
 }
 
@@ -2757,10 +2772,11 @@ mod tests {
     }
 
     /// A forged answer (the console says it never wrote it) becomes a deny;
-    /// a genuine one passes through; an unreachable console keeps it.
+    /// a genuine one passes through; an allow the console did not confirm is
+    /// dropped (no decision), never honoured.
     #[test]
     fn confirm_pickup_turns_a_forged_answer_into_a_deny() {
-        fn server(forged: bool) -> u16 {
+        fn server(reply: &'static str) -> u16 {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = listener.local_addr().unwrap().port();
             std::thread::spawn(move || {
@@ -2772,7 +2788,7 @@ mod tests {
                     req.starts_with("POST /approval/pickup HTTP/1.1\r\n"),
                     "{req}"
                 );
-                let body = format!(r#"{{"ok":true,"forged":{forged}}}"#);
+                let body = reply;
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
@@ -2800,17 +2816,31 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("XDG_DATA_HOME", &dir);
         let allow = json!({ "id": "x", "decision": "allow" });
+        let deny = json!({ "id": "x", "decision": "deny", "reason": "no" });
         // Forged → deny.
-        write_port_file_for_test(&dir, server(true), "sekrit");
+        write_port_file_for_test(&dir, server(r#"{"ok":true,"forged":true}"#), "sekrit");
         let out = confirm_pickup(Some(allow.clone()), "x").unwrap();
         assert_eq!(out["decision"], "deny");
         assert!(out["reason"].as_str().unwrap().contains("forged"));
         // Genuine → unchanged.
-        write_port_file_for_test(&dir, server(false), "sekrit");
+        write_port_file_for_test(&dir, server(r#"{"ok":true,"forged":false}"#), "sekrit");
         assert_eq!(confirm_pickup(Some(allow.clone()), "x").unwrap(), allow);
-        // Unreachable console → unchanged.
+        // Unreachable console → the allow is dropped; a deny still stands.
         write_port_file_for_test(&dir, 1, "sekrit");
-        assert_eq!(confirm_pickup(Some(allow.clone()), "x").unwrap(), allow);
+        assert!(confirm_pickup(Some(allow.clone()), "x").is_none());
+        assert_eq!(confirm_pickup(Some(deny.clone()), "x").unwrap(), deny);
+        // Something answers on the port but does not say "not forged" → dropped.
+        write_port_file_for_test(&dir, server("{}"), "sekrit");
+        assert!(confirm_pickup(Some(allow.clone()), "x").is_none());
+        write_port_file_for_test(&dir, server(r#"{"ok":false}"#), "sekrit");
+        assert!(confirm_pickup(Some(allow.clone()), "x").is_none());
+        // No port file at all (deleted by whoever forged the answer) → dropped.
+        std::fs::remove_file(dir.join("agent-console").join("inject-port.json")).unwrap();
+        assert!(confirm_pickup(Some(allow.clone()), "x").is_none());
+        assert_eq!(confirm_pickup(Some(deny.clone()), "x").unwrap(), deny);
+        // "ask" is not a decision and is passed through untouched.
+        let ask = json!({ "id": "x", "decision": "ask" });
+        assert_eq!(confirm_pickup(Some(ask.clone()), "x").unwrap(), ask);
         // No answer stays no answer.
         assert!(confirm_pickup(None, "x").is_none());
     }
