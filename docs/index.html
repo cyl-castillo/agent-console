@@ -595,7 +595,7 @@
         <div class="pillar">
           <div class="icon">▸</div>
           <h4>Agent-first</h4>
-          <p>Powered by the Claude Code CLI inside your repo. Full tool access; per-tool approval on every dangerous action.</p>
+          <p>Runs the real agent CLIs inside your repo: Claude Code, Codex or OpenCode, chosen per session. Full tool access; you decide what waits for your approval.</p>
         </div>
         <div class="pillar">
           <div class="icon">±</div>
@@ -625,10 +625,10 @@
     <div class="container">
       <h2>What you get</h2>
       <ul class="features">
-        <li>Per-tool approval modal <span class="dim">— Bash, Edit, Write blocked until you OK; keyboard flow + countdown</span></li>
+        <li>Per-tool approval modal <span class="dim">— Bash, Edit, Write blocked until you OK; keyboard flow + countdown. Claude Code and Codex; OpenCode has no hooks and follows the policy file through its own permission settings</span></li>
         <li>Per-turn working-tree snapshot <span class="dim">— restore with one click, undo the restore too</span></li>
         <li>Proof ledger (Testigo) <span class="dim">— witnessed sessions, signed exportable packets</span></li>
-        <li>Multiple engines <span class="dim">— Claude or Codex, per session; one-click login repair</span></li>
+        <li>Multiple engines <span class="dim">— Claude Code, Codex or OpenCode, per session; one-click login repair</span></li>
         <li>Multi-agent rooms <span class="dim">— you + several AIs on one problem; working rooms edit on an isolated branch</span></li>
         <li>Jira as an actionable queue <span class="dim">— ticket → seeded session; log hours with evidence-backed suggestions</span></li>
         <li>Project roles <span class="dim">— Developer, QA, Analyst, PO, PM: the queue and the prompts adapt</span></li>
@@ -648,7 +648,7 @@
   <section id="install">
     <div class="container">
       <h2>Install</h2>
-      <p style="margin: 0 0 24px;">Linux bundles attached to the <span data-version-tag>latest</span> release. Requires <code>claude</code> CLI installed and authenticated (<code>npm install -g @anthropic-ai/claude-code</code>) and Node.js ≥ 20.</p>
+      <p style="margin: 0 0 24px;">Linux bundles attached to the <span data-version-tag>latest</span> release. Requires at least one agent CLI installed and logged in: Claude Code (<code>npm install -g @anthropic-ai/claude-code</code>), Codex or OpenCode. Also Node.js ≥ 20.</p>
 
       <div class="install">
         <div class="install-card">
@@ -703,14 +703,14 @@ agent-console</pre>
           <div class="num">2</div>
           <div>
             <div class="label">Direct the agent</div>
-            <p class="desc">Type a task. Behind the scenes, Agent Console builds a snapshot of the working tree and dispatches your prompt to <code>claude -p</code> running inside the repo.</p>
+            <p class="desc">Type a task. Behind the scenes, Agent Console builds a snapshot of the working tree and sends your prompt to that session's agent CLI (Claude Code, Codex or OpenCode) running inside the repo.</p>
           </div>
         </div>
         <div class="step">
           <div class="num">3</div>
           <div>
             <div class="label">Approve risky actions</div>
-            <p class="desc">When the agent wants to run <code>Bash</code>, <code>Edit</code>, or <code>Write</code>, a modal pops up showing the tool name and input. Approve, deny, or enable "approve all" for the session.</p>
+            <p class="desc">With Claude Code and Codex, when the agent wants to run <code>Bash</code>, <code>Edit</code>, or <code>Write</code>, a modal pops up showing the tool name and input. Approve, deny, or enable "approve all" for the session.</p>
           </div>
         </div>
         <div class="step">
@@ -734,35 +734,28 @@ agent-console</pre>
   <section id="arch">
     <div class="container">
       <h2>Architecture</h2>
-      <p style="margin-bottom: 20px;">Tauri 2 binary (Rust) hosting a React frontend. Cross-process IPC for the agent via stdin/stdout. Filesystem coordination for the PreToolUse hook.</p>
-      <pre class="ascii">┌──────────────────────────────────────────────┐
-│ React + TypeScript + Zustand                 │
-│  <span class="hl">FileTree</span> · <span class="hl">Terminal</span> · <span class="hl">Changes</span> · <span class="hl">Preview</span> · <span class="hl">Chat</span> │
-│            ▲                                 │
-│            │ invoke() + events               │
-├────────────┼─────────────────────────────────┤
-│ Rust (Tauri 2)                               │
-│            ▼                                 │
-│  <span class="hl">project_manager</span>   <span class="hl">terminal_runner (PTY)</span>   │
-│  <span class="hl">git_service</span>       <span class="hl">snapshot_service</span>        │
-│  <span class="hl">projects_service</span>  <span class="hl">permission_bridge</span>       │
-│                                              │
-│  <span class="hl">agent_session</span>                              │
-│    spawns: claude -p                         │
-│      --input/output-format stream-json       │
-│      --permission-mode default               │
-│      --settings hooks.json                   │
-│                                              │
-└──────────────────────────────────────────────┘
-              │
-              ▼ stdin / stdout
-         claude -p subprocess
-              │
-              ▼ PreToolUse hook (Node script)
-         req-*.json / res-*.json
-              │
-              ▼
-         permission_bridge → UI modal</pre>
+      <p style="margin-bottom: 20px;">Tauri 2 binary (Rust) hosting a React frontend. Each session's agent CLI runs in a PTY; its hooks reach the console through a bundled native sidecar that writes events and approval requests into the session's directory.</p>
+      <pre class="ascii">┌────────────────────────────────────────────────────────────────┐
+│ React + TypeScript + Zustand                                   │
+│  shell: <span class="hl">Inbox</span> · <span class="hl">Sessions</span> · <span class="hl">Work</span> · <span class="hl">Proof</span> · <span class="hl">Settings</span>             │
+│            ▲ invoke() + events                                 │
+├────────────┼───────────────────────────────────────────────────┤
+│ Rust (Tauri 2)                one service per concern          │
+│            ▼                                                   │
+│  <span class="hl">terminal_runner (PTY)</span>  runs each session's agent CLI          │
+│  <span class="hl">hooks_service</span>          installs the hooks, answers approvals  │
+│  <span class="hl">snapshot_service</span>       per-turn refs and restore              │
+│  <span class="hl">testigo_service</span>        the hash-chained ledger                │
+│  <span class="hl">verification_rules</span>     verdicts, from ledger events only      │
+│  <span class="hl">engine_runner</span>          headless turns for rooms and jobs      │
+│  <span class="hl">vault_service</span>          secrets, in the OS keychain            │
+│  <span class="hl">transport</span>              paired devices (Noise), loopback       │
+└────────────────────────────────────────────────────────────────┘
+        ▲ events.jsonl and approvals/&lt;id&gt;.req.json / .res.json
+        │ in the session's directory
+   <span class="hl">hook-bridge</span>  (bundled native sidecar, a no-op outside the console)
+        ▲ hooks: prompt, permission request, tool result, stop
+   agent CLI  (Claude Code, Codex; OpenCode through a witness plugin)</pre>
     </div>
   </section>
 
