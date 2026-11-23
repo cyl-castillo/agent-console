@@ -981,6 +981,35 @@ fn decision_output(decision: Option<&Value>) -> String {
     .to_string()
 }
 
+/// The request as the console will hash it: the SHA-256 of the exact bytes
+/// `await_decision` writes to the request file.
+fn request_sha256(req: &Value) -> String {
+    sha256_hex(req.to_string().as_bytes())
+}
+
+/// An allow is honoured only for the request this hook made. The console
+/// answers with the hash of the request file as it first read it; that file
+/// sits where anything running as the user can rewrite it, so a human (or a
+/// paired device) may have been shown, and approved, something else. A hash
+/// that differs turns the allow into a deny; an allow that names no request
+/// at all is no decision. A deny or an "ask" needs no binding: neither runs
+/// a tool.
+fn bind_to_request(decision: Option<Value>, id: &str, expected: &str) -> Option<Value> {
+    let res = decision?;
+    if res.get("decision").and_then(|v| v.as_str()) != Some("allow") {
+        return Some(res);
+    }
+    match res.get("requestSha256").and_then(|v| v.as_str()) {
+        Some(h) if h == expected => Some(res),
+        Some(_) => Some(json!({
+            "id": id,
+            "decision": "deny",
+            "reason": "agent-console denied this: the request approved in the console is not the one this tool call made (the request file was rewritten)",
+        })),
+        None => None,
+    }
+}
+
 /// Shared half of both approval bridges: write the request where the app's
 /// watcher sees it, poll for the answer until the deadline, clean up. None ⇒
 /// no decision arrived in time.
@@ -1087,7 +1116,12 @@ fn run_pretooluse(session_dir: &Path) {
         now_ms(),
         timeout_ms,
     );
-    let decision = confirm_pickup(await_decision(session_dir, &id, &req, timeout_ms), &id);
+    let decision = bind_to_request(
+        await_decision(session_dir, &id, &req, timeout_ms),
+        &id,
+        &request_sha256(&req),
+    );
+    let decision = confirm_pickup(decision, &id);
     record_if_deferred(
         session_dir,
         decision.as_ref(),
@@ -1117,7 +1151,12 @@ fn run_permissionrequest(session_dir: &Path) {
         now_ms(),
         timeout_ms,
     );
-    let decision = confirm_pickup(await_decision(session_dir, &id, &req, timeout_ms), &id);
+    let decision = bind_to_request(
+        await_decision(session_dir, &id, &req, timeout_ms),
+        &id,
+        &request_sha256(&req),
+    );
+    let decision = confirm_pickup(decision, &id);
     record_if_deferred(
         session_dir,
         decision.as_ref(),
@@ -2813,6 +2852,39 @@ mod tests {
         assert_eq!(confirm_pickup(Some(allow.clone()), "x").unwrap(), allow);
         // No answer stays no answer.
         assert!(confirm_pickup(None, "x").is_none());
+    }
+
+    /// An allow counts only for the request this hook wrote: the same hash
+    /// passes, another one is a deny, none at all is no decision; deny and
+    /// ask are never touched.
+    #[test]
+    fn an_allow_is_bound_to_the_request_the_hook_made() {
+        let req = json!({ "id": "x", "tool": "Bash", "input": { "command": "rm -rf x" } });
+        let mine = request_sha256(&req);
+        assert_eq!(mine, sha256_hex(req.to_string().as_bytes()));
+        let swapped =
+            request_sha256(&json!({ "id": "x", "tool": "Bash", "input": { "command": "ls" } }));
+        assert_ne!(mine, swapped);
+
+        let ok = json!({ "id": "x", "decision": "allow", "requestSha256": mine });
+        assert_eq!(bind_to_request(Some(ok.clone()), "x", &mine).unwrap(), ok);
+
+        let other = json!({ "id": "x", "decision": "allow", "requestSha256": swapped });
+        let out = bind_to_request(Some(other), "x", &mine).unwrap();
+        assert_eq!(out["decision"], "deny");
+        assert!(out["reason"].as_str().unwrap().contains("rewritten"));
+
+        let unbound = json!({ "id": "x", "decision": "allow" });
+        assert!(bind_to_request(Some(unbound), "x", &mine).is_none());
+
+        let deny = json!({ "id": "x", "decision": "deny", "reason": "no" });
+        assert_eq!(
+            bind_to_request(Some(deny.clone()), "x", &mine).unwrap(),
+            deny
+        );
+        let ask = json!({ "id": "x", "decision": "ask" });
+        assert_eq!(bind_to_request(Some(ask.clone()), "x", &mine).unwrap(), ask);
+        assert!(bind_to_request(None, "x", &mine).is_none());
     }
 
     #[test]

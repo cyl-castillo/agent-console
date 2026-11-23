@@ -131,6 +131,26 @@ pub struct HooksRuntime {
     /// wrote is a forged approval (something running as the user — the
     /// agent's own shell — wrote the file) and is denied and interrupted.
     answered: Mutex<HashMap<String, String>>,
+    /// Every pending request as this console FIRST read it, by request id,
+    /// with the SHA-256 of the file's bytes. The request file stays on disk
+    /// where anything running as the user can rewrite it, so what is shown,
+    /// tiered and answered is this copy, and the answer names its hash: the
+    /// hook honours an allow only for the request it actually made.
+    first_seen: Mutex<HashMap<String, SeenRequest>>,
+}
+
+#[derive(Clone)]
+struct SeenRequest {
+    sha256: String,
+    request: Value,
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Session dirs are keyed by PID and never reused, so every app run leaves one
@@ -230,6 +250,7 @@ impl HooksRuntime {
             watcher_started: Mutex::new(false),
             approvals_watcher_started: Mutex::new(false),
             answered: Mutex::new(HashMap::new()),
+            first_seen: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1100,14 +1121,65 @@ impl HooksRuntime {
         let Ok(entries) = fs::read_dir(&dir) else {
             return Vec::new();
         };
-        let mut reqs: Vec<Value> = entries
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".req.json"))
-            .filter_map(|e| fs::read_to_string(e.path()).ok())
-            .filter_map(|txt| serde_json::from_str::<Value>(&txt).ok())
-            .collect();
+        let mut on_disk: HashSet<String> = HashSet::new();
+        let mut reqs: Vec<Value> = Vec::new();
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let Some(id) = name.strip_suffix(".req.json") else {
+                continue;
+            };
+            on_disk.insert(id.to_string());
+            if let Some(seen) = self.first_sight(id) {
+                reqs.push(seen.request);
+            }
+        }
+        // A request the hook cleaned up is no longer pending: forget it.
+        self.first_seen.lock().retain(|id, _| on_disk.contains(id));
         reqs.sort_by_key(|v| v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0));
         reqs
+    }
+
+    /// The request `id` as this console first read it. The first call reads
+    /// and remembers the file; every later one returns that copy, whatever
+    /// the file says by then. None while the file is absent, half-written,
+    /// or names a different id than its filename.
+    fn first_sight(&self, id: &str) -> Option<SeenRequest> {
+        let mut map = self.first_seen.lock();
+        if let Some(seen) = map.get(id) {
+            return Some(seen.clone());
+        }
+        let path = self
+            .session_dir
+            .join("approvals")
+            .join(format!("{id}.req.json"));
+        let txt = fs::read_to_string(path).ok()?;
+        let request: Value = serde_json::from_str(&txt).ok()?;
+        if request.get("id").and_then(Value::as_str) != Some(id) {
+            return None;
+        }
+        let seen = SeenRequest {
+            sha256: sha256_hex(txt.as_bytes()),
+            request,
+        };
+        map.insert(id.to_string(), seen.clone());
+        Some(seen)
+    }
+
+    /// Has the request file changed since this console first read it?
+    /// (Something running as the user rewrote it: what a human or a device
+    /// is looking at is no longer what the hook is waiting on.)
+    pub fn request_rewritten(&self, id: &str) -> bool {
+        let Some(seen) = self.first_seen.lock().get(id).cloned() else {
+            return false;
+        };
+        let path = self
+            .session_dir
+            .join("approvals")
+            .join(format!("{id}.req.json"));
+        match fs::read(path) {
+            Ok(bytes) => sha256_hex(&bytes) != seen.sha256,
+            Err(_) => false,
+        }
     }
 
     /// Write a response for an in-flight approval. The hook script is polling
@@ -1132,8 +1204,21 @@ impl HooksRuntime {
                 "that request is no longer pending".into(),
             ));
         }
+        // The answer names the request it answers, as first seen: the hook
+        // compares it with the request it made and refuses an allow given
+        // to anything else.
+        let Some(seen) = self.first_sight(id) else {
+            return Err(AppError::InvalidArgument(
+                "that request could not be read".into(),
+            ));
+        };
         let path = dir.join(format!("{id}.res.json"));
-        let body = json!({ "id": id, "decision": decision, "reason": reason });
+        let body = json!({
+            "id": id,
+            "decision": decision,
+            "reason": reason,
+            "requestSha256": seen.sha256,
+        });
         // Write to a temp file, then LINK it into place: the hook never reads
         // a partial JSON, and a second answer (keyboard vs device racing
         // inside the hook's poll interval) fails with EEXIST instead of
@@ -2571,17 +2656,26 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
                 }
                 continue;
             }
-            if !name.ends_with(".req.json") {
-                continue;
-            }
-            current.insert(name.clone());
-            if seen.contains(&name) {
-                continue;
-            }
-            let Ok(txt) = fs::read_to_string(e.path()) else {
+            let Some(id) = name.strip_suffix(".req.json") else {
                 continue;
             };
-            let Ok(v) = serde_json::from_str::<Value>(&txt) else {
+            current.insert(name.clone());
+            if seen.contains(&name) {
+                // Shown already: a request file rewritten since then is the
+                // same attack as a forged answer, one step earlier.
+                let state = app.state::<AppState>();
+                if state.hooks.request_rewritten(id) && seen.insert(format!("rewritten:{id}")) {
+                    on_forged_approval(&app, id, "request rewritten", "request as first shown");
+                }
+                continue;
+            }
+            // What is shown, pushed and witnessed is the first-sight copy.
+            let Some(v) = app
+                .state::<AppState>()
+                .hooks
+                .first_sight(id)
+                .map(|s| s.request)
+            else {
                 continue;
             };
             let _ = app.emit("approval://request", &v);
@@ -2603,7 +2697,11 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
             seen.insert(name);
         }
         // Drop ids that disappeared (hook cleaned them up).
-        seen.retain(|n| current.contains(n));
+        seen.retain(|n| {
+            current.contains(n)
+                || n.strip_prefix("rewritten:")
+                    .is_some_and(|id| current.contains(&format!("{id}.req.json")))
+        });
     }
 }
 
@@ -4036,6 +4134,11 @@ mod tests {
         let res: Value =
             serde_json::from_str(&std::fs::read_to_string(&res_path).unwrap()).unwrap();
         assert_eq!(res["decision"], "deny");
+        assert_eq!(
+            res["requestSha256"],
+            sha256_hex(&std::fs::read(approvals.join(format!("{id}.req.json"))).unwrap()),
+            "the answer names the request it answers"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -4086,5 +4189,70 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty());
+    }
+
+    /// A request is what this console first read. Rewriting the file after
+    /// that changes neither what is listed nor the hash the answer carries,
+    /// and the rewrite is noticed; a file whose inner id is not its name is
+    /// never shown.
+    #[test]
+    fn a_request_rewritten_after_first_sight_is_not_what_gets_answered() {
+        let _env = crate::test_support::lock_env();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("ac-bound-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", base.join("data"));
+        std::env::set_var("XDG_CACHE_HOME", base.join("cache"));
+        let hooks = HooksRuntime::new().unwrap();
+        let approvals = hooks.session_dir().join("approvals");
+        let id = uuid::Uuid::new_v4().to_string();
+        let req_path = approvals.join(format!("{id}.req.json"));
+        let original =
+            json!({ "id": id, "ts": 1, "tool": "Bash", "input": { "command": "rm -rf x" } })
+                .to_string();
+        std::fs::write(&req_path, &original).unwrap();
+
+        let shown = hooks.pending_approvals();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0]["input"]["command"], "rm -rf x");
+        assert!(!hooks.request_rewritten(&id));
+
+        // The agent's shell swaps in something harmless to look at.
+        std::fs::write(
+            &req_path,
+            json!({ "id": id, "ts": 1, "tool": "Bash", "input": { "command": "ls" } }).to_string(),
+        )
+        .unwrap();
+        assert!(hooks.request_rewritten(&id));
+        assert_eq!(
+            hooks.pending_approvals()[0]["input"]["command"],
+            "rm -rf x",
+            "still the request as first seen"
+        );
+
+        hooks.respond(&id, "allow", None).unwrap();
+        let res: Value = serde_json::from_str(
+            &std::fs::read_to_string(approvals.join(format!("{id}.res.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(res["requestSha256"], sha256_hex(original.as_bytes()));
+
+        // Once the hook removes the request, the copy is dropped with it.
+        std::fs::remove_file(&req_path).unwrap();
+        assert!(hooks.pending_approvals().is_empty());
+        assert!(!hooks.request_rewritten(&id));
+
+        // A file that claims another request's id is never shown.
+        let other = uuid::Uuid::new_v4().to_string();
+        std::fs::write(
+            approvals.join(format!("{other}.req.json")),
+            json!({ "id": id, "ts": 2, "tool": "Bash", "input": {} }).to_string(),
+        )
+        .unwrap();
+        assert!(hooks.pending_approvals().is_empty());
+        assert!(hooks.respond(&other, "allow", None).is_err());
     }
 }
