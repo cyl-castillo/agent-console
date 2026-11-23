@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Copy, RefreshCw } from "lucide-react";
 import { ipc } from "../ipc/tauri";
 import { copyText } from "../lib/clipboard";
+import { useSessionStore } from "../stores/sessionStore";
 import { useToastStore } from "../stores/toastStore";
 import type { FirewallStatus } from "../types/domain";
 import { Button } from "../ui/Button";
@@ -33,6 +34,8 @@ const preClass =
 /// here elevates.
 export function FirewallSection() {
   const showToast = useToastStore((s) => s.show);
+  // With a project open, a change of state is witnessed in its ledger.
+  const root = useSessionStore((s) => s.project?.root);
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,7 +44,7 @@ export function FirewallSection() {
     (announce: boolean) => {
       setBusy(true);
       return ipc
-        .firewallStatus()
+        .firewallStatus(root)
         .then((s) => {
           setStatus(s);
           setError(null);
@@ -50,7 +53,7 @@ export function FirewallSection() {
         .catch((e) => setError(String(e)))
         .finally(() => setBusy(false));
     },
-    [showToast],
+    [showToast, root],
   );
 
   useEffect(() => {

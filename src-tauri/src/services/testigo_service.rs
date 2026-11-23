@@ -1780,6 +1780,65 @@ impl TestigoService {
         )
     }
 
+    /// Firewall mode as the console found it (`firewall_state`, actor
+    /// `console`, `unbound`): an observation, written only when it differs
+    /// from the last one in this ledger, so a packet says under which
+    /// enforcement its approvals were decided and when that changed. A
+    /// ledger that never saw the mode on gets no line for "off" or
+    /// "unsupported". `None` = nothing new to say.
+    pub fn on_firewall_state(
+        &self,
+        project_root: &str,
+        ts: i64,
+        state: &str,
+        installed_sha256: Option<&str>,
+        expected_sha256: Option<&str>,
+        problems: &[String],
+    ) -> AppResult<Option<ProofEvent>> {
+        let mut inner = self.inner.lock();
+        let last = Self::read_events(project_root)?
+            .into_iter()
+            .rev()
+            .find(|e| e.kind == "firewall_state");
+        let previous = last
+            .as_ref()
+            .and_then(|e| e.payload.get("state"))
+            .and_then(Value::as_str)
+            .map(String::from);
+        let previous_sha = last
+            .as_ref()
+            .and_then(|e| e.payload.get("installedSha256"))
+            .and_then(Value::as_str);
+        match previous.as_deref() {
+            None if matches!(state, "off" | "unsupported") => return Ok(None),
+            Some(p) if p == state && previous_sha == installed_sha256 => return Ok(None),
+            _ => {}
+        }
+        let mut payload = json!({ "state": state, "problems": problems });
+        if let Some(p) = previous {
+            payload["previous"] = json!(p);
+        }
+        if let Some(h) = installed_sha256 {
+            payload["installedSha256"] = json!(h);
+        }
+        if let Some(h) = expected_sha256 {
+            payload["expectedSha256"] = json!(h);
+        }
+        Self::record(
+            &mut inner,
+            project_root,
+            ts,
+            "unbound".into(),
+            None,
+            "firewall_state",
+            None,
+            None,
+            "console",
+            payload,
+        )
+        .map(Some)
+    }
+
     /// F8: a remote device paired, re-scoped or revoked (`remote_device`) and
     /// the listener started or stopped with its bind (`remote_listener`) —
     /// the human's acts that decide who can answer from afar. `unbound`.
@@ -2158,6 +2217,85 @@ mod tests {
             .on_turn_end(root, 9, Some("t1"), None, json!({}))
             .unwrap();
         assert_eq!(end.turn_id, second.turn_id);
+    }
+
+    /// Firewall mode is witnessed when it changes, not every time it is read.
+    #[test]
+    fn firewall_state_is_recorded_on_change_only() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base =
+            std::env::temp_dir().join(format!("ac-testigo-fw-{}-{}", std::process::id(), nanos));
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let svc = TestigoService::new();
+        let root = "/proj/fw";
+        let none: &[String] = &[];
+        // Never on: nothing to say.
+        assert!(svc
+            .on_firewall_state(root, 1, "off", None, Some("e1"), none)
+            .unwrap()
+            .is_none());
+        assert!(svc
+            .on_firewall_state(root, 2, "unsupported", None, None, none)
+            .unwrap()
+            .is_none());
+
+        let on = svc
+            .on_firewall_state(root, 3, "enforced", Some("e1"), Some("e1"), none)
+            .unwrap()
+            .expect("first enforced");
+        assert_eq!(on.kind, "firewall_state");
+        assert_eq!(on.actor, "console");
+        assert_eq!(on.case_id, "unbound");
+        assert_eq!(on.payload["state"], "enforced");
+        assert_eq!(on.payload["installedSha256"], "e1");
+        assert!(on.payload.get("previous").is_none());
+        // Read again, unchanged: no line.
+        assert!(svc
+            .on_firewall_state(root, 4, "enforced", Some("e1"), Some("e1"), none)
+            .unwrap()
+            .is_none());
+
+        // The drop-in changed under the same state name.
+        let problems = vec!["/etc/x is not what this version installs".to_string()];
+        let drift = svc
+            .on_firewall_state(root, 5, "drifted", Some("zz"), Some("e1"), &problems)
+            .unwrap()
+            .expect("drift");
+        assert_eq!(drift.payload["previous"], "enforced");
+        assert_eq!(drift.payload["problems"][0], problems[0]);
+        let drift2 = svc
+            .on_firewall_state(root, 6, "drifted", Some("yy"), Some("e1"), &problems)
+            .unwrap()
+            .expect("another content");
+        assert_eq!(drift2.payload["installedSha256"], "yy");
+
+        // Turned off after having been on: that is a line.
+        let off = svc
+            .on_firewall_state(root, 7, "off", None, Some("e1"), none)
+            .unwrap()
+            .expect("off after on");
+        assert_eq!(off.payload["previous"], "drifted");
+        assert!(off.payload.get("installedSha256").is_none());
+        assert!(svc
+            .on_firewall_state(root, 8, "off", None, Some("e1"), none)
+            .unwrap()
+            .is_none());
+
+        let kinds: Vec<String> = svc
+            .list(root, None, None)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "firewall_state")
+            .map(|e| e.payload["state"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(kinds, ["enforced", "drifted", "drifted", "off"]);
+        assert!(svc.verify(root).unwrap().ok);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// D9: what an agent does through the console's MCP server is witnessed

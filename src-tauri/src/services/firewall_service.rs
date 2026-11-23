@@ -213,6 +213,9 @@ pub struct FirewallStatus {
     pub expected: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_sha256: Option<String>,
+    /// sha256 of the drop-in on disk, when there is one to read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub installed_sha256: Option<String>,
     /// Shell text the user reviews and runs in their own terminal to turn
     /// the mode on (or bring a drifted install up to date). Absent when
     /// this build ships no bridge binary to install.
@@ -256,6 +259,7 @@ fn unsupported(reason: String) -> FirewallStatus {
         bridge_path: None,
         expected: None,
         expected_sha256: None,
+        installed_sha256: None,
         install_script: None,
         uninstall_script: None,
         engines: engines(false),
@@ -429,6 +433,7 @@ pub fn inspect(
         bridge_path: Some(bridge.to_string_lossy().to_string()),
         expected: Some(expected.to_string()),
         expected_sha256: Some(sha256_hex(expected.as_bytes())),
+        installed_sha256: None,
         install_script: None,
         uninstall_script: None,
         engines: engines(false),
@@ -436,6 +441,7 @@ pub fn inspect(
     if std::fs::symlink_metadata(dropin).is_err() {
         return status;
     }
+    status.installed_sha256 = std::fs::read(dropin).ok().map(|b| sha256_hex(&b));
 
     let mut unsafe_problems = ownership_problems(dropin, anchor, admin_uid);
     if !world_readable(dropin, false) {
