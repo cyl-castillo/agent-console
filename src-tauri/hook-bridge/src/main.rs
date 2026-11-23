@@ -898,9 +898,20 @@ fn permission_decision_output(decision: Option<&Value>) -> String {
 /// prompt, or by its auto-deny where it can't prompt. Recorded so the ledger
 /// never shows a request with no outcome; until now 58 % of approval
 /// requests ended exactly like that.
-fn approval_deferred_event(id: &str, tool: Option<&str>, term_id: Option<&str>, ts: u64) -> Value {
+fn approval_deferred_event(
+    id: &str,
+    tool: Option<&str>,
+    term_id: Option<&str>,
+    ts: u64,
+    unconfirmed: Option<&str>,
+) -> Value {
     let mut e = Map::new();
     e.insert("type".into(), json!("approval_deferred"));
+    // An answer WAS picked up but the console did not confirm writing it:
+    // not the same as a request nobody answered, and the ledger says so.
+    if let Some(picked) = unconfirmed {
+        e.insert("unconfirmed".into(), json!(picked));
+    }
     e.insert("ts".into(), json!(ts));
     e.insert("approvalId".into(), json!(id));
     if let Some(t) = tool {
@@ -1030,6 +1041,10 @@ fn record_if_deferred(
                 req.get("tool").and_then(|v| v.as_str()),
                 term_id,
                 now_ms(),
+                decision
+                    .filter(|d| d.get("decision").and_then(|v| v.as_str()) == Some("unconfirmed"))
+                    .and_then(|d| d.get("picked"))
+                    .and_then(|v| v.as_str()),
             ),
         );
     }
@@ -1043,9 +1058,12 @@ fn record_if_deferred(
 /// An `allow` is honoured only when the console says, in so many words, that
 /// it wrote it (`"forged": false`). No port file, a console that does not
 /// answer within the budget, or a reply without that member all mean "not
-/// confirmed": the allow is dropped and the hook reports no decision, so the
-/// CLI asks the human itself (or auto-denies where it cannot prompt). Removing
-/// `inject-port.json` used to be enough to get a forged allow honoured.
+/// confirmed": the allow is replaced by `"decision": "unconfirmed"`, which is
+/// no decision to the CLI (it asks the human itself, or auto-denies where it
+/// cannot prompt) and lets the ledger say why — the console may well have
+/// recorded a human's allow for this request, and "nobody answered" would
+/// contradict it. Removing `inject-port.json` used to be enough to get a
+/// forged allow honoured.
 ///
 /// A `deny` needs no confirmation: honouring one nobody wrote blocks a tool,
 /// it never runs one. Whoever can read the port file can also stand in for
@@ -1078,7 +1096,7 @@ fn confirm_pickup(decision: Option<Value>, id: &str) -> Option<Value> {
         })),
         Some(false) => Some(res),
         None if d == "deny" => Some(res),
-        None => None,
+        None => Some(json!({ "id": id, "decision": "unconfirmed", "picked": d })),
     }
 }
 
@@ -2411,7 +2429,11 @@ mod tests {
         assert!(is_decided(Some(&json!({"decision": "deny"}))));
         assert!(!is_decided(Some(&json!({"decision": "ask"}))));
         assert!(!is_decided(None));
-        let e = approval_deferred_event("abc", Some("Bash"), Some("t-1"), 42);
+        let e = approval_deferred_event("abc", Some("Bash"), Some("t-1"), 42, None);
+        assert!(e.get("unconfirmed").is_none());
+        let u = approval_deferred_event("abc", Some("Bash"), Some("t-1"), 42, Some("allow"));
+        assert_eq!(u["type"], "approval_deferred");
+        assert_eq!(u["unconfirmed"], "allow");
         assert_eq!(e["type"], "approval_deferred");
         assert_eq!(e["approvalId"], "abc");
         assert_eq!(e["tool"], "Bash");
@@ -2817,6 +2839,12 @@ mod tests {
         std::env::set_var("XDG_DATA_HOME", &dir);
         let allow = json!({ "id": "x", "decision": "allow" });
         let deny = json!({ "id": "x", "decision": "deny", "reason": "no" });
+        // What an allow becomes when the console did not confirm it: no
+        // decision to either engine, and a deferred line that says why.
+        let unconfirmed = json!({ "id": "x", "decision": "unconfirmed", "picked": "allow" });
+        assert_eq!(decision_output(Some(&unconfirmed)), "{}");
+        assert_eq!(permission_decision_output(Some(&unconfirmed)), "{}");
+        assert!(!is_decided(Some(&unconfirmed)));
         // Forged → deny.
         write_port_file_for_test(&dir, server(r#"{"ok":true,"forged":true}"#), "sekrit");
         let out = confirm_pickup(Some(allow.clone()), "x").unwrap();
@@ -2827,16 +2855,28 @@ mod tests {
         assert_eq!(confirm_pickup(Some(allow.clone()), "x").unwrap(), allow);
         // Unreachable console → the allow is dropped; a deny still stands.
         write_port_file_for_test(&dir, 1, "sekrit");
-        assert!(confirm_pickup(Some(allow.clone()), "x").is_none());
+        assert_eq!(
+            confirm_pickup(Some(allow.clone()), "x").unwrap(),
+            unconfirmed
+        );
         assert_eq!(confirm_pickup(Some(deny.clone()), "x").unwrap(), deny);
         // Something answers on the port but does not say "not forged" → dropped.
         write_port_file_for_test(&dir, server("{}"), "sekrit");
-        assert!(confirm_pickup(Some(allow.clone()), "x").is_none());
+        assert_eq!(
+            confirm_pickup(Some(allow.clone()), "x").unwrap(),
+            unconfirmed
+        );
         write_port_file_for_test(&dir, server(r#"{"ok":false}"#), "sekrit");
-        assert!(confirm_pickup(Some(allow.clone()), "x").is_none());
+        assert_eq!(
+            confirm_pickup(Some(allow.clone()), "x").unwrap(),
+            unconfirmed
+        );
         // No port file at all (deleted by whoever forged the answer) → dropped.
         std::fs::remove_file(dir.join("agent-console").join("inject-port.json")).unwrap();
-        assert!(confirm_pickup(Some(allow.clone()), "x").is_none());
+        assert_eq!(
+            confirm_pickup(Some(allow.clone()), "x").unwrap(),
+            unconfirmed
+        );
         assert_eq!(confirm_pickup(Some(deny.clone()), "x").unwrap(), deny);
         // "ask" is not a decision and is passed through untouched.
         let ask = json!({ "id": "x", "decision": "ask" });

@@ -2161,12 +2161,21 @@ fn handle_event(v: &Value, app: &AppHandle) {
         if let (Some(p), Some(id)) = (project, str_field(v, "approvalId")) {
             let root = p.root.to_string_lossy();
             let ts = v.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);
+            // An answer the hook picked up but could not confirm with this
+            // console is a different story from silence: the ledger may
+            // already hold the human's allow for this id, and this line
+            // says it was not the one that took effect.
+            let reason = if v.get("unconfirmed").is_some() {
+                "an allow was picked up but the console did not confirm it wrote it — not honoured; decided in the CLI prompt or auto-denied"
+            } else {
+                "not answered in the console in time — decided in the CLI prompt or auto-denied"
+            };
             let _ = state.testigo.on_approval_decision(
                 root.as_ref(),
                 ts,
                 &id,
                 "external",
-                Some("not answered in the console in time — decided in the CLI prompt or auto-denied"),
+                Some(reason),
                 None,
             );
         }
