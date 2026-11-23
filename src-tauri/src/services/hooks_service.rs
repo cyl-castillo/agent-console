@@ -1363,7 +1363,7 @@ fn permissionrequest_supported() -> bool {
 /// outside CLAUDE_EVENT_FLOORS are the base set every CLI knows. Unknown
 /// version (`None`) ⇒ base set only: the one thing we know about a CLI we
 /// couldn't identify is that an unknown key can stop it from starting.
-fn claude_event_supported(event: &str, version: Option<(u64, u64, u64)>) -> bool {
+pub(crate) fn claude_event_supported(event: &str, version: Option<(u64, u64, u64)>) -> bool {
     match CLAUDE_EVENT_FLOORS.iter().find(|(e, _)| *e == event) {
         None => true,
         Some((_, floor)) => version.is_some_and(|v| v >= *floor),
@@ -1387,7 +1387,7 @@ const CLAUDE_VERSION_RETRY_AFTER: Duration = Duration::from_secs(60);
 /// setup). The first failure is logged, because its consequence (base hook
 /// set only) is otherwise invisible; `HooksStatus.claude_version` carries
 /// it to the UI.
-fn detect_claude_version() -> Option<(u64, u64, u64)> {
+pub(crate) fn detect_claude_version() -> Option<(u64, u64, u64)> {
     type Probe = (Instant, Option<(u64, u64, u64)>);
     static CACHE: std::sync::OnceLock<Mutex<Option<Probe>>> = std::sync::OnceLock::new();
     static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1731,12 +1731,12 @@ fn install_opencode_plugin_at(path: &Path) -> AppResult<bool> {
 
 /// The native bridge binary's filename (with .exe on Windows).
 #[cfg(windows)]
-const BRIDGE_BIN_NAME: &str = "hook-bridge.exe";
+pub(crate) const BRIDGE_BIN_NAME: &str = "hook-bridge.exe";
 #[cfg(not(windows))]
-const BRIDGE_BIN_NAME: &str = "hook-bridge";
+pub(crate) const BRIDGE_BIN_NAME: &str = "hook-bridge";
 
 /// Hook event → bridge binary mode argument.
-fn bridge_mode(event: &str) -> &'static str {
+pub(crate) fn bridge_mode(event: &str) -> &'static str {
     match event {
         "UserPromptSubmit" => "userprompt",
         "PreToolUse" => "pretooluse",
@@ -1755,6 +1755,16 @@ fn bridge_mode(event: &str) -> &'static str {
     }
 }
 
+/// The hook-bridge sidecar that ships next to the app executable. None in a
+/// dev run without it.
+pub(crate) fn bundled_bridge() -> Option<PathBuf> {
+    let sidecar = std::env::current_exe()
+        .ok()?
+        .parent()?
+        .join(BRIDGE_BIN_NAME);
+    sidecar.is_file().then_some(sidecar)
+}
+
 /// Copy the bundled hook-bridge sidecar to a STABLE path under the cache dir.
 /// The sidecar ships next to the app executable, but that location moves on
 /// every AppImage launch (fresh /tmp mount) and on every update — a hooks.json
@@ -1763,13 +1773,7 @@ fn bridge_mode(event: &str) -> &'static str {
 /// None ⇒ no sidecar next to the exe (dev run without it) — callers fall back
 /// to the node scripts.
 fn ensure_hook_binary(runtime_dir: &Path) -> Option<PathBuf> {
-    let sidecar = std::env::current_exe()
-        .ok()?
-        .parent()?
-        .join(BRIDGE_BIN_NAME);
-    if !sidecar.is_file() {
-        return None;
-    }
+    let sidecar = bundled_bridge()?;
     let bin_dir = runtime_dir.join("bin");
     fs::create_dir_all(&bin_dir).ok()?;
     let dest = bin_dir.join(BRIDGE_BIN_NAME);

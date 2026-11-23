@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 
 use crate::error::AppResult;
+use crate::services::firewall_service::{self, FirewallStatus};
 use crate::services::hooks_service::HooksStatus;
 use crate::services::sandbox_service::{self, SandboxStatus};
 use crate::state::AppState;
@@ -74,4 +75,12 @@ pub fn sandbox_status(project_root: String) -> AppResult<SandboxStatus> {
 #[tauri::command(async)]
 pub fn sandbox_enable(project_root: String) -> AppResult<SandboxStatus> {
     sandbox_service::enable(std::path::Path::new(&project_root))
+}
+
+/// Firewall mode: are the console's hooks and baseline policy installed in
+/// Claude Code's managed settings, owned by the administrator, and what
+/// this version would install? Read-only; installing is the user's action.
+#[tauri::command(async)]
+pub fn firewall_status() -> AppResult<FirewallStatus> {
+    Ok(firewall_service::status())
 }
