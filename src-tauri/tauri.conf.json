@@ -31,8 +31,8 @@
     "targets": "all",
     "category": "DeveloperTool",
     "publisher": "GoEncode LLC",
-    "shortDescription": "Minimalist AI-native console for directing agents inside a repository.",
-    "longDescription": "Agent Console is a small, terminal-first desktop app that puts an integrated shell, git diff viewer, and Claude Code agent side-by-side. It is designed for developers who want to direct an agent — not write code in an IDE.",
+    "shortDescription": "Direct coding agents in your repository, with a verifiable record of what they did.",
+    "longDescription": "Agent Console is a desktop app that runs the real agent CLIs (Claude Code, Codex or OpenCode, per session) next to a shell and a git diff. A human approves each risky step, any turn can be rewound, and every prompt, approval, tool result and diff lands in a hash-chained ledger.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

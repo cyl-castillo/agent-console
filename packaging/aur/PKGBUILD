@@ -5,7 +5,7 @@
 pkgname=agent-console-bin
 pkgver=0.59.0
 pkgrel=1
-pkgdesc="Minimalist AI-native console for directing coding agents inside a repository"
+pkgdesc="Direct coding agents in your repo, with a verifiable record of what they did"
 arch=('x86_64')
 url="https://github.com/cyl-castillo/agent-console"
 license=('AGPL-3.0-only')

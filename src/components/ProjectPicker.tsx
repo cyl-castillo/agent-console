@@ -106,7 +106,7 @@ export function ProjectPicker() {
       </button>
       <div className="picker-card">
         <h1>AGENT CONSOLE</h1>
-        <p>A minimalist, AI-native console for directing agents inside a repository.</p>
+        <p>Direct coding agents in your repository, with a verifiable record of what they did.</p>
         <p className="picker-sub">
           Pick a git repository — the agent works inside it. You approve every file change and
           command, and any turn can be rewound.

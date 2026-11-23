@@ -1,7 +1,8 @@
 # @cyl-castillo/agent-console
 
 Launcher for [Agent Console](https://github.com/cyl-castillo/agent-console) — a
-minimalist AI-native desktop console for directing coding agents.
+desktop app for directing coding agents in your repository, with a verifiable
+record of what they did.
 
 Agent Console is a native desktop app (Tauri: Rust + a webview), not a
 JavaScript program. This package is a thin, dependency-free launcher: it
