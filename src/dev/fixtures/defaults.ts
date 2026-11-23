@@ -1663,7 +1663,8 @@ export const defaultFixtures: FixtureMap = {
     source: "project",
     projectSettings: `${ROOT}/.claude/settings.json`,
   },
-  // Firewall mode: not installed in the fixture.
+  // Firewall mode: not installed in the fixture, with the commands that
+  // would install it.
   firewall_status: {
     state: "off",
     problems: [],
@@ -1671,10 +1672,30 @@ export const defaultFixtures: FixtureMap = {
     bridgePath: "/opt/agent-console/hook-bridge",
     expected: '{\n  "allowManagedHooksOnly": true\n}\n',
     expectedSha256: "0".repeat(64),
+    installScript: [
+      "sh -eu <<'AGENT_CONSOLE_INSTALL'",
+      "sudo install -d -o 0 -g 0 -m 0755 '/etc/claude-code/managed-settings.d' '/opt/agent-console'",
+      "sudo install -o 0 -g 0 -m 0700 '/usr/bin/hook-bridge' '/opt/agent-console/hook-bridge.new'",
+      "sudo mv -f '/opt/agent-console/hook-bridge.new' '/opt/agent-console/hook-bridge'",
+      "AGENT_CONSOLE_INSTALL",
+      "",
+    ].join("\n"),
     engines: [
-      { engine: "claude", covered: false, note: "Not enforced." },
-      { engine: "codex", covered: false, note: "Not supported." },
-      { engine: "opencode", covered: false, note: "Not supported." },
+      {
+        engine: "claude",
+        covered: false,
+        note: "Not enforced.",
+      },
+      {
+        engine: "codex",
+        covered: false,
+        note: "Not supported: firewall mode writes no Codex policy.",
+      },
+      {
+        engine: "opencode",
+        covered: false,
+        note: "Not supported: OpenCode has no sandbox and no managed tier.",
+      },
     ],
   },
   remote_status: remoteStatus(false),

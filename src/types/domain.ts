@@ -651,6 +651,9 @@ export interface FirewallStatus {
   /// The drop-in this version would install, and its sha256.
   expected?: string;
   expectedSha256?: string;
+  /// Shell text for the user's own terminal; the console never runs it.
+  installScript?: string;
+  uninstallScript?: string;
   engines: FirewallEngineCoverage[];
 }
 

@@ -213,6 +213,14 @@ pub struct FirewallStatus {
     pub expected: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_sha256: Option<String>,
+    /// Shell text the user reviews and runs in their own terminal to turn
+    /// the mode on (or bring a drifted install up to date). Absent when
+    /// this build ships no bridge binary to install.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_script: Option<String>,
+    /// Shell text that removes the drop-in and the root-owned bridge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uninstall_script: Option<String>,
     pub engines: Vec<EngineCoverage>,
 }
 
@@ -248,8 +256,103 @@ fn unsupported(reason: String) -> FirewallStatus {
         bridge_path: None,
         expected: None,
         expected_sha256: None,
+        install_script: None,
+        uninstall_script: None,
         engines: engines(false),
     }
+}
+
+/// One argument for `sh`, single-quoted. `None` for a path that cannot be
+/// carried on one line: the scripts are text a person reads before running,
+/// and a line break inside an argument is how such text lies.
+fn sh_quote(path: &Path) -> Option<String> {
+    let s = path.to_str()?;
+    if s.is_empty() || s.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    Some(format!("'{}'", s.replace('\'', "'\\''")))
+}
+
+const INSTALL_DELIM: &str = "AGENT_CONSOLE_INSTALL";
+const DROPIN_DELIM: &str = "AGENT_CONSOLE_DROPIN";
+
+/// The install, as shell text for the user's own terminal. The console
+/// never runs it and never elevates.
+///
+/// Nothing root does here trusts a file the agent can write:
+/// - the drop-in travels inside the text (a quoted here-document), not in
+///   a staged file;
+/// - the bridge is copied to a root-only name first, checked there against
+///   the hash of the binary this build ships, and only then made
+///   executable and moved into place — so a swapped source is refused, and
+///   a source swapped for a link to someone's private file is never left
+///   readable.
+///
+/// Both files land through a rename, so Claude Code never reads half of one.
+pub fn install_script(
+    dropin: &Path,
+    bridge: &Path,
+    expected: &str,
+    bridge_source: &Path,
+    bridge_sha256: &str,
+    macos: bool,
+) -> Option<String> {
+    if !bridge_sha256.chars().all(|c| c.is_ascii_hexdigit()) || bridge_sha256.len() != 64 {
+        return None;
+    }
+    if expected
+        .lines()
+        .any(|l| l == DROPIN_DELIM || l == INSTALL_DELIM)
+    {
+        return None;
+    }
+    let with_suffix = |p: &Path| {
+        let mut os = p.as_os_str().to_os_string();
+        os.push(".new");
+        PathBuf::from(os)
+    };
+    let dropin_dir = sh_quote(dropin.parent()?)?;
+    let bridge_dir = sh_quote(bridge.parent()?)?;
+    let dropin_new = sh_quote(&with_suffix(dropin))?;
+    let bridge_new = sh_quote(&with_suffix(bridge))?;
+    let dropin_q = sh_quote(dropin)?;
+    let bridge_q = sh_quote(bridge)?;
+    let source = sh_quote(bridge_source)?;
+    let sha_check = if macos {
+        "shasum -a 256 -c -"
+    } else {
+        "sha256sum -c -"
+    };
+    // `sha256sum -c` reads "<hash>  <path>"; the path is the root-only copy.
+    let check_line = sh_quote(Path::new(&format!(
+        "{bridge_sha256}  {}",
+        with_suffix(bridge).to_str()?
+    )))?;
+    Some(format!(
+        "sh -eu <<'{INSTALL_DELIM}'\n\
+         sudo install -d -o 0 -g 0 -m 0755 {dropin_dir} {bridge_dir}\n\
+         sudo install -o 0 -g 0 -m 0700 {source} {bridge_new}\n\
+         echo {check_line} | sudo {sha_check}\n\
+         sudo chmod 0755 {bridge_new}\n\
+         sudo mv -f {bridge_new} {bridge_q}\n\
+         sudo tee {dropin_new} >/dev/null <<'{DROPIN_DELIM}'\n\
+         {expected}\
+         {DROPIN_DELIM}\n\
+         sudo chown 0:0 {dropin_new}\n\
+         sudo chmod 0644 {dropin_new}\n\
+         sudo mv -f {dropin_new} {dropin_q}\n\
+         {INSTALL_DELIM}\n"
+    ))
+}
+
+/// Turning the mode off: the drop-in first, so Claude Code never sees
+/// hooks that point at a bridge that is gone (which would deny everything).
+pub fn uninstall_script(dropin: &Path, bridge: &Path) -> Option<String> {
+    Some(format!(
+        "sudo rm -f {} && sudo rm -f {}\n",
+        sh_quote(dropin)?,
+        sh_quote(bridge)?
+    ))
 }
 
 /// Can anyone but `admin_uid` change `path` — by writing it, or by
@@ -326,6 +429,8 @@ pub fn inspect(
         bridge_path: Some(bridge.to_string_lossy().to_string()),
         expected: Some(expected.to_string()),
         expected_sha256: Some(sha256_hex(expected.as_bytes())),
+        install_script: None,
+        uninstall_script: None,
         engines: engines(false),
     };
     if std::fs::symlink_metadata(dropin).is_err() {
@@ -410,14 +515,31 @@ pub fn status() -> FirewallStatus {
     let home = dirs::home_dir();
     let expected = render(&dropin_settings(version, &dropin, &bridge, home.as_deref()));
     let bundled = hooks_service::bundled_bridge();
-    inspect(
+    let mut status = inspect(
         &dropin,
         &bridge,
         &expected,
         bundled.as_deref(),
         Path::new("/"),
         0,
-    )
+    );
+    if status.state != "enforced" {
+        status.install_script = bundled.as_deref().and_then(|src| {
+            let sha = sha256_hex(&std::fs::read(src).ok()?);
+            install_script(
+                &dropin,
+                &bridge,
+                &expected,
+                src,
+                &sha,
+                cfg!(target_os = "macos"),
+            )
+        });
+    }
+    if status.state != "off" {
+        status.uninstall_script = uninstall_script(&dropin, &bridge);
+    }
+    status
 }
 
 #[cfg(test)]
@@ -528,6 +650,112 @@ mod tests {
         let hooks = old["hooks"].as_object().unwrap();
         assert!(hooks.contains_key("Stop"));
         assert!(!hooks.contains_key("PermissionRequest"));
+    }
+
+    #[test]
+    fn the_install_script_carries_the_policy_and_checks_the_bridge_as_root() {
+        let expected = render(&settings());
+        let sha = "a".repeat(64);
+        let script = install_script(
+            Path::new("/etc/claude-code/managed-settings.d/50-agent-console.json"),
+            Path::new("/opt/agent-console/hook-bridge"),
+            &expected,
+            Path::new("/home/it's me/app/hook-bridge"),
+            &sha,
+            false,
+        )
+        .unwrap();
+        // The policy is in the text the user reads, byte for byte.
+        assert!(script.contains(&format!(
+            "<<'AGENT_CONSOLE_DROPIN'\n{expected}AGENT_CONSOLE_DROPIN\n"
+        )));
+        // The source is one quoted argument, quote and space included.
+        assert!(script.contains(" '/home/it'\\''s me/app/hook-bridge' "));
+        // Root-only first, verified, then executable, then in place.
+        let order = [
+            "-m 0700 ",
+            &format!("echo '{sha}  /opt/agent-console/hook-bridge.new' | sudo sha256sum -c -"),
+            "sudo chmod 0755 '/opt/agent-console/hook-bridge.new'",
+            "sudo mv -f '/opt/agent-console/hook-bridge.new' '/opt/agent-console/hook-bridge'",
+            "sudo chmod 0644 ",
+            "sudo mv -f '/etc/claude-code/managed-settings.d/50-agent-console.json.new'",
+        ];
+        let mut at = 0;
+        for step in order {
+            let found = script[at..]
+                .find(step)
+                .unwrap_or_else(|| panic!("{step}\n{script}"));
+            at += found + step.len();
+        }
+        assert!(script.starts_with("sh -eu <<'AGENT_CONSOLE_INSTALL'\n"));
+        assert!(script.ends_with("\nAGENT_CONSOLE_INSTALL\n"));
+        // It parses.
+        #[cfg(unix)]
+        {
+            let ok = std::process::Command::new("sh")
+                .arg("-n")
+                .arg("-c")
+                .arg(&script)
+                .status()
+                .unwrap();
+            assert!(ok.success(), "{script}");
+        }
+
+        let mac = install_script(
+            Path::new(
+                "/Library/Application Support/ClaudeCode/managed-settings.d/50-agent-console.json",
+            ),
+            Path::new("/Library/Application Support/AgentConsole/hook-bridge"),
+            &expected,
+            Path::new("/Applications/Agent Console.app/Contents/MacOS/hook-bridge"),
+            &sha,
+            true,
+        )
+        .unwrap();
+        assert!(mac.contains("| sudo shasum -a 256 -c -"));
+        assert!(mac.contains("'/Library/Application Support/AgentConsole/hook-bridge'"));
+    }
+
+    #[test]
+    fn no_script_for_a_path_or_a_hash_that_cannot_be_shown_honestly() {
+        let expected = render(&settings());
+        let dropin = Path::new("/etc/claude-code/managed-settings.d/50-agent-console.json");
+        let bridge = Path::new("/opt/agent-console/hook-bridge");
+        let sha = "a".repeat(64);
+        // A line break in the source path.
+        assert!(install_script(
+            dropin,
+            bridge,
+            &expected,
+            Path::new("/tmp/x\nsudo rm -rf /"),
+            &sha,
+            false
+        )
+        .is_none());
+        // Not a sha256.
+        assert!(install_script(
+            dropin,
+            bridge,
+            &expected,
+            Path::new("/tmp/x"),
+            "$(id)",
+            false
+        )
+        .is_none());
+        // A policy that would close the here-document early.
+        assert!(install_script(
+            dropin,
+            bridge,
+            "{}\nAGENT_CONSOLE_DROPIN\nsudo id\n",
+            Path::new("/tmp/x"),
+            &sha,
+            false
+        )
+        .is_none());
+        assert_eq!(
+            uninstall_script(dropin, bridge).unwrap(),
+            "sudo rm -f '/etc/claude-code/managed-settings.d/50-agent-console.json' && sudo rm -f '/opt/agent-console/hook-bridge'\n"
+        );
     }
 
     #[cfg(unix)]
