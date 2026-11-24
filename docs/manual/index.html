@@ -412,7 +412,7 @@
 │ tests/   │                                     │ ▸ Read tests/auth   │
 │ README   │                                     │ ✓ Edit src/api.ts   │
 │          │                                     │ ✓ Bash: npm test    │
-│          │                                     │ claude: fixed —     │
+│          │                                     │ agent: fixed —      │
 │          │                                     │ token was expired   │
 │          │                                     │ [type a task…]      │
 └──────────┴─────────────────────────────────────┴─────────────────────┘</div>
@@ -435,11 +435,11 @@
       <!-- ============ REQUIREMENTS ============ -->
       <section id="requirements">
         <h2>Requirements</h2>
-        <p>Agent Console drives the Claude Code CLI under the hood, so that has to be installed and logged in first.</p>
+        <p>Agent Console drives the real agent CLIs, so at least one of them has to be installed and logged in first. You choose the engine per session: Claude Code, Codex or OpenCode.</p>
         <table>
           <thead><tr><th>What</th><th>Why</th></tr></thead>
           <tbody>
-            <tr><td>Claude Code CLI</td><td>The agent itself. Install with <code>npm install -g @anthropic-ai/claude-code</code>, then run <code>claude</code> once to authenticate.</td></tr>
+            <tr><td>An agent CLI (at least one)</td><td>The agent itself. <strong>Claude Code</strong>: <code>npm install -g @anthropic-ai/claude-code</code>, then run <code>claude</code> once to log in. <strong>Codex</strong>: <code>npm install -g @openai/codex</code>, then <code>codex login</code>. <strong>OpenCode</strong>: install it from <a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>, then <code>opencode auth login</code>. The setup doctor in Getting Started checks what is present.</td></tr>
             <tr><td>Node.js ≥ 20</td><td>The bundled per-tool approval hook is a Node script.</td></tr>
             <tr><td>git ≥ 2.30</td><td>Powers the diff viewer and per-turn snapshots.</td></tr>
             <tr><td>Rust toolchain</td><td>Only needed if you build from source.</td></tr>
@@ -455,7 +455,7 @@
       <section id="getting-started">
         <h2>Install &amp; first run</h2>
         <ol>
-          <li><strong>Authenticate the CLI.</strong> Run <code>claude</code> in any terminal once and complete login. Agent Console reuses that session — it never asks for your API key.</li>
+          <li><strong>Log in to your agent CLI.</strong> Run its login once in any terminal (<code>claude</code>, <code>codex login</code> or <code>opencode auth login</code>). Agent Console reuses that login — it never asks for your API key.</li>
           <li><strong>Launch Agent Console.</strong> Install a release from the <a href="../#install">downloads on the home page</a> (<code>.deb</code>, <code>.AppImage</code>, or <code>.rpm</code> on Linux; <code>.dmg</code> / <code>.msi</code> on macOS / Windows), or build from source (see <a href="#build">below</a>).</li>
           <li><strong>Open a repository.</strong> Use the folder picker or pick from the recents list. Any local folder works; a git repo unlocks the diff viewer and snapshots.</li>
           <li><strong>Give it a task.</strong> Type a plain-language instruction into the chat — e.g. <em>"fix the failing user-auth test"</em> — and press <kbd>Enter</kbd>.</li>
@@ -463,7 +463,7 @@
         </ol>
         <div class="note">
           <span class="tag">No accounts</span>
-          There is nothing to sign up for inside Agent Console. It runs entirely on your machine and uses your existing Claude Code login.
+          There is nothing to sign up for inside Agent Console. It runs entirely on your machine and uses the login your agent CLI already has.
         </div>
       </section>
 
@@ -492,7 +492,7 @@
       <!-- ============ DIRECTING ============ -->
       <section id="directing">
         <h2>Directing the agent</h2>
-        <p>The chat panel runs <code>claude -p</code> inside your repository with full tool access. You don't write code or call tools yourself — you describe the outcome and supervise.</p>
+        <p>Each session runs its agent CLI (Claude Code, Codex or OpenCode, chosen when you create the session) inside your repository with full tool access. You don't write code or call tools yourself — you describe the outcome and supervise.</p>
         <h3>A good loop</h3>
         <ol>
           <li>State the task in plain language. Be specific about the goal and how to verify it ("…and make <code>npm test</code> pass").</li>
@@ -551,6 +551,7 @@
       <section id="approvals">
         <h2>Tool approvals</h2>
         <p>Before the agent runs a state-changing tool, a modal shows you the <strong>tool name and its exact input</strong>, and you approve or deny.</p>
+        <p><strong>Which engines.</strong> This applies to Claude Code and Codex, which call the console through their hooks before each tool. OpenCode has no hooks, so the console cannot ask before its tools run: it follows the approval policy file (Settings → Trust → Permissions) through its own permission settings, and a plugin records each tool result, the prompt and the end of the turn in the ledger.</p>
         <p>Approval is required for: <code>Bash</code>, <code>Edit</code>, <code>Write</code>, <code>MultiEdit</code>, and <code>NotebookEdit</code>. Read-only tools — <code>Read</code>, <code>Grep</code>, <code>Glob</code>, <code>LS</code>, <code>WebFetch</code>, <code>WebSearch</code> — pass through without interrupting you.</p>
         <ul>
           <li><kbd>Ctrl+Enter</kbd> approves the pending action.</li>
@@ -559,7 +560,7 @@
         <p>If you trust the current task, a session-wide <strong>"approve all"</strong> toggle lets the agent run uninterrupted for that session.</p>
         <div class="note">
           <span class="tag">How it works</span>
-          Approvals are enforced by a bundled <code>PreToolUse</code> hook (a small Node script) that Claude Code runs before each tool. This is why Node.js is a runtime requirement.
+          Approvals are enforced by a bundled <code>PreToolUse</code> hook (a small Node script) that Claude Code and Codex run before each tool. This is why Node.js is a runtime requirement.
         </div>
       </section>
 
@@ -652,7 +653,7 @@
       <section id="flywheel">
         <h2>The knowledge flywheel</h2>
         <p>Everything the workspace learns flows back into the work — automatically, visibly, and under your veto. Four pieces close the loop:</p>
-        <p><strong>1&nbsp;&#183; Memory injection.</strong> When you send a prompt that clearly matches a saved memory or skill, the agent receives it as background context — for both engines. A <strong>&#9672; chip</strong> in the status bar shows exactly what was injected (nothing ever reaches the agent silently), and Context &#8594; <em>Memory injection</em> keeps the audit trail plus a per-project toggle. Retrieval is local; injected notes carry an explicit "may be stale — verify" caveat.</p>
+        <p><strong>1&nbsp;&#183; Memory injection.</strong> When you send a prompt that clearly matches a saved memory or skill, the agent receives it as background context — for Claude Code and Codex. OpenCode has no prompt hook, so nothing is injected there. A <strong>&#9672; chip</strong> in the status bar shows exactly what was injected (nothing ever reaches the agent silently), and Context &#8594; <em>Memory injection</em> keeps the audit trail plus a per-project toggle. Retrieval is local; injected notes carry an explicit "may be stale — verify" caveat.</p>
         <p><strong>2&nbsp;&#183; Outcome feedback.</strong> Every injected note has &#128077;/&#128078; buttons on the chip and in the audit trail. Useful notes rank slightly higher next time; a note voted unhelpful three times (with no upvote) stops being injected — it stays searchable, shows an <em>excluded</em> badge, and one click restores it. Your verdict only ever nudges near-ties: semantic relevance always dominates. Notes that are <em>policy</em> rather than preference can be <strong>pinned</strong> (&#128204;): a pinned note is exempt from exclusion and from negative ranking &#8212; verdicts can lift it, never bury it. Only you pin and unpin.</p>
         <p><strong>3&nbsp;&#183; Work profile.</strong> Context &#8594; <em>Work profile</em> is one global document about how <em>you</em> work — conventions, cadence, recurring corrections. It's injected once at the start of every session (shown as &#11041; on the chip), in every project. The Coach proposes profile lines from your actual activity; "Add to profile" is always your click.</p>
         <p><strong>4&nbsp;&#183; The Flywheel card.</strong> At the top of the Coach: corpus size, the 30-day injection curve, the share of injections you judged useful, and its verdict coverage — with an honest "&#8212;" when there isn't enough data to claim a number. Below it, your most useful and most noisy docs.</p>
@@ -685,9 +686,9 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
       <section id="troubleshooting">
         <h2>Troubleshooting</h2>
         <h3>The agent never responds</h3>
-        <p>Confirm the Claude Code CLI is installed and logged in: run <code>claude</code> in a terminal and check it answers. Agent Console can only drive a CLI that's already authenticated.</p>
+        <p>Confirm the session's agent CLI is installed and logged in: run it in a terminal (<code>claude</code>, <code>codex</code> or <code>opencode</code>) and check it answers. Agent Console can only drive a CLI that's already authenticated.</p>
         <h3>Approval modals never appear / mutations are blocked</h3>
-        <p>The approval hook is a Node script — make sure <strong>Node.js ≥ 20</strong> is on your <code>PATH</code>. If you installed via the <code>.deb</code>, the <code>nodejs</code> dependency should pull it in; on other distros install Node yourself.</p>
+        <p>The approval hook is a Node script — make sure <strong>Node.js ≥ 20</strong> is on your <code>PATH</code>. If you installed via the <code>.deb</code>, the <code>nodejs</code> dependency should pull it in; on other distros install Node yourself. With OpenCode there is no approval from the console to wait for; see <a href="#approvals">Tool approvals</a>.</p>
         <h3>No diff or no restore handle</h3>
         <p>The diff viewer and per-turn snapshots only work inside a <strong>git repository</strong>. Open a folder that has been <code>git init</code>'d (or any existing repo).</p>
         <h3>macOS says the app "is damaged and can't be opened"</h3>
@@ -695,7 +696,7 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <h3>Windows SmartScreen warns about an unknown publisher</h3>
         <p>Releases are Authenticode-signed by <strong>GoEncode LLC</strong> (Azure Artifact Signing) once the signing account is live; older releases are unsigned. Right-click the installer → Properties → Digital Signatures: a valid signature from GoEncode LLC means it is the one published on the GitHub Releases page, and SmartScreen is only still learning the publisher — "More info → Run anyway". No signature on a release that should carry one: do not run it, and open an issue.</p>
         <h3>Advisor / Learning fail with an authentication error</h3>
-        <p>Your engine login expired. The error itself offers a <strong>Fix Claude login</strong> button, and the palette has <em>Fix Claude login</em> / <em>Fix Codex login</em> — each opens a terminal running the engine's interactive login flow.</p>
+        <p>Your engine login expired. The error itself offers a <strong>Fix Claude login</strong> button, and the palette has <em>Fix Claude login</em> / <em>Fix Codex login</em> — each opens a terminal running the engine's interactive login flow. When a session's terminal shows its CLI asking for a login, a <strong>Log in</strong> card offers that engine's login flow. OpenCode has no palette entry: if the card does not appear, run <code>opencode auth login</code> in a terminal.</p>
         <h3>A shortcut isn't doing what I expect</h3>
         <p>Several shortcuts pass through to the shell when the terminal is focused (see the note under <a href="#terminal">Terminal &amp; sessions</a>). Click outside the terminal to get the app-level action.</p>
       </section>
@@ -706,7 +707,7 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <h3>Is this an IDE?</h3>
         <p>No. There's no code-editing UI by design — use your own editor. Agent Console is for <em>directing and verifying</em> an agent, not for reading and writing code by hand.</p>
         <h3>Does it send my code anywhere?</h3>
-        <p>The app is local-first: no accounts, no cloud sync, no telemetry. The agent itself (Claude Code) talks to Anthropic's API exactly as the CLI does on its own — Agent Console just drives it inside your repo.</p>
+        <p>The app is local-first: no accounts, no cloud sync, no telemetry. The agent you pick talks to its own provider exactly as its CLI does on its own (Claude Code to Anthropic, Codex to OpenAI, OpenCode to whichever providers you configured, which can be a local model) — Agent Console just drives it inside your repo.</p>
         <h3>Will it touch my git branches or history?</h3>
         <p>No. Snapshots live in a private ref namespace and restore only rewrites the working tree. HEAD and your branches are never moved.</p>
         <h3>Can I let it run without approving every step?</h3>
