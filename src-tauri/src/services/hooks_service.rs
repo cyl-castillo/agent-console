@@ -1681,6 +1681,30 @@ fn codex_available() -> bool {
         .unwrap_or(false)
 }
 
+/// `codex --version` as (major, minor, patch). None when the CLI is absent
+/// or prints something else.
+pub(crate) fn detect_codex_version() -> Option<(u64, u64, u64)> {
+    let out = crate::services::claude_cli::codex_command_with_stdin(&["--version"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_codex_version(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// "codex-cli 0.163.0" → (0, 163, 0). A pre-release suffix is dropped.
+fn parse_codex_version(text: &str) -> Option<(u64, u64, u64)> {
+    let token = text
+        .split_whitespace()
+        .find(|t| t.starts_with(|c: char| c.is_ascii_digit()))?;
+    let mut parts = token
+        .split(|c: char| !c.is_ascii_digit())
+        .map(|p| p.parse::<u64>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+
 /// Only wire the OpenCode plugin when the CLI is present — same reasoning
 /// as Codex: nothing lands in the config of a tool the user doesn't run.
 fn opencode_available() -> bool {
@@ -3103,6 +3127,20 @@ mod tests {
         let node = json!({ "statusLine": { "type": "command", "command": "node \"/cache/statusline-hook.cjs\"" } });
         assert!(statusline_is_ours(&node, script));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn codex_version_is_read_from_its_banner() {
+        assert_eq!(
+            parse_codex_version("codex-cli 0.163.0\n"),
+            Some((0, 163, 0))
+        );
+        assert_eq!(
+            parse_codex_version("codex-cli 1.2.3-beta.4"),
+            Some((1, 2, 3))
+        );
+        assert_eq!(parse_codex_version("command not found"), None);
+        assert_eq!(parse_codex_version("codex-cli 0.163"), None);
     }
 
     #[test]

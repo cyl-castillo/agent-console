@@ -610,7 +610,12 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   await expect(firewall.getByTestId("firewall-consequences")).toContainText(
     "your own hooks in ~/.claude/settings.json are ignored",
   );
-  await expect(firewall.getByTestId("firewall-engine-codex")).toContainText("Not supported");
+  await expect(firewall.getByTestId("firewall-engine-codex")).toContainText(
+    "The install commands cover it",
+  );
+  await expect(firewall.getByTestId("firewall-codex-consequences")).toContainText(
+    "cannot send a request to a person",
+  );
   await expect(firewall.getByTestId("firewall-engine-opencode")).toContainText("Not supported");
   await expect(firewall.getByTestId("firewall-install-script")).toContainText("sudo install");
   await expect(firewall.getByRole("button", { name: "Copy install commands" })).toBeVisible();

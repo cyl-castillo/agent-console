@@ -25,8 +25,18 @@
 //! installing takes the administrator's password and is the user's own
 //! action.
 //!
-//! Engine parity: Claude Code only. Codex and OpenCode have no tier this
-//! module writes; the status says so for each.
+//! Engine parity:
+//! - Claude Code: the drop-in above. The overall `state` is Claude's.
+//! - Codex: `/etc/codex/requirements.toml`, written only where there is none
+//!   or the one there is ours (Codex reads a single file, with no drop-in
+//!   directory, so an organization's own file is never replaced). It makes
+//!   the console's hooks the only hooks, makes the approval hook deny when
+//!   it fails, and forbids the `never` approval policy and the
+//!   `danger-full-access` sandbox. It has no guard: a Codex `PreToolUse`
+//!   hook can allow or deny but cannot send a request to a person, so a
+//!   high-tier action inside the workspace is not escalated by this mode.
+//! - OpenCode: not covered. It has a managed tier, but no sandbox, and its
+//!   enforced policies can only deny.
 
 use std::path::{Path, PathBuf};
 
@@ -66,6 +76,144 @@ const EVENTS: &[(&str, bool)] = &[
     ("StopFailure", false),
     ("PostModelSwitch", false),
 ];
+
+/// Oldest Codex this mode is offered for: the oldest one seen to carry both
+/// `allow_managed_hooks_only` and `onFailure` on command hooks. Their
+/// documentation states no minimum version for either.
+pub const MIN_CODEX_FIREWALL_VERSION: (u64, u64, u64) = (0, 163, 0);
+
+/// First line of a requirements file this console wrote. A file without it
+/// belongs to someone else and is left alone.
+const CODEX_MARKER: &str =
+    "# Agent Console firewall mode. Remove this file to turn it off for Codex.";
+
+/// Hook events of the Codex policy, with whether a failure must block: the
+/// events the console already installs in `~/.codex/hooks.json`. On Codex
+/// the approvals bridge is the `PreToolUse` hook.
+const CODEX_EVENTS: &[(&str, bool)] = &[
+    ("UserPromptSubmit", false),
+    ("PreToolUse", true),
+    ("PostToolUse", false),
+    ("Stop", false),
+    ("Interrupt", false),
+];
+
+/// Directories of the user's home no sandboxed Codex command may read.
+const CODEX_DENY_READ: &[&str] = &[".ssh", ".aws", ".gnupg"];
+
+/// Codex's system requirements file. `None` on Windows, where the mode is
+/// not offered at all.
+pub fn codex_requirements_path() -> Option<PathBuf> {
+    cfg!(any(target_os = "linux", target_os = "macos"))
+        .then(|| PathBuf::from("/etc/codex/requirements.toml"))
+}
+
+/// A TOML basic string. `None` for text with a control character: the file
+/// is shown to a person before it is installed.
+fn toml_str(s: &str) -> Option<String> {
+    if s.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    Some(format!(
+        "\"{}\"",
+        s.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
+}
+
+/// The Codex requirements file. Pure, like the drop-in. Only keys whose
+/// shape was read in Codex's source: a key Codex does not accept would make
+/// it refuse to load its configuration.
+pub fn codex_requirements(bridge: &Path, home: Option<&Path>) -> Option<String> {
+    let bridge_s = bridge.to_str()?;
+    let mut out = format!(
+        "{CODEX_MARKER}\n\
+         allow_managed_hooks_only = true\n\
+         allowed_approval_policies = [\"untrusted\", \"on-request\"]\n\
+         allowed_sandbox_modes = [\"read-only\", \"workspace-write\"]\n\
+         \n\
+         [features]\n\
+         hooks = true\n"
+    );
+    if let Some(home) = home {
+        let dirs = CODEX_DENY_READ
+            .iter()
+            .map(|d| toml_str(home.join(d).to_str()?))
+            .collect::<Option<Vec<_>>>()?;
+        out.push_str(&format!(
+            "\n[permissions.filesystem]\ndeny_read = [{}]\n",
+            dirs.join(", ")
+        ));
+    }
+    out.push_str(&format!(
+        "\n[hooks]\nmanaged_dir = {}\n",
+        toml_str(bridge.parent()?.to_str()?)?
+    ));
+    for (event, blocking) in CODEX_EVENTS {
+        let command = toml_str(&format!(
+            "\"{bridge_s}\" {}",
+            hooks_service::bridge_mode(event)
+        ))?;
+        out.push_str(&format!(
+            "\n[[hooks.{event}]]\n\n[[hooks.{event}.hooks]]\ntype = \"command\"\ncommand = {command}\n"
+        ));
+        if *blocking {
+            out.push_str(&format!(
+                "timeout = {APPROVAL_HOOK_TIMEOUT_S}\nonFailure = \"block\"\n"
+            ));
+        }
+    }
+    Some(out)
+}
+
+/// The Codex file on disk against `expected`: `off` · `foreign` (someone
+/// else's requirements file) · `unsafe` · `drifted` · `enforced`.
+pub fn inspect_codex(
+    path: &Path,
+    expected: &str,
+    anchor: &Path,
+    admin_uid: u32,
+) -> (String, Vec<String>) {
+    if std::fs::symlink_metadata(path).is_err() {
+        return ("off".into(), Vec::new());
+    }
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) => return ("unsafe".into(), vec![format!("{}: {e}", path.display())]),
+    };
+    let ours = bytes
+        .split(|b| *b == b'\n')
+        .next()
+        .is_some_and(|l| l == CODEX_MARKER.as_bytes());
+    if !ours {
+        return (
+            "foreign".into(),
+            vec![format!(
+                "{} was not written by Agent Console and is left as it is",
+                path.display()
+            )],
+        );
+    }
+    let mut problems = ownership_problems(path, anchor, admin_uid);
+    if !world_readable(path, false) {
+        problems.push(format!(
+            "{} is not readable by every user: Codex cannot load its configuration",
+            path.display()
+        ));
+    }
+    if !problems.is_empty() {
+        return ("unsafe".into(), problems);
+    }
+    if bytes != expected.as_bytes() {
+        return (
+            "drifted".into(),
+            vec![format!(
+                "{} is not what this version of Agent Console installs",
+                path.display()
+            )],
+        );
+    }
+    ("enforced".into(), Vec::new())
+}
 
 /// Where the managed tier and the root-owned bridge live on this OS. `None`
 /// where firewall mode is not offered (Windows: Claude Code's sandbox does
@@ -190,6 +338,9 @@ pub struct EngineCoverage {
     pub engine: String,
     pub covered: bool,
     pub note: String,
+    /// The engine's own policy file, where this mode writes one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -237,16 +388,19 @@ fn engines(claude_covered: bool) -> Vec<EngineCoverage> {
             } else {
                 "Not enforced.".into()
             },
+            path: None,
         },
         EngineCoverage {
             engine: "codex".into(),
             covered: false,
-            note: "Not supported: firewall mode writes no Codex policy. Codex sessions run with the hooks and rules in your home.".into(),
+            note: "Not enforced.".into(),
+            path: None,
         },
         EngineCoverage {
             engine: "opencode".into(),
             covered: false,
-            note: "Not supported: OpenCode has no sandbox and no managed tier.".into(),
+            note: "Not supported: OpenCode has no sandbox, and the policies its managed settings enforce can only deny, not ask a person.".into(),
+            path: None,
         },
     ]
 }
@@ -279,6 +433,7 @@ fn sh_quote(path: &Path) -> Option<String> {
 
 const INSTALL_DELIM: &str = "AGENT_CONSOLE_INSTALL";
 const DROPIN_DELIM: &str = "AGENT_CONSOLE_DROPIN";
+const CODEX_DELIM: &str = "AGENT_CONSOLE_CODEX";
 
 /// The install, as shell text for the user's own terminal. The console
 /// never runs it and never elevates.
@@ -293,6 +448,11 @@ const DROPIN_DELIM: &str = "AGENT_CONSOLE_DROPIN";
 ///   readable.
 ///
 /// Both files land through a rename, so Claude Code never reads half of one.
+///
+/// `codex` = the Codex requirements file and its text, when Codex is to be
+/// covered too. The script then starts by refusing to go on if a
+/// requirements file is there that this console did not write: the status
+/// that built this text may be minutes old by the time it runs.
 pub fn install_script(
     dropin: &Path,
     bridge: &Path,
@@ -300,14 +460,44 @@ pub fn install_script(
     bridge_source: &Path,
     bridge_sha256: &str,
     macos: bool,
+    codex: Option<(&Path, &str)>,
 ) -> Option<String> {
+    let delims = [DROPIN_DELIM, INSTALL_DELIM, CODEX_DELIM];
+    let (codex_guard, codex_block) = match codex {
+        None => (String::new(), String::new()),
+        Some((path, text)) => {
+            if text.lines().any(|l| delims.contains(&l)) || !text.ends_with('\n') {
+                return None;
+            }
+            let mut new = path.as_os_str().to_os_string();
+            new.push(".new");
+            let dir = sh_quote(path.parent()?)?;
+            let new = sh_quote(Path::new(&new))?;
+            let q = sh_quote(path)?;
+            let marker = sh_quote(Path::new(CODEX_MARKER))?;
+            (
+                format!(
+                    "if sudo test -e {q} && ! sudo head -n 1 {q} | grep -qxF {marker}; then\n\
+                     \x20 echo 'A Codex requirements file that Agent Console did not write is there. Nothing was changed.' >&2\n\
+                     \x20 exit 1\n\
+                     fi\n"
+                ),
+                format!(
+                    "sudo install -d -o 0 -g 0 -m 0755 {dir}\n\
+                     sudo tee {new} >/dev/null <<'{CODEX_DELIM}'\n\
+                     {text}\
+                     {CODEX_DELIM}\n\
+                     sudo chown 0:0 {new}\n\
+                     sudo chmod 0644 {new}\n\
+                     sudo mv -f {new} {q}\n"
+                ),
+            )
+        }
+    };
     if !bridge_sha256.chars().all(|c| c.is_ascii_hexdigit()) || bridge_sha256.len() != 64 {
         return None;
     }
-    if expected
-        .lines()
-        .any(|l| l == DROPIN_DELIM || l == INSTALL_DELIM)
-    {
+    if expected.lines().any(|l| delims.contains(&l)) {
         return None;
     }
     let with_suffix = |p: &Path| {
@@ -334,6 +524,7 @@ pub fn install_script(
     )))?;
     Some(format!(
         "sh -eu <<'{INSTALL_DELIM}'\n\
+         {codex_guard}\
          sudo install -d -o 0 -g 0 -m 0755 {dropin_dir} {bridge_dir}\n\
          sudo install -o 0 -g 0 -m 0700 {source} {bridge_new}\n\
          echo {check_line} | sudo {sha_check}\n\
@@ -345,18 +536,22 @@ pub fn install_script(
          sudo chown 0:0 {dropin_new}\n\
          sudo chmod 0644 {dropin_new}\n\
          sudo mv -f {dropin_new} {dropin_q}\n\
+         {codex_block}\
          {INSTALL_DELIM}\n"
     ))
 }
 
 /// Turning the mode off: the drop-in first, so Claude Code never sees
 /// hooks that point at a bridge that is gone (which would deny everything).
-pub fn uninstall_script(dropin: &Path, bridge: &Path) -> Option<String> {
-    Some(format!(
-        "sudo rm -f {} && sudo rm -f {}\n",
-        sh_quote(dropin)?,
-        sh_quote(bridge)?
-    ))
+///
+/// `codex` = the Codex requirements file, only when the one on disk is ours.
+pub fn uninstall_script(dropin: &Path, bridge: &Path, codex: Option<&Path>) -> Option<String> {
+    let mut out = format!("sudo rm -f {}", sh_quote(dropin)?);
+    if let Some(codex) = codex {
+        out.push_str(&format!(" && sudo rm -f {}", sh_quote(codex)?));
+    }
+    out.push_str(&format!(" && sudo rm -f {}\n", sh_quote(bridge)?));
+    Some(out)
 }
 
 /// Can anyone but `admin_uid` change `path` — by writing it, or by
@@ -529,7 +724,12 @@ pub fn status() -> FirewallStatus {
         Path::new("/"),
         0,
     );
-    if status.state != "enforced" {
+    let codex = codex_coverage(&bridge, home.as_deref(), &status.state);
+    let codex_install = codex
+        .as_ref()
+        .filter(|c| matches!(c.state.as_str(), "off" | "drifted" | "unsafe" | "enforced"));
+    let codex_pending = codex_install.is_some_and(|c| c.state != "enforced");
+    if status.state != "enforced" || codex_pending {
         status.install_script = bundled.as_deref().and_then(|src| {
             let sha = sha256_hex(&std::fs::read(src).ok()?);
             install_script(
@@ -539,13 +739,78 @@ pub fn status() -> FirewallStatus {
                 src,
                 &sha,
                 cfg!(target_os = "macos"),
+                codex_install.map(|c| (c.path.as_path(), c.expected.as_str())),
             )
         });
     }
-    if status.state != "off" {
-        status.uninstall_script = uninstall_script(&dropin, &bridge);
+    let codex_ours = codex
+        .as_ref()
+        .filter(|c| matches!(c.state.as_str(), "drifted" | "unsafe" | "enforced"));
+    if status.state != "off" || codex_ours.is_some() {
+        status.uninstall_script =
+            uninstall_script(&dropin, &bridge, codex_ours.map(|c| c.path.as_path()));
+    }
+    if let Some(entry) = status.engines.iter_mut().find(|e| e.engine == "codex") {
+        match &codex {
+            None => {
+                let (a, b, c) = MIN_CODEX_FIREWALL_VERSION;
+                entry.note = format!(
+                    "Not enforced: needs the Codex CLI {a}.{b}.{c} or newer on this machine."
+                );
+            }
+            Some(c) => {
+                entry.path = Some(c.path.to_string_lossy().to_string());
+                entry.covered = c.covered;
+                entry.note = c.note.clone();
+            }
+        }
     }
     status
+}
+
+struct CodexCoverage {
+    path: PathBuf,
+    expected: String,
+    state: String,
+    covered: bool,
+    note: String,
+}
+
+/// `None` when Codex is not installed, is too old, or its file cannot be
+/// described. `claude_state` matters because the root-owned bridge the
+/// Codex hooks run is the one the Claude inspection checked.
+fn codex_coverage(bridge: &Path, home: Option<&Path>, claude_state: &str) -> Option<CodexCoverage> {
+    let path = codex_requirements_path()?;
+    if hooks_service::detect_codex_version()? < MIN_CODEX_FIREWALL_VERSION {
+        return None;
+    }
+    let expected = codex_requirements(bridge, home)?;
+    let (state, problems) = inspect_codex(&path, &expected, Path::new("/"), 0);
+    Some(codex_note(path, expected, state, &problems, claude_state))
+}
+
+fn codex_note(
+    path: PathBuf,
+    expected: String,
+    state: String,
+    problems: &[String],
+    claude_state: &str,
+) -> CodexCoverage {
+    let covered = state == "enforced" && claude_state == "enforced";
+    let note = match state.as_str() {
+        "enforced" if covered => "Only Agent Console's hooks run, the approval hook denies when it fails, and the never policy and the full-access sandbox are refused. A high-tier action inside the workspace is not sent to a person: a Codex hook cannot ask.".to_string(),
+        "enforced" => "Its policy is installed, but the bridge it runs is only checked while Claude Code's part is on.".to_string(),
+        "off" => "Not enforced. The install commands cover it.".to_string(),
+        "foreign" => format!("Not enforced: {}.", problems.join("; ")),
+        _ => format!("Not enforced: {}. Reinstall to repair it.", problems.join("; ")),
+    };
+    CodexCoverage {
+        path,
+        expected,
+        state,
+        covered,
+        note,
+    }
 }
 
 #[cfg(test)]
@@ -669,6 +934,7 @@ mod tests {
             Path::new("/home/it's me/app/hook-bridge"),
             &sha,
             false,
+            None,
         )
         .unwrap();
         // The policy is in the text the user reads, byte for byte.
@@ -716,6 +982,7 @@ mod tests {
             Path::new("/Applications/Agent Console.app/Contents/MacOS/hook-bridge"),
             &sha,
             true,
+            None,
         )
         .unwrap();
         assert!(mac.contains("| sudo shasum -a 256 -c -"));
@@ -735,7 +1002,8 @@ mod tests {
             &expected,
             Path::new("/tmp/x\nsudo rm -rf /"),
             &sha,
-            false
+            false,
+            None,
         )
         .is_none());
         // Not a sha256.
@@ -745,7 +1013,8 @@ mod tests {
             &expected,
             Path::new("/tmp/x"),
             "$(id)",
-            false
+            false,
+            None,
         )
         .is_none());
         // A policy that would close the here-document early.
@@ -755,11 +1024,12 @@ mod tests {
             "{}\nAGENT_CONSOLE_DROPIN\nsudo id\n",
             Path::new("/tmp/x"),
             &sha,
-            false
+            false,
+            None,
         )
         .is_none());
         assert_eq!(
-            uninstall_script(dropin, bridge).unwrap(),
+            uninstall_script(dropin, bridge, None).unwrap(),
             "sudo rm -f '/etc/claude-code/managed-settings.d/50-agent-console.json' && sudo rm -f '/opt/agent-console/hook-bridge'\n"
         );
     }
@@ -835,5 +1105,172 @@ mod tests {
         assert_eq!(look(me).state, "unsafe");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn codex_text() -> String {
+        codex_requirements(
+            Path::new("/opt/agent-console/hook-bridge"),
+            Some(Path::new("/home/u")),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn the_codex_policy_locks_hooks_approval_and_sandbox() {
+        let text = codex_text();
+        assert!(text.starts_with(&format!("{CODEX_MARKER}\n")));
+        assert!(text.ends_with('\n'));
+        for line in [
+            "allow_managed_hooks_only = true",
+            r#"allowed_approval_policies = ["untrusted", "on-request"]"#,
+            r#"allowed_sandbox_modes = ["read-only", "workspace-write"]"#,
+            r#"deny_read = ["/home/u/.ssh", "/home/u/.aws", "/home/u/.gnupg"]"#,
+            r#"managed_dir = "/opt/agent-console""#,
+        ] {
+            assert!(text.lines().any(|l| l == line), "{line}\n{text}");
+        }
+        assert!(!text.contains("never") && !text.contains("danger-full-access"));
+        // The approvals bridge is the one hook that blocks on failure, and
+        // every hook is the root-owned bridge.
+        let approval = r#"[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "\"/opt/agent-console/hook-bridge\" pretooluse"
+timeout = 600
+onFailure = "block"
+"#;
+        assert!(text.contains(approval), "{text}");
+        assert_eq!(text.matches("onFailure").count(), 1);
+        assert_eq!(
+            text.matches("command = \"\\\"/opt/agent-console/hook-bridge\\\" ")
+                .count(),
+            CODEX_EVENTS.len()
+        );
+        // No guard: a Codex hook that answers "ask" is a failed hook.
+        assert!(!text.contains(" guard"));
+        // A path that cannot be shown on one line gives no file at all.
+        assert!(codex_requirements(Path::new("/opt/a\nb/hook-bridge"), None).is_none());
+    }
+
+    #[test]
+    fn a_requirements_file_someone_else_wrote_is_left_alone() {
+        let root = temp();
+        let path = root.join("requirements.toml");
+        let expected = codex_text();
+        let uid = {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                std::fs::metadata(&root).unwrap().uid()
+            }
+            #[cfg(not(unix))]
+            {
+                0
+            }
+        };
+        // A umask of 002 would make the test's own files group-writable.
+        let chmod = |p: &Path, _mode: u32| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(p, std::fs::Permissions::from_mode(_mode)).unwrap();
+            }
+        };
+        chmod(&root, 0o755);
+        assert_eq!(inspect_codex(&path, &expected, &root, uid).0, "off");
+        std::fs::write(&path, "allowed_sandbox_modes = [\"read-only\"]\n").unwrap();
+        assert_eq!(inspect_codex(&path, &expected, &root, uid).0, "foreign");
+        std::fs::write(&path, &expected).unwrap();
+        chmod(&path, 0o644);
+        assert_eq!(inspect_codex(&path, &expected, &root, uid).0, "enforced");
+        std::fs::write(&path, format!("{expected}# edited\n")).unwrap();
+        assert_eq!(inspect_codex(&path, &expected, &root, uid).0, "drifted");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(&path, &expected).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+            assert_eq!(inspect_codex(&path, &expected, &root, uid).0, "unsafe");
+            // Not the administrator's ⇒ not to be trusted either.
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert_eq!(inspect_codex(&path, &expected, &root, uid + 1).0, "unsafe");
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_install_script_covers_codex_and_refuses_a_foreign_file_first() {
+        let expected = render(&settings());
+        let codex = codex_text();
+        let sha = "a".repeat(64);
+        let path = Path::new("/etc/codex/requirements.toml");
+        let script = install_script(
+            Path::new("/etc/claude-code/managed-settings.d/50-agent-console.json"),
+            Path::new("/opt/agent-console/hook-bridge"),
+            &expected,
+            Path::new("/home/u/app/hook-bridge"),
+            &sha,
+            false,
+            Some((path, &codex)),
+        )
+        .unwrap();
+        // The check comes before anything is written.
+        let guard = script
+            .find("if sudo test -e '/etc/codex/requirements.toml'")
+            .unwrap();
+        assert!(guard < script.find("sudo install").unwrap());
+        assert!(script.contains(&format!(
+            "<<'AGENT_CONSOLE_CODEX'\n{codex}AGENT_CONSOLE_CODEX\n"
+        )));
+        assert!(script.contains(
+            "sudo mv -f '/etc/codex/requirements.toml.new' '/etc/codex/requirements.toml'\n"
+        ));
+        assert!(script.ends_with("\nAGENT_CONSOLE_INSTALL\n"));
+        #[cfg(unix)]
+        {
+            let ok = std::process::Command::new("sh")
+                .arg("-n")
+                .arg("-c")
+                .arg(&script)
+                .status()
+                .unwrap();
+            assert!(ok.success(), "{script}");
+        }
+        // Text that would end a here-document early is refused.
+        assert!(install_script(
+            Path::new("/etc/claude-code/managed-settings.d/50-agent-console.json"),
+            Path::new("/opt/agent-console/hook-bridge"),
+            &expected,
+            Path::new("/home/u/app/hook-bridge"),
+            &sha,
+            false,
+            Some((path, "x\nAGENT_CONSOLE_CODEX\n")),
+        )
+        .is_none());
+        assert_eq!(
+            uninstall_script(
+                Path::new("/etc/claude-code/managed-settings.d/50-agent-console.json"),
+                Path::new("/opt/agent-console/hook-bridge"),
+                Some(path),
+            )
+            .unwrap(),
+            "sudo rm -f '/etc/claude-code/managed-settings.d/50-agent-console.json' && sudo rm -f '/etc/codex/requirements.toml' && sudo rm -f '/opt/agent-console/hook-bridge'\n"
+        );
+    }
+
+    #[test]
+    fn codex_counts_as_covered_only_with_the_bridge_checked() {
+        let p = PathBuf::from("/etc/codex/requirements.toml");
+        let on = codex_note(p.clone(), String::new(), "enforced".into(), &[], "enforced");
+        assert!(on.covered && on.note.contains("cannot ask"));
+        let half = codex_note(p.clone(), String::new(), "enforced".into(), &[], "drifted");
+        assert!(!half.covered);
+        let other = codex_note(
+            p,
+            String::new(),
+            "foreign".into(),
+            &["x was not written by Agent Console".into()],
+            "enforced",
+        );
+        assert!(!other.covered && other.note.starts_with("Not enforced: x was not"));
     }
 }

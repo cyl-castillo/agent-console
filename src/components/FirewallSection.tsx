@@ -68,6 +68,7 @@ export function FirewallSection() {
   };
 
   const state = status?.state ?? "off";
+  const codexPath = status?.engines.find((e) => e.engine === "codex")?.path;
   const installLabel =
     state === "off" ? "Copy install commands" : "Copy commands to reinstall this version";
 
@@ -106,6 +107,18 @@ export function FirewallSection() {
             bypass mode is refused; the sandbox is mandatory and Claude Code will not start without
             it.
           </p>
+          {codexPath && (
+            <p className="m-0 text-small text-foreground" data-testid="firewall-codex-consequences">
+              On Codex, through <span className="font-code">{codexPath}</span>: only Agent Console's
+              hooks run and its approval hook denies when it fails; the{" "}
+              <span className="font-code">never</span> approval policy and the full-access sandbox
+              are refused; sandboxed commands cannot read your{" "}
+              <span className="font-code">~/.ssh</span>, <span className="font-code">~/.aws</span>{" "}
+              and <span className="font-code">~/.gnupg</span>. A Codex hook cannot send a request to
+              a person, so a high-risk action inside the project is not escalated the way it is on
+              Claude Code.
+            </p>
+          )}
           <ul className="m-0 flex list-none flex-col gap-1 p-0 text-small">
             {status.engines.map((e) => (
               <li
@@ -193,9 +206,15 @@ export function FirewallSection() {
           )}
           <p className="wb-hint">
             Installs <span className="font-code">{status.dropinPath}</span> and{" "}
-            <span className="font-code">{status.bridgePath}</span>. Restart the agent's sessions
-            after installing or removing; <span className="font-code">/status</span> in Claude Code
-            lists the managed settings it loaded.
+            <span className="font-code">{status.bridgePath}</span>
+            {codexPath && (
+              <>
+                , and <span className="font-code">{codexPath}</span> when Codex is covered
+              </>
+            )}
+            . Restart the agent's sessions after installing or removing;{" "}
+            <span className="font-code">/status</span> in Claude Code lists the managed settings it
+            loaded.
           </p>
         </div>
       )}

@@ -1690,12 +1690,13 @@ export const defaultFixtures: FixtureMap = {
       {
         engine: "codex",
         covered: false,
-        note: "Not supported: firewall mode writes no Codex policy.",
+        note: "Not enforced. The install commands cover it.",
+        path: "/etc/codex/requirements.toml",
       },
       {
         engine: "opencode",
         covered: false,
-        note: "Not supported: OpenCode has no sandbox and no managed tier.",
+        note: "Not supported: OpenCode has no sandbox, and the policies its managed settings enforce can only deny, not ask a person.",
       },
     ],
   },

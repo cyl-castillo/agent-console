@@ -642,6 +642,8 @@ export interface FirewallEngineCoverage {
   engine: "claude" | "codex" | "opencode" | string;
   covered: boolean;
   note: string;
+  /** The engine's own policy file, where firewall mode writes one. */
+  path?: string;
 }
 export interface FirewallStatus {
   state: "unsupported" | "off" | "enforced" | "drifted" | "unsafe" | string;
