@@ -625,7 +625,7 @@
     <div class="container">
       <h2>What you get</h2>
       <ul class="features">
-        <li>Per-tool approval modal <span class="dim">— Bash, Edit, Write blocked until you OK; keyboard flow + countdown. Claude Code and Codex; OpenCode has no hooks and follows the policy file through its own permission settings</span></li>
+        <li>Per-tool approval cards <span class="dim">— Bash, Edit, Write wait for your answer, graded by risk; an irreversible one asks you to type "approve", and the countdown never approves by itself. Claude Code and Codex; OpenCode has no hooks and follows the policy file through its own permission settings</span></li>
         <li>Per-turn working-tree snapshot <span class="dim">— restore with one click, undo the restore too</span></li>
         <li>Proof ledger (Testigo) <span class="dim">— witnessed sessions, signed exportable packets</span></li>
         <li>Multiple engines <span class="dim">— Claude Code, Codex or OpenCode, per session; one-click login repair</span></li>
@@ -710,7 +710,7 @@ agent-console</pre>
           <div class="num">3</div>
           <div>
             <div class="label">Approve risky actions</div>
-            <p class="desc">With Claude Code and Codex, when the agent wants to run <code>Bash</code>, <code>Edit</code>, or <code>Write</code>, a modal pops up showing the tool name and input. Approve, deny, or enable "approve all" for the session.</p>
+            <p class="desc">With Claude Code and Codex, when the agent wants to run <code>Bash</code>, <code>Edit</code>, or <code>Write</code>, a decision card appears in the Inbox and in the session, with the tool, its exact input (or the diff of an edit) and a risk tier. Deny it, approve it once, or turn the answer into a standing rule with <em>Always…</em>.</p>
           </div>
         </div>
         <div class="step">
