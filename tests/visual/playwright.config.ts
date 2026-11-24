@@ -13,10 +13,11 @@ export default defineConfig({
   outputDir: webkit ? "out/results-webkit" : "out/results",
   fullyParallel: true,
   workers: process.env.CI ? 2 : 4,
-  // One retry on CI only: the F3 cards spec flaked three times on unrelated
-  // PRs (the card vanished mid-click under runner load) and passes locally
-  // every time. The retry keeps a trace (see `use.trace`) so the next flake
-  // leaves evidence in the uploaded results instead of a red check.
+  // One retry on CI only. It was added for the F3 cards spec, whose card
+  // vanished under runner load; the cause was the spec feeding the terminal
+  // before the agent launch reset the session's signals, fixed in the spec.
+  // The retry stays as a net and keeps a trace (see `use.trace`), so a flake
+  // leaves evidence in the uploaded results.
   retries: process.env.CI ? 1 : 0,
   reporter: [
     ["list"],

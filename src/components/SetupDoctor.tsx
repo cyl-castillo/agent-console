@@ -20,9 +20,10 @@ async function copyText(text: string): Promise<void> {
 
 /// What each tool is for, in words a first-time user can act on.
 const TOOL_ROLES: Record<string, string> = {
-  claude: "the Claude Code agent",
-  codex: "the Codex agent (optional second engine)",
-  node: "runs the approval & memory bridges",
+  claude: "the Claude Code agent (one agent is enough)",
+  codex: "the Codex agent (optional)",
+  opencode: "the OpenCode agent (optional)",
+  node: "optional: only for an agent CLI installed through npm (Codex)",
   git: "snapshots, diffs and proof",
 };
 

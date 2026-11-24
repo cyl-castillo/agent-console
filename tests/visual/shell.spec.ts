@@ -473,6 +473,19 @@ const termOut = (page: Page, id: string, data: string) =>
     [id, data],
   );
 
+/// How many agent launches the terminal has typed so far.
+const launchesTyped = (page: Page) =>
+  page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __fixtures: { invokeLog: { cmd: string; args: Record<string, unknown> }[] };
+        }
+      ).__fixtures.invokeLog.filter(
+        (e) => e.cmd === "term_write" && /^(claude|codex|opencode)\b/.test(String(e.args.data)),
+      ).length,
+  );
+
 test("F4 gate in Sessions: the folder-trust card holds the launch in the conversation, answering it starts the agent", async ({
   page,
 }) => {
@@ -521,6 +534,14 @@ test("F3: the trust question, a login ask and a missing CLI surface as cards wit
   await expect(page.getByTestId("terminal-drawer")).toContainText("Welcome back", {
     timeout: 10_000,
   });
+  // The banner is not the last thing the terminal does on its own: about
+  // 600 ms after the spawn it types the agent launch, and a launch starts a
+  // new boot, which resets the session's signals (markBooting). A question
+  // fed before that point raises its card and loses it when the launch
+  // lands, which is what failed on loaded runners: the trust card gone
+  // before its button was clicked, or the login card never found. Feed the
+  // terminal only once the launch is out.
+  await expect.poll(() => launchesTyped(page), { timeout: 10_000 }).toBeGreaterThan(0);
   // The story's drawer is open by default; hide it so the cards' CTA is tested.
   await page.keyboard.press("Control+`");
   await expect(page.getByTestId("terminal-drawer")).not.toHaveAttribute("data-open", "true");
@@ -532,12 +553,7 @@ test("F3: the trust question, a login ask and a missing CLI surface as cards wit
   );
   const trust = page.getByTestId("card-trust");
   await expect(trust).toContainText("trust this folder");
-  // The card mounts inside the virtualised thread while the terminal output
-  // is still streaming in: under CI load its box keeps moving past
-  // Playwright's stability window and the row can be re-measured (detached).
-  // A dispatched click asserts the button exists and acts on it without
-  // waiting for a layout that never settles in time.
-  await trust.getByRole("button", { name: "Answer in the terminal" }).dispatchEvent("click");
+  await trust.getByRole("button", { name: "Answer in the terminal" }).click();
   await expect(page.getByTestId("terminal-drawer")).toHaveAttribute("data-open", "true");
   // The CLI comes up: the question is behind us.
   await termOut(page, "term-sess-auth", "✻ Welcome to Claude Code\r\n❯ ");
@@ -551,10 +567,7 @@ test("F3: the trust question, a login ask and a missing CLI surface as cards wit
 
   await termOut(page, "term-sess-auth", "bash: claude: command not found\r\n");
   await expect(page.getByTestId("card-notfound")).toContainText("not installed");
-  await page
-    .getByTestId("card-notfound")
-    .getByRole("button", { name: "Open setup" })
-    .dispatchEvent("click");
+  await page.getByTestId("card-notfound").getByRole("button", { name: "Open setup" }).click();
   await expect(page.getByText("Welcome to Agent Console")).toBeVisible();
 });
 
