@@ -1,5 +1,5 @@
 //! First-run environment check. Agent Console drives external CLIs (claude /
-//! codex) by typing them into a login-shell PTY — so if those binaries are
+//! codex / opencode) by typing them into a login-shell PTY — so if those binaries are
 //! missing the user only finds out via a cryptic `command not found` in a
 //! black terminal. Node is probed because an agent CLI installed through npm
 //! needs it (Codex's installer is npm); the console's own hooks do not: they
@@ -78,6 +78,13 @@ fn fix_for(bin: &str, os: &str, node_found: bool) -> (Option<String>, Option<Str
         ("git", _) => (
             cmd("sudo apt-get install -y git"),
             Some("Debian/Ubuntu — on other distros use your package manager.".to_string()),
+        ),
+        // No command on purpose: OpenCode's own installer follows its newest
+        // release line, and the console has only been verified against the
+        // one it was built for. The human picks the version; we point.
+        ("opencode", _) => (
+            None,
+            Some("Install it from opencode.ai, then re-check.".to_string()),
         ),
         _ => (None, None),
     }
@@ -194,9 +201,13 @@ fn claude_auth() -> EngineAuth {
     }
 }
 
+/// What the doctor shows, top to bottom. Node stays above Codex: Codex's
+/// installer is npm and its note says "install it above".
+const PROBE_ORDER: [&str; 5] = ["claude", "node", "git", "codex", "opencode"];
+
 #[tauri::command(async)]
 pub fn preflight_check() -> Preflight {
-    let mut tools = vec![probe("claude"), probe("node"), probe("git"), probe("codex")];
+    let mut tools: Vec<ToolStatus> = PROBE_ORDER.iter().map(|bin| probe(bin)).collect();
     let node_found = tools.iter().any(|t| t.name == "node" && t.found);
     let os = current_os();
     for t in tools.iter_mut() {
@@ -239,6 +250,23 @@ mod tests {
                 assert!(cmd.is_some(), "{bin} on {os} must have a fix command");
             }
         }
+    }
+
+    #[test]
+    fn opencode_is_pointed_at_never_installed_by_a_typed_command() {
+        for os in ["linux", "macos", "windows"] {
+            let (cmd, note) = fix_for("opencode", os, true);
+            assert!(cmd.is_none(), "opencode on {os} must not carry a command");
+            assert!(note.unwrap().contains("opencode.ai"));
+        }
+    }
+
+    #[test]
+    fn node_is_listed_above_the_installer_that_needs_it() {
+        let at = |bin: &str| PROBE_ORDER.iter().position(|b| *b == bin).unwrap();
+        assert!(at("node") < at("codex"));
+        let (_, note) = fix_for("codex", "linux", false);
+        assert!(note.unwrap().contains("above"));
     }
 
     #[test]
