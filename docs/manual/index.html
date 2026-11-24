@@ -288,7 +288,8 @@
       margin-bottom: 6px;
     }
     .panel-card p { font-size: 13px; margin: 0; color: var(--dim); }
-    @media (max-width: 720px) { .panels { grid-template-columns: 1fr; } }
+    .panels.two { grid-template-columns: repeat(2, 1fr); }
+    @media (max-width: 720px) { .panels, .panels.two { grid-template-columns: 1fr; } }
 
     /* --- Footer --- */
     footer {
@@ -372,7 +373,7 @@
       <div class="toc-group">
         <p class="toc-title">The workbench</p>
         <ul>
-          <li><a href="#workbench">The nine groups</a></li>
+          <li><a href="#workbench">Destinations &amp; modules</a></li>
           <li><a href="#tasks">Tasks: Jira, roles &amp; hours</a></li>
           <li><a href="#proof">Proof (Testigo)</a></li>
           <li><a href="#memory">Context &amp; semantic memory</a></li>
@@ -400,23 +401,28 @@
       <section id="overview">
         <h2>What is Agent Console</h2>
         <p>Agent Console is a desktop app for <strong>directing coding agents inside a repository</strong>, with a verifiable record of what they did. It runs the real agent CLIs (Claude Code, Codex or OpenCode, per session) next to an integrated shell, a git diff viewer, and per-turn snapshots, so you can hand real work to an agent and verify every step.</p>
-        <p>It is deliberately <strong>not an IDE and not a chat client</strong>. The center of the app is the chat, the terminal, and the git diff — not a code editor. You don't read code here; you direct the agent and check its work.</p>
+        <p>It is deliberately <strong>not an IDE and not a chat client</strong>. The center of the app is the conversation with the agent, the terminal, and the git diff — not a code editor. You don't read code here; you direct the agent and check its work.</p>
 
         <div class="ascii">┌──────────────────────────────────────────────────────────────────────┐
-│ my-repo · javascript · vite · /home/me/code/my-repo                  │
-├──────────┬─────────────────────────────────────┬─────────────────────┤
-│ Files    │ [Terminal] [Changes (3)]            │ Agent               │
-│          │ ─────────────────────────────────── │ ─────────────────── │
-│ src/     │ $ npm test                          │ you ↶restore        │
-│  api.ts  │ ✓ 14 passed                         │ "fix the failing    │
-│  app.ts  │                                     │  user-auth test"    │
-│ tests/   │                                     │ ▸ Read tests/auth   │
-│ README   │                                     │ ✓ Edit src/api.ts   │
-│          │                                     │ ✓ Bash: npm test    │
-│          │                                     │ agent: fixed —      │
-│          │                                     │ token was expired   │
-│          │                                     │ [type a task…]      │
-└──────────┴─────────────────────────────────────┴─────────────────────┘</div>
+│ my-repo                                                 ?   Close    │
+├──────────┬──────────────┬────────────────────────────┬───────────────┤
+│ Inbox  2 │ SESSIONS   + │ [Conversation] Changes 3   │ INSPECTOR Turn│
+│ Sessions │ working      │ you ↶restore               │ you           │
+│ Work     │ ✻ fix auth   │ "fix the failing           │ tool calls · 3│
+│ Proof    │ stopped      │  user-auth test"           │ Read  Edit    │
+│ Settings │ ○ retry path │ ▸ Read tests/auth          │ Bash          │
+│          │              │ ✓ Edit src/api.ts          │               │
+│          │              │ ✓ Bash: npm test           │ Re-run        │
+│          │              │ agent: fixed —             │ Ledger        │
+│          │              │ token was expired          │               │
+│          │              │ [type a task…]             │               │
+│          │              ├────────────────────────────┤               │
+│          │              │ Terminal · fix auth        │               │
+│          │              │ $ npm test                 │               │
+│          │              │ ✓ 14 passed                │               │
+├──────────┴──────────────┴────────────────────────────┴───────────────┤
+│ decisions 2                             main · 3 changed · hooks     │
+└──────────────────────────────────────────────────────────────────────┘</div>
 
         <h3>Principles</h3>
         <ul>
@@ -429,7 +435,7 @@
 
         <div class="note">
           <span class="tag">Status · early preview</span>
-          Single user, local only, no auto-update. Suitable for daily personal use and demos. APIs and event names may still change between minor releases.
+          Single user, local only. It updates itself on all three platforms (on Linux the AppImage self-updates; <code>.deb</code> and <code>.rpm</code> get a download prompt). Suitable for daily personal use and demos. APIs and event names may still change between minor releases.
         </div>
       </section>
 
@@ -460,7 +466,7 @@
           <li><strong>Launch Agent Console.</strong> Install a release from the <a href="../#install">downloads on the home page</a> (<code>.deb</code>, <code>.AppImage</code>, or <code>.rpm</code> on Linux; <code>.dmg</code> / <code>.msi</code> on macOS / Windows), or build from source (see <a href="#build">below</a>).</li>
           <li><strong>Open a repository.</strong> Use the folder picker or pick from the recents list. Any local folder works; a git repo unlocks the diff viewer and snapshots.</li>
           <li><strong>Give it a task.</strong> Type a plain-language instruction into the chat — e.g. <em>"fix the failing user-auth test"</em> — and press <kbd>Enter</kbd>.</li>
-          <li><strong>Approve as it goes.</strong> Each time the agent wants to edit a file or run a command, a modal asks you to approve or deny.</li>
+          <li><strong>Approve as it goes.</strong> Each time the agent wants to edit a file or run a command, the console asks you to approve or deny (see <a href="#approvals">Tool approvals</a>).</li>
         </ol>
         <div class="note">
           <span class="tag">No accounts</span>
@@ -471,23 +477,27 @@
       <!-- ============ INTERFACE ============ -->
       <section id="interface">
         <h2>The interface</h2>
-        <p>The window is three columns. From left to right:</p>
-        <div class="panels">
+        <p>The window is a rail and three columns, with a status bar underneath. From left to right:</p>
+        <div class="panels two">
           <div class="panel-card">
-            <div class="pn">◧ Files</div>
-            <p>The file tree of the open repository. Browse structure at a glance — this is for orientation, not editing.</p>
+            <div class="pn">◧ Rail</div>
+            <p>Five destinations: <strong>Inbox</strong>, <strong>Sessions</strong>, <strong>Work</strong>, <strong>Proof</strong> and <strong>Settings</strong>. The Inbox carries a badge with the decisions waiting on you.</p>
           </div>
           <div class="panel-card">
-            <div class="pn">▤ Terminal / Changes / Preview</div>
-            <p>The work area, tabbed. A real PTY terminal, the git diff viewer, and a preview pane. Switch with <kbd>Ctrl+1/2/3</kbd>.</p>
+            <div class="pn">☰ List pane</div>
+            <p>What the destination offers. In Sessions: your sessions, grouped into working and stopped, and the <strong>+</strong> that starts a new one. In Work, Proof and Settings: their sections.</p>
           </div>
           <div class="panel-card">
-            <div class="pn">◨ Agent</div>
-            <p>The chat. You type tasks here and watch the agent's tool calls and replies stream in, each with a restore handle.</p>
+            <div class="pn">▤ Center</div>
+            <p>The work area. In Sessions it has three tabs — <strong>Conversation</strong>, <strong>Changes</strong> and <strong>Preview</strong> (<kbd>Ctrl+1/2/3</kbd>) — and the session's terminal in a drawer underneath.</p>
+          </div>
+          <div class="panel-card">
+            <div class="pn">◨ Inspector</div>
+            <p>The detail of what is selected: a turn in full (your prompt, its tool calls, re-run, its ledger entry), or the file while Changes is up. Other destinations hide it.</p>
           </div>
         </div>
-        <p>Two sidebars can be toggled to give the work area more room: <kbd>Ctrl+B</kbd> hides the workspace sidebar, <kbd>Ctrl+J</kbd> toggles the side panel.</p>
-        <p>When the agent first mutates files in a turn, the work area <strong>auto-switches to the Changes tab</strong> so you see the diff without hunting for it.</p>
+        <p>Give the center more room when you need it: <kbd>Ctrl+B</kbd> hides the list pane, <kbd>Ctrl+J</kbd> hides the side panel, <kbd>Ctrl+`</kbd> shows or hides the terminal drawer, and <kbd>Ctrl+Shift+F</kbd> is focus mode, the terminal alone.</p>
+        <p>The status bar shows how many decisions are waiting, the branch and how many files changed, and whether the hooks are reporting.</p>
       </section>
 
       <!-- ============ DIRECTING ============ -->
@@ -507,7 +517,7 @@
       <!-- ============ TERMINAL ============ -->
       <section id="terminal">
         <h2>Terminal &amp; sessions</h2>
-        <p>The Terminal tab is a full PTY — it runs <code>npm test</code>, <code>vim</code>, <code>git status</code>, anything you'd run in a normal shell. It's how you verify the agent's work with your own hands.</p>
+        <p>Each session has a terminal in a drawer under its conversation (<kbd>Ctrl+`</kbd> shows and hides it). It is a full PTY — it runs <code>npm test</code>, <code>vim</code>, <code>git status</code>, anything you'd run in a normal shell. It's how you verify the agent's work with your own hands.</p>
         <h3>Sessions</h3>
         <p>Each session is an independent live context. Create a new one with <kbd>Ctrl+T</kbd> and cycle between live sessions with <kbd>Ctrl+Tab</kbd> / <kbd>Ctrl+Shift+Tab</kbd> (or <kbd>Ctrl+]</kbd> / <kbd>Ctrl+[</kbd>). Close the active one with <kbd>Ctrl+W</kbd>. Your recent projects persist across launches.</p>
         <div class="note">
@@ -536,7 +546,7 @@
       <section id="safety">
         <h2>The safety model</h2>
         <p>Agent Console assumes the agent will sometimes be wrong. Two independent layers keep you in control, and <strong>both are on by default</strong>:</p>
-        <div class="panels" style="grid-template-columns: repeat(2, 1fr);">
+        <div class="panels two">
           <div class="panel-card">
             <div class="pn">1 · Tool approval — the front line</div>
             <p>You approve every mutation <em>before</em> it happens.</p>
@@ -551,14 +561,18 @@
       <!-- ============ APPROVALS ============ -->
       <section id="approvals">
         <h2>Tool approvals</h2>
-        <p>Before the agent runs a state-changing tool, a modal shows you the <strong>tool name and its exact input</strong>, and you approve or deny.</p>
+        <p>Before the agent runs a state-changing tool, the console shows you the <strong>tool name and its exact input</strong> (for an edit, the diff) and waits for your answer.</p>
+        <p>The decision appears as a card in the <strong>Inbox</strong> and inline in that session's conversation. If you are looking at something else, the same decision pops up as a modal. Each card carries a risk tier and three answers: <strong>Deny</strong>, <strong>Approve once</strong>, and <strong>Always…</strong>, which turns your answer into a standing rule. An irreversible action asks you to type <code>approve</code> before the button works.</p>
+        <p>The card's countdown is how long the agent waits. When it runs out nothing is approved: the question goes back to the agent's own prompt in the terminal.</p>
         <p><strong>Which engines.</strong> This applies to Claude Code and Codex, which call the console through their hooks before each tool. OpenCode has no hooks, so the console cannot ask before its tools run: it follows the approval policy file (Settings → Trust → Permissions) through its own permission settings, and a plugin records each tool result, the prompt and the end of the turn in the ledger.</p>
         <p>Approval is required for: <code>Bash</code>, <code>Edit</code>, <code>Write</code>, <code>MultiEdit</code>, and <code>NotebookEdit</code>. Read-only tools — <code>Read</code>, <code>Grep</code>, <code>Glob</code>, <code>LS</code>, <code>WebFetch</code>, <code>WebSearch</code> — pass through without interrupting you.</p>
+        <p>In the modal, the keyboard answers too:</p>
         <ul>
-          <li><kbd>Ctrl+Enter</kbd> approves the pending action.</li>
-          <li><kbd>Esc</kbd> denies it (and dismisses any modal).</li>
+          <li><kbd>Ctrl+Enter</kbd> approves once. It is disabled for a command flagged as dangerous, which needs a click.</li>
+          <li><kbd>Ctrl+D</kbd> denies.</li>
+          <li><kbd>Esc</kbd> closes the modal without deciding and hands the question back to the terminal.</li>
         </ul>
-        <p>If you trust the current task, a session-wide <strong>"approve all"</strong> toggle lets the agent run uninterrupted for that session.</p>
+        <p>There is no blanket "approve all". To stop being asked about something you trust, use <strong>Always…</strong> on its card, or write it into the approval policy file (Settings → Trust → Permissions), which each engine enforces.</p>
         <div class="note">
           <span class="tag">How it works</span>
           Approvals are enforced by a bundled hook that Claude Code and Codex run before each tool: a small native helper shipped with the app, so nothing else has to be installed for it.
@@ -586,11 +600,13 @@
         <table>
           <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
           <tbody>
-            <tr><td><kbd>Ctrl+1</kbd></td><td>Switch to Terminal tab</td></tr>
-            <tr><td><kbd>Ctrl+2</kbd></td><td>Switch to Changes tab</td></tr>
-            <tr><td><kbd>Ctrl+3</kbd></td><td>Switch to Preview tab</td></tr>
-            <tr><td><kbd>Ctrl+B</kbd></td><td>Toggle workspace sidebar</td></tr>
-            <tr><td><kbd>Ctrl+J</kbd></td><td>Toggle side panel</td></tr>
+            <tr><td><kbd>Ctrl+1</kbd></td><td>Switch to the Conversation tab</td></tr>
+            <tr><td><kbd>Ctrl+2</kbd></td><td>Switch to the Changes tab</td></tr>
+            <tr><td><kbd>Ctrl+3</kbd></td><td>Switch to the Preview tab</td></tr>
+            <tr><td><kbd>Ctrl+B</kbd></td><td>Toggle the list pane</td></tr>
+            <tr><td><kbd>Ctrl+J</kbd></td><td>Toggle the side panel</td></tr>
+            <tr><td><kbd>Ctrl+`</kbd></td><td>Show or hide the terminal drawer</td></tr>
+            <tr><td><kbd>Ctrl+Shift+F</kbd></td><td>Focus mode: the terminal alone</td></tr>
             <tr><td><kbd>Ctrl+P</kbd></td><td>Open command palette</td></tr>
             <tr><td><kbd>Ctrl+/</kbd></td><td>Show keyboard shortcuts</td></tr>
             <tr><td><kbd>Ctrl+T</kbd></td><td>New session <span style="color:var(--faint)">(passes to the shell inside the terminal)</span></td></tr>
@@ -600,10 +616,12 @@
             <tr><td><kbd>Ctrl+[</kbd></td><td>Previous live session <span style="color:var(--faint)">(passes as Esc inside the terminal — e.g. vim)</span></td></tr>
             <tr><td><kbd>Ctrl+W</kbd></td><td>Close active session <span style="color:var(--faint)">(passes as delete-word inside the terminal)</span></td></tr>
             <tr><td><kbd>Ctrl+K</kbd></td><td>Focus the chat input</td></tr>
+            <tr><td><kbd>Ctrl+E</kbd></td><td>Toggle the prompt composer, for multi-line drafts <span style="color:var(--faint)">(passes to the shell inside the terminal)</span></td></tr>
             <tr><td><kbd>Ctrl+L</kbd></td><td>Clear the terminal <span style="color:var(--faint)">(shell still gets Ctrl+L natively when focused there)</span></td></tr>
             <tr><td><kbd>Ctrl+R</kbd></td><td>Refresh git changes</td></tr>
-            <tr><td><kbd>Esc</kbd></td><td>Deny pending agent action / dismiss modal</td></tr>
-            <tr><td><kbd>Ctrl+Enter</kbd></td><td>Approve pending agent action</td></tr>
+            <tr><td><kbd>Ctrl+Enter</kbd></td><td>Approve the pending action once <span style="color:var(--faint)">(in the approval modal)</span></td></tr>
+            <tr><td><kbd>Ctrl+D</kbd></td><td>Deny the pending action <span style="color:var(--faint)">(in the approval modal)</span></td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Close a modal; on an approval, hand the question back to the terminal</td></tr>
             <tr><td><kbd>Enter</kbd></td><td>Send chat message</td></tr>
             <tr><td><kbd>Shift+Enter</kbd></td><td>New line in chat input</td></tr>
           </tbody>
@@ -612,14 +630,16 @@
 
       <!-- ============ WORKBENCH ============ -->
       <section id="workbench">
-        <h2>The workbench: nine groups</h2>
-        <p>The right-hand panel is the control plane. Everything in it is local and suggest-only — nothing there can block the core loop. The strip shows nine groups in three clusters; merged groups open with a small sub-tab switcher at the top.</p>
+        <h2>The workbench: five destinations, twelve modules</h2>
+        <p>Everything beyond the core loop lives in the rail's five destinations. All of it is local, and nothing there can block the core loop.</p>
         <ul>
-          <li><strong>Work</strong> — <em>Tasks</em> (Jira queue | agenda), <em>Notes</em> (per-project scratchpad; a note can be typed into the agent with one click), <em>Proof</em> (the evidence ledger), <em>Context</em> (CLAUDE.md, memories, semantic search).</li>
-          <li><strong>Agents</strong> — <em>Coach</em> (skills | advisor | learning: the agent's playbook, generated from your repo and your real usage), <em>Room</em> (you + N agents on one problem), <em>Schedule</em> (agentic jobs on a clock, physically restricted to plan mode).</li>
-          <li><strong>Config</strong> — <em>Trust</em> (permissions | secrets vault: what the agent can touch), <em>Add-ons</em> (plugins | MCP servers).</li>
+          <li><strong>Inbox</strong> — the decisions waiting on you, each as a card with its evidence: tool approvals, a folder to trust, a pull request with red CI, a claim nothing verified, a session stopped by its plan's quota.</li>
+          <li><strong>Sessions</strong> — your agent sessions: the conversation, the changes, the preview and the terminal of each.</li>
+          <li><strong>Work</strong> — <em>Agents</em>: Jobs, Room (you + several agents on one problem), Schedule (agent jobs on a clock, suggest-only), Watch. <em>Queue</em>: Jira queue, Agenda, Teams. <em>Notes</em>: a per-project scratchpad; a note can be typed into the agent with one click. <em>Help</em>: Assistant.</li>
+          <li><strong>Proof</strong> — <em>Turns</em> and the <em>Ledger</em>: what was witnessed, turn by turn, and the exports.</li>
+          <li><strong>Settings</strong> — <em>Trust</em>: Permissions, Vault (what the agent can touch). <em>Coach</em>: Skills, Advisor, Learning, Context (CLAUDE.md, memories, semantic search). <em>Add-ons</em>: Plugins, MCP servers. <em>Maintenance</em>: Export / import, Feedback.</li>
         </ul>
-        <p>Export/import and the feedback form left the strip — reach them from the command palette (<code>Ctrl+P</code>).</p>
+        <p>Those sections are twelve <strong>modules</strong>: Tasks, Teams, Notes, Proof, Context, Coach, Room, Schedule, Watch, Assistant, Trust and Add-ons. Switch off the ones you do not use from the command palette (<kbd>Ctrl+P</kbd> → <em>Configure Modules</em>); off only hides, it never deletes data. <strong>Trust</strong> cannot be switched off, and the two experimental ones, <strong>Watch</strong> and <strong>Assistant</strong>, start off.</p>
       </section>
 
       <!-- ============ TASKS ============ -->
@@ -688,7 +708,7 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <h2>Troubleshooting</h2>
         <h3>The agent never responds</h3>
         <p>Confirm the session's agent CLI is installed and logged in: run it in a terminal (<code>claude</code>, <code>codex</code> or <code>opencode</code>) and check it answers. Agent Console can only drive a CLI that's already authenticated.</p>
-        <h3>Approval modals never appear / mutations are blocked</h3>
+        <h3>Approvals never appear / mutations are blocked</h3>
         <p>Approvals reach the console through hooks written into the agent's own settings (<code>~/.claude/settings.json</code>, <code>~/.codex/hooks.json</code>). The Skills panel shows whether the approvals bridge is active and offers <em>enable approvals bridge</em> when it is not. Node.js is not involved: the hook is a native helper bundled with the app. With OpenCode there is no approval from the console to wait for; see <a href="#approvals">Tool approvals</a>.</p>
         <h3>No diff or no restore handle</h3>
         <p>The diff viewer and per-turn snapshots only work inside a <strong>git repository</strong>. Open a folder that has been <code>git init</code>'d (or any existing repo).</p>
@@ -712,7 +732,7 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <h3>Will it touch my git branches or history?</h3>
         <p>No. Snapshots live in a private ref namespace and restore only rewrites the working tree. HEAD and your branches are never moved.</p>
         <h3>Can I let it run without approving every step?</h3>
-        <p>Yes — flip the session-wide "approve all" toggle when you trust the task. The snapshot safety net still applies, so you can always rewind.</p>
+        <p>For what you decide, yes. <strong>Always…</strong> on an approval turns that answer into a standing rule, and the approval policy file (Settings → Trust → Permissions) states what each engine may do without asking. There is no blanket "approve all". The snapshot safety net still applies, so you can always rewind.</p>
         <h3>Which platforms are supported?</h3>
         <p>Linux, macOS, and Windows by design; Linux-first in practice. It's not yet packaged for Snap / Flatpak / Homebrew / the MS Store.</p>
         <h3>Can I use it from my phone?</h3>
