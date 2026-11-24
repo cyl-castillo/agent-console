@@ -39,8 +39,8 @@ as the approved classic dev-tool snaps (`code`, `goland`, `clion`, …).
 Hello! I'm requesting classic confinement for `agent-console`
 (<https://github.com/cyl-castillo/agent-console>, AGPL-3.0 licensed).
 
-Agent Console is a desktop developer tool (Tauri/WebKitGTK): a minimalist
-console for supervising AI coding agents (Claude Code, Codex CLIs) working
+Agent Console is a desktop developer tool (Tauri/WebKitGTK): a console for
+supervising AI coding agents (Claude Code, Codex CLIs) working
 inside the user's own repositories. It embeds a PTY terminal that runs the
 user's login shell, and its core function is launching and supervising
 CLIs the user has installed on the host — `claude`, `codex`, `node`, `git` —

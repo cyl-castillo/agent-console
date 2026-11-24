@@ -28,6 +28,14 @@ export const usePreflightStore = create<PreflightState>((set, get) => ({
   },
 }));
 
+/// The agent CLIs the console can drive. One of them is enough to work.
+export const ENGINE_TOOLS = ["claude", "codex", "opencode"] as const;
+
+/// The engines whose CLI the preflight found, in ENGINE_TOOLS order.
+export function enginesFound(result: Preflight | null): string[] {
+  return ENGINE_TOOLS.filter((name) => toolStatus(result, name)?.found);
+}
+
 /// Look up one tool's status from a preflight result.
 export function toolStatus(result: Preflight | null, name: string): PreflightTool | undefined {
   return result?.tools.find((t) => t.name === name);

@@ -48,9 +48,11 @@ stories, see below):
   on the full ledger: path, counts, draft, verification state, policy hash,
   SHA-256. Story `app-v2--proof-ledger` + the button.
 - `og-cover.png` — 1200×630 social cover (wired into `og:image` /
-  `twitter:image`), generated from the hero with the wordmark baked in (PIL:
-  resize to 1200 wide, crop to 630, dark gradient over the lower half,
-  DejaVu Sans Mono Bold wordmark + DejaVu Sans tagline).
+  `twitter:image`), generated from the hero by `scripts/og-cover.py` (Pillow:
+  resize to 1200 wide, crop to 630 from the top, fade into the page
+  background over the lower part, DejaVu Sans Mono Bold wordmark + DejaVu
+  Sans tagline and engine line). Run `python3 scripts/og-cover.py` after
+  replacing the hero or changing the text; the three lines live in `LINES`.
 
 Capture spec: see `../LANDING_SHOTLIST.md`. The v0.93 set (October 25, 2026)
 was captured the same way with a one-off Playwright script (chromium, the

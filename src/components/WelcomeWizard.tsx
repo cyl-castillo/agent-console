@@ -72,7 +72,8 @@ export function WelcomeWizard({ onClose }: { onClose: () => void }) {
         <div className="wizard-body">
           <p className="gs-step-desc">
             Agent Console drives a coding agent in a real terminal. Which one do you want to start
-            with? (You can add the other later.)
+            with? (You can add the other later. OpenCode works too: install it from opencode.ai and
+            it shows up in the setup check; this wizard does not install it.)
           </p>
           <div className="wizard-choices">
             <button className="wizard-choice" onClick={() => setEngine("claude")}>
