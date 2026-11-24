@@ -201,15 +201,13 @@ fn claude_auth() -> EngineAuth {
     }
 }
 
+/// What the doctor shows, top to bottom. Node stays above Codex: Codex's
+/// installer is npm and its note says "install it above".
+const PROBE_ORDER: [&str; 5] = ["claude", "node", "git", "codex", "opencode"];
+
 #[tauri::command(async)]
 pub fn preflight_check() -> Preflight {
-    let mut tools = vec![
-        probe("claude"),
-        probe("codex"),
-        probe("opencode"),
-        probe("git"),
-        probe("node"),
-    ];
+    let mut tools: Vec<ToolStatus> = PROBE_ORDER.iter().map(|bin| probe(bin)).collect();
     let node_found = tools.iter().any(|t| t.name == "node" && t.found);
     let os = current_os();
     for t in tools.iter_mut() {
@@ -261,6 +259,14 @@ mod tests {
             assert!(cmd.is_none(), "opencode on {os} must not carry a command");
             assert!(note.unwrap().contains("opencode.ai"));
         }
+    }
+
+    #[test]
+    fn node_is_listed_above_the_installer_that_needs_it() {
+        let at = |bin: &str| PROBE_ORDER.iter().position(|b| *b == bin).unwrap();
+        assert!(at("node") < at("codex"));
+        let (_, note) = fix_for("codex", "linux", false);
+        assert!(note.unwrap().contains("above"));
     }
 
     #[test]
