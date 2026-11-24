@@ -78,8 +78,8 @@ pub fn sandbox_enable(project_root: String) -> AppResult<SandboxStatus> {
 }
 
 /// Firewall mode: are the console's hooks and baseline policy installed in
-/// Claude Code's managed settings, owned by the administrator, and what
-/// this version would install? Installing is the user's action; this only
+/// Claude Code's managed settings (and Codex's requirements file), owned by
+/// the administrator, and what this version would install? Installing is the user's action; this only
 /// reads. With a project, a change since the ledger's last `firewall_state`
 /// line is witnessed there (see `witness_firewall`).
 #[tauri::command(async)]
@@ -113,6 +113,7 @@ pub fn witness_firewall(
         status.installed_sha256.as_deref(),
         status.expected_sha256.as_deref(),
         &status.problems,
+        status.codex.as_ref(),
     ) {
         tracing::debug!("firewall_state not witnessed: {e}");
     }

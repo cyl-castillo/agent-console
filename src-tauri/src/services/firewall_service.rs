@@ -343,6 +343,16 @@ pub struct EngineCoverage {
     pub path: Option<String>,
 }
 
+/// The state of Codex's requirements file: `off` · `foreign` (someone
+/// else's file, left alone) · `enforced` · `drifted` · `unsafe`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodexWitness {
+    pub state: String,
+    /// sha256 of the file on disk, when there is one to read.
+    pub installed_sha256: Option<String>,
+    pub problems: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FirewallStatus {
@@ -376,6 +386,10 @@ pub struct FirewallStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uninstall_script: Option<String>,
     pub engines: Vec<EngineCoverage>,
+    /// Codex's part as found, for the ledger (`firewall_state`). Not sent to
+    /// the interface: the engine line already says it in words.
+    #[serde(skip)]
+    pub codex: Option<CodexWitness>,
 }
 
 fn engines(claude_covered: bool) -> Vec<EngineCoverage> {
@@ -414,6 +428,7 @@ fn unsupported(reason: String) -> FirewallStatus {
         expected: None,
         expected_sha256: None,
         installed_sha256: None,
+        codex: None,
         install_script: None,
         uninstall_script: None,
         engines: engines(false),
@@ -629,6 +644,7 @@ pub fn inspect(
         expected: Some(expected.to_string()),
         expected_sha256: Some(sha256_hex(expected.as_bytes())),
         installed_sha256: None,
+        codex: None,
         install_script: None,
         uninstall_script: None,
         engines: engines(false),
@@ -750,6 +766,11 @@ pub fn status() -> FirewallStatus {
         status.uninstall_script =
             uninstall_script(&dropin, &bridge, codex_ours.map(|c| c.path.as_path()));
     }
+    status.codex = codex.as_ref().map(|c| CodexWitness {
+        state: c.state.clone(),
+        installed_sha256: c.installed_sha256.clone(),
+        problems: c.problems.clone(),
+    });
     if let Some(entry) = status.engines.iter_mut().find(|e| e.engine == "codex") {
         match &codex {
             None => {
@@ -774,6 +795,8 @@ struct CodexCoverage {
     state: String,
     covered: bool,
     note: String,
+    problems: Vec<String>,
+    installed_sha256: Option<String>,
 }
 
 /// `None` when Codex is not installed, is too old, or its file cannot be
@@ -786,7 +809,10 @@ fn codex_coverage(bridge: &Path, home: Option<&Path>, claude_state: &str) -> Opt
     }
     let expected = codex_requirements(bridge, home)?;
     let (state, problems) = inspect_codex(&path, &expected, Path::new("/"), 0);
-    Some(codex_note(path, expected, state, &problems, claude_state))
+    let installed_sha256 = std::fs::read(&path).ok().map(|b| sha256_hex(&b));
+    let mut coverage = codex_note(path, expected, state, &problems, claude_state);
+    coverage.installed_sha256 = installed_sha256;
+    Some(coverage)
 }
 
 fn codex_note(
@@ -810,6 +836,8 @@ fn codex_note(
         state,
         covered,
         note,
+        problems: problems.to_vec(),
+        installed_sha256: None,
     }
 }
 

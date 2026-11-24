@@ -1786,6 +1786,13 @@ impl TestigoService {
     /// enforcement its approvals were decided and when that changed. A
     /// ledger that never saw the mode on gets no line for "off" or
     /// "unsupported". `None` = nothing new to say.
+    ///
+    /// `state` is Claude Code's part. `codex` is Codex's requirements file
+    /// as found, when Codex is on this machine: it goes in the payload, and
+    /// a change in it is a line too once the console's file has been there
+    /// (`enforced`, `drifted`, `unsafe`). A Codex file that is absent or
+    /// someone else's is the same as no Codex for that comparison.
+    #[allow(clippy::too_many_arguments)]
     pub fn on_firewall_state(
         &self,
         project_root: &str,
@@ -1794,7 +1801,11 @@ impl TestigoService {
         installed_sha256: Option<&str>,
         expected_sha256: Option<&str>,
         problems: &[String],
+        codex: Option<&crate::services::firewall_service::CodexWitness>,
     ) -> AppResult<Option<ProofEvent>> {
+        fn installed(state: Option<&str>) -> Option<&str> {
+            state.filter(|s| matches!(*s, "enforced" | "drifted" | "unsafe"))
+        }
         let mut inner = self.inner.lock();
         let last = Self::read_events(project_root)?
             .into_iter()
@@ -1809,12 +1820,37 @@ impl TestigoService {
             .as_ref()
             .and_then(|e| e.payload.get("installedSha256"))
             .and_then(Value::as_str);
+        let previous_codex = last.as_ref().and_then(|e| e.payload.get("codex"));
+        let previous_codex_state = installed(previous_codex.and_then(|c| c.get("state")?.as_str()));
+        let previous_codex_sha = previous_codex_state
+            .and(previous_codex)
+            .and_then(|c| c.get("installedSha256")?.as_str());
+        let codex_state = installed(codex.map(|c| c.state.as_str()));
+        let codex_sha = codex_state
+            .and(codex)
+            .and_then(|c| c.installed_sha256.as_deref());
         match previous.as_deref() {
-            None if matches!(state, "off" | "unsupported") => return Ok(None),
-            Some(p) if p == state && previous_sha == installed_sha256 => return Ok(None),
+            None if matches!(state, "off" | "unsupported") && codex_state.is_none() => {
+                return Ok(None)
+            }
+            Some(p)
+                if p == state
+                    && previous_sha == installed_sha256
+                    && previous_codex_state == codex_state
+                    && previous_codex_sha == codex_sha =>
+            {
+                return Ok(None)
+            }
             _ => {}
         }
         let mut payload = json!({ "state": state, "problems": problems });
+        if let Some(c) = codex {
+            let mut entry = json!({ "state": c.state, "problems": c.problems });
+            if let Some(h) = &c.installed_sha256 {
+                entry["installedSha256"] = json!(h);
+            }
+            payload["codex"] = entry;
+        }
         if let Some(p) = previous {
             payload["previous"] = json!(p);
         }
@@ -2236,16 +2272,16 @@ mod tests {
         let none: &[String] = &[];
         // Never on: nothing to say.
         assert!(svc
-            .on_firewall_state(root, 1, "off", None, Some("e1"), none)
+            .on_firewall_state(root, 1, "off", None, Some("e1"), none, None)
             .unwrap()
             .is_none());
         assert!(svc
-            .on_firewall_state(root, 2, "unsupported", None, None, none)
+            .on_firewall_state(root, 2, "unsupported", None, None, none, None)
             .unwrap()
             .is_none());
 
         let on = svc
-            .on_firewall_state(root, 3, "enforced", Some("e1"), Some("e1"), none)
+            .on_firewall_state(root, 3, "enforced", Some("e1"), Some("e1"), none, None)
             .unwrap()
             .expect("first enforced");
         assert_eq!(on.kind, "firewall_state");
@@ -2256,33 +2292,33 @@ mod tests {
         assert!(on.payload.get("previous").is_none());
         // Read again, unchanged: no line.
         assert!(svc
-            .on_firewall_state(root, 4, "enforced", Some("e1"), Some("e1"), none)
+            .on_firewall_state(root, 4, "enforced", Some("e1"), Some("e1"), none, None)
             .unwrap()
             .is_none());
 
         // The drop-in changed under the same state name.
         let problems = vec!["/etc/x is not what this version installs".to_string()];
         let drift = svc
-            .on_firewall_state(root, 5, "drifted", Some("zz"), Some("e1"), &problems)
+            .on_firewall_state(root, 5, "drifted", Some("zz"), Some("e1"), &problems, None)
             .unwrap()
             .expect("drift");
         assert_eq!(drift.payload["previous"], "enforced");
         assert_eq!(drift.payload["problems"][0], problems[0]);
         let drift2 = svc
-            .on_firewall_state(root, 6, "drifted", Some("yy"), Some("e1"), &problems)
+            .on_firewall_state(root, 6, "drifted", Some("yy"), Some("e1"), &problems, None)
             .unwrap()
             .expect("another content");
         assert_eq!(drift2.payload["installedSha256"], "yy");
 
         // Turned off after having been on: that is a line.
         let off = svc
-            .on_firewall_state(root, 7, "off", None, Some("e1"), none)
+            .on_firewall_state(root, 7, "off", None, Some("e1"), none, None)
             .unwrap()
             .expect("off after on");
         assert_eq!(off.payload["previous"], "drifted");
         assert!(off.payload.get("installedSha256").is_none());
         assert!(svc
-            .on_firewall_state(root, 8, "off", None, Some("e1"), none)
+            .on_firewall_state(root, 8, "off", None, Some("e1"), none, None)
             .unwrap()
             .is_none());
 
@@ -2294,6 +2330,91 @@ mod tests {
             .map(|e| e.payload["state"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(kinds, ["enforced", "drifted", "drifted", "off"]);
+
+        // Codex's file is witnessed too. A ledger that never saw either
+        // part gets no line for a Codex file that is absent or not ours.
+        use crate::services::firewall_service::CodexWitness;
+        let codex = |state: &str, sha: Option<&str>| CodexWitness {
+            state: state.into(),
+            installed_sha256: sha.map(String::from),
+            problems: Vec::new(),
+        };
+        let other = "/proj/fw-codex";
+        for (ts, state) in [(1, "off"), (2, "foreign")] {
+            assert!(svc
+                .on_firewall_state(
+                    other,
+                    ts,
+                    "off",
+                    None,
+                    None,
+                    none,
+                    Some(&codex(state, None))
+                )
+                .unwrap()
+                .is_none());
+        }
+        let first = svc
+            .on_firewall_state(
+                other,
+                3,
+                "off",
+                None,
+                None,
+                none,
+                Some(&codex("enforced", Some("c1"))),
+            )
+            .unwrap()
+            .expect("codex on with claude off");
+        assert_eq!(first.payload["state"], "off");
+        assert_eq!(first.payload["codex"]["state"], "enforced");
+        assert_eq!(first.payload["codex"]["installedSha256"], "c1");
+        // Same again: nothing. Its content changed: a line.
+        assert!(svc
+            .on_firewall_state(
+                other,
+                4,
+                "off",
+                None,
+                None,
+                none,
+                Some(&codex("enforced", Some("c1")))
+            )
+            .unwrap()
+            .is_none());
+        let changed = svc
+            .on_firewall_state(
+                other,
+                5,
+                "off",
+                None,
+                None,
+                none,
+                Some(&codex("drifted", Some("c2"))),
+            )
+            .unwrap()
+            .expect("codex drift");
+        assert_eq!(changed.payload["codex"]["state"], "drifted");
+        // Replaced by someone else's file, then Codex gone: one line, since
+        // both mean the console's file is no longer there.
+        let gone = svc
+            .on_firewall_state(
+                other,
+                6,
+                "off",
+                None,
+                None,
+                none,
+                Some(&codex("foreign", Some("zz"))),
+            )
+            .unwrap()
+            .expect("codex file replaced");
+        assert_eq!(gone.payload["codex"]["state"], "foreign");
+        assert!(svc
+            .on_firewall_state(other, 7, "off", None, None, none, None)
+            .unwrap()
+            .is_none());
+        assert!(svc.verify(other).unwrap().ok);
         assert!(svc.verify(root).unwrap().ok);
         let _ = std::fs::remove_dir_all(&base);
     }

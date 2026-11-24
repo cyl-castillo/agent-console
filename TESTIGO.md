@@ -276,7 +276,12 @@ ProofEvent {
   `unbound`) **sólo cuando difiere** de la última línea `firewall_state` de ese ledger; un ledger
   que nunca vio el modo activo no recibe línea por `off` ni `unsupported`. Es una observación de
   la consola, no una decisión. Export IETF: `firewall_state` → lifecycle / concurrent /
-  success (`enforced`), failure (`drifted`, `unsafe`), partial (el resto). Sólo Claude Code.
+  success (`enforced`), failure (`drifted`, `unsafe`), partial (el resto). `state` es la parte de
+  Claude Code. Con el CLI de Codex en la máquina el payload lleva además
+  `codex {state, installedSha256?, problems}`, el estado de `/etc/codex/requirements.toml`
+  (`off`, `foreign` = archivo ajeno que la consola no toca, `enforced`, `drifted`, `unsafe`); un
+  cambio ahí también escribe línea una vez que el archivo de la consola estuvo instalado, y
+  `drifted`/`unsafe` en Codex exporta como failure. OpenCode no tiene modo firewall y no figura.
 - **Revisión cruzada y fan-out (COMPETENCIA-2026-10 F9, 2026-10-24)**: (1) la regla "el revisor nunca es
   el productor" vive en un solo lugar, `reviewer_service::distinct_identity`: otro engine, o el mismo
   engine en otra familia de modelo (Claude opus/sonnet/haiku/fable; OpenCode otro id); Codex con otro
