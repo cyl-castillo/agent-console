@@ -425,6 +425,7 @@ mod tests {
 
     fn ev(seq: u64, ts: i64, kind: &str, turn: Option<&str>, payload: Value) -> ProofEvent {
         ProofEvent {
+            schema_version: 1,
             seq,
             ts,
             case_id: "c".into(),

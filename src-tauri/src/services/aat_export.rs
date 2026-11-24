@@ -797,6 +797,7 @@ mod tests {
 
     fn ev(seq: u64, ts: i64, kind: &str, term: &str, actor: &str, payload: Value) -> ProofEvent {
         ProofEvent {
+            schema_version: 1,
             seq,
             ts,
             case_id: "case-1".into(),
