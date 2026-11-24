@@ -6,6 +6,7 @@ pub mod agent_run;
 pub mod agent_sessions;
 pub mod assistant_log;
 pub mod assistant_service;
+pub mod check_commands;
 pub mod claude_cli;
 pub mod codex_app_server;
 pub mod compliance;
