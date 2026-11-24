@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
 use crate::services::agent_run::{self, RunSpec};
+use crate::services::check_commands::exit_speaks_for_checks;
 use crate::services::engine_runner::{Engine, EngineRunner, ToolPolicy};
 use crate::services::roundtable_service::Participant;
 use crate::services::testigo_service::{check_kind, is_check_command};
@@ -174,6 +175,9 @@ pub fn facts_from_activity(activity: &[Activity], summary: &str) -> TurnFacts {
                 if is_check_command(cmd) {
                     let kind = check_kind(cmd);
                     f.last_check_seq = Some(seq);
+                    // The code is the line's: `cargo test | tail` ends with
+                    // `tail`'s, which says nothing about the tests.
+                    let exit = exit.filter(|code| exit_speaks_for_checks(cmd, *code == 0));
                     let status = match exit {
                         Some(0) => {
                             f.checks.passed += 1;
@@ -740,6 +744,40 @@ mod tests {
     /// The same words, three engines' worth of evidence: a reported exit 0
     /// after the edit verifies, a reported exit 1 contradicts, a call with
     /// no result (Claude's stream) leaves the claim unverified.
+    #[test]
+    fn an_exit_code_that_is_not_the_runners_verifies_no_candidate() {
+        // `tail` exited 0; the tests may have failed.
+        let a = [act(
+            "tool_result",
+            "shell",
+            "npm test 2>&1 | tail -5 · exit 0",
+        )];
+        let f = facts_from_activity(&a, "All tests pass.");
+        assert_eq!((f.checks.passed, f.checks.unknown), (0, 1));
+        assert_eq!(f.last_good_check_seq, None);
+        let (st, _) = verification_rules::verdict(&f, &verification_rules::claims(&f.summary));
+        assert_eq!(st.as_str(), "unverified_claim");
+
+        // `grep -q` exited 1: nothing matched, so nothing is known to fail.
+        let b = [act(
+            "tool_result",
+            "shell",
+            "npm test | grep -q FAIL · exit 1",
+        )];
+        let f = facts_from_activity(&b, "All tests pass.");
+        assert_eq!((f.checks.failed, f.checks.unknown), (0, 1));
+        assert_eq!(f.failed_commands, 1, "the line itself still failed");
+
+        // With pipefail the status is the runner's again.
+        let c = [act(
+            "tool_result",
+            "shell",
+            "set -o pipefail; npm test | tail -5 · exit 0",
+        )];
+        let f = facts_from_activity(&c, "All tests pass.");
+        assert_eq!(f.checks.passed, 1);
+    }
+
     #[test]
     fn facts_from_activity_read_exit_codes_and_edit_order() {
         let a = [

@@ -148,7 +148,13 @@ ProofEvent {
   deterministas que el modelo no puede rebajar (test editado junto al código que cubre sin que el
   prompt lo pidiera → `block`; resumen que dice "tests pass" sin `check_run` **passed** → `high`;
   desde F1a (2026-10-23) un `check_run` solo es `passed` con exit 0 conocido — `empty` (exit 0 sin
-  correr tests), `unknown` (sin exit code visible) e `interrupted` no cuentan; desde F1b OpenCode
+  correr tests), `unknown` (sin exit code visible) e `interrupted` no cuentan; desde 2026-11-24 el
+  exit code tiene que ser el del runner: si la línea termina con el status de otro comando
+  (`cargo test | tail`, `cargo test || true`, `cargo test; echo done`) o puede terminar en 0 sin
+  que el runner arranque (`false && cargo test; true`), el `check_run` es `unknown` y lleva
+  `exitCodeOf: "line"` (`"runner"` cuando el código habla del runner: comandos unidos por `&&`,
+  el runner al final de una lista, un pipeline bajo `set -o pipefail`). `set -e` no se acredita:
+  el wrapper de un engine puede hacer que el shell lo ignore; desde F1b OpenCode
   también deja `tool_result` por tool call vía su plugin testigo, con `observedVia: "plugin"`; desde
   **F1c** el reviewer lee el evento `verification` en vez de su propia lista de frases) y el
   veredicto del modelo, que solo puede endurecer. Se registra `review_verdict` (actor

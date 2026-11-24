@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
-pub use crate::services::check_commands::{check_kind, is_check_command};
+pub use crate::services::check_commands::{check_kind, exit_speaks_for_checks, is_check_command};
 
 /// One link in a project's Testigo chain: the durable, hash-chained record of
 /// something that happened between the human and the agent (a prompt, an
@@ -990,12 +990,22 @@ impl TestigoService {
         // verdict is honest about what the engine let us see: `passed` needs
         // a known exit 0 (stated, or Claude's by-construction zero); a
         // runner that exited 0 having run nothing is `empty`; no exit code
-        // at all is `unknown`, never `passed`.
+        // at all is `unknown`, never `passed`. And the exit code is the
+        // line's: when the line does not end with the runner's status
+        // (`cargo test | tail`, `cargo test || true`), `passed` and `failed`
+        // would be about another command, so the check is `unknown` and the
+        // line says whose code it kept (`exitCodeOf`).
         if canonical == Some("shell") {
             if let Some(cmd) = ids.command.filter(|c| is_check_command(c)) {
+                let line_failed = ids.failed || ids.exit_code.is_some_and(|c| c != 0);
+                let speaks = exit_speaks_for_checks(cmd, !line_failed);
+                // Whose code it is, only when there is a code to speak of.
+                let exit_code_of = ids
+                    .exit_code
+                    .map(|_| if speaks { "runner" } else { "line" });
                 let status = if ids.interrupted == Some(true) {
                     "interrupted"
-                } else if ids.failed || ids.exit_code.is_some_and(|c| c != 0) {
+                } else if line_failed {
                     "failed"
                 } else if ids.exit_code.is_none() {
                     "unknown"
@@ -1005,6 +1015,10 @@ impl TestigoService {
                     "empty"
                 } else {
                     "passed"
+                };
+                let status = match status {
+                    "passed" | "failed" if !speaks => "unknown",
+                    other => other,
                 };
                 let _ = Self::record(
                     &mut inner,
@@ -1022,6 +1036,7 @@ impl TestigoService {
                         "status": status,
                         "exitCode": ids.exit_code,
                         "exitCodeVia": ids.exit_code_via,
+                        "exitCodeOf": exit_code_of,
                         "outputSha256": ids.output_sha256,
                         "toolUseId": ids.tool_use_id,
                         "durationMs": ids.duration_ms,
@@ -2854,6 +2869,115 @@ mod tests {
         assert_eq!(v.kind, "verification");
         assert_eq!(v.payload["status"], "unverified_claim");
         assert_eq!(v.payload["checks"]["passed"], 0);
+        assert!(svc.verify(a).unwrap().ok);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_check_whose_exit_code_is_another_commands_is_unknown_and_verifies_nothing() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "ac-testigo-exitof-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let svc = TestigoService::new();
+        let root = base.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let a = root.to_str().unwrap();
+        // (command, exit code) → (status, whose exit code). `None` and
+        // `FAILED` are the two shapes without a code: nothing reported, and
+        // a failure event that carries none.
+        const FAILED: Option<i64> = Some(i64::MIN);
+        let cases: [(&str, Option<i64>, &str, &str); 11] = [
+            // exit 0 that is `tail`'s, `true`'s, `echo`'s
+            ("cargo test 2>&1 | tail -20", Some(0), "unknown", "line"),
+            ("cargo test || true", Some(0), "unknown", "line"),
+            ("cargo test; echo done", Some(0), "unknown", "line"),
+            // exit 0 with the runner never started
+            ("false && cargo test; true", Some(0), "unknown", "line"),
+            // exit 1 that is `grep`'s: nothing matched, nothing failed
+            ("cargo test | grep -q FAILED", Some(1), "unknown", "line"),
+            // the runner's own
+            ("cd src-tauri && cargo test", Some(0), "passed", "runner"),
+            (
+                "set -o pipefail; cargo test | tail",
+                Some(0),
+                "passed",
+                "runner",
+            ),
+            ("cargo test && git push", Some(1), "failed", "runner"),
+            // no exit code at all: nobody's
+            ("cargo test | tail", None, "unknown", ""),
+            ("cargo test", FAILED, "failed", ""),
+            ("cargo test | grep -q FAILED", FAILED, "unknown", ""),
+        ];
+        for (turn, (cmd, exit_code, ..)) in cases.iter().enumerate() {
+            let failed = exit_code.is_some_and(|c| c != 0);
+            let exit_code = exit_code.filter(|_| *exit_code != FAILED);
+            let t = format!("t{turn}");
+            let ts = 10 * turn as i64;
+            svc.on_prompt(
+                a,
+                ts + 1,
+                Some(&t),
+                Some("s1"),
+                Some("fix it"),
+                None,
+                Some(a),
+            )
+            .unwrap();
+            svc.on_tool_result(
+                a,
+                ts + 2,
+                Some(&t),
+                Some("s1"),
+                Some("Bash"),
+                Some("test result: ok. 12 passed; 0 failed"),
+                failed,
+                ToolResultIds {
+                    command: Some(cmd),
+                    failed,
+                    exit_code,
+                    exit_code_via: exit_code.map(|_| "payload"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            svc.on_turn_end(
+                a,
+                ts + 3,
+                Some(&t),
+                Some("s1"),
+                json!({"summary": "Done. All tests pass."}),
+            )
+            .unwrap();
+        }
+        let evs = svc.list(a, None, None).unwrap();
+        let checks: Vec<_> = evs.iter().filter(|e| e.kind == "check_run").collect();
+        let verdicts: Vec<_> = evs.iter().filter(|e| e.kind == "verification").collect();
+        assert_eq!(checks.len(), cases.len());
+        assert_eq!(verdicts.len(), cases.len());
+        for (i, (cmd, exit_code, status, of)) in cases.iter().enumerate() {
+            let p = &checks[i].payload;
+            assert_eq!(p["status"], *status, "{cmd}");
+            let of = (!of.is_empty()).then_some(*of);
+            assert_eq!(p["exitCodeOf"], json!(of), "{cmd}");
+            // The code the engine reported stays on the line as it came.
+            let exit_code = exit_code.filter(|_| *exit_code != FAILED);
+            assert_eq!(p["exitCode"], json!(exit_code), "{cmd}");
+            let verdict = match *status {
+                "passed" => "verified",
+                "failed" => "claim_contradicted",
+                _ => "unverified_claim",
+            };
+            assert_eq!(verdicts[i].payload["status"], verdict, "{cmd}");
+        }
         assert!(svc.verify(a).unwrap().ok);
         let _ = std::fs::remove_dir_all(&base);
     }
