@@ -4,6 +4,7 @@ import { ipc } from "../ipc/tauri";
 import { useToastStore } from "./toastStore";
 import type { PersistedSession, WorktreeRef, RunsIn } from "../types/domain";
 import { asAgentKind, type AgentKind } from "../agents/profiles";
+import { tailWellFormed } from "../lib/wellFormed";
 
 const MAX_SCROLLBACK = 50_000;
 
@@ -338,10 +339,7 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
           ? {
               ...s,
               status: "stopped" as const,
-              initialScrollback:
-                merged.length > MAX_SCROLLBACK
-                  ? merged.slice(merged.length - MAX_SCROLLBACK)
-                  : merged,
+              initialScrollback: tailWellFormed(merged, MAX_SCROLLBACK),
               liveScrollback: "",
               lastActiveMs: Date.now(),
             }
@@ -382,8 +380,10 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     if (idx < 0) return;
     const target = sessions[idx];
     const next = target.liveScrollback + chunk;
+    // Cut on a code point boundary: a slice by code unit can leave half an
+    // emoji at the head, and serde_json then refuses the whole save (#138).
     target.liveScrollback =
-      next.length > MAX_SCROLLBACK ? next.slice(next.length - MAX_SCROLLBACK) : next;
+      next.length > MAX_SCROLLBACK ? tailWellFormed(next, MAX_SCROLLBACK) : next;
   },
 
   close: async (id) => {
@@ -424,10 +424,9 @@ export const useTerminalsStore = create<TerminalsState>((set, get) => ({
     if (!projectRoot || !ready) return;
     const payload: PersistedSession[] = sessions.map((s) => {
       const scrollback = s.status === "live" ? s.liveScrollback : s.initialScrollback;
-      const trimmed =
-        scrollback.length > MAX_SCROLLBACK
-          ? scrollback.slice(scrollback.length - MAX_SCROLLBACK)
-          : scrollback;
+      // Also repairs a scrollback that was cut badly before this fix, so a
+      // session already stuck on a lone surrogate saves again.
+      const trimmed = tailWellFormed(scrollback, MAX_SCROLLBACK);
       return {
         id: s.id,
         name: s.name,
