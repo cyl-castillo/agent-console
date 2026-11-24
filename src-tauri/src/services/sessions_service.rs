@@ -147,65 +147,25 @@ impl SessionsService {
     /// error so callers don't mistake unreadable data for "no sessions" and
     /// overwrite it. On parse failure we first try the `.bak` copy.
     fn load_file() -> AppResult<SessionsFile> {
-        let path = Self::path()?;
-        if !path.exists() {
-            return Ok(SessionsFile::default());
-        }
-        let txt = fs::read_to_string(&path)
-            .map_err(|e| AppError::Other(format!("read sessions.json: {e}")))?;
-        if txt.trim().is_empty() {
-            return Ok(SessionsFile::default());
-        }
-        match serde_json::from_str::<SessionsFile>(&txt) {
-            Ok(file) => Ok(file),
-            Err(e) => {
-                // Main file is corrupt — fall back to the last good backup
-                // rather than reporting "no sessions" and risking an overwrite.
-                if let Ok(bak) = Self::bak_path() {
-                    if let Ok(btxt) = fs::read_to_string(&bak) {
-                        if let Ok(file) = serde_json::from_str::<SessionsFile>(&btxt) {
-                            return Ok(file);
-                        }
-                    }
-                }
-                Err(AppError::Other(format!("parse sessions.json: {e}")))
-            }
-        }
+        crate::services::persistence::load_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            "sessions.json",
+        )
     }
 
     /// Write atomically: serialize to a temp file, back up the current good
     /// file, then rename the temp over the target. A crash mid-write can only
     /// damage the temp file, never the live sessions.json.
     fn write_file(file: &SessionsFile) -> AppResult<()> {
-        let path = Self::path()?;
         let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-        let tmp = Self::tmp_path()?;
-        fs::write(&tmp, json.as_bytes())?;
-        // Snapshot the previous (known-good, since save() loaded it) file before
-        // replacing it, so a future corruption has something to recover from.
-        if path.exists() {
-            if let Ok(bak) = Self::bak_path() {
-                let _ = fs::copy(&path, &bak);
-            }
-        }
-        // On Windows, antivirus/indexers briefly lock recently-written files
-        // and the rename fails transiently; without a retry, every persist in
-        // that window fails and (before the failure toast existed) session
-        // history silently stopped saving — issue #72's likeliest mechanism.
-        let mut last = None;
-        for attempt in 0..3 {
-            match fs::rename(&tmp, &path) {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    last = Some(e);
-                    if attempt < 2 {
-                        std::thread::sleep(std::time::Duration::from_millis(80));
-                    }
-                }
-            }
-        }
-        Err(last.expect("loop ran").into())
+            .map_err(|e| AppError::Other(format!("serialize sessions.json: {e}")))?;
+        crate::services::persistence::save_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            &Self::tmp_path()?,
+            &json,
+        )
     }
 
     pub fn list(&self, project_root: &str) -> AppResult<Vec<PersistedSession>> {
@@ -483,6 +443,22 @@ mod tests {
             !svc.list(proj).unwrap().is_empty(),
             "corrupt main must recover from backup, not return empty"
         );
+
+        // 4b. A BLANK main file (truncated by a crash or a full disk) is damage
+        //     too, not "no sessions": recover from the backup — and the save
+        //     that follows must not push the blank file over that backup.
+        std::fs::write(&path, "").unwrap();
+        assert!(
+            !svc.list(proj).unwrap().is_empty(),
+            "blank main must recover from backup, not return empty"
+        );
+        svc.save(proj, vec![sample("after-blank")]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&bak).unwrap(),
+            good,
+            "a blank main file is never copied over the good backup"
+        );
+        assert_eq!(svc.list(proj).unwrap().len(), 1, "saving works after it");
 
         // 5. CRITICAL (contract revised for #72 round two): corrupt main AND
         //    no usable backup used to ERROR forever — which silently disabled

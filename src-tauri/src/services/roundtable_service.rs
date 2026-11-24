@@ -728,46 +728,25 @@ impl RoomsStore {
     /// read or parse failure on an EXISTING file is an error so a blind save can
     /// never clobber unreadable history. On a parse failure we first try `.bak`.
     fn load_file() -> AppResult<RoomsFile> {
-        let path = Self::path()?;
-        if !path.exists() {
-            return Ok(RoomsFile::default());
-        }
-        let txt = fs::read_to_string(&path)
-            .map_err(|e| AppError::Other(format!("read rooms.json: {e}")))?;
-        if txt.trim().is_empty() {
-            return Ok(RoomsFile::default());
-        }
-        match serde_json::from_str::<RoomsFile>(&txt) {
-            Ok(file) => Ok(file),
-            Err(e) => {
-                if let Ok(bak) = Self::bak_path() {
-                    if let Ok(btxt) = fs::read_to_string(&bak) {
-                        if let Ok(file) = serde_json::from_str::<RoomsFile>(&btxt) {
-                            return Ok(file);
-                        }
-                    }
-                }
-                Err(AppError::Other(format!("parse rooms.json: {e}")))
-            }
-        }
+        crate::services::persistence::load_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            "rooms.json",
+        )
     }
 
     /// Write atomically: serialize to a temp file, back up the current good file,
     /// then rename the temp over the target. A crash mid-write can only damage
     /// the temp file, never the live rooms.json.
     fn write_file(file: &RoomsFile) -> AppResult<()> {
-        let path = Self::path()?;
         let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-        let tmp = Self::tmp_path()?;
-        fs::write(&tmp, json.as_bytes())?;
-        if path.exists() {
-            if let Ok(bak) = Self::bak_path() {
-                let _ = fs::copy(&path, &bak);
-            }
-        }
-        fs::rename(&tmp, &path)?;
-        Ok(())
+            .map_err(|e| AppError::Other(format!("serialize rooms.json: {e}")))?;
+        crate::services::persistence::save_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            &Self::tmp_path()?,
+            &json,
+        )
     }
 
     /// Upsert one room under its project, prune to the most-recent

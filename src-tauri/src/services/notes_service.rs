@@ -69,45 +69,24 @@ impl NotesService {
     /// fails too — so callers can't mistake unreadable data for "no notes"
     /// and overwrite it.
     fn load_file() -> AppResult<NotesFile> {
-        let path = Self::path()?;
-        if !path.exists() {
-            return Ok(NotesFile::default());
-        }
-        let txt = fs::read_to_string(&path)
-            .map_err(|e| AppError::Other(format!("read notes.json: {e}")))?;
-        if txt.trim().is_empty() {
-            return Ok(NotesFile::default());
-        }
-        match serde_json::from_str::<NotesFile>(&txt) {
-            Ok(file) => Ok(file),
-            Err(e) => {
-                if let Ok(bak) = Self::bak_path() {
-                    if let Ok(btxt) = fs::read_to_string(&bak) {
-                        if let Ok(file) = serde_json::from_str::<NotesFile>(&btxt) {
-                            return Ok(file);
-                        }
-                    }
-                }
-                Err(AppError::Other(format!("parse notes.json: {e}")))
-            }
-        }
+        crate::services::persistence::load_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            "notes.json",
+        )
     }
 
     /// Atomic write: temp file → back up the live (known-good) file → rename.
     /// A crash mid-write can only ever damage the temp file.
     fn write_file(file: &NotesFile) -> AppResult<()> {
-        let path = Self::path()?;
         let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-        let tmp = Self::tmp_path()?;
-        fs::write(&tmp, json.as_bytes())?;
-        if path.exists() {
-            if let Ok(bak) = Self::bak_path() {
-                let _ = fs::copy(&path, &bak);
-            }
-        }
-        fs::rename(&tmp, &path)?;
-        Ok(())
+            .map_err(|e| AppError::Other(format!("serialize notes.json: {e}")))?;
+        crate::services::persistence::save_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            &Self::tmp_path()?,
+            &json,
+        )
     }
 
     pub fn list(&self, project_root: &str) -> AppResult<Vec<Note>> {

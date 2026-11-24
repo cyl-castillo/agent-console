@@ -468,7 +468,7 @@ fn regenerate_vault_md(
             md.push_str(&format!("| `${}` | {} | {} |\n", e.key, desc, kind));
         }
     }
-    fs::write(&path, md)?;
+    crate::services::persistence::write_atomic(&path, md.as_bytes())?;
     Ok(())
 }
 

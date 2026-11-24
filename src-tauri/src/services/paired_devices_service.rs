@@ -133,44 +133,23 @@ impl PairedDevicesService {
     /// "no devices" and silently grant nothing / overwrite it), recovering from
     /// the `.bak` first.
     fn load_file() -> AppResult<DevicesFile> {
-        let path = Self::path()?;
-        if !path.exists() {
-            return Ok(DevicesFile::default());
-        }
-        let txt = fs::read_to_string(&path)
-            .map_err(|e| AppError::Other(format!("read paired-devices.json: {e}")))?;
-        if txt.trim().is_empty() {
-            return Ok(DevicesFile::default());
-        }
-        match serde_json::from_str::<DevicesFile>(&txt) {
-            Ok(f) => Ok(f),
-            Err(e) => {
-                if let Ok(bak) = Self::bak_path() {
-                    if let Ok(btxt) = fs::read_to_string(&bak) {
-                        if let Ok(f) = serde_json::from_str::<DevicesFile>(&btxt) {
-                            return Ok(f);
-                        }
-                    }
-                }
-                Err(AppError::Other(format!("parse paired-devices.json: {e}")))
-            }
-        }
+        crate::services::persistence::load_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            "paired-devices.json",
+        )
     }
 
     /// Atomic write: temp file → back up current good file → rename over target.
     fn write_file(file: &DevicesFile) -> AppResult<()> {
-        let path = Self::path()?;
         let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-        let tmp = Self::tmp_path()?;
-        fs::write(&tmp, json.as_bytes())?;
-        if path.exists() {
-            if let Ok(bak) = Self::bak_path() {
-                let _ = fs::copy(&path, &bak);
-            }
-        }
-        fs::rename(&tmp, &path)?;
-        Ok(())
+            .map_err(|e| AppError::Other(format!("serialize paired-devices.json: {e}")))?;
+        crate::services::persistence::save_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            &Self::tmp_path()?,
+            &json,
+        )
     }
 
     // ---- Trusted device store ----

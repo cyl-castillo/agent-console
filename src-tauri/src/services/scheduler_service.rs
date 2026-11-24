@@ -246,43 +246,22 @@ impl SchedulerService {
     // ---- jobs file (crash-safe, mirrors sessions_service) ----------------
 
     fn load_file() -> AppResult<SchedulerFile> {
-        let path = Self::path()?;
-        if !path.exists() {
-            return Ok(SchedulerFile::default());
-        }
-        let txt = fs::read_to_string(&path)
-            .map_err(|e| AppError::Other(format!("read scheduler.json: {e}")))?;
-        if txt.trim().is_empty() {
-            return Ok(SchedulerFile::default());
-        }
-        match serde_json::from_str::<SchedulerFile>(&txt) {
-            Ok(file) => Ok(file),
-            Err(e) => {
-                if let Ok(bak) = Self::bak_path() {
-                    if let Ok(btxt) = fs::read_to_string(&bak) {
-                        if let Ok(file) = serde_json::from_str::<SchedulerFile>(&btxt) {
-                            return Ok(file);
-                        }
-                    }
-                }
-                Err(AppError::Other(format!("parse scheduler.json: {e}")))
-            }
-        }
+        crate::services::persistence::load_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            "scheduler.json",
+        )
     }
 
     fn write_file(file: &SchedulerFile) -> AppResult<()> {
-        let path = Self::path()?;
         let json = serde_json::to_string_pretty(file)
-            .map_err(|e| AppError::Other(format!("serialize: {e}")))?;
-        let tmp = Self::tmp_path()?;
-        fs::write(&tmp, json.as_bytes())?;
-        if path.exists() {
-            if let Ok(bak) = Self::bak_path() {
-                let _ = fs::copy(&path, &bak);
-            }
-        }
-        fs::rename(&tmp, &path)?;
-        Ok(())
+            .map_err(|e| AppError::Other(format!("serialize scheduler.json: {e}")))?;
+        crate::services::persistence::save_json_store(
+            &Self::path()?,
+            &Self::bak_path()?,
+            &Self::tmp_path()?,
+            &json,
+        )
     }
 
     // ---- public API (called by commands) ---------------------------------

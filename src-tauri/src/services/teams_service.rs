@@ -143,7 +143,7 @@ pub fn load_config() -> Option<TeamsConfig> {
 
 fn save_config(cfg: &TeamsConfig) -> AppResult<()> {
     let json = serde_json::to_string_pretty(cfg).map_err(|e| AppError::Other(e.to_string()))?;
-    std::fs::write(config_path()?, json)?;
+    crate::services::persistence::write_atomic(&config_path()?, json.as_bytes())?;
     Ok(())
 }
 
