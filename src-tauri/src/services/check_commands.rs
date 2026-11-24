@@ -5,7 +5,11 @@
 //! question here is narrower than "does the line mention a runner": the
 //! runner has to be the command a shell would execute. `echo cargo test`,
 //! `git commit -m 'run npm test later'`, `true # cargo test` and a heredoc
-//! whose body says `pytest` all mention one and run none.
+//! whose body says `pytest` all mention one and run none. So do a test
+//! (`[[ -n x && pytest ]]`), an arithmetic expression (`(( pytest + 1 ))`)
+//! and a `case` pattern (`a|pytest)`), where the word is not a command. And
+//! the runner has to be asked to run: `cargo test --no-run` compiles,
+//! `pytest --collect-only` lists and `make -n test` echoes the recipe.
 //!
 //! The line is split the way a POSIX shell splits it — quotes, comments,
 //! heredocs, redirections, command and process substitutions, control
@@ -80,8 +84,10 @@ enum Tok {
     Open,
     /// `)`
     Close,
-    /// `((`: arithmetic, where the words are not commands
+    /// `(( … ))`: arithmetic; what is inside is not kept
     Arithmetic,
+    /// `;;`, `;&`, `;;&`: the end of a `case` branch
+    Branch,
 }
 
 /// A statement being assembled: the words of one simple command.
@@ -245,6 +251,24 @@ impl Lexer {
         self.depth -= 1;
     }
 
+    /// `(( … ))` at `self.i`: skipped whole, its words being names and numbers
+    /// rather than commands. `false`, with nothing consumed, when the group
+    /// does not end in `))`: then it is a subshell in a subshell.
+    fn arithmetic(&mut self) -> bool {
+        let (start, heredocs, bail) = (self.i, self.heredocs.len(), self.bail);
+        self.i += 2;
+        self.skip_nested();
+        // `1 << 2` in there is a shift, not a heredoc.
+        self.heredocs.truncate(heredocs);
+        if !self.bail && self.peek(0) == Some(')') {
+            self.i += 1;
+            return true;
+        }
+        self.i = start;
+        self.bail = bail;
+        false
+    }
+
     /// `<<[-]DELIM`: remember the delimiter; the body is skipped at the next
     /// newline. Called with `self.i` just past the `<<`.
     fn heredoc_start(&mut self) {
@@ -327,7 +351,24 @@ impl Lexer {
     fn statements(&mut self, nested: bool) -> Vec<Tok> {
         let mut p = Pending::default();
         let mut parens = 0usize;
+        // Inside `[[ … ]]`, where `&&`, `||`, `(`, `<` belong to the test.
+        let mut test = false;
         while let Some(c) = self.peek(0) {
+            if test
+                && matches!(
+                    c,
+                    '&' | '|' | '(' | ')' | '<' | '>' | ';' | '\n' | ' ' | '\t' | '\r'
+                )
+            {
+                p.end_word();
+                if p.words.last().is_some_and(|w| w == "]]") {
+                    // closed: read this character again as part of the line
+                    test = false;
+                } else {
+                    self.i += 1;
+                }
+                continue;
+            }
             match c {
                 '\\' => match (self.peek(1), self.peek(2)) {
                     (Some('\n'), _) => self.i += 2,
@@ -378,6 +419,17 @@ impl Lexer {
                 ' ' | '\t' | '\r' => {
                     self.i += 1;
                     p.end_word();
+                    // `[[` where a command goes opens a test.
+                    test = matches!(p.words.split_last(), Some((w, before))
+                        if w == "[[" && before.iter().all(|b| RESERVED.contains(&b.as_str())));
+                }
+                ';' if matches!(self.peek(1), Some(';' | '&')) => {
+                    // `;;`, `;&`, `;;&`
+                    self.i += 2;
+                    if self.peek(0) == Some('&') {
+                        self.i += 1;
+                    }
+                    p.operator(Tok::Branch);
                 }
                 ';' => {
                     self.i += 1;
@@ -425,10 +477,10 @@ impl Lexer {
                     self.skip_nested();
                     p.push(UNKNOWN);
                 }
+                '(' if self.peek(1) == Some('(') && !p.in_word && self.arithmetic() => {
+                    p.operator(Tok::Arithmetic);
+                }
                 '(' => {
-                    if self.peek(1) == Some('(') && !p.in_word {
-                        p.operator(Tok::Arithmetic);
-                    }
                     self.i += 1;
                     p.operator(Tok::Open);
                     parens += 1;
@@ -458,11 +510,81 @@ impl Lexer {
     }
 }
 
+/// The word a statement starts with, past the reserved words that only
+/// introduce one (`then case …`, `do case …`).
+fn first_word(words: &[String]) -> Option<&str> {
+    words
+        .iter()
+        .map(String::as_str)
+        .find(|w| !RESERVED.contains(w))
+}
+
+/// `case x in a|pytest) echo ok ;; esac`: what stands between `in` or `;;`
+/// and the next `)` is a pattern to match, not a command. Patterns are
+/// dropped, with the `|` between them and the `)` that ends them; the
+/// branches' commands stay.
+fn without_case_patterns(toks: Vec<Tok>) -> Vec<Tok> {
+    #[derive(PartialEq)]
+    enum At {
+        /// After `case x`, before its `in`.
+        Head,
+        Patterns,
+        Body,
+    }
+    let mut out = Vec::with_capacity(toks.len());
+    // One entry per `case` that is open.
+    let mut open: Vec<At> = Vec::new();
+    for tok in toks {
+        let first = match &tok {
+            Tok::Cmd(words) => first_word(words),
+            _ => None,
+        };
+        match (open.last(), &tok) {
+            (Some(At::Patterns), _) if first == Some("esac") => {
+                open.pop();
+                out.push(tok);
+            }
+            (Some(At::Patterns), Tok::Close) => *open.last_mut().expect("open") = At::Body,
+            (Some(At::Patterns), _) => {}
+            (Some(At::Head), Tok::Seq) => {}
+            (Some(At::Head), _) if first == Some("in") => {
+                *open.last_mut().expect("open") = At::Patterns;
+            }
+            (Some(At::Head), _) => {
+                // not a `case` this reads
+                open.pop();
+                out.push(tok);
+            }
+            (_, Tok::Cmd(words)) if first == Some("case") => {
+                // `case x in a` keeps `case x in`: the rest is a pattern.
+                let cut = words.iter().position(|w| w == "in").map(|i| i + 1);
+                open.push(if cut.is_some() {
+                    At::Patterns
+                } else {
+                    At::Head
+                });
+                let keep = cut.unwrap_or(words.len());
+                out.push(Tok::Cmd(words[..keep].to_vec()));
+            }
+            (Some(At::Body), Tok::Branch) => {
+                *open.last_mut().expect("open") = At::Patterns;
+                out.push(tok);
+            }
+            (Some(At::Body), _) if first == Some("esac") => {
+                open.pop();
+                out.push(tok);
+            }
+            _ => out.push(tok),
+        }
+    }
+    out
+}
+
 /// The line as commands and operators; `None` when it cannot be read.
 fn tokens(cmd: &str) -> Option<Vec<Tok>> {
     let mut lx = Lexer::new(cmd);
     let out = lx.statements(false);
-    (!lx.bail).then_some(out)
+    (!lx.bail).then(|| without_case_patterns(out))
 }
 
 fn simple_commands(cmd: &str) -> Vec<Vec<String>> {
@@ -636,6 +758,103 @@ fn command_start(words: &[String]) -> Option<usize> {
     Some(i)
 }
 
+/// Flags that make a runner print, list or prepare instead of run, in
+/// whichever of the runners below has them. Each ends 0 with nothing
+/// checked: `cargo test --no-run` compiles, `pytest --collect-only` lists,
+/// `npm test --if-present` does nothing when there is no script. A flag is
+/// listed only if it runs nothing in every runner that takes it (not
+/// `--all`: it prints options in `tsc` and is a real run in `cargo test`).
+const RUNS_NOTHING: &[&str] = &[
+    // any of them
+    "--help",
+    "-h",
+    "--version",
+    // cargo test, and `cargo test -- --list`; playwright test, nox
+    "--no-run",
+    "--list",
+    // pytest
+    "--collect-only",
+    "--co",
+    "--fixtures",
+    "--markers",
+    "--setup-plan",
+    "--setup-only",
+    // jest, tsc, eslint
+    "--listTests",
+    "--showConfig",
+    "--clearCache",
+    "--init",
+    "--listFilesOnly",
+    "--print-config",
+    "--env-info",
+    // mocha, rspec, gradle, make
+    "--dry-run",
+    "--just-print",
+    "--recon",
+    "--question",
+    "--touch",
+    // dotnet test, swift test, phpunit
+    "--list-tests",
+    "--list-groups",
+    "--list-suites",
+    // tox
+    "--listenvs",
+    "--showconfig",
+    "--notest",
+    // npm, pnpm, yarn
+    "--if-present",
+];
+
+/// Is the runner asked for something other than a run? Long flags are
+/// looked for in every argument, past `--` too: there they reach the tool
+/// behind `npm test --` and the test binary behind `cargo test --`. Short
+/// ones mean different things to different runners (`-n` is `make`'s dry
+/// run and pytest-xdist's worker count), so they are each runner's own.
+fn runs_nothing(name: &str, args: &[&str]) -> bool {
+    let long = |a: &str| {
+        RUNS_NOTHING.iter().any(|f| {
+            a.strip_prefix(f)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('='))
+        })
+    };
+    if args.iter().any(|a| long(a)) {
+        return true;
+    }
+    let own = args.iter().take_while(|a| **a != "--");
+    let arg = |n: usize| args.get(n).copied().unwrap_or("");
+    match name {
+        // `go test -c` builds the test binary; `-list` and `-n` print.
+        "go" => own
+            .into_iter()
+            .any(|a| matches!(*a, "-c" | "-n" | "-list") || a.starts_with("-list=")),
+        // `-n`, `-q`, `-t`, alone or in a cluster (`-kn`).
+        "make" => own
+            .into_iter()
+            .any(|a| a.starts_with('-') && !a.starts_with("--") && a.contains(['n', 'q', 't'])),
+        // `-m` is the dry run; `-x test` leaves the tests out of `check`.
+        "gradle" | "gradlew" => {
+            let left_out = args.windows(2).any(|pair| {
+                matches!(pair[0], "-x" | "--exclude-task")
+                    && (pair[1].ends_with("test") || pair[1].ends_with("check"))
+            });
+            left_out || own.into_iter().any(|a| *a == "-m")
+        }
+        "mvn" | "mvnw" => own
+            .into_iter()
+            .any(|a| a.starts_with("-DskipTests") || a.starts_with("-Dmaven.test.skip")),
+        "dotnet" => own.into_iter().any(|a| *a == "-t"),
+        "tox" => {
+            matches!(arg(0), "list" | "l" | "config" | "c")
+                || own.into_iter().any(|a| matches!(*a, "-l" | "-a"))
+        }
+        "nox" => own.into_iter().any(|a| *a == "-l"),
+        "pytest" => own.into_iter().any(|a| *a == "-V"),
+        "vitest" => matches!(arg(0), "list" | "init"),
+        "swift" => arg(1) == "list",
+        _ => false,
+    }
+}
+
 /// The kind of check one simple command runs, if it runs one.
 fn statement_kind(words: &[String], depth: usize) -> Option<&'static str> {
     let i = command_start(words)?;
@@ -650,13 +869,7 @@ fn statement_kind(words: &[String], depth: usize) -> Option<&'static str> {
         }
         return line_kind(shell_script(&args)?, depth + 1);
     }
-    // `pytest --version` and `cargo test --help` ask the runner about
-    // itself; nothing is checked.
-    if args
-        .iter()
-        .take_while(|a| **a != "--")
-        .any(|a| matches!(*a, "--version" | "--help"))
-    {
+    if runs_nothing(name, &args) {
         return None;
     }
 
@@ -1163,6 +1376,33 @@ mod tests {
             "sh -c \"cargo test\"",
             "cargo test \\\n  --workspace",
             "cat <<EOF > notes.txt\nsome text\nEOF\ncargo test",
+            // after a test, an arithmetic expression, inside a `case` branch
+            "[[ -f Cargo.toml ]] && cargo test",
+            "[[ -n $CI || -n $FORCE ]] && npm test",
+            "if [[ $1 =~ ^(a|b)$ ]]; then npm test; fi",
+            "[[ -f a ]]; cargo test",
+            "(( n > 0 )) && cargo test",
+            "(( n << 2 ))\ncargo test",
+            "((cd app && npm test) && echo ok)",
+            "case $1 in\n  unit) cargo test ;;\n  lint) cargo clippy ;;\nesac",
+            "case x in a) cd app\n\n npm test;; esac",
+            "case x in (a|b) npm test;& c) true;; esac",
+            "case x in a) case y in b) pytest;; esac;; esac",
+            "case x\nin\n a) pytest;;\nesac",
+            "case x in a) true;; esac; cargo test",
+            // flags that still run
+            "cargo test --all",
+            "cargo fmt --all --check",
+            "cargo test list",
+            "cargo test -- --nocapture --test-threads 1",
+            "pytest -x -q -m slow -n 4 -k list",
+            "pytest --cov=src --color=yes",
+            "go test -run TestList -count=1 -cover ./...",
+            "make test -j4 -k",
+            "npx vitest run --reporter=verbose",
+            "npm test -- --passWithNoTests",
+            "./gradlew check -x lint",
+            "mvn verify -q -B",
         ] {
             assert!(is_check_command(c), "{c}");
         }
@@ -1237,6 +1477,51 @@ mod tests {
             "timeout -s KILL 5 echo",
             "timeout cargo test",
             "nice -n cargo test",
+            // a word in a test, an arithmetic expression or a `case` pattern
+            "[[ -n x && pytest ]]",
+            "[[ -n x || cargo test ]]",
+            "[[ -n x && pytest ]] && echo ok",
+            "if [[ -n pytest ]]; then echo; fi",
+            "! [[ -z x || eslint ]]",
+            "(( pytest + 1 ))",
+            "(( x = 1 | jest ))",
+            "for (( i = 0; i < 3; i++ )); do echo $i; done",
+            "case x in a|pytest) echo ok;; esac",
+            "case $1 in\n  pytest) echo one ;;\n  jest|vitest) echo two ;;\nesac",
+            "case x in (a|eslint) true;& tsc) true;; esac",
+            "case x in a) case y in pytest) echo;; esac;; jest) echo;; esac",
+            // asked to print, list or prepare, not to run
+            "cargo test --no-run",
+            "cargo test -- --list",
+            "cargo test -h",
+            "pytest --collect-only",
+            "pytest --co -q",
+            "python -m pytest --collect-only tests/",
+            "python3 -m unittest -h",
+            "make -n test",
+            "make test --dry-run",
+            "make -kn test",
+            "make test -q",
+            "go test -list . ./...",
+            "go test -list=Foo ./...",
+            "go test -c ./pkg",
+            "npx jest --listTests",
+            "npx vitest list",
+            "pnpm vitest list",
+            "npx playwright test --list",
+            "npm test -- --listTests",
+            "npm test -- --help",
+            "npm run test --if-present",
+            "mvn test -DskipTests",
+            "mvn verify -Dmaven.test.skip=true",
+            "./gradlew test --dry-run",
+            "gradle check -x test",
+            "npx tsc --showConfig",
+            "npx tsc --init",
+            "npx eslint --print-config src/a.ts",
+            "dotnet test --list-tests",
+            "tox --notest",
+            "bash -c 'cd app && pytest --co'",
             // shells without a script, or with one only the shell can read
             "bash script.sh cargo test",
             "bash -c",
@@ -1312,6 +1597,44 @@ mod tests {
                 vec!["d"],
                 vec!["e"],
                 vec!["f"]
+            ]
+        );
+        // A test and an arithmetic expression are one piece each, whatever
+        // operators they hold; `case` patterns are not commands.
+        let cmd = |words: &[&str]| Tok::Cmd(words.iter().map(|w| w.to_string()).collect());
+        assert_eq!(
+            tokens("[[ -n a && ( b || c ) ]] && d; (( e | f )); ((g) | h)").unwrap(),
+            vec![
+                cmd(&["[[", "-n", "a", "b", "c", "]]"]),
+                Tok::And,
+                cmd(&["d"]),
+                Tok::Seq,
+                Tok::Arithmetic,
+                Tok::Seq,
+                Tok::Open,
+                Tok::Open,
+                cmd(&["g"]),
+                Tok::Close,
+                Tok::Pipe,
+                cmd(&["h"]),
+                Tok::Close,
+            ]
+        );
+        assert_eq!(
+            tokens("case x in a|b) c;; (d) (e);& f) g\nesac; h").unwrap(),
+            vec![
+                cmd(&["case", "x", "in"]),
+                cmd(&["c"]),
+                Tok::Branch,
+                Tok::Open,
+                cmd(&["e"]),
+                Tok::Close,
+                Tok::Branch,
+                cmd(&["g"]),
+                Tok::Seq,
+                cmd(&["esac"]),
+                Tok::Seq,
+                cmd(&["h"]),
             ]
         );
         // Redirections are not arguments; `&>` is not the background operator.
