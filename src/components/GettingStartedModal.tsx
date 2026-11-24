@@ -46,8 +46,7 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const requirementsReady =
-    !!toolStatus(preflight, "claude")?.found && !!toolStatus(preflight, "node")?.found;
+  const requirementsReady = !!toolStatus(preflight, "claude")?.found;
 
   const jump = (tab: WorkbenchTab) => () => {
     onJumpToTab(tab);

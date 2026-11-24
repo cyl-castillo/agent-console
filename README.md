@@ -243,7 +243,9 @@ branch name; you'll see a one-line notice.
 - **At least one agent CLI**, installed and logged in: Claude Code
   (`npm install -g @anthropic-ai/claude-code`, then `claude` once), Codex or
   OpenCode. The setup doctor in Getting Started checks what is present.
-- **Node.js ≥ 20** (the bundled PreToolUse hook is a Node script).
+- **Node.js ≥ 20**, only for an agent CLI installed through npm (Codex, or
+  Claude Code's npm package) and for building from source. The console's own
+  hooks run through a native helper bundled with the app.
 - **git** ≥ 2.30.
 - Rust toolchain (only for building from source).
 - Linux: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`, `librsvg2-dev`, `libayatana-appindicator3-dev`, `libjavascriptcoregtk-4.1-dev`, `libssl-dev`.
@@ -281,7 +283,7 @@ src-tauri/target/release/bundle/
 └── rpm/Agent Console-<version>-1.x86_64.rpm
 ```
 
-The `.deb` declares `nodejs` as a runtime dep (needed for the PreToolUse hook). On other distros, AppImage works as a self-contained binary.
+The `.deb` recommends `nodejs` (agent CLIs installed through npm need it; the console's hooks do not). On other distros, AppImage works as a self-contained binary.
 
 macOS and Windows builds use the same command; bundle output varies (`.dmg` / `.msi` and `-setup.exe`).
 

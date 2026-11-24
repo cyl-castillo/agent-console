@@ -497,9 +497,6 @@ select:focus-visible,
   border-color: var(--warn-25);
   background: var(--warn-12);
 }
-.preflight.warn {
-  border-color: var(--warn-25);
-}
 .preflight-title {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -507,8 +504,7 @@ select:focus-visible,
   color: var(--text);
   margin-bottom: 6px;
 }
-.preflight.bad .preflight-title,
-.preflight.warn .preflight-title {
+.preflight.bad .preflight-title {
   color: var(--warn);
 }
 .preflight-title.ok {
@@ -518,8 +514,7 @@ select:focus-visible,
 .preflight-title.ok::before {
   content: "✓ ";
 }
-.preflight.bad .preflight-title::before,
-.preflight.warn .preflight-title::before {
+.preflight.bad .preflight-title::before {
   content: "⚠ ";
 }
 .preflight-body {
