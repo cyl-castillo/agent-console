@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ArrowDown, Clock, MessageSquare, Square, TerminalSquare, X } from "lucide-react";
 import { typeIntoActiveSession } from "../../../lib/termInput";
 import { cn } from "@/lib/cn";
@@ -27,6 +28,7 @@ import { StatusGlyph } from "../../../ui/StatusGlyph";
 import { useSessionTimeline } from "./useSessionTimeline";
 import { useTranscriptWatch } from "./useTranscriptWatch";
 import { saidText, streamFor } from "./stream";
+import { draftWithDropped } from "./dropPaths";
 import { SessionCards } from "./SessionCards";
 import { useApprovalStore } from "../../../stores/approvalStore";
 import { useHooksHealthStore } from "../../../stores/hooksHealthStore";
@@ -68,6 +70,42 @@ export function ConversationView() {
   const [now, setNow] = useState(() => Date.now());
   const listRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Files dropped on the conversation land in the draft as quoted paths —
+  // what dropping on the terminal does, for the view that stands in for it.
+  // Tauri intercepts webview drag&drop, so HTML5 drop events never fire and
+  // this webview event (which carries real OS paths) is the only source. The
+  // element under the cursor decides: a drop on the terminal drawer, or on a
+  // dialog above this view, is not ours.
+  useEffect(() => {
+    let off: (() => void) | null = null;
+    let gone = false;
+    void getCurrentWebview()
+      .onDragDropEvent((e) => {
+        if (e.payload.type !== "drop") return;
+        const root = rootRef.current;
+        const box = draftRef.current;
+        if (!root || !box || box.disabled) return;
+        const scale = window.devicePixelRatio || 1;
+        const under = document.elementFromPoint(
+          e.payload.position.x / scale,
+          e.payload.position.y / scale,
+        );
+        if (!under || !root.contains(under)) return;
+        const paths = e.payload.paths;
+        setDraft((d) => draftWithDropped(d, paths));
+        box.focus();
+      })
+      .then((un) => {
+        if (gone) un();
+        else off = un;
+      })
+      .catch(() => {});
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, []);
   const goTo = useShellStore((s) => s.goTo);
   // Ctrl+E / palette "compose prompt": the conversation's draft IS the
   // composer — bring Sessions up and focus it.
@@ -364,7 +402,7 @@ export function ConversationView() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="conversation">
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col" data-testid="conversation">
       <div className="relative min-h-0 flex-1">
         <div
           ref={listRef}
