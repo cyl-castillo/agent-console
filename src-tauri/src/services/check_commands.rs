@@ -101,6 +101,10 @@ struct Pending {
     skip_word: bool,
     /// The statement has a redirection: it is a command even with no words.
     redirected: bool,
+    /// The word being read has a quote or an escape in it.
+    quoted: bool,
+    /// The last word was written bare: `]]`, not `"]]"` or `\]\]`.
+    bare: bool,
 }
 
 impl Pending {
@@ -115,6 +119,7 @@ impl Pending {
         }
         let w = std::mem::take(&mut self.word);
         self.in_word = false;
+        self.bare = !std::mem::take(&mut self.quoted);
         if self.skip_word {
             self.skip_word = false;
         } else {
@@ -142,6 +147,7 @@ impl Pending {
         if self.in_word && self.word.chars().all(|c| c.is_ascii_digit()) {
             self.word.clear();
             self.in_word = false;
+            self.quoted = false;
         } else {
             self.end_word();
         }
@@ -361,7 +367,7 @@ impl Lexer {
                 )
             {
                 p.end_word();
-                if p.words.last().is_some_and(|w| w == "]]") {
+                if p.bare && p.words.last().is_some_and(|w| w == "]]") {
                     // closed: read this character again as part of the line
                     test = false;
                 } else {
@@ -375,6 +381,7 @@ impl Lexer {
                     (Some('\r'), Some('\n')) => self.i += 3,
                     (Some(n), _) => {
                         p.push(n);
+                        p.quoted = true;
                         self.i += 2;
                     }
                     (None, _) => self.i += 1,
@@ -385,10 +392,12 @@ impl Lexer {
                         p.word.pop();
                     }
                     self.i += 1;
+                    p.quoted = true;
                     self.single_quoted(&mut p, ansi);
                 }
                 '"' => {
                     self.i += 1;
+                    p.quoted = true;
                     self.double_quoted(&mut p);
                 }
                 '`' => {
@@ -421,7 +430,7 @@ impl Lexer {
                     p.end_word();
                     // `[[` where a command goes opens a test.
                     test = matches!(p.words.split_last(), Some((w, before))
-                        if w == "[[" && before.iter().all(|b| RESERVED.contains(&b.as_str())));
+                        if w == "[[" && p.bare && before.iter().all(|b| RESERVED.contains(&b.as_str())));
                 }
                 ';' if matches!(self.peek(1), Some(';' | '&')) => {
                     // `;;`, `;&`, `;;&`
@@ -827,10 +836,7 @@ fn runs_nothing(name: &str, args: &[&str]) -> bool {
         "go" => own
             .into_iter()
             .any(|a| matches!(*a, "-c" | "-n" | "-list") || a.starts_with("-list=")),
-        // `-n`, `-q`, `-t`, alone or in a cluster (`-kn`).
-        "make" => own
-            .into_iter()
-            .any(|a| a.starts_with('-') && !a.starts_with("--") && a.contains(['n', 'q', 't'])),
+        "make" => own.into_iter().any(|a| make_runs_nothing(a)),
         // `-m` is the dry run; `-x test` leaves the tests out of `check`.
         "gradle" | "gradlew" => {
             let left_out = args.windows(2).any(|pair| {
@@ -839,9 +845,13 @@ fn runs_nothing(name: &str, args: &[&str]) -> bool {
             });
             left_out || own.into_iter().any(|a| *a == "-m")
         }
-        "mvn" | "mvnw" => own
-            .into_iter()
-            .any(|a| a.starts_with("-DskipTests") || a.starts_with("-Dmaven.test.skip")),
+        // `-DskipTests` skips; `-DskipTests=false` turns them back on.
+        "mvn" | "mvnw" => own.into_iter().any(|a| {
+            ["-DskipTests", "-Dmaven.test.skip"].iter().any(|skip| {
+                a.strip_prefix(skip)
+                    .is_some_and(|v| v.is_empty() || (v.starts_with('=') && v != "=false"))
+            })
+        }),
         "dotnet" => own.into_iter().any(|a| *a == "-t"),
         "tox" => {
             matches!(arg(0), "list" | "l" | "config" | "c")
@@ -853,6 +863,19 @@ fn runs_nothing(name: &str, args: &[&str]) -> bool {
         "swift" => arg(1) == "list",
         _ => false,
     }
+}
+
+/// `make -n`, `-q` and `-t` run no recipe, alone or in a cluster (`-kn`).
+/// The letters after an option that carries a value are that value:
+/// `-Iinclude` and `-Otarget` run the recipe.
+fn make_runs_nothing(arg: &str) -> bool {
+    let Some(letters) = arg.strip_prefix('-').filter(|l| !l.starts_with('-')) else {
+        return false;
+    };
+    letters
+        .chars()
+        .take_while(|c| !"CEfIjloOW".contains(*c))
+        .any(|c| matches!(c, 'n' | 'q' | 't'))
 }
 
 /// The kind of check one simple command runs, if it runs one.
@@ -1399,6 +1422,11 @@ mod tests {
             "pytest --cov=src --color=yes",
             "go test -run TestList -count=1 -cover ./...",
             "make test -j4 -k",
+            "make test -Iinclude -Otarget -f tests.mk",
+            "mvn test -DskipTests=false",
+            "mvn verify -Dmaven.test.skip=false",
+            // a quoted `[[` is a command of that name, not a test
+            "\"[[\" -n x ]] && pytest",
             "npx vitest run --reporter=verbose",
             "npm test -- --passWithNoTests",
             "./gradlew check -x lint",
@@ -1483,6 +1511,10 @@ mod tests {
             "[[ -n x && pytest ]] && echo ok",
             "if [[ -n pytest ]]; then echo; fi",
             "! [[ -z x || eslint ]]",
+            // a quoted or escaped `]]` is an operand: the test goes on
+            "[[ \"]]\" = x && pytest ]]",
+            "[[ ']]' = ']]' && pytest ]]",
+            "[[ \\]\\] = x || pytest ]]",
             "(( pytest + 1 ))",
             "(( x = 1 | jest ))",
             "for (( i = 0; i < 3; i++ )); do echo $i; done",
@@ -1502,6 +1534,9 @@ mod tests {
             "make test --dry-run",
             "make -kn test",
             "make test -q",
+            "make test -sn",
+            "make test -Onone -n",
+            "mvn test -DskipTests=true",
             "go test -list . ./...",
             "go test -list=Foo ./...",
             "go test -c ./pkg",
