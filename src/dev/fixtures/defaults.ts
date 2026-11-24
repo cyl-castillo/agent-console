@@ -190,6 +190,7 @@ export const preflight: Preflight = {
   tools: [
     { name: "claude", found: true, version: "2.1.296", fixCommand: null, fixNote: null },
     { name: "codex", found: true, version: "0.162.1", fixCommand: null, fixNote: null },
+    { name: "opencode", found: true, version: "1.19.3", fixCommand: null, fixNote: null },
     { name: "git", found: true, version: "2.51.0", fixCommand: null, fixNote: null },
     { name: "node", found: true, version: "22.23.3", fixCommand: null, fixNote: null },
   ],
