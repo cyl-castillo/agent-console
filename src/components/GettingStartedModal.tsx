@@ -7,7 +7,7 @@ import { useOnboardingStore } from "../stores/onboardingStore";
 import { useAdvisorStore } from "../stores/advisorStore";
 import { useSkillsStore } from "../stores/skillsStore";
 import { useSchedulerStore } from "../stores/schedulerStore";
-import { usePreflightStore, toolStatus } from "../stores/preflightStore";
+import { usePreflightStore, enginesFound } from "../stores/preflightStore";
 import { SetupDoctor } from "./SetupDoctor";
 import type { WorkbenchTab } from "../lib/workbenchTabs";
 
@@ -46,8 +46,7 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const requirementsReady =
-    !!toolStatus(preflight, "claude")?.found && !!toolStatus(preflight, "node")?.found;
+  const requirementsReady = enginesFound(preflight).length > 0;
 
   const jump = (tab: WorkbenchTab) => () => {
     onJumpToTab(tab);

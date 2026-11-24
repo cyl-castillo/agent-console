@@ -3,7 +3,12 @@ import { useEffect } from "react";
 import { useSessionStore } from "../stores/sessionStore";
 import { useProjectsStore } from "../stores/projectsStore";
 import { useThemeStore } from "../stores/themeStore";
-import { usePreflightStore, toolStatus } from "../stores/preflightStore";
+import {
+  usePreflightStore,
+  toolStatus,
+  ENGINE_TOOLS,
+  enginesFound,
+} from "../stores/preflightStore";
 import type { PreflightTool } from "../types/domain";
 import { pickFolder } from "../ipc/tauri";
 import { Icon } from "./Icon";
@@ -20,8 +25,15 @@ function ToolPill({ t, label }: { t?: PreflightTool; label: string }) {
   );
 }
 
-// First-run environment check — surfaces a missing Claude CLI / Node *before*
+const ENGINE_LABELS: Record<string, string> = {
+  claude: "Claude CLI",
+  codex: "Codex CLI",
+  opencode: "OpenCode CLI",
+};
+
+// First-run environment check — surfaces a machine with no agent CLI *before*
 // the user opens a repo and hits a cryptic `command not found` in the terminal.
+// One engine is enough: Claude Code, Codex or OpenCode.
 function PreflightCard() {
   const result = usePreflightStore((s) => s.result);
   const checking = usePreflightStore((s) => s.checking);
@@ -35,28 +47,30 @@ function PreflightCard() {
     return checking ? <div className="preflight checking">Checking your setup…</div> : null;
   }
 
-  const claude = toolStatus(result, "claude");
-  const node = toolStatus(result, "node");
   const git = toolStatus(result, "git");
-  const claudeMissing = claude && !claude.found;
-  const nodeMissing = node && !node.found;
-  const tone = claudeMissing ? "bad" : nodeMissing ? "warn" : "ok";
+  const found = enginesFound(result);
+  const noEngine = found.length === 0;
+  const tone = noEngine ? "bad" : "ok";
+  // With an engine present, show the ones found; with none, show all three
+  // as missing so the card names what it looked for.
+  const shown = noEngine ? [...ENGINE_TOOLS] : found;
+  // The catalog's installer for this OS (the native one), not a hardcoded line.
+  const claudeFix = toolStatus(result, "claude")?.fixCommand;
 
   return (
     <div className={`preflight ${tone}`}>
-      {claudeMissing ? (
+      {noEngine ? (
         <div className="preflight-msg">
-          <div className="preflight-title">Claude CLI not found</div>
+          <div className="preflight-title">No agent CLI found</div>
           <div className="preflight-body">
-            Agent Console drives the Claude CLI. Install it, then sign in once:
-            <pre>npm install -g @anthropic-ai/claude-code{"\n"}claude # sign in</pre>
-          </div>
-        </div>
-      ) : nodeMissing ? (
-        <div className="preflight-msg">
-          <div className="preflight-title">Node.js not found</div>
-          <div className="preflight-body">
-            The per-tool approval hook is a Node script — install Node ≥ 20 on your PATH.
+            Agent Console drives Claude Code, Codex or OpenCode; one is enough. Install it, then
+            sign in once.{claudeFix ? " For Claude Code:" : ""}
+            {claudeFix && (
+              <pre>
+                {claudeFix}
+                {"\n"}claude # sign in
+              </pre>
+            )}
           </div>
         </div>
       ) : (
@@ -65,8 +79,9 @@ function PreflightCard() {
 
       <div className="preflight-row">
         <div className="preflight-tools">
-          <ToolPill t={claude} label="Claude CLI" />
-          <ToolPill t={node} label="Node" />
+          {shown.map((name) => (
+            <ToolPill key={name} t={toolStatus(result, name)} label={ENGINE_LABELS[name]} />
+          ))}
           <ToolPill t={git} label="git" />
         </div>
         <button className="btn btn-link btn-sm" onClick={() => void check()} disabled={checking}>
@@ -106,7 +121,7 @@ export function ProjectPicker() {
       </button>
       <div className="picker-card">
         <h1>AGENT CONSOLE</h1>
-        <p>A minimalist, AI-native console for directing agents inside a repository.</p>
+        <p>Direct coding agents in your repository, with a verifiable record of what they did.</p>
         <p className="picker-sub">
           Pick a git repository — the agent works inside it. You approve every file change and
           command, and any turn can be rewound.

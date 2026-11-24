@@ -2,17 +2,17 @@ name: agent-console
 base: core22
 # Placeholder — the Snap workflow rewrites this from the release tag before building.
 version: '0.0.0'
-summary: Minimalist AI-native console for directing coding agents
+summary: Direct coding agents in your repo, with a verifiable record of what they did
 description: |
   Agent Console is a terminal-first desktop app that pairs coding-agent CLIs
-  (Claude Code, Codex) with an integrated PTY terminal, a git diff viewer,
+  (Claude Code, Codex, OpenCode) with an integrated PTY terminal, a git diff viewer,
   per-turn working-tree snapshots, and per-tool approvals — so you can drive
   an agent through real work without losing control. Every session is
   witnessed into a hash-chained evidence ledger (Testigo) exportable as
   signed proof packets verifiable in any browser.
 
-  Requires the Claude Code CLI (npm i -g @anthropic-ai/claude-code) and
-  Node.js 20+ on the host.
+  Requires at least one agent CLI on the host (Claude Code, Codex or
+  OpenCode). Node.js 20+ only for a CLI installed through npm.
 website: https://github.com/cyl-castillo/agent-console
 license: AGPL-3.0-only
 grade: stable

@@ -1,6 +1,6 @@
 # Agent Console
 
-> Terminal-first, Linux-first desktop app (Tauri + Rust + React) for directing AI coding agents inside a repository. It runs the real agent CLIs (Claude Code, Codex) in PTYs, keeps per-turn snapshots with diff review and rewind, and witnesses every prompt, human approval, tool result and diff into a hash-chained evidence ledger (Testigo) that exports as a signed proof packet or as an IETF Agent Audit Trail verifiable offline. Agents can drive the console themselves through its MCP server and a stable action contract. AGPL-3.0.
+> Terminal-first, Linux-first desktop app (Tauri + Rust + React) for directing AI coding agents inside a repository. It runs the real agent CLIs (Claude Code, Codex, OpenCode) in PTYs, keeps per-turn snapshots with diff review and rewind, and witnesses every prompt, human approval, tool result and diff into a hash-chained evidence ledger (Testigo) that exports as a signed proof packet or as an IETF Agent Audit Trail verifiable offline. Agents can drive the console themselves through its MCP server and a stable action contract. AGPL-3.0.
 
 Not to be confused with `buhuipao/agent-console`, a Rust TUI that finds and resumes Codex and Claude Code sessions. This project lives at `cyl-castillo/agent-console` and `agent-console.dev`.
 

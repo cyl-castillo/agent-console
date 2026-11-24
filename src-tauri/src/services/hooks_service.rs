@@ -1774,22 +1774,90 @@ pub(crate) fn bundled_bridge() -> Option<PathBuf> {
 /// to the node scripts.
 fn ensure_hook_binary(runtime_dir: &Path) -> Option<PathBuf> {
     let sidecar = bundled_bridge()?;
-    let bin_dir = runtime_dir.join("bin");
-    fs::create_dir_all(&bin_dir).ok()?;
+    refresh_hook_binary(&sidecar, &runtime_dir.join("bin"))
+}
+
+/// Bring the cached copy in `bin_dir` up to date with `sidecar` and return
+/// its path.
+///
+/// A copy that already holds the sidecar's bytes is left alone: there is
+/// nothing to write, and a copy that is running at this moment (a hook
+/// mid-flight, the console MCP server of a session started outside the
+/// console) cannot be replaced on Windows. Its execute bits are still put
+/// back when they are missing (a cache restored from a backup): the copy
+/// used to be rewritten with them on every start, and a hook pointing at a
+/// file that cannot run fails without falling back to anything.
+///
+/// When the refresh fails and an earlier copy is there, that copy stays the
+/// address. Answering None instead makes startup rewrite every installed hook
+/// to `node "<script>"` (normalize_hook_commands), which is dead on a machine
+/// without Node: approvals stop reaching the console and the ledger stops
+/// receiving events, with nothing on screen to say so. A copy one version old
+/// is the lesser failure, and it is replaced on the next start that can.
+fn refresh_hook_binary(sidecar: &Path, bin_dir: &Path) -> Option<PathBuf> {
     let dest = bin_dir.join(BRIDGE_BIN_NAME);
-    // Copy through a temp name + rename so a hook firing mid-update never
-    // execs a half-written binary.
+    if same_bytes(sidecar, &dest) && make_executable(&dest).is_ok() {
+        return Some(dest);
+    }
+    match replace_hook_binary(sidecar, bin_dir, &dest) {
+        Ok(()) => Some(dest),
+        Err(e) if dest.is_file() && make_executable(&dest).is_ok() => {
+            tracing::warn!(
+                "hooks: could not refresh the hook-bridge copy ({e}); keeping the cached one"
+            );
+            Some(dest)
+        }
+        Err(e) => {
+            tracing::warn!(
+                "hooks: could not copy the hook-bridge sidecar ({e}); hooks fall back to node"
+            );
+            None
+        }
+    }
+}
+
+/// Copy through a temp name + rename so a hook firing mid-update never execs
+/// a half-written binary.
+fn replace_hook_binary(sidecar: &Path, bin_dir: &Path, dest: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(bin_dir)?;
     let tmp = bin_dir.join(format!("{BRIDGE_BIN_NAME}.tmp"));
-    fs::copy(&sidecar, &tmp).ok()?;
+    fs::copy(sidecar, &tmp)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perm = fs::metadata(&tmp).ok()?.permissions();
+        let mut perm = fs::metadata(&tmp)?.permissions();
         perm.set_mode(0o755);
-        fs::set_permissions(&tmp, perm).ok()?;
+        fs::set_permissions(&tmp, perm)?;
     }
-    fs::rename(&tmp, &dest).ok()?;
-    Some(dest)
+    fs::rename(&tmp, dest)
+}
+
+/// Give the file its execute bits when any is missing. Nothing to do off unix.
+fn make_executable(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perm = fs::metadata(path)?.permissions();
+        if perm.mode() & 0o111 != 0o111 {
+            perm.set_mode(0o755);
+            fs::set_permissions(path, perm)?;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+/// Do both paths hold the same file contents? False when either cannot be
+/// read, so the caller goes on to (re)write the copy.
+fn same_bytes(a: &Path, b: &Path) -> bool {
+    let (Ok(meta_a), Ok(meta_b)) = (fs::metadata(a), fs::metadata(b)) else {
+        return false;
+    };
+    if !meta_b.is_file() || meta_a.len() != meta_b.len() {
+        return false;
+    }
+    matches!((fs::read(a), fs::read(b)), (Ok(x), Ok(y)) if x == y)
 }
 
 fn ensure_hook_script(runtime_dir: &Path, filename: &str, body: &str) -> AppResult<PathBuf> {
@@ -2614,6 +2682,131 @@ fn approvals_watcher_loop(app: AppHandle, dir: PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bridge_tmp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ac-bridge-{tag}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_first_start_copies_the_sidecar_into_the_cache() {
+        let dir = bridge_tmp_dir("first");
+        let sidecar = dir.join("sidecar");
+        fs::write(&sidecar, b"bridge v1").unwrap();
+        let bin = dir.join("bin");
+
+        let dest = refresh_hook_binary(&sidecar, &bin).expect("a copy");
+        assert_eq!(dest, bin.join(BRIDGE_BIN_NAME));
+        assert_eq!(fs::read(&dest).unwrap(), b"bridge v1");
+        assert!(!bin.join(format!("{BRIDGE_BIN_NAME}.tmp")).exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&dest).unwrap().permissions().mode() & 0o111,
+                0o111
+            );
+        }
+    }
+
+    #[test]
+    fn a_copy_that_is_already_current_is_not_rewritten() {
+        let dir = bridge_tmp_dir("current");
+        let sidecar = dir.join("sidecar");
+        fs::write(&sidecar, b"bridge v1").unwrap();
+        let bin = dir.join("bin");
+        let dest = refresh_hook_binary(&sidecar, &bin).unwrap();
+        // A directory where the temp file goes: any attempt to copy again
+        // would fail, so reaching Some(dest) with the same file proves the
+        // refresh did not try.
+        fs::create_dir_all(bin.join(format!("{BRIDGE_BIN_NAME}.tmp"))).unwrap();
+        #[cfg(unix)]
+        let inode = {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(&dest).unwrap().ino()
+        };
+
+        assert_eq!(refresh_hook_binary(&sidecar, &bin), Some(dest.clone()));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(fs::metadata(&dest).unwrap().ino(), inode);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_current_copy_that_lost_its_execute_bits_gets_them_back() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = bridge_tmp_dir("mode");
+        let sidecar = dir.join("sidecar");
+        fs::write(&sidecar, b"bridge v1").unwrap();
+        let bin = dir.join("bin");
+        let dest = refresh_hook_binary(&sidecar, &bin).unwrap();
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o644)).unwrap();
+        // Blocked temp path: the bits must come back without a new copy.
+        fs::create_dir_all(bin.join(format!("{BRIDGE_BIN_NAME}.tmp"))).unwrap();
+
+        assert_eq!(refresh_hook_binary(&sidecar, &bin), Some(dest.clone()));
+        assert_eq!(
+            fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+    }
+
+    #[test]
+    fn a_newer_sidecar_replaces_the_cached_copy() {
+        let dir = bridge_tmp_dir("update");
+        let sidecar = dir.join("sidecar");
+        fs::write(&sidecar, b"bridge v1").unwrap();
+        let bin = dir.join("bin");
+        refresh_hook_binary(&sidecar, &bin).unwrap();
+
+        fs::write(&sidecar, b"bridge v2, longer").unwrap();
+        let dest = refresh_hook_binary(&sidecar, &bin).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"bridge v2, longer");
+    }
+
+    /// The regression: a refresh that fails used to answer None, and startup
+    /// then rewrote every hook to `node "<script>"`.
+    #[test]
+    fn a_refresh_that_fails_keeps_the_cached_copy_as_the_address() {
+        let dir = bridge_tmp_dir("keep");
+        let sidecar = dir.join("sidecar");
+        fs::write(&sidecar, b"bridge v1").unwrap();
+        let bin = dir.join("bin");
+        let dest = refresh_hook_binary(&sidecar, &bin).unwrap();
+
+        fs::write(&sidecar, b"bridge v2, longer").unwrap();
+        // Stand-in for a destination that cannot be replaced.
+        fs::create_dir_all(bin.join(format!("{BRIDGE_BIN_NAME}.tmp"))).unwrap();
+
+        assert_eq!(refresh_hook_binary(&sidecar, &bin), Some(dest.clone()));
+        assert_eq!(fs::read(&dest).unwrap(), b"bridge v1");
+        // And the hook command built from it stays native.
+        let cmd = bridge_command(
+            Some(&dest),
+            Path::new("/cache/pretooluse-hook.cjs"),
+            "pretooluse",
+        );
+        assert!(!cmd.starts_with("node "), "{cmd}");
+    }
+
+    #[test]
+    fn with_no_cached_copy_a_failed_first_copy_answers_none() {
+        let dir = bridge_tmp_dir("none");
+        let sidecar = dir.join("sidecar");
+        fs::write(&sidecar, b"bridge v1").unwrap();
+        let bin = dir.join("bin");
+        fs::create_dir_all(bin.join(format!("{BRIDGE_BIN_NAME}.tmp"))).unwrap();
+
+        assert_eq!(refresh_hook_binary(&sidecar, &bin), None);
+    }
 
     #[test]
     fn a_settings_file_that_does_not_parse_is_never_the_base_for_a_write() {
