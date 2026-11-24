@@ -23,7 +23,7 @@ use crate::error::{AppError, AppResult};
 use crate::services::agent_run::{self, RunSpec};
 use crate::services::engine_runner::{Engine, EngineRunner, ToolPolicy};
 use crate::services::roundtable_service::Participant;
-use crate::services::testigo_service::check_kind;
+use crate::services::testigo_service::{check_kind, is_check_command};
 use crate::services::verification_rules::{self, TurnFacts};
 use crate::services::{proc, worktree_service};
 
@@ -155,8 +155,10 @@ pub fn facts_from_activity(activity: &[Activity], summary: &str) -> TurnFacts {
             "tool" if shell && !results_seen => {
                 f.tool_results += 1;
                 f.commands += 1;
-                let kind = check_kind(&a.text);
-                if !kind.is_empty() {
+                // `check_kind` names a check; it does not decide whether the
+                // command is one (it answers "test" for `ls`).
+                if is_check_command(&a.text) {
+                    let kind = check_kind(&a.text);
                     f.checks.unknown += 1;
                     f.last_check_seq = Some(seq);
                     f.gates_ran.insert(kind.to_string(), "unknown".into());
@@ -169,8 +171,8 @@ pub fn facts_from_activity(activity: &[Activity], summary: &str) -> TurnFacts {
                 if exit.is_some_and(|c| c != 0) {
                     f.failed_commands += 1;
                 }
-                let kind = check_kind(cmd);
-                if !kind.is_empty() {
+                if is_check_command(cmd) {
+                    let kind = check_kind(cmd);
                     f.last_check_seq = Some(seq);
                     let status = match exit {
                         Some(0) => {
@@ -775,6 +777,35 @@ mod tests {
         let f = facts_from_activity(&[], "");
         let (st, _) = verification_rules::verdict(&f, &[]);
         assert_eq!(st.as_str(), "no_claim");
+    }
+
+    /// A candidate that only ran plain commands ran no check: its "tests
+    /// pass" is unverified, whatever those commands exited with.
+    #[test]
+    fn a_plain_command_is_not_a_check_of_the_candidate() {
+        let a = [
+            act("tool", "Edit", "src/x.ts"),
+            act("tool", "shell", "ls -la"),
+            act("tool_result", "shell", "ls -la · exit 0"),
+            act("tool_result", "shell", "git status · exit 0"),
+        ];
+        let f = facts_from_activity(&a, "Done, all tests pass.");
+        assert_eq!(f.commands, 2);
+        assert_eq!(f.checks.total(), 0);
+        assert!(f.gates_ran.is_empty());
+        let (st, _) = verification_rules::verdict(&f, &verification_rules::claims(&f.summary));
+        assert_eq!(st.as_str(), "unverified_claim");
+
+        // Nor does a failing plain command contradict a claim about tests.
+        let b = [act("tool_result", "shell", "grep -q TODO src · exit 1")];
+        let f = facts_from_activity(&b, "All tests pass.");
+        assert_eq!(f.failed_commands, 1);
+        assert_eq!(f.checks.total(), 0);
+
+        // Claude's stream shows the call and no result: still not a check.
+        let c = [act("tool", "Bash", "ls")];
+        let f = facts_from_activity(&c, "tests pass");
+        assert_eq!(f.checks.total(), 0);
     }
 
     fn init_repo(tag: &str) -> PathBuf {
