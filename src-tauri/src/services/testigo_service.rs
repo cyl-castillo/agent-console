@@ -998,13 +998,11 @@ impl TestigoService {
         if canonical == Some("shell") {
             if let Some(cmd) = ids.command.filter(|c| is_check_command(c)) {
                 let line_failed = ids.failed || ids.exit_code.is_some_and(|c| c != 0);
-                let exit_code_of = (line_failed || ids.exit_code.is_some()).then(|| {
-                    if exit_speaks_for_checks(cmd, !line_failed) {
-                        "runner"
-                    } else {
-                        "line"
-                    }
-                });
+                let speaks = exit_speaks_for_checks(cmd, !line_failed);
+                // Whose code it is, only when there is a code to speak of.
+                let exit_code_of = ids
+                    .exit_code
+                    .map(|_| if speaks { "runner" } else { "line" });
                 let status = if ids.interrupted == Some(true) {
                     "interrupted"
                 } else if line_failed {
@@ -1019,7 +1017,7 @@ impl TestigoService {
                     "passed"
                 };
                 let status = match status {
-                    "passed" | "failed" if exit_code_of == Some("line") => "unknown",
+                    "passed" | "failed" if !speaks => "unknown",
                     other => other,
                 };
                 let _ = Self::record(
@@ -2892,8 +2890,11 @@ mod tests {
         let root = base.join("proj");
         std::fs::create_dir_all(&root).unwrap();
         let a = root.to_str().unwrap();
-        // (command, exit code) → (status, whose exit code)
-        let cases: [(&str, Option<i64>, &str, &str); 9] = [
+        // (command, exit code) → (status, whose exit code). `None` and
+        // `FAILED` are the two shapes without a code: nothing reported, and
+        // a failure event that carries none.
+        const FAILED: Option<i64> = Some(i64::MIN);
+        let cases: [(&str, Option<i64>, &str, &str); 11] = [
             // exit 0 that is `tail`'s, `true`'s, `echo`'s
             ("cargo test 2>&1 | tail -20", Some(0), "unknown", "line"),
             ("cargo test || true", Some(0), "unknown", "line"),
@@ -2913,9 +2914,12 @@ mod tests {
             ("cargo test && git push", Some(1), "failed", "runner"),
             // no exit code at all: nobody's
             ("cargo test | tail", None, "unknown", ""),
+            ("cargo test", FAILED, "failed", ""),
+            ("cargo test | grep -q FAILED", FAILED, "unknown", ""),
         ];
         for (turn, (cmd, exit_code, ..)) in cases.iter().enumerate() {
             let failed = exit_code.is_some_and(|c| c != 0);
+            let exit_code = exit_code.filter(|_| *exit_code != FAILED);
             let t = format!("t{turn}");
             let ts = 10 * turn as i64;
             svc.on_prompt(
@@ -2939,7 +2943,7 @@ mod tests {
                 ToolResultIds {
                     command: Some(cmd),
                     failed,
-                    exit_code: *exit_code,
+                    exit_code,
                     exit_code_via: exit_code.map(|_| "payload"),
                     ..Default::default()
                 },
@@ -2965,6 +2969,7 @@ mod tests {
             let of = (!of.is_empty()).then_some(*of);
             assert_eq!(p["exitCodeOf"], json!(of), "{cmd}");
             // The code the engine reported stays on the line as it came.
+            let exit_code = exit_code.filter(|_| *exit_code != FAILED);
             assert_eq!(p["exitCode"], json!(exit_code), "{cmd}");
             let verdict = match *status {
                 "passed" => "verified",
