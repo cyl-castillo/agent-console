@@ -151,7 +151,8 @@ export const TIMELINE_TOOLS_CAP = 60;
 
 export interface TimelineCheck {
   command: string;
-  /** passed · failed · interrupted · empty (exit 0, ran nothing) · unknown (no exit code seen). */
+  /** passed · failed · interrupted · empty (exit 0, ran nothing) · unknown (no exit code seen, or
+   *  the line's exit code is another command's: `cargo test | tail`). */
   status: "passed" | "failed" | "interrupted" | "empty" | "unknown" | string;
   /** test · lint · typecheck · build · format (what the runner checks). */
   kind?: string;

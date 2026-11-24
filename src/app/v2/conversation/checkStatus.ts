@@ -1,7 +1,9 @@
 /** One vocabulary for a check's verdict across the thread and the Inspector:
- *  ✓ passed · ✕ failed · ∅ ran nothing (exit 0, zero tests) · ? no exit code
- *  seen · ∙ interrupted/other. `empty` and `unknown` are NOT green: a runner
- *  that ran nothing, or whose exit the engine never showed, proves nothing. */
+ *  ✓ passed · ✕ failed · ∅ ran nothing (exit 0, zero tests) · ? the runner's
+ *  exit code was not seen · ∙ interrupted/other. `empty` and `unknown` are
+ *  NOT green: a runner that ran nothing, whose exit the engine never showed,
+ *  or whose line ended with another command's exit (`| tail`, `|| true`),
+ *  proves nothing. */
 export function checkGlyph(status: string): string {
   switch (status) {
     case "passed":
@@ -75,7 +77,7 @@ export function checkTitle(status: string): string | undefined {
     case "empty":
       return "Exit 0, but the runner ran zero tests — this proves nothing";
     case "unknown":
-      return "No exit code was visible to the console — not counted as passed";
+      return "The console did not see the runner's own exit code: none was reported, or the line ended with another command's (| tail, || true) — not counted as passed";
     case "interrupted":
       return "Interrupted before it finished";
     default:

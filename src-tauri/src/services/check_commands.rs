@@ -19,10 +19,16 @@
 //! launcher, a prefix flag this does not know, a `sh -c` script built from
 //! an expansion, a line nested too deep to read) is a miss.
 //!
-//! What this does NOT decide: whether the runner's exit status is the line's
-//! (`cargo test | tail`, `cargo test || true`), or whether the runner is the
-//! real one (an alias, a `PATH` override, a `test` script that echoes). The
-//! command is recorded verbatim on the `check_run` line for that reason.
+//! A second question, answered by `exit_speaks_for_checks`: is the status the
+//! line ended with a statement about the runner? `cargo test | tail` ends
+//! with `tail`'s, `cargo test || true` with `true`'s, and `false && cargo
+//! test; true` ends 0 without the runner ever starting. A `passed` or
+//! `failed` read off such a status would be about another command.
+//!
+//! What this does NOT decide: whether the runner is the real one (an alias,
+//! a function, a `PATH` override, a `test` script that echoes, a file the
+//! line sources). The command is recorded verbatim on the `check_run` line
+//! for that reason.
 
 /// A nesting no person types; past it the line is not read at all.
 const MAX_DEPTH: usize = 16;
@@ -54,15 +60,41 @@ struct Lexer {
     bail: bool,
 }
 
+/// A piece of a line: a simple command, or what joins it to the next one.
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    /// The words of one simple command; empty for one that is only a
+    /// redirection (`> out.txt`), which still has a status of its own.
+    Cmd(Vec<String>),
+    /// `&&`
+    And,
+    /// `||`
+    Or,
+    /// `|` and `|&`
+    Pipe,
+    /// `;` and a newline
+    Seq,
+    /// `&`
+    Background,
+    /// `(`
+    Open,
+    /// `)`
+    Close,
+    /// `((`: arithmetic, where the words are not commands
+    Arithmetic,
+}
+
 /// A statement being assembled: the words of one simple command.
 #[derive(Default)]
 struct Pending {
-    out: Vec<Vec<String>>,
+    out: Vec<Tok>,
     words: Vec<String>,
     word: String,
     in_word: bool,
     /// The next word is a redirection target, not an argument.
     skip_word: bool,
+    /// The statement has a redirection: it is a command even with no words.
+    redirected: bool,
 }
 
 impl Pending {
@@ -87,9 +119,16 @@ impl Pending {
     fn end_statement(&mut self) {
         self.end_word();
         self.skip_word = false;
-        if !self.words.is_empty() {
-            self.out.push(std::mem::take(&mut self.words));
+        if !self.words.is_empty() || self.redirected {
+            self.out.push(Tok::Cmd(std::mem::take(&mut self.words)));
         }
+        self.redirected = false;
+    }
+
+    /// The statement ends at an operator, which is kept.
+    fn operator(&mut self, op: Tok) {
+        self.end_statement();
+        self.out.push(op);
     }
 
     /// `2>` / `1>&2`: the digits before a redirection are a descriptor.
@@ -261,6 +300,7 @@ impl Lexer {
     /// `>&2`, `<&-`, `<<<`): consumed, and its target word marked to skip.
     fn redirection(&mut self, p: &mut Pending) {
         p.drop_fd_or_end_word();
+        p.redirected = true;
         while matches!(self.peek(0), Some('>' | '<')) {
             self.i += 1;
         }
@@ -281,9 +321,10 @@ impl Lexer {
         p.skip_word = true;
     }
 
-    /// The simple commands of the line, in order. `nested` reads up to the
-    /// `)` that closes the group the caller opened.
-    fn statements(&mut self, nested: bool) -> Vec<Vec<String>> {
+    /// The simple commands of the line and the operators between them, in
+    /// order. `nested` reads up to the `)` that closes the group the caller
+    /// opened.
+    fn statements(&mut self, nested: bool) -> Vec<Tok> {
         let mut p = Pending::default();
         let mut parens = 0usize;
         while let Some(c) = self.peek(0) {
@@ -331,16 +372,25 @@ impl Lexer {
                 }
                 '\n' => {
                     self.i += 1;
-                    p.end_statement();
+                    p.operator(Tok::Seq);
                     self.heredoc_bodies();
                 }
                 ' ' | '\t' | '\r' => {
                     self.i += 1;
                     p.end_word();
                 }
-                ';' | '|' => {
+                ';' => {
                     self.i += 1;
-                    p.end_statement();
+                    p.operator(Tok::Seq);
+                }
+                '|' if self.peek(1) == Some('|') => {
+                    self.i += 2;
+                    p.operator(Tok::Or);
+                }
+                '|' => {
+                    // `|` and `|&`
+                    self.i += if self.peek(1) == Some('&') { 2 } else { 1 };
+                    p.operator(Tok::Pipe);
                 }
                 '&' if self.peek(1) == Some('>') => {
                     // `&>file`, `&>>file`
@@ -348,12 +398,17 @@ impl Lexer {
                     p.end_word();
                     self.redirection(&mut p);
                 }
+                '&' if self.peek(1) == Some('&') => {
+                    self.i += 2;
+                    p.operator(Tok::And);
+                }
                 '&' => {
                     self.i += 1;
-                    p.end_statement();
+                    p.operator(Tok::Background);
                 }
                 '<' if self.peek(1) == Some('<') && self.peek(2) != Some('<') => {
                     p.drop_fd_or_end_word();
+                    p.redirected = true;
                     self.i += 2;
                     self.heredoc_start();
                 }
@@ -371,18 +426,22 @@ impl Lexer {
                     p.push(UNKNOWN);
                 }
                 '(' => {
+                    if self.peek(1) == Some('(') && !p.in_word {
+                        p.operator(Tok::Arithmetic);
+                    }
                     self.i += 1;
-                    p.end_statement();
+                    p.operator(Tok::Open);
                     parens += 1;
                 }
                 ')' => {
                     self.i += 1;
-                    p.end_statement();
                     if parens > 0 {
                         parens -= 1;
                     } else if nested {
+                        p.end_statement();
                         return p.out;
                     }
+                    p.operator(Tok::Close);
                 }
                 _ => {
                     self.i += 1;
@@ -399,14 +458,22 @@ impl Lexer {
     }
 }
 
-fn simple_commands(cmd: &str) -> Vec<Vec<String>> {
+/// The line as commands and operators; `None` when it cannot be read.
+fn tokens(cmd: &str) -> Option<Vec<Tok>> {
     let mut lx = Lexer::new(cmd);
     let out = lx.statements(false);
-    if lx.bail {
-        Vec::new()
-    } else {
-        out
-    }
+    (!lx.bail).then_some(out)
+}
+
+fn simple_commands(cmd: &str) -> Vec<Vec<String>> {
+    tokens(cmd)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|t| match t {
+            Tok::Cmd(words) if !words.is_empty() => Some(words),
+            _ => None,
+        })
+        .collect()
 }
 
 /// `./gradlew` and `.venv/bin/pytest` run `gradlew` and `pytest`.
@@ -550,8 +617,9 @@ fn shell_script<'a>(args: &[&'a str]) -> Option<&'a str> {
     None
 }
 
-/// The kind of check one simple command runs, if it runs one.
-fn statement_kind(words: &[String], depth: usize) -> Option<&'static str> {
+/// Where the command of a statement starts: past reserved words, assignments
+/// and the prefixes that run what follows them.
+fn command_start(words: &[String]) -> Option<usize> {
     let mut i = 0;
     loop {
         let w = words.get(i)?.as_str();
@@ -565,6 +633,12 @@ fn statement_kind(words: &[String], depth: usize) -> Option<&'static str> {
         }
     }
     words.get(i)?;
+    Some(i)
+}
+
+/// The kind of check one simple command runs, if it runs one.
+fn statement_kind(words: &[String], depth: usize) -> Option<&'static str> {
+    let i = command_start(words)?;
     let name = basename(&words[i]);
     let args: Vec<&str> = words[i + 1..].iter().map(String::as_str).collect();
     let arg = |n: usize| args.get(n).copied().unwrap_or("");
@@ -643,6 +717,376 @@ fn line_kind(cmd: &str, depth: usize) -> Option<&'static str> {
         .iter()
         .filter_map(|words| statement_kind(words, depth))
         .min_by_key(|kind| ORDER.iter().position(|k| k == kind))
+}
+
+/// What the exit status of a piece of a line says about the checks in it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Reads {
+    /// It runs a check.
+    runs: bool,
+    /// Status 0 means every check in it ran and exited 0.
+    zero: bool,
+    /// A non-zero status may be a check's: one that failed, or one the line
+    /// never reached because the command before it failed.
+    nonzero: bool,
+}
+
+/// A command that is not a check: its status says nothing about one.
+const PLAIN: Reads = Reads {
+    runs: false,
+    zero: true,
+    nonzero: false,
+};
+/// A runner: its status is its own.
+const CHECK: Reads = Reads {
+    runs: true,
+    zero: true,
+    nonzero: true,
+};
+
+/// Command words after which the line's status is not followed: a compound
+/// command (`if`, `for`, `{`, `[[`), a negation, or a builtin that ends or
+/// replaces the shell reading the line, or runs text as part of it. `exit 0;
+/// cargo test` and `exec true && cargo test` end 0 and start no runner.
+const NOT_FOLLOWED: &[&str] = &[
+    "if", "then", "elif", "else", "fi", "while", "until", "do", "done", "for", "case", "esac",
+    "select", "function", "{", "}", "!", "[[", "coproc", "exit", "return", "exec", "logout",
+    "trap", "eval", "setopt", "unsetopt",
+];
+
+/// The word the shell itself acts on: past assignments and the words that
+/// hand the next one to a builtin (`time exit 0`, `builtin exit 0`).
+fn shell_word(words: &[String]) -> Option<(&str, &[String])> {
+    let i = words.iter().position(|w| {
+        !is_assignment(w) && !matches!(w.as_str(), "time" | "-p" | "command" | "builtin")
+    })?;
+    Some((words[i].as_str(), &words[i + 1..]))
+}
+
+/// `set -euo pipefail` / `bash -o pipefail`: `Some(true)` turns the option
+/// on, `Some(false)` off, `None` leaves it.
+fn pipefail_option(args: &[String]) -> Option<bool> {
+    args.windows(2)
+        .filter(|pair| pair[1] == "pipefail" && pair[0].len() >= 2 && pair[0].ends_with('o'))
+        .filter_map(|pair| match pair[0].chars().next() {
+            Some('-') if !pair[0].starts_with("--") => Some(true),
+            Some('+') => Some(false),
+            _ => None,
+        })
+        .next_back()
+}
+
+/// `set -e`, `set -o errexit`, `bash -ec`: a failure may end the line there.
+fn errexit_option(args: &[String]) -> bool {
+    args.iter().enumerate().any(|(i, a)| {
+        let named = a == "errexit" && i > 0 && args[i - 1].starts_with('-');
+        let flag = a.starts_with('-') && !a.starts_with("--") && a.contains('e');
+        named || flag
+    })
+}
+
+/// The options a line is read under.
+#[derive(Clone, Copy, Default)]
+struct Options {
+    /// `pipefail` is on: the line opens by turning it on and never touches
+    /// it again, or its shell was started with it.
+    pipefail: bool,
+    /// The line turns `pipefail` on somewhere, so it may be on.
+    may_pipefail: bool,
+    /// The line turns `-e` on somewhere, so a failure may end it early.
+    may_errexit: bool,
+}
+
+/// A `set` that changes only how failures are reported (`-e`, `-u`, `-x`,
+/// `-o pipefail`). Any other may change what runs: under `set -n` the shell
+/// reads `cargo test`, runs nothing and ends 0.
+fn is_plain_set(args: &[String]) -> bool {
+    let mut i = 0;
+    while let Some(a) = args.get(i).map(String::as_str) {
+        let flags = match a.strip_prefix('-').or_else(|| a.strip_prefix('+')) {
+            Some(f) if !f.is_empty() && f.chars().all(|c| "euxo".contains(c)) => f,
+            _ => return false,
+        };
+        i += 1;
+        if flags.ends_with('o') {
+            let known = ["pipefail", "errexit", "nounset", "xtrace"];
+            if !args.get(i).is_some_and(|o| known.contains(&o.as_str())) {
+                return false;
+            }
+            i += 1;
+        }
+    }
+    true
+}
+
+/// Nothing in the line takes its status somewhere this does not follow.
+fn is_followed(toks: &[Tok]) -> bool {
+    toks.iter().all(|t| match t {
+        Tok::Background | Tok::Arithmetic => false,
+        Tok::Cmd(words) => match shell_word(words) {
+            // An expansion in the command word may name any of the above.
+            Some((w, _)) if NOT_FOLLOWED.contains(&w) || w.contains(UNKNOWN) => false,
+            Some(("set", args)) => is_plain_set(args),
+            Some(("shopt", args)) => !args.iter().any(|a| a.starts_with('-') && a.contains('o')),
+            _ => true,
+        },
+        _ => true,
+    })
+}
+
+/// The options in force for a line whose shell started with `shell`
+/// (`bash -o pipefail -c …`). `pipefail` is held to be on only when the line
+/// opens with the `set`s that turn it on and has no other `set` after them.
+fn options_of(toks: &[Tok], shell: Options) -> Options {
+    let set_args = |t: &'_ Tok| match t {
+        Tok::Cmd(words) => match shell_word(words) {
+            Some(("set", args)) => Some(args.to_vec()),
+            _ => None,
+        },
+        _ => None,
+    };
+    let mut on = shell.pipefail;
+    let mut i = 0;
+    while let (Some(Tok::Cmd(words)), Some(Tok::Seq | Tok::And)) = (toks.get(i), toks.get(i + 1)) {
+        if words.first().map(String::as_str) != Some("set") {
+            break;
+        }
+        on = pipefail_option(&words[1..]).unwrap_or(on);
+        i += 2;
+    }
+    let sets: Vec<Vec<String>> = toks.iter().filter_map(set_args).collect();
+    Options {
+        pipefail: on && !toks[i..].iter().any(|t| set_args(t).is_some()),
+        may_pipefail: shell.may_pipefail || sets.iter().any(|a| pipefail_option(a) == Some(true)),
+        may_errexit: shell.may_errexit || sets.iter().any(|a| errexit_option(a)),
+    }
+}
+
+/// Follows a line's exit status back to the commands it comes from.
+struct Reader<'a> {
+    toks: &'a [Tok],
+    i: usize,
+    /// `sh -c` nesting, as in `statement_kind`.
+    depth: usize,
+    /// `( … )` nesting.
+    nest: usize,
+    options: Options,
+    /// The line has a shape this does not read.
+    lost: bool,
+}
+
+impl<'a> Reader<'a> {
+    fn peek(&self) -> Option<&'a Tok> {
+        self.toks.get(self.i)
+    }
+
+    /// `a; b; c`: the status is the last command's, and the others' is
+    /// discarded. `nested` reads up to the `)` that closes a subshell.
+    fn list(&mut self, nested: bool) -> Reads {
+        let mut discarded = false;
+        let mut last = PLAIN;
+        loop {
+            match self.peek() {
+                None => {
+                    self.lost |= nested;
+                    break;
+                }
+                Some(Tok::Close) => {
+                    self.i += 1;
+                    self.lost |= !nested;
+                    break;
+                }
+                Some(Tok::Seq) => {
+                    self.i += 1;
+                    continue;
+                }
+                _ => {}
+            }
+            discarded |= last.runs;
+            last = self.and_or();
+            if !matches!(self.peek(), None | Some(Tok::Seq | Tok::Close)) {
+                self.lost = true;
+                break;
+            }
+        }
+        Reads {
+            runs: discarded || last.runs,
+            zero: last.zero && !discarded,
+            // Under `set -e` the line may have ended at an earlier check.
+            nonzero: last.nonzero || (self.options.may_errexit && discarded),
+        }
+    }
+
+    /// `a && b || c`, left to right.
+    fn and_or(&mut self) -> Reads {
+        let mut left = self.pipeline();
+        loop {
+            let or = match self.peek() {
+                Some(Tok::And) => false,
+                Some(Tok::Or) => true,
+                _ => return left,
+            };
+            self.i += 1;
+            let right = self.pipeline();
+            let runs = left.runs || right.runs;
+            left = if or {
+                // 0 when either side is, so a check on either side may have
+                // failed or never started; non-zero when both sides failed.
+                Reads {
+                    runs,
+                    zero: !runs,
+                    nonzero: left.nonzero || right.nonzero,
+                }
+            } else {
+                // 0 when both sides are; non-zero when the left failed, and
+                // then the right never started, or when the right failed.
+                Reads {
+                    runs,
+                    zero: left.zero && right.zero,
+                    nonzero: left.nonzero || right.runs,
+                }
+            };
+        }
+    }
+
+    /// `a | b | c`: the status is the last command's, unless `pipefail`
+    /// makes it the last one that failed.
+    fn pipeline(&mut self) -> Reads {
+        let mut units = vec![self.unit()];
+        while matches!(self.peek(), Some(Tok::Pipe)) {
+            self.i += 1;
+            units.push(self.unit());
+        }
+        let (last, before) = units.split_last().expect("one unit at least");
+        let runs = units.iter().any(|u| u.runs);
+        if self.options.pipefail {
+            Reads {
+                runs,
+                zero: units.iter().all(|u| u.zero),
+                nonzero: units.iter().any(|u| u.nonzero),
+            }
+        } else {
+            Reads {
+                runs,
+                zero: last.zero && !before.iter().any(|u| u.runs),
+                nonzero: last.nonzero
+                    || (self.options.may_pipefail && before.iter().any(|u| u.nonzero)),
+            }
+        }
+    }
+
+    /// A simple command, or a `( … )` subshell.
+    fn unit(&mut self) -> Reads {
+        match self.peek() {
+            Some(Tok::Cmd(words)) => {
+                self.i += 1;
+                // `name() { … }` defines a function and runs nothing.
+                self.lost |= matches!(self.peek(), Some(Tok::Open));
+                self.command(words)
+            }
+            Some(Tok::Open) if self.nest < MAX_DEPTH => {
+                self.i += 1;
+                self.nest += 1;
+                let inner = self.list(true);
+                self.nest -= 1;
+                inner
+            }
+            // Nothing where a command goes, or nested too deep to read.
+            _ => {
+                self.lost = true;
+                self.i = self.toks.len();
+                PLAIN
+            }
+        }
+    }
+
+    fn command(&mut self, words: &[String]) -> Reads {
+        let Some(i) = command_start(words) else {
+            return PLAIN;
+        };
+        // `sh -c '…'` ends with the status of its script.
+        if SHELLS.contains(&basename(&words[i])) {
+            let args: Vec<&str> = words[i + 1..].iter().map(String::as_str).collect();
+            return match shell_script(&args) {
+                Some(script) if self.depth < 2 => {
+                    // `bash -o pipefail -c '…'`: the options before the script.
+                    let options = args.iter().position(|a| std::ptr::eq(*a, script));
+                    let options = &words[i + 1..i + 1 + options.unwrap_or(0)];
+                    let on = pipefail_option(options) == Some(true);
+                    let shell = Options {
+                        pipefail: on,
+                        may_pipefail: on,
+                        may_errexit: errexit_option(options),
+                    };
+                    read_line(script, self.depth + 1, shell)
+                }
+                _ => PLAIN,
+            };
+        }
+        if statement_kind(words, self.depth).is_some() {
+            CHECK
+        } else {
+            PLAIN
+        }
+    }
+}
+
+/// What the exit status of a whole line (or of a `sh -c` script) says.
+fn read_line(cmd: &str, depth: usize, shell: Options) -> Reads {
+    // A line this does not read: 0 says nothing about its checks. Non-zero
+    // is still taken as theirs, as it was before lines were read at all.
+    let runs = line_kind(cmd, depth).is_some();
+    let unread = Reads {
+        runs,
+        zero: false,
+        nonzero: runs,
+    };
+    let Some(toks) = tokens(cmd).filter(|toks| is_followed(toks)) else {
+        return unread;
+    };
+    let mut reader = Reader {
+        toks: &toks,
+        i: 0,
+        depth,
+        nest: 0,
+        options: options_of(&toks, shell),
+        lost: false,
+    };
+    let reads = reader.list(false);
+    if reader.lost {
+        unread
+    } else {
+        reads
+    }
+}
+
+/// Is the status a check line ended with a statement about its checks?
+///
+/// `passed` and `failed` are read off the exit code, so the code has to be
+/// the runner's. With `zero`: does status 0 mean every check in the line ran
+/// and exited 0? Not for `cargo test | tail` (the status is `tail`'s),
+/// `cargo test || true`, `cargo test; echo done`, `cargo test &`, or
+/// `false && cargo test; true`, which never starts the runner. Without
+/// `zero`: may a non-zero status be a check's own? Not for `cargo test |
+/// grep -q FAILED`, which ends 1 when nothing failed.
+///
+/// The two directions are not held to the same standard. A wrong yes with
+/// `zero` turns "tests pass" into `verified`, so it takes a line read from
+/// end to end: commands joined by `&&`, a check at the end of a `;` list, a
+/// pipeline under `set -o pipefail`, a `( … )` subshell, `sh -c` of the
+/// same. `set -e` is not credited: a shell told to ignore the status of the
+/// line (as some agents' wrappers do) ignores `-e` inside it. A wrong yes
+/// without `zero` reports a failed line as a failed check, which it nearly
+/// always is, so it is a no only where the line plainly ends with another
+/// command's status: `cargo test && git push` failing counts, and so does
+/// `cargo test; echo done` once the line has a `set -e` that may have ended
+/// it at the test.
+///
+/// A line that is not read (a loop, an `if`, `exit`, `eval`, a command named
+/// by an expansion) answers no with `zero`, and yes without.
+pub fn exit_speaks_for_checks(cmd: &str, zero: bool) -> bool {
+    let reads = read_line(cmd, 0, Options::default());
+    reads.runs && if zero { reads.zero } else { reads.nonzero }
 }
 
 /// Does this command line run a test/check suite? A hit turns the result
@@ -837,6 +1281,29 @@ mod tests {
             ]
         );
         assert_eq!(
+            tokens("a && b || c | d |& e; (f) & g\n> h").unwrap(),
+            vec![
+                Tok::Cmd(vec!["a".into()]),
+                Tok::And,
+                Tok::Cmd(vec!["b".into()]),
+                Tok::Or,
+                Tok::Cmd(vec!["c".into()]),
+                Tok::Pipe,
+                Tok::Cmd(vec!["d".into()]),
+                Tok::Pipe,
+                Tok::Cmd(vec!["e".into()]),
+                Tok::Seq,
+                Tok::Open,
+                Tok::Cmd(vec!["f".into()]),
+                Tok::Close,
+                Tok::Background,
+                Tok::Cmd(vec!["g".into()]),
+                Tok::Seq,
+                // only a redirection: still a command with a status
+                Tok::Cmd(vec![]),
+            ]
+        );
+        assert_eq!(
             words("a && b || c; d & e\nf"),
             vec![
                 vec!["a"],
@@ -876,6 +1343,160 @@ mod tests {
             words("cat <<EOF\r\ncargo test\r\nEOF\r\nls"),
             vec![vec!["cat"], vec!["ls"]]
         );
+    }
+
+    #[test]
+    fn a_status_of_zero_is_the_checks_only_when_the_line_ends_with_theirs() {
+        for c in [
+            "cargo test",
+            "cargo test 2>&1",
+            "npm test > out.log 2>&1",
+            "cd src-tauri && cargo test",
+            "cargo fmt --check && cargo clippy -- -D warnings && cargo test",
+            "ls; cargo test",
+            "echo starting\ncargo test",
+            "CI=1 timeout 600 npm test",
+            "(cd app && npm test)",
+            "source .venv/bin/activate && pytest -q",
+            "yes | npm test",
+            "cd a || cd b && cargo test",
+            "cat <<EOF > notes.txt\nsome text\nEOF\ncargo test",
+            // an operator that is not one
+            "cargo test # | tail",
+            "cargo test -- --nocapture '| tail'",
+            // pipefail makes a pipeline end with the status of what failed
+            "set -o pipefail; cargo test 2>&1 | tail -20",
+            "set -euo pipefail\ncargo test | tee out.log",
+            "set -e; set -o pipefail; cargo test | tail",
+            "set -o pipefail && cd app && npm test | tail -5",
+            "bash -o pipefail -c 'npm test | tee out.log'",
+            "bash -c 'set -o pipefail; npm test | tail'",
+            // a script ends with the status of its last command
+            "bash -c 'cd app && npm test'",
+            "sh -c \"cargo test\"",
+        ] {
+            assert!(exit_speaks_for_checks(c, true), "{c}");
+        }
+        for c in [
+            // the status is another command's
+            "cargo test | tail -20",
+            "cargo test 2>&1 | tail -20",
+            "cargo test |& tee out.log",
+            "(cargo test) | tail",
+            "cargo test || true",
+            "cargo test || echo failed",
+            "cargo test; echo done",
+            "cargo test\necho done",
+            "cargo test; > out.txt",
+            "npm run lint; npm test",
+            "(cargo test; true)",
+            "cargo test && npm test | tail",
+            "cargo test &",
+            "cargo test & wait",
+            "bash -c 'cargo test | tail'",
+            "bash -c 'cargo test; true'",
+            // the runner may never have started
+            "false && cargo test; true",
+            "exit 0; cargo test",
+            "exec true && cargo test",
+            "builtin exit 0; cargo test",
+            "time exit 0; cargo test",
+            "set -n; cargo test",
+            "set -o noexec; cargo test",
+            "shopt -so noexec; cargo test",
+            "\"$SETUP\" && cargo test",
+            "eval \"$SETUP\" && cargo test",
+            "trap 'exit 0' EXIT; cargo test",
+            // compound commands are not followed
+            "! cargo test",
+            "if cargo test; then echo ok; fi",
+            "for p in a b; do cargo test -p $p; done",
+            "while ! cargo test; do sleep 1; done",
+            "{ cargo test; } || true",
+            "cargo() { true; }; cargo test",
+            "[[ -n x && pytest ]]",
+            "(( pytest + 1 ))",
+            "case x in a|pytest) echo ok;; esac",
+            "cargo test | tail; exit ${PIPESTATUS[0]}",
+            // pipefail only where the line plainly turns it on
+            "bash -c 'npm test | tail' -o pipefail",
+            "cd app && set -o pipefail && npm test | tail",
+            "set -o pipefail; set +o pipefail; npm test | tail",
+            "set -o pipefail || true; npm test | tail",
+            "set +o pipefail; npm test | tail",
+            "(set -o pipefail; npm test | tail)",
+            "bash -o pipefail -c 'set +o pipefail; npm test | tail'",
+            // `-e` is not credited: a wrapper may have it ignored
+            "set -e; cargo test; echo done",
+            // not a check at all
+            "ls",
+            "echo cargo test",
+        ] {
+            assert!(!exit_speaks_for_checks(c, true), "{c}");
+        }
+    }
+
+    #[test]
+    fn a_failed_line_is_a_failed_check_unless_the_status_is_another_commands() {
+        for c in [
+            "cargo test",
+            "cd app && cargo test",
+            "cargo test && git push",
+            "cargo test || echo failed",
+            "ls; cargo test",
+            "(cd app && npm test)",
+            "set -o pipefail; cargo test | tail",
+            "bash -c 'cargo test'",
+            // `set -e` or pipefail somewhere: the line may have ended at the check
+            "set -e; cargo test; echo done",
+            "set -euo pipefail\ncargo fmt --check\ncargo test\necho done",
+            "bash -ec 'cargo test; echo done'",
+            "cd app && set -o pipefail && npm test | tail",
+            // not followed: taken as the check's, as before
+            "if ! cargo test; then exit 1; fi",
+            "for p in a b; do cargo test -p $p || exit 1; done",
+            "cargo test | tail; exit ${PIPESTATUS[0]}",
+        ] {
+            assert!(exit_speaks_for_checks(c, false), "{c}");
+        }
+        for c in [
+            // `grep -q` ends 1 when nothing failed
+            "cargo test | grep -q FAILED",
+            "cargo test | grep -q FAILED && echo found",
+            "bash -c 'cargo test | grep -q FAILED'",
+            "cargo test | tail",
+            "cargo test; false",
+            "cargo test; git push",
+            "ls",
+        ] {
+            assert!(!exit_speaks_for_checks(c, false), "{c}");
+        }
+    }
+
+    #[test]
+    fn a_line_is_followed_within_bounds() {
+        // Model-written input: bounded recursion, no panic.
+        let deep = format!("{}cargo test{}", "(".repeat(5000), ")".repeat(5000));
+        assert!(!exit_speaks_for_checks(&deep, true));
+        let spaced = format!("{}cargo test{}", "( ".repeat(5000), " )".repeat(5000));
+        assert!(!exit_speaks_for_checks(&spaced, true));
+        for c in [
+            "",
+            ")",
+            "&&",
+            "| |",
+            "cargo test &&",
+            "cargo test )",
+            "( cargo test",
+            "set -o",
+            "set é; cargo test",
+            "bash -c",
+            "\u{1} && cargo test",
+        ] {
+            let _ = exit_speaks_for_checks(c, true);
+            let _ = exit_speaks_for_checks(c, false);
+        }
+        assert!(exit_speaks_for_checks("( ( cd app && npm test ) )", true));
     }
 
     #[test]

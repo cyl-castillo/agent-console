@@ -133,7 +133,7 @@ if (packets.length === 0) {
         const s = e.payload?.status;
         if (s === "passed") checksPassed++;
         else if (s === "failed") checksFailed++;
-        else checksInconclusive++; // empty (ran zero tests), unknown (no exit code), interrupted
+        else checksInconclusive++; // empty (ran zero tests), unknown (no exit code of the runner's own), interrupted
       } else if (e.kind === "review_verdict") {
         if (e.payload?.verdict === "block" && e.turnId) {
           blocks.set(e.turnId, {
@@ -227,7 +227,7 @@ if (packets.length === 0) {
         `${approvals === 1 ? "" : "s"} · ${checksPassed} check run` +
         `${checksPassed === 1 ? "" : "s"} passed` +
         (checksFailed ? ` (${checksFailed} failed)` : "") +
-        (checksInconclusive ? ` (${checksInconclusive} inconclusive: ran zero tests or no exit code)` : "") +
+        (checksInconclusive ? ` (${checksInconclusive} inconclusive: ran zero tests or no exit code of their own)` : "") +
         "**",
     );
     const diffFiles = changed.filter((f) => !f.startsWith(".testigo/"));

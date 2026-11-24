@@ -21,7 +21,10 @@ Command palette → **Configure Modules** → **Watch**. The panel appears under
 - **One condition.** A run fails a recognized test or check: a `check_run`
   ledger line with status `failed`. That is a fact the ledger already
   records (runner, exit code, hash of the output). `unknown`, `empty` and
-  `interrupted` checks do not alert.
+  `interrupted` checks do not alert. A runner piped into another command
+  (`cargo test | tail -20`) ends with that command's exit code, so it is
+  `unknown` whatever the tests did: run it bare, or under `set -o pipefail`,
+  for a failure to be seen.
 - **One alert per run.** The run is the turn. A second failed check in the
   same turn joins the alert as more evidence and notifies nobody.
 - **Evidence in a click.** An alert opens the turn's ledger lines (prompt,
