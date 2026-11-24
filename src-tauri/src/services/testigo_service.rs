@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
+pub use crate::services::check_commands::{check_kind, is_check_command};
 
 /// One link in a project's Testigo chain: the durable, hash-chained record of
 /// something that happened between the human and the agent (a prompt, an
@@ -217,29 +218,6 @@ pub fn canonical_tool(tool: &str) -> &'static str {
     }
 }
 
-/// What a recognized check command checks. Keyed on the runner, not the
-/// outcome: a reviewer asks "did the TESTS run?", not "did something pass?".
-pub fn check_kind(cmd: &str) -> &'static str {
-    static RE: std::sync::OnceLock<Vec<(regex::Regex, &'static str)>> = std::sync::OnceLock::new();
-    let rules = RE.get_or_init(|| {
-        [
-            (r"(?x)(^|[\s;&|(])(cargo\s+fmt|prettier|(npm|pnpm|yarn|bun)\s+run\s+format:check)(\s|$)", "format"),
-            (r"(?x)(^|[\s;&|(])(cargo\s+clippy|eslint|(npm|pnpm|yarn|bun)\s+run\s+lint|make\s+lint|go\s+vet)(\s|$)", "lint"),
-            (r"(?x)(^|[\s;&|(])(cargo\s+check|tsc|(npm|pnpm|yarn|bun)\s+run\s+(typecheck|check))(\s|$)", "typecheck"),
-            (r"(?x)(^|[\s;&|(])((npm|pnpm|yarn|bun)\s+run\s+build)(\s|$)", "build"),
-        ]
-        .into_iter()
-        .map(|(re, k)| (regex::Regex::new(re).expect("check-kind regex compiles"), k))
-        .collect()
-    });
-    for (re, kind) in rules {
-        if re.is_match(cmd) {
-            return kind;
-        }
-    }
-    "test"
-}
-
 /// A runner that exited 0 having run NOTHING: "ctest ran zero tests and
 /// exited 0, and the agent then told the user that all tests pass". Matched
 /// on the output's head and tail (the verdict line is the last one).
@@ -265,33 +243,6 @@ pub fn is_zero_tests_output(text: &str) -> bool {
         .expect("zero-tests regex compiles")
     });
     re.is_match(text)
-}
-
-/// Does this Bash command line run a test/check suite? Conservative
-/// allow-list of common runners; a hit turns the result into a `check_run`
-/// event — the "tests ran, and this is what they said" line a reviewer
-/// reads before any prompt.
-pub fn is_check_command(cmd: &str) -> bool {
-    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let re = RE.get_or_init(|| {
-        regex::Regex::new(
-            r"(?x)(^|[\s;&|(])(
-                cargo\s+(test|clippy|check|fmt\s+--check)
-              | (npm|pnpm|yarn|bun)\s+(test|run\s+(test|tests|lint|typecheck|check|build|format:check))
-              | npx\s+(vitest|jest|playwright|tsc|eslint|prettier\s+--check|mocha)
-              | (vitest|jest|mocha|playwright\s+test|pytest|tox|nox|rspec|phpunit|dotnet\s+test|swift\s+test)
-              | python(3)?\s+-m\s+(pytest|unittest)
-              | go\s+(test|vet)
-              | make\s+(test|check|lint)
-              | (mvn|mvnw|\./mvnw)\s+(test|verify)
-              | (gradle|gradlew|\./gradlew)\s+(test|check)
-              | mix\s+test
-              | bundle\s+exec\s+rspec
-            )(\s|$)",
-        )
-        .expect("check-runner regex compiles")
-    });
-    re.is_match(cmd)
 }
 
 /// A shell command that creates a commit: `git commit` as the start of a
@@ -2839,6 +2790,70 @@ mod tests {
         .unwrap();
         let evs = svc.list(a, None, None).unwrap();
         assert_eq!(evs.last().unwrap().payload["status"], "unverified_claim");
+        assert!(svc.verify(a).unwrap().ok);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_runner_named_in_an_argument_leaves_no_check_and_verifies_nothing() {
+        let _env = crate::test_support::lock_env();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let base = std::env::temp_dir().join(format!(
+            "ac-testigo-mention-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let svc = TestigoService::new();
+        let root = base.join("proj");
+        std::fs::create_dir_all(&root).unwrap();
+        let a = root.to_str().unwrap();
+        svc.on_prompt(a, 1, Some("t1"), Some("s1"), Some("fix it"), None, Some(a))
+            .unwrap();
+        // Each of these exits 0 and names a runner without running it.
+        for (i, cmd) in [
+            "echo cargo test",
+            "true # cargo test",
+            "git commit -m 'run npm test later'",
+            "cat > NOTES.md <<'EOF'\npytest -q\nEOF",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            svc.on_tool_result(
+                a,
+                2 + i as i64,
+                Some("t1"),
+                Some("s1"),
+                Some("Bash"),
+                Some("ok"),
+                false,
+                ToolResultIds {
+                    command: Some(cmd),
+                    exit_code: Some(0),
+                    exit_code_via: Some("claude_success"),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        svc.on_turn_end(
+            a,
+            10,
+            Some("t1"),
+            Some("s1"),
+            json!({"summary": "Done. All tests pass."}),
+        )
+        .unwrap();
+        let evs = svc.list(a, None, None).unwrap();
+        assert_eq!(evs.iter().filter(|e| e.kind == "check_run").count(), 0);
+        let v = evs.last().unwrap();
+        assert_eq!(v.kind, "verification");
+        assert_eq!(v.payload["status"], "unverified_claim");
+        assert_eq!(v.payload["checks"]["passed"], 0);
         assert!(svc.verify(a).unwrap().ok);
         let _ = std::fs::remove_dir_all(&base);
     }
