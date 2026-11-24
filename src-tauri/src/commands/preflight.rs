@@ -1,7 +1,9 @@
 //! First-run environment check. Agent Console drives external CLIs (claude /
-//! codex) by typing them into a login-shell PTY, and the per-tool approval hook
-//! is a Node script — so if those binaries are missing the user only finds out
-//! via a cryptic `command not found` in a black terminal. This command probes
+//! codex) by typing them into a login-shell PTY — so if those binaries are
+//! missing the user only finds out via a cryptic `command not found` in a
+//! black terminal. Node is probed because an agent CLI installed through npm
+//! needs it (Codex's installer is npm); the console's own hooks do not: they
+//! run through the bundled hook-bridge sidecar. This command probes
 //! for them up front so the UI can warn *before* the wall.
 //!
 //! Resolution goes through a login shell (`$SHELL -lc`) on unix so the PATH

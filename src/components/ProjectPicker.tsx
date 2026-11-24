@@ -20,7 +20,7 @@ function ToolPill({ t, label }: { t?: PreflightTool; label: string }) {
   );
 }
 
-// First-run environment check — surfaces a missing Claude CLI / Node *before*
+// First-run environment check — surfaces a missing Claude CLI *before*
 // the user opens a repo and hits a cryptic `command not found` in the terminal.
 function PreflightCard() {
   const result = usePreflightStore((s) => s.result);
@@ -36,11 +36,9 @@ function PreflightCard() {
   }
 
   const claude = toolStatus(result, "claude");
-  const node = toolStatus(result, "node");
   const git = toolStatus(result, "git");
   const claudeMissing = claude && !claude.found;
-  const nodeMissing = node && !node.found;
-  const tone = claudeMissing ? "bad" : nodeMissing ? "warn" : "ok";
+  const tone = claudeMissing ? "bad" : "ok";
 
   return (
     <div className={`preflight ${tone}`}>
@@ -52,13 +50,6 @@ function PreflightCard() {
             <pre>npm install -g @anthropic-ai/claude-code{"\n"}claude # sign in</pre>
           </div>
         </div>
-      ) : nodeMissing ? (
-        <div className="preflight-msg">
-          <div className="preflight-title">Node.js not found</div>
-          <div className="preflight-body">
-            The per-tool approval hook is a Node script — install Node ≥ 20 on your PATH.
-          </div>
-        </div>
       ) : (
         <div className="preflight-title ok">Setup ready</div>
       )}
@@ -66,7 +57,6 @@ function PreflightCard() {
       <div className="preflight-row">
         <div className="preflight-tools">
           <ToolPill t={claude} label="Claude CLI" />
-          <ToolPill t={node} label="Node" />
           <ToolPill t={git} label="git" />
         </div>
         <button className="btn btn-link btn-sm" onClick={() => void check()} disabled={checking}>

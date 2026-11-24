@@ -12,7 +12,7 @@ description: |
   signed proof packets verifiable in any browser.
 
   Requires at least one agent CLI on the host (Claude Code, Codex or
-  OpenCode) and Node.js 20+.
+  OpenCode). Node.js 20+ only for a CLI installed through npm.
 website: https://github.com/cyl-castillo/agent-console
 license: AGPL-3.0-only
 grade: stable

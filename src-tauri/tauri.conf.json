@@ -53,7 +53,7 @@
     },
     "linux": {
       "deb": {
-        "depends": ["nodejs"]
+        "recommends": ["nodejs"]
       }
     }
   },

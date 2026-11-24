@@ -22,7 +22,7 @@ async function copyText(text: string): Promise<void> {
 const TOOL_ROLES: Record<string, string> = {
   claude: "the Claude Code agent",
   codex: "the Codex agent (optional second engine)",
-  node: "runs the approval & memory bridges",
+  node: "optional: only for an agent CLI installed through npm (Codex)",
   git: "snapshots, diffs and proof",
 };
 

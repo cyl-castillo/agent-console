@@ -441,7 +441,7 @@
           <thead><tr><th>What</th><th>Why</th></tr></thead>
           <tbody>
             <tr><td>An agent CLI (at least one)</td><td>The agent itself. <strong>Claude Code</strong>: <code>npm install -g @anthropic-ai/claude-code</code>, then run <code>claude</code> once to log in. <strong>Codex</strong>: <code>npm install -g @openai/codex</code>, then <code>codex login</code>. <strong>OpenCode</strong>: install it from <a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>, then <code>opencode auth login</code>. The setup doctor in Getting Started checks what is present.</td></tr>
-            <tr><td>Node.js ≥ 20</td><td>The bundled per-tool approval hook is a Node script.</td></tr>
+            <tr><td>Node.js ≥ 20 (optional)</td><td>Only for an agent CLI installed through npm (Codex, or Claude Code's npm package). The console's own hooks run through a native helper bundled with the app.</td></tr>
             <tr><td>git ≥ 2.30</td><td>Powers the diff viewer and per-turn snapshots.</td></tr>
             <tr><td>Rust toolchain</td><td>Only needed if you build from source.</td></tr>
           </tbody>
@@ -561,7 +561,7 @@
         <p>If you trust the current task, a session-wide <strong>"approve all"</strong> toggle lets the agent run uninterrupted for that session.</p>
         <div class="note">
           <span class="tag">How it works</span>
-          Approvals are enforced by a bundled <code>PreToolUse</code> hook (a small Node script) that Claude Code and Codex run before each tool. This is why Node.js is a runtime requirement.
+          Approvals are enforced by a bundled hook that Claude Code and Codex run before each tool: a small native helper shipped with the app, so nothing else has to be installed for it.
         </div>
       </section>
 
@@ -680,7 +680,7 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <p>The first build downloads ~250 crates and takes 2–4 minutes; subsequent runs are seconds. The dev process opens a Tauri window and hot-reloads the React side via Vite.</p>
         <h3>Build a release</h3>
         <pre><code>npm run tauri build</code></pre>
-        <p>On Linux this produces a <code>.deb</code>, an <code>.AppImage</code>, and an <code>.rpm</code> under <code>src-tauri/target/release/bundle/</code>. The <code>.deb</code> declares <code>nodejs</code> as a runtime dependency (needed for the approval hook); the <code>.AppImage</code> is self-contained. macOS and Windows use the same command and produce <code>.dmg</code> / <code>.msi</code> bundles.</p>
+        <p>On Linux this produces a <code>.deb</code>, an <code>.AppImage</code>, and an <code>.rpm</code> under <code>src-tauri/target/release/bundle/</code>. The <code>.deb</code> recommends <code>nodejs</code> (agent CLIs installed through npm need it; the console's hooks do not); the <code>.AppImage</code> is self-contained. macOS and Windows use the same command and produce <code>.dmg</code> / <code>.msi</code> bundles.</p>
       </section>
 
       <!-- ============ TROUBLESHOOTING ============ -->
@@ -689,7 +689,7 @@ cd src-tauri &amp;&amp; cargo check</code></pre>
         <h3>The agent never responds</h3>
         <p>Confirm the session's agent CLI is installed and logged in: run it in a terminal (<code>claude</code>, <code>codex</code> or <code>opencode</code>) and check it answers. Agent Console can only drive a CLI that's already authenticated.</p>
         <h3>Approval modals never appear / mutations are blocked</h3>
-        <p>The approval hook is a Node script — make sure <strong>Node.js ≥ 20</strong> is on your <code>PATH</code>. If you installed via the <code>.deb</code>, the <code>nodejs</code> dependency should pull it in; on other distros install Node yourself. With OpenCode there is no approval from the console to wait for; see <a href="#approvals">Tool approvals</a>.</p>
+        <p>Approvals reach the console through hooks written into the agent's own settings (<code>~/.claude/settings.json</code>, <code>~/.codex/hooks.json</code>). The Skills panel shows whether the approvals bridge is active and offers <em>enable approvals bridge</em> when it is not. Node.js is not involved: the hook is a native helper bundled with the app. With OpenCode there is no approval from the console to wait for; see <a href="#approvals">Tool approvals</a>.</p>
         <h3>No diff or no restore handle</h3>
         <p>The diff viewer and per-turn snapshots only work inside a <strong>git repository</strong>. Open a folder that has been <code>git init</code>'d (or any existing repo).</p>
         <h3>macOS says the app "is damaged and can't be opened"</h3>
