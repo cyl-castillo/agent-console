@@ -1,5 +1,5 @@
 //! First-run environment check. Agent Console drives external CLIs (claude /
-//! codex) by typing them into a login-shell PTY — so if those binaries are
+//! codex / opencode) by typing them into a login-shell PTY — so if those binaries are
 //! missing the user only finds out via a cryptic `command not found` in a
 //! black terminal. Node is probed because an agent CLI installed through npm
 //! needs it (Codex's installer is npm); the console's own hooks do not: they
@@ -78,6 +78,13 @@ fn fix_for(bin: &str, os: &str, node_found: bool) -> (Option<String>, Option<Str
         ("git", _) => (
             cmd("sudo apt-get install -y git"),
             Some("Debian/Ubuntu — on other distros use your package manager.".to_string()),
+        ),
+        // No command on purpose: OpenCode's own installer follows its newest
+        // release line, and the console has only been verified against the
+        // one it was built for. The human picks the version; we point.
+        ("opencode", _) => (
+            None,
+            Some("Install it from opencode.ai, then re-check.".to_string()),
         ),
         _ => (None, None),
     }
@@ -196,7 +203,13 @@ fn claude_auth() -> EngineAuth {
 
 #[tauri::command(async)]
 pub fn preflight_check() -> Preflight {
-    let mut tools = vec![probe("claude"), probe("node"), probe("git"), probe("codex")];
+    let mut tools = vec![
+        probe("claude"),
+        probe("codex"),
+        probe("opencode"),
+        probe("git"),
+        probe("node"),
+    ];
     let node_found = tools.iter().any(|t| t.name == "node" && t.found);
     let os = current_os();
     for t in tools.iter_mut() {
@@ -238,6 +251,15 @@ mod tests {
                 let (cmd, _) = fix_for(bin, os, true);
                 assert!(cmd.is_some(), "{bin} on {os} must have a fix command");
             }
+        }
+    }
+
+    #[test]
+    fn opencode_is_pointed_at_never_installed_by_a_typed_command() {
+        for os in ["linux", "macos", "windows"] {
+            let (cmd, note) = fix_for("opencode", os, true);
+            assert!(cmd.is_none(), "opencode on {os} must not carry a command");
+            assert!(note.unwrap().contains("opencode.ai"));
         }
     }
 
