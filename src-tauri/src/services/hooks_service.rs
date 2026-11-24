@@ -1779,7 +1779,10 @@ fn ensure_hook_binary(runtime_dir: &Path) -> Option<PathBuf> {
 /// A copy that already holds the sidecar's bytes is left alone: there is
 /// nothing to write, and a copy that is running at this moment (a hook
 /// mid-flight, the console MCP server of a session started outside the
-/// console) cannot be replaced on Windows.
+/// console) cannot be replaced on Windows. Its execute bits are still put
+/// back when they are missing (a cache restored from a backup): the copy
+/// used to be rewritten with them on every start, and a hook pointing at a
+/// file that cannot run fails without falling back to anything.
 ///
 /// When the refresh fails and an earlier copy is there, that copy stays the
 /// address. Answering None instead makes startup rewrite every installed hook
@@ -1789,12 +1792,12 @@ fn ensure_hook_binary(runtime_dir: &Path) -> Option<PathBuf> {
 /// is the lesser failure, and it is replaced on the next start that can.
 fn refresh_hook_binary(sidecar: &Path, bin_dir: &Path) -> Option<PathBuf> {
     let dest = bin_dir.join(BRIDGE_BIN_NAME);
-    if same_bytes(sidecar, &dest) {
+    if same_bytes(sidecar, &dest) && make_executable(&dest).is_ok() {
         return Some(dest);
     }
     match replace_hook_binary(sidecar, bin_dir, &dest) {
         Ok(()) => Some(dest),
-        Err(e) if dest.is_file() => {
+        Err(e) if dest.is_file() && make_executable(&dest).is_ok() => {
             tracing::warn!(
                 "hooks: could not refresh the hook-bridge copy ({e}); keeping the cached one"
             );
@@ -1823,6 +1826,22 @@ fn replace_hook_binary(sidecar: &Path, bin_dir: &Path, dest: &Path) -> std::io::
         fs::set_permissions(&tmp, perm)?;
     }
     fs::rename(&tmp, dest)
+}
+
+/// Give the file its execute bits when any is missing. Nothing to do off unix.
+fn make_executable(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perm = fs::metadata(path)?.permissions();
+        if perm.mode() & 0o111 != 0o111 {
+            perm.set_mode(0o755);
+            fs::set_permissions(path, perm)?;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// Do both paths hold the same file contents? False when either cannot be
@@ -2714,6 +2733,26 @@ mod tests {
             use std::os::unix::fs::MetadataExt;
             assert_eq!(fs::metadata(&dest).unwrap().ino(), inode);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_current_copy_that_lost_its_execute_bits_gets_them_back() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = bridge_tmp_dir("mode");
+        let sidecar = dir.join("sidecar");
+        fs::write(&sidecar, b"bridge v1").unwrap();
+        let bin = dir.join("bin");
+        let dest = refresh_hook_binary(&sidecar, &bin).unwrap();
+        fs::set_permissions(&dest, fs::Permissions::from_mode(0o644)).unwrap();
+        // Blocked temp path: the bits must come back without a new copy.
+        fs::create_dir_all(bin.join(format!("{BRIDGE_BIN_NAME}.tmp"))).unwrap();
+
+        assert_eq!(refresh_hook_binary(&sidecar, &bin), Some(dest.clone()));
+        assert_eq!(
+            fs::metadata(&dest).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
     }
 
     #[test]
