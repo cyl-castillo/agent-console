@@ -11,6 +11,10 @@
 //! has a minimal PATH that omits nvm/npm-global binaries, which would otherwise
 //! produce false "not found" results.
 //!
+//! On Windows the probe spawns the tool itself, by the path the console's own
+//! resolver finds: a CLI installed through npm is a `.cmd` shim, which the
+//! bare name does not reach (`Command::new("codex")` looks for `codex.exe`).
+//!
 //! Beyond detection, each missing tool carries its official installer command
 //! for this OS. The UI never runs it behind the user's back: it is typed into
 //! a visible terminal without Enter (the review-first contract), so a novice
@@ -120,9 +124,16 @@ fn probe(bin: &str) -> ToolStatus {
 
 #[cfg(windows)]
 fn probe(bin: &str) -> ToolStatus {
-    match proc::command(bin).arg("--version").output() {
-        Ok(o) if o.status.success() => status(bin, true, &String::from_utf8_lossy(&o.stdout)),
-        _ => status(bin, false, ""),
+    probe_program(bin, &crate::services::claude_cli::program_for(bin))
+}
+
+/// `<program> --version`, spawned directly: found when it runs and exits 0.
+/// The Windows probe; compiled everywhere so the tests cover it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn probe_program(name: &str, program: &str) -> ToolStatus {
+    match proc::command(program).arg("--version").output() {
+        Ok(o) if o.status.success() => status(name, true, &String::from_utf8_lossy(&o.stdout)),
+        _ => status(name, false, ""),
     }
 }
 
@@ -152,7 +163,11 @@ fn codex_auth() -> EngineAuth {
             .output()
     };
     #[cfg(windows)]
-    let run = || proc::command("codex").args(["login", "status"]).output();
+    let run = || {
+        proc::command(crate::services::claude_cli::codex_bin())
+            .args(["login", "status"])
+            .output()
+    };
 
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -288,6 +303,44 @@ mod tests {
                 "claude fix on {os} must not use npm"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_tool_is_found_by_the_path_it_was_resolved_to() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "ac-preflight-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = |name: &str, body: &str| {
+            let path = dir.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path.to_string_lossy().to_string()
+        };
+
+        // Not on PATH under this name: only the resolved path reaches it.
+        let shim = script("codex-shim", "echo 'codex-cli 0.162.1'; echo 'second line'");
+        let found = probe_program("codex", &shim);
+        assert!(found.found);
+        assert_eq!(found.name, "codex");
+        assert_eq!(found.version.as_deref(), Some("codex-cli 0.162.1"));
+
+        let broken = script("codex-broken", "echo 'codex-cli 0.162.1'; exit 3");
+        assert!(!probe_program("codex", &broken).found);
+
+        let missing = dir.join("no-such-codex").to_string_lossy().to_string();
+        let gone = probe_program("codex", &missing);
+        assert!(!gone.found);
+        assert!(gone.version.is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -349,7 +349,9 @@ fn version_line() -> Option<String> {
 
 #[cfg(windows)]
 fn version_line() -> Option<String> {
-    let out = crate::services::proc::command("claude")
+    // The resolved path: an npm install is `claude.cmd`, which the bare name
+    // does not find on Windows.
+    let out = crate::services::proc::command(crate::services::claude_cli::bin())
         .arg("--version")
         .output()
         .ok()?;

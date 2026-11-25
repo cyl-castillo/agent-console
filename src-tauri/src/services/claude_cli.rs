@@ -14,7 +14,7 @@
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 /// Caches successfully-resolved absolute paths, keyed by binary base name.
@@ -43,19 +43,43 @@ const OPENCODE: AgentBin = AgentBin {
     env_override: "AGENT_CONSOLE_OPENCODE_BIN",
 };
 
-/// Filenames to probe for `base` in each directory (Windows ships shims).
-#[cfg(windows)]
-fn names_for(base: &str) -> Vec<String> {
-    vec![
-        format!("{base}.cmd"),
-        format!("{base}.exe"),
-        format!("{base}.bat"),
-        base.to_string(),
-    ]
+/// Filenames to probe for `base` in each directory. On Windows a CLI
+/// installed through npm is a `.cmd` shim next to an extensionless shell
+/// script: the shim comes first, the bare name last, because the script is
+/// not something Windows can run.
+fn names_for_os(base: &str, windows: bool) -> Vec<String> {
+    if windows {
+        vec![
+            format!("{base}.cmd"),
+            format!("{base}.exe"),
+            format!("{base}.bat"),
+            base.to_string(),
+        ]
+    } else {
+        vec![base.to_string()]
+    }
 }
-#[cfg(not(windows))]
+
 fn names_for(base: &str) -> Vec<String> {
-    vec![base.to_string()]
+    names_for_os(base, cfg!(windows))
+}
+
+/// What to hand `Command::new` to run `base` here: the resolved path of an
+/// agent CLI, or of any other tool found on PATH, else the bare name so the
+/// spawn fails the usual way.
+///
+/// The bare name is not enough on Windows. `Command::new("codex")` looks for
+/// `codex.exe` only, and a CLI installed with `npm install -g` is
+/// `codex.cmd`: a check that spawns the bare name answers "not found" for a
+/// tool the terminal runs fine. Only the Windows checks call this.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn program_for(base: &str) -> String {
+    match base {
+        "claude" => bin(),
+        "codex" => codex_bin(),
+        "opencode" => opencode_bin(),
+        other => which_in_path(other).unwrap_or_else(|| other.to_string()),
+    }
 }
 
 /// Absolute path to the `claude` binary (see `resolve`), or the bare name as a
@@ -209,9 +233,14 @@ fn resolve(agent: &AgentBin) -> Option<String> {
 /// Search the inherited PATH for any name variant of `base`.
 fn which_in_path(base: &str) -> Option<String> {
     let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        for name in names_for(base) {
-            let candidate = dir.join(&name);
+    which_in(std::env::split_paths(&path), &names_for(base))
+}
+
+/// The first of `names` that is a file, directory by directory.
+fn which_in(dirs: impl IntoIterator<Item = PathBuf>, names: &[String]) -> Option<String> {
+    for dir in dirs {
+        for name in names {
+            let candidate = dir.join(name);
             if candidate.is_file() {
                 return Some(candidate.to_string_lossy().to_string());
             }
@@ -501,6 +530,56 @@ pub fn failure_hint(reason: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ac-cli-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn an_npm_shim_is_found_by_its_windows_name() {
+        // What `npm install -g @openai/codex` leaves in %APPDATA%\npm.
+        let npm = scratch("npm");
+        for name in ["codex", "codex.cmd", "codex.ps1"] {
+            fs::write(npm.join(name), "").unwrap();
+        }
+        let empty = scratch("empty");
+        let dirs = || vec![empty.clone(), npm.clone()];
+
+        let found = which_in(dirs(), &names_for_os("codex", true)).unwrap();
+        assert_eq!(Path::new(&found), npm.join("codex.cmd"));
+        // Elsewhere the bare name is the program.
+        let found = which_in(dirs(), &names_for_os("codex", false)).unwrap();
+        assert_eq!(Path::new(&found), npm.join("codex"));
+
+        // A tool nobody resolves by hand is found the same way, and a name
+        // with no file under any spelling is not found at all.
+        fs::write(npm.join("node.exe"), "").unwrap();
+        let found = which_in(dirs(), &names_for_os("node", true)).unwrap();
+        assert_eq!(Path::new(&found), npm.join("node.exe"));
+        assert!(which_in(dirs(), &names_for_os("node", false)).is_none());
+        assert!(which_in(dirs(), &names_for_os("opencode", true)).is_none());
+
+        let _ = fs::remove_dir_all(&npm);
+        let _ = fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    fn a_tool_that_is_nowhere_keeps_its_bare_name() {
+        // The spawn then fails the usual way and the check says "not found".
+        assert_eq!(
+            program_for("ac-no-such-tool-anywhere"),
+            "ac-no-such-tool-anywhere"
+        );
+    }
 
     #[cfg(unix)]
     #[test]
