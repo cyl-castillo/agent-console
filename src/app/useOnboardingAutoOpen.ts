@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { useOverlaysStore } from "../stores/overlaysStore";
 import { usePreflightStore, enginesFound } from "../stores/preflightStore";
+import { isSetupAside } from "../lib/setupAside";
 
 /// First-time auto-open. If NO agent CLI is installed this machine belongs
 /// to a first-run novice: open the wizard (engine → install → login) instead
@@ -23,7 +24,10 @@ export function useOnboardingAutoOpen(): void {
       return;
     }
     if (!preflight) return;
-    if (enginesFound(preflight).length === 0) show("wizard");
-    else if (!seenWelcome) show("gettingStarted");
+    if (enginesFound(preflight).length === 0) {
+      // Stepped aside for an install or a login: a re-check that still finds
+      // no engine must not put the wizard back over the terminal.
+      if (!isSetupAside()) show("wizard");
+    } else if (!seenWelcome) show("gettingStarted");
   }, [seenWelcome, wizardDone, preflight, show]);
 }

@@ -6,6 +6,7 @@ import { usePreflightStore, toolStatus } from "../stores/preflightStore";
 import { useOnboardingStore } from "../stores/onboardingStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { startLoginSession } from "../lib/loginSession";
+import { asideEngine, setupResumed, setupStepsAside } from "../lib/setupAside";
 import { pickFolder } from "../ipc/tauri";
 import type { AgentKind } from "../agents/profiles";
 
@@ -25,9 +26,12 @@ export function WelcomeWizard({ onClose }: { onClose: () => void }) {
   const project = useSessionStore((s) => s.project);
   const openProject = useSessionStore((s) => s.openProject);
 
-  const [engine, setEngine] = useState<AgentKind | null>(null);
+  // Back from a step that needed the terminal: resume with the engine that
+  // was being set up. The re-check below moves the step on if it is done.
+  const [engine, setEngine] = useState<AgentKind | null>(asideEngine);
 
   useEffect(() => {
+    setupResumed();
     void check();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -52,6 +56,10 @@ export function WelcomeWizard({ onClose }: { onClose: () => void }) {
     markWizardDone();
     onClose();
   };
+
+  // A terminal just opened behind this modal. Get out of its way without
+  // finishing: the wizard is hidden, and a toast that stays brings it back.
+  const stepAside = () => setupStepsAside(engine);
 
   return (
     <Modal onClose={finish} className="welcome-wizard" ariaLabel="Welcome">
@@ -119,10 +127,11 @@ export function WelcomeWizard({ onClose }: { onClose: () => void }) {
         <div className="wizard-body">
           <p className="gs-step-desc">
             Hit <strong>Install</strong> on anything red. Each install opens a terminal with the
-            official command already typed — read it, then press Enter. When everything you need is
-            green, this step advances by itself on re-check.
+            official command already typed, and this guide steps aside so you can reach it: read the
+            command, press Enter, then choose <strong>Back to setup</strong>. The step advances once
+            everything you need is green.
           </p>
-          <SetupDoctor />
+          <SetupDoctor onTerminalOpened={stepAside} />
         </div>
       )}
 
@@ -130,11 +139,14 @@ export function WelcomeWizard({ onClose }: { onClose: () => void }) {
         <div className="wizard-body">
           <p className="gs-step-desc">
             <code>{engine}</code> is installed — now connect your account. A terminal will open with
-            the login flow; it finishes in your browser.
+            the login flow and this guide steps aside; the login finishes in your browser. Then
+            choose <strong>Back to setup</strong>.
           </p>
           <button
             className="wb-cta"
-            onClick={() => startLoginSession(engine as AgentKind)}
+            onClick={() =>
+              void startLoginSession(engine as AgentKind).then((opened) => opened && stepAside())
+            }
             disabled={!engine}
           >
             Log in to {engine}

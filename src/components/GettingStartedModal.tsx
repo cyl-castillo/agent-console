@@ -61,7 +61,8 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
         description:
           "The doctor below checks everything the console needs and hands you the official installer for anything missing.",
         done: requirementsReady,
-        detail: <SetupDoctor />,
+        // The guide covers the terminal an Install opens: close it.
+        detail: <SetupDoctor onTerminalOpened={onClose} />,
       },
       {
         key: "open-project",
