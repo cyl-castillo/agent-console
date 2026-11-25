@@ -114,14 +114,26 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// The label a runner gives a command: Claude's tool name, Codex's `shell`,
+/// OpenCode's `bash` on the legacy path and the ACP kind `execute` on the
+/// default one.
 fn is_shell(label: &str) -> bool {
-    matches!(label, "Bash" | "shell" | "bash")
+    matches!(label, "Bash" | "shell" | "bash" | "execute")
 }
 
 fn is_edit(label: &str) -> bool {
     matches!(
         label,
-        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "edit" | "write" | "patch"
+        "Edit"
+            | "Write"
+            | "MultiEdit"
+            | "NotebookEdit"
+            | "edit"
+            | "write"
+            | "patch"
+            // ACP kinds that change files without being called an edit
+            | "delete"
+            | "move"
     )
 }
 
@@ -776,6 +788,42 @@ mod tests {
         )];
         let f = facts_from_activity(&c, "All tests pass.");
         assert_eq!(f.checks.passed, 1);
+    }
+
+    #[test]
+    fn an_opencode_candidate_on_acp_is_read_like_the_others() {
+        // OpenCode over the Agent Client Protocol labels its activity with
+        // the ACP tool kind: `execute` for a command, `edit`, `delete` and
+        // `move` for what changes files (acp_client's fixture pins them).
+        let failing = [
+            act("tool", "execute", "npm test"),
+            act("tool_result", "execute", "npm test · exit 1"),
+        ];
+        let f = facts_from_activity(&failing, "All tests pass.");
+        assert_eq!((f.commands, f.checks.failed), (1, 1));
+        let (st, _) = verification_rules::verdict(&f, &verification_rules::claims(&f.summary));
+        assert_eq!(st.as_str(), "claim_contradicted");
+
+        let passing = [
+            act("tool", "edit", "src/x.ts"),
+            act("tool", "execute", "npm test"),
+            act("tool_result", "execute", "npm test · exit 0"),
+        ];
+        let f = facts_from_activity(&passing, "All tests pass.");
+        assert_eq!((f.commands, f.checks.passed), (1, 1));
+        let (st, _) = verification_rules::verdict(&f, &verification_rules::claims(&f.summary));
+        assert_eq!(st.as_str(), "verified");
+
+        // A file removed or moved after the passing run makes it stale.
+        for label in ["delete", "move"] {
+            let stale = [
+                act("tool_result", "execute", "npm test · exit 0"),
+                act("tool", label, "src/x.ts"),
+            ];
+            let f = facts_from_activity(&stale, "All tests pass.");
+            let (st, _) = verification_rules::verdict(&f, &verification_rules::claims(&f.summary));
+            assert_eq!(st.as_str(), "stale_check", "{label}");
+        }
     }
 
     #[test]
