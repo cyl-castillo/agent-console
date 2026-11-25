@@ -7,12 +7,13 @@ import { useToastStore } from "../stores/toastStore";
 import { useUIStore } from "../stores/uiStore";
 import { useShellStore } from "../stores/shellStore";
 import { copyText } from "../lib/clipboard";
+import { initialAgentArg } from "../lib/initialAgent";
 
 export function newSession(): void {
   const project = useSessionStore.getState().project;
   if (!project) return;
   const t = useTerminalsStore.getState();
-  t.add(project.root);
+  t.add(project.root, undefined, undefined, initialAgentArg(project.root));
   useUIStore.getState().setTab("terminal");
   useShellStore.getState().goTo("sessions");
   void t.persist();

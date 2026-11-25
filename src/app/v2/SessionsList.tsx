@@ -23,7 +23,8 @@ import { confirmDialog } from "../../stores/confirmStore";
 import { useLiveStatusStore } from "../../stores/liveStatusStore";
 import { useHandoffStore } from "../../stores/handoffStore";
 import { useModelStore } from "../../stores/modelStore";
-import { DEFAULT_AGENT } from "../../agents/profiles";
+import { pickInitialAgent } from "../../lib/initialAgent";
+import { usePreflightStore } from "../../stores/preflightStore";
 import { useProofStore } from "../../stores/proofStore";
 import { useSessionStore } from "../../stores/sessionStore";
 import { useShellStore } from "../../stores/shellStore";
@@ -314,6 +315,7 @@ export function SessionsList() {
   const requestHandoff = useHandoffStore((s) => s.request);
   const defaultAgentFor = useModelStore((s) => s.defaultAgentFor);
   const defaultFor = useModelStore((s) => s.defaultFor);
+  const preflight = usePreflightStore((s) => s.result);
   const choosing = useShellStore((s) => s.chooserOpen);
   const setChoosing = useShellStore((s) => s.setChooserOpen);
   const rename = useTerminalsStore((s) => s.rename);
@@ -509,7 +511,7 @@ export function SessionsList() {
             // One path, one key: Enter starts with what you used last.
             if (e.key === "Enter" && e.target === e.currentTarget) {
               e.preventDefault();
-              const agent = defaultAgentFor(project.root) ?? DEFAULT_AGENT;
+              const agent = pickInitialAgent(defaultAgentFor(project.root), preflight);
               void createSession(agent, defaultFor(project.root, agent)).then(
                 (ok) => ok && setChoosing(false),
               );
@@ -519,7 +521,7 @@ export function SessionsList() {
         >
           <AgentModelChooser
             projectRoot={project.root}
-            lastAgent={defaultAgentFor(project.root) ?? DEFAULT_AGENT}
+            lastAgent={pickInitialAgent(defaultAgentFor(project.root), preflight)}
             onPick={(agent, model, wt, folder) => {
               void createSession(agent, model, wt, folder).then((ok) => ok && setChoosing(false));
             }}

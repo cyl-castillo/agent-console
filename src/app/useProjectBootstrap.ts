@@ -15,6 +15,9 @@ import { useToastStore } from "../stores/toastStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
 import { maybeWorklogNudge } from "../lib/worklogNudge";
 import { sessionCheckout } from "../lib/sessionCheckout";
+import { initialAgentArg } from "../lib/initialAgent";
+import { useModelStore } from "../stores/modelStore";
+import { preflightSettled } from "../stores/preflightStore";
 
 export interface ProjectBootstrap {
   workspace: WorkspaceContext | null;
@@ -118,7 +121,14 @@ export function useProjectBootstrap(project: Project | null): ProjectBootstrap {
       // would let the next persist overwrite history we simply couldn't read.
       const st = useTerminalsStore.getState();
       if (st.ready && st.sessions.length === 0) {
-        addTerminal(project.root);
+        // Nobody chose this session's engine. It is the one last used here,
+        // else one the setup check found installed: wait for that check when
+        // it is still running (a project opened right at launch).
+        if (!useModelStore.getState().defaultAgentFor(project.root)) await preflightSettled();
+        const now = useTerminalsStore.getState();
+        if (now.projectRoot === project.root && now.sessions.length === 0) {
+          addTerminal(project.root, undefined, undefined, initialAgentArg(project.root));
+        }
       }
       // Clean up managed worktree checkouts no session references any more
       // (branches are kept). Only when hydrate succeeded — a failed load must
