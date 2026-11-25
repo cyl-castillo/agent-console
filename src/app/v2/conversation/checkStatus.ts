@@ -72,12 +72,32 @@ export function verificationTone(status: string): "ok" | "danger" | "warn" | "ne
   }
 }
 
-export function checkTitle(status: string): string | undefined {
+/** What the line says after the command about its exit code. An `unknown`
+ *  check that kept a code says whose it is: "exit unknown" beside a recorded
+ *  exit 0 would be false. */
+export function checkNote(c: { status: string; exitCode?: number; exitCodeOf?: string }): string {
+  switch (c.status) {
+    case "failed":
+      return c.exitCode !== undefined ? ` exit ${c.exitCode}` : "";
+    case "empty":
+      return " · ran 0 tests";
+    case "unknown":
+      return c.exitCodeOf === "line" && c.exitCode !== undefined
+        ? ` · exit ${c.exitCode} is the line's, not the runner's`
+        : " · exit unknown";
+    default:
+      return "";
+  }
+}
+
+export function checkTitle(status: string, exitCodeOf?: string): string | undefined {
   switch (status) {
     case "empty":
       return "Exit 0, but the runner ran zero tests — this proves nothing";
     case "unknown":
-      return "The console did not see the runner's own exit code: none was reported, or the line ended with another command's (| tail, || true) — not counted as passed";
+      return exitCodeOf === "line"
+        ? "The exit code is the line's, and the line ended with another command (| tail, || true) or was cut before its end — not counted as passed or failed"
+        : "The console did not see the runner's own exit code: no exit code was reported, or the line ended with another command's (| tail, || true) — not counted as passed";
     case "interrupted":
       return "Interrupted before it finished";
     default:

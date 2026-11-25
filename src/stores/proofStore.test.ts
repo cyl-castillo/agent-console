@@ -349,6 +349,18 @@ describe("buildTimeline", () => {
         turnId: "T1",
         payload: { command: "cargo test", status: "passed" },
       }),
+      ev({
+        seq: 45,
+        ts: 12,
+        kind: "check_run",
+        turnId: "T1",
+        payload: {
+          command: "cargo test | tail -20",
+          status: "unknown",
+          exitCode: 0,
+          exitCodeOf: "line",
+        },
+      }),
       ev({ seq: 5, ts: 13, kind: "turn_end", turnId: "T1", payload: {} }),
       ev({
         seq: 6,
@@ -363,6 +375,7 @@ describe("buildTimeline", () => {
     expect(turns[0].checks).toEqual([
       { command: "cargo test", status: "failed", exitCode: 101, durationMs: 4200 },
       { command: "cargo test", status: "passed", exitCode: undefined, durationMs: undefined },
+      { command: "cargo test | tail -20", status: "unknown", exitCode: 0, exitCodeOf: "line" },
     ]);
     expect(turns[0].commits).toEqual([
       { sha: "deadbeef1234", subject: "Fix it", files: 2, amend: false },

@@ -372,7 +372,9 @@ pub fn verdict(facts: &TurnFacts, claims: &[Claim]) -> (Status, String) {
     }
     let Some(good) = facts.last_good_check_seq else {
         let why = if c.unknown > 0 {
-            "the only checks seen had no visible exit code"
+            // No code reported, or the line's code was another command's
+            // (`cargo test | tail`): either way not the runner's.
+            "the only checks seen did not show the runner's own exit code"
         } else if c.interrupted > 0 {
             "the only checks seen were interrupted"
         } else {
@@ -504,6 +506,24 @@ mod tests {
         assert!(claims("Nothing to report.").is_empty());
         // "all tests pass" is not also counted as "tests pass".
         assert_eq!(claims("all tests pass").len(), 1);
+    }
+
+    #[test]
+    fn an_unverified_claim_does_not_say_there_was_no_exit_code_when_there_was_one() {
+        // `cargo test | tail` exits 0 and the line keeps that 0: the check is
+        // `unknown` because the code is `tail`'s, not because none was seen.
+        let facts = fold(&[
+            event(
+                1,
+                "check_run",
+                json!({"kind": "test", "status": "unknown", "exitCode": 0, "exitCodeOf": "line"}),
+            ),
+            event(2, "turn_end", json!({"summary": "All tests pass."})),
+        ]);
+        let (status, reason) = verdict(&facts, &claims(&facts.summary));
+        assert_eq!(status.as_str(), "unverified_claim");
+        assert!(!reason.contains("no visible exit code"), "{reason}");
+        assert!(reason.contains("the runner's own exit code"), "{reason}");
     }
 
     #[test]

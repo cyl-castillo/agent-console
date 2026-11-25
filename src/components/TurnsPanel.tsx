@@ -10,6 +10,7 @@ import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useToastStore } from "../stores/toastStore";
 import { useUIStore } from "../stores/uiStore";
+import { checkGlyph, checkNote, checkTitle } from "../app/v2/conversation/checkStatus";
 
 /// The active session, turn by turn — what the terminal shows as raw
 /// scrollback, as structure: prompt, what the console fed it, the tools it
@@ -294,14 +295,14 @@ export function TurnsPanel() {
                     <span
                       key={i}
                       className={`proof-check proof-check-${c.status}`}
-                      title={c.command}
+                      title={`${c.command}${checkTitle(c.status, c.exitCodeOf) ? ` — ${checkTitle(c.status, c.exitCodeOf)}` : ""}`}
                     >
                       {i > 0 && " · "}
-                      {c.status === "passed" ? "✓" : c.status === "failed" ? "✗" : "⏸"}{" "}
+                      {checkGlyph(c.status)}{" "}
                       <code>
                         {c.command.length > 48 ? `${c.command.slice(0, 48)}…` : c.command}
                       </code>
-                      {c.status === "failed" && c.exitCode !== undefined && ` exit ${c.exitCode}`}
+                      {checkNote(c)}
                     </span>
                   ))}
                 </p>
