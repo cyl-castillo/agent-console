@@ -176,8 +176,13 @@ pub fn facts_from_activity(activity: &[Activity], summary: &str) -> TurnFacts {
                     let kind = check_kind(cmd);
                     f.last_check_seq = Some(seq);
                     // The code is the line's: `cargo test | tail` ends with
-                    // `tail`'s, which says nothing about the tests.
-                    let exit = exit.filter(|code| exit_speaks_for_checks(cmd, *code == 0));
+                    // `tail`'s, which says nothing about the tests. Nor does
+                    // a 0 after a command the runner cut (`…`): what came
+                    // after the cut is not there to read.
+                    let cut = cmd.ends_with('…');
+                    let exit = exit.filter(|code| {
+                        exit_speaks_for_checks(cmd, *code == 0) && !(cut && *code == 0)
+                    });
                     let status = match exit {
                         Some(0) => {
                             f.checks.passed += 1;
@@ -767,6 +772,24 @@ mod tests {
         let f = facts_from_activity(&b, "All tests pass.");
         assert_eq!((f.checks.failed, f.checks.unknown), (0, 1));
         assert_eq!(f.failed_commands, 1, "the line itself still failed");
+
+        // The legacy OpenCode runner cuts the command and marks the cut: the
+        // `| tail -5` that was there is not, and exit 0 is not the tests'.
+        let d = [act(
+            "tool_result",
+            "bash",
+            "cd packages/app && npx vitest run src/a.test.ts src/b.test.ts… · exit 0",
+        )];
+        let f = facts_from_activity(&d, "All tests pass.");
+        assert_eq!((f.checks.passed, f.checks.unknown), (0, 1));
+        assert_eq!(f.last_good_check_seq, None);
+        let e = [act(
+            "tool_result",
+            "bash",
+            "cd packages/app && npx vitest run src/a.test.ts src/b.test.ts… · exit 1",
+        )];
+        let f = facts_from_activity(&e, "All tests pass.");
+        assert_eq!(f.checks.failed, 1);
 
         // With pipefail the status is the runner's again.
         let c = [act(
