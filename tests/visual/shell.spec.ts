@@ -1244,6 +1244,33 @@ test("the setup wizard steps aside for the install terminal and comes back", asy
   // Same step, same engine: nothing was finished by stepping aside.
   await expect(wizard).toContainText("Step 3 of 4");
   await expect(back).toHaveCount(0);
+
+  // The install finished: the re-check finds the engine and the wizard moves
+  // on to the login step. (Stories run with the guide already seen, so that
+  // the guide stays shut on a first run is covered by the unit test.)
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __fixtures: {
+        getFixture: (c: string) => unknown;
+        setFixture: (c: string, v: unknown) => void;
+      };
+    };
+    const now = w.__fixtures.getFixture("preflight_check") as {
+      tools: { name: string }[];
+      auth: unknown[];
+    };
+    w.__fixtures.setFixture("preflight_check", {
+      tools: now.tools.map((t) =>
+        t.name === "claude"
+          ? { name: "claude", found: true, version: "2.1.296", fixCommand: null, fixNote: null }
+          : t,
+      ),
+      auth: [...now.auth, { engine: "claude", loggedIn: false, detail: null }],
+    });
+  });
+  await wizard.getByRole("button", { name: /re-check/ }).click();
+  await expect(wizard).toContainText("Step 4 of 4");
+  await expect(page.getByRole("dialog")).toHaveCount(1);
 });
 
 test("the guide closes when its doctor opens an install terminal", async ({ page }) => {
