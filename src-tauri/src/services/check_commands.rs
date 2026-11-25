@@ -37,6 +37,11 @@
 /// A nesting no person types; past it the line is not read at all.
 const MAX_DEPTH: usize = 16;
 
+/// How many `((` that are not arithmetic a line may hold. Each one is read
+/// twice, as arithmetic and then as two subshells; past this many the line is
+/// not read at all, so reading it costs its length and not its length squared.
+const MAX_REREADS: usize = 64;
+
 /// Stands in a word for text only the running shell knows: an expansion
 /// (`$X`, `$(…)`, backticks) or an escape this does not decode. A word that
 /// carries it never names a runner, and is never read as a `sh -c` script:
@@ -62,6 +67,14 @@ struct Lexer {
     /// a quote or substitution left open (a shell refuses that line whole).
     /// Nothing in it is a check.
     bail: bool,
+    /// Inside an `arithmetic` attempt, which only looks for where the group
+    /// ends: a `((` in there is two parentheses and starts no attempt of its
+    /// own. Without this an attempt held attempts, each read again when the
+    /// outer one failed, and a run of `(` cost more with every one added.
+    probing: bool,
+    /// `((` groups read again as subshells. Counted across the whole line
+    /// and never rewound; past `MAX_REREADS` the line is not read.
+    rereads: usize,
 }
 
 /// A piece of a line: a simple command, or what joins it to the next one.
@@ -162,7 +175,14 @@ impl Lexer {
             heredocs: Vec::new(),
             depth: 0,
             bail: false,
+            probing: false,
+            rereads: 0,
         }
+    }
+
+    /// The line was read to its end and can be trusted.
+    fn read(&self) -> bool {
+        !self.bail && self.rereads <= MAX_REREADS
     }
 
     fn peek(&self, ahead: usize) -> Option<char> {
@@ -261,9 +281,14 @@ impl Lexer {
     /// rather than commands. `false`, with nothing consumed, when the group
     /// does not end in `))`: then it is a subshell in a subshell.
     fn arithmetic(&mut self) -> bool {
+        if self.probing || self.rereads > MAX_REREADS {
+            return false;
+        }
         let (start, heredocs, bail) = (self.i, self.heredocs.len(), self.bail);
         self.i += 2;
+        self.probing = true;
         self.skip_nested();
+        self.probing = false;
         // `1 << 2` in there is a shift, not a heredoc.
         self.heredocs.truncate(heredocs);
         if !self.bail && self.peek(0) == Some(')') {
@@ -272,6 +297,7 @@ impl Lexer {
         }
         self.i = start;
         self.bail = bail;
+        self.rereads += 1;
         false
     }
 
@@ -593,7 +619,7 @@ fn without_case_patterns(toks: Vec<Tok>) -> Vec<Tok> {
 fn tokens(cmd: &str) -> Option<Vec<Tok>> {
     let mut lx = Lexer::new(cmd);
     let out = lx.statements(false);
-    (!lx.bail).then(|| without_case_patterns(out))
+    lx.read().then(|| without_case_patterns(out))
 }
 
 fn simple_commands(cmd: &str) -> Vec<Vec<String>> {
@@ -1855,6 +1881,61 @@ mod tests {
             let _ = exit_speaks_for_checks(c, false);
         }
         assert!(exit_speaks_for_checks("( ( cd app && npm test ) )", true));
+    }
+
+    #[test]
+    fn a_run_of_open_parens_is_read_once_not_once_per_nesting() {
+        // `((` is tried as arithmetic and read again as two subshells when
+        // it is not. Tried again inside every attempt, that multiplied: 40
+        // parentheses took half a minute, with the ledger waiting on it.
+        let lines = vec![
+            // valid shell: subshells in subshells, closed one by one
+            format!("{}true{}", "(".repeat(60), " )".repeat(60)),
+            format!("{}cargo test{}", "(".repeat(60), " )".repeat(60)),
+            "(".repeat(60),
+            format!("echo $({}", "(".repeat(60)),
+            format!("{}true{}", "(".repeat(5000), " )".repeat(5000)),
+            "(".repeat(100_000),
+        ];
+        let (done, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in &lines {
+                let _ = is_check_command(line);
+                let _ = check_kind(line);
+                let _ = exit_speaks_for_checks(line, true);
+                let _ = exit_speaks_for_checks(line, false);
+            }
+            let _ = done.send(());
+        });
+        assert!(
+            wait.recv_timeout(std::time::Duration::from_secs(20))
+                .is_ok(),
+            "a run of `(` is still being read when it should be done"
+        );
+
+        // What a person types still reads the same.
+        for c in [
+            "((cargo test) )",
+            "(((cargo test) ) )",
+            "((cargo test); (echo done))",
+            "((cd app && npm test) | (cat))",
+            "(( n = (1 + 2) * 3 )); cargo test",
+            "echo $(( (1 + 2) * 3 )) && cargo test",
+        ] {
+            assert!(is_check_command(c), "{c}");
+        }
+        for c in [
+            "(( pytest + 1 ))",
+            "(( (pytest) + ((1)) ))",
+            "(( a = ((pytest)) ))",
+            "echo $(( ((pytest)) ))",
+        ] {
+            assert!(!is_check_command(c), "{c}");
+        }
+        // Past the bound the line is not read: a miss, not a guess.
+        let many = format!("{}cargo test{}", "(".repeat(200), " )".repeat(200));
+        assert!(!is_check_command(&many));
+        assert!(!exit_speaks_for_checks(&many, true));
     }
 
     #[test]
