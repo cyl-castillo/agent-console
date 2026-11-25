@@ -14,6 +14,18 @@ use sha2::{Digest, Sha256};
 use crate::error::{AppError, AppResult};
 pub use crate::services::check_commands::{check_kind, exit_speaks_for_checks, is_check_command};
 
+/// How much of a command line the hooks let through: the bridge and the
+/// OpenCode plugin keep 500 characters, the Node fallback 500 UTF-16 units
+/// (`COMMAND_MAX` on their side; a test here reads it from their sources).
+pub const COMMAND_SEEN_MAX: usize = 500;
+
+/// A line that came in at the cap may have been cut there. What followed
+/// (`| tail -40`, `|| true`, `--no-run`) is not there to read, so an exit 0
+/// is not read as the runner's.
+fn may_be_cut(cmd: &str) -> bool {
+    cmd.encode_utf16().count() >= COMMAND_SEEN_MAX
+}
+
 /// One link in a project's Testigo chain: the durable, hash-chained record of
 /// something that happened between the human and the agent (a prompt, an
 /// approval, a snapshot, a turn boundary).
@@ -994,11 +1006,13 @@ impl TestigoService {
         // line's: when the line does not end with the runner's status
         // (`cargo test | tail`, `cargo test || true`), `passed` and `failed`
         // would be about another command, so the check is `unknown` and the
-        // line says whose code it kept (`exitCodeOf`).
+        // line says whose code it kept (`exitCodeOf`). The same for a line
+        // that may have been cut before its end: its exit 0 is the line's.
         if canonical == Some("shell") {
             if let Some(cmd) = ids.command.filter(|c| is_check_command(c)) {
                 let line_failed = ids.failed || ids.exit_code.is_some_and(|c| c != 0);
-                let speaks = exit_speaks_for_checks(cmd, !line_failed);
+                let speaks =
+                    exit_speaks_for_checks(cmd, !line_failed) && (line_failed || !may_be_cut(cmd));
                 // Whose code it is, only when there is a code to speak of.
                 let exit_code_of = ids
                     .exit_code
@@ -2894,7 +2908,28 @@ mod tests {
         // `FAILED` are the two shapes without a code: nothing reported, and
         // a failure event that carries none.
         const FAILED: Option<i64> = Some(i64::MIN);
-        let cases: [(&str, Option<i64>, &str, &str); 11] = [
+        // A line that arrives at the bridge's cap may have lost its end: the
+        // `| tail -40` here falls past character 500.
+        let crates: String = (0..28)
+            .map(|i| format!(" -p crate_number_{i:02}"))
+            .collect();
+        let cut_piped: String = format!("cd app && cargo test{crates} 2>&1 | tail -40")
+            .chars()
+            .take(COMMAND_SEEN_MAX)
+            .collect();
+        assert!(!cut_piped.contains("tail"));
+        let cut_and: String = format!("cargo test{crates} && git push origin main")
+            .chars()
+            .take(COMMAND_SEEN_MAX)
+            .collect();
+        // One character short of the cap: all of it was seen.
+        let whole = format!("cargo test --{}", "x".repeat(COMMAND_SEEN_MAX - 14));
+        assert_eq!(whole.chars().count(), COMMAND_SEEN_MAX - 1);
+        let cases: [(&str, Option<i64>, &str, &str); 14] = [
+            (&cut_piped, Some(0), "unknown", "line"),
+            // a non-zero status stays a failed check, as for any line
+            (&cut_and, Some(1), "failed", "runner"),
+            (&whole, Some(0), "passed", "runner"),
             // exit 0 that is `tail`'s, `true`'s, `echo`'s
             ("cargo test 2>&1 | tail -20", Some(0), "unknown", "line"),
             ("cargo test || true", Some(0), "unknown", "line"),
@@ -2980,6 +3015,27 @@ mod tests {
         }
         assert!(svc.verify(a).unwrap().ok);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn the_cap_a_line_is_judged_by_is_the_one_the_hooks_cut_at() {
+        // The sidecar and the plugins are not this crate: read their caps.
+        let bridge = include_str!("../../hook-bridge/src/main.rs");
+        assert!(bridge.contains(&format!("const COMMAND_MAX: usize = {COMMAND_SEEN_MAX};")));
+        let plugin = include_str!("../../resources/opencode-plugin.js");
+        assert!(plugin.contains(&format!("const COMMAND_MAX = {COMMAND_SEEN_MAX};")));
+        for node in [
+            include_str!("../../resources/posttooluse-hook.cjs"),
+            include_str!("../../resources/posttoolusefailure-hook.cjs"),
+        ] {
+            assert!(node.contains(&format!(
+                "cmd.length > {COMMAND_SEEN_MAX} ? cmd.slice(0, {COMMAND_SEEN_MAX})"
+            )));
+        }
+        assert!(!may_be_cut(&"x".repeat(COMMAND_SEEN_MAX - 1)));
+        assert!(may_be_cut(&"x".repeat(COMMAND_SEEN_MAX)));
+        // 250 astral characters are 500 UTF-16 units: the Node hooks' cap.
+        assert!(may_be_cut(&"\u{1F600}".repeat(COMMAND_SEEN_MAX / 2)));
     }
 
     #[test]
