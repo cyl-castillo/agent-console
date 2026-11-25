@@ -168,7 +168,7 @@ export function VerificationDecision({ turn }: { turn: TimelineTurn }) {
             {v.claims.length > 0 ? `“${v.claims[0]}”` : "a green claim"}
           </span>
         }
-        context={`${session?.name ?? turn.termId ?? "session"} · turn ${turnId.slice(0, 8)} · ${v.checks.passed} passed · ${v.checks.failed} failed · ${v.checks.empty} ran nothing${notRun.length ? ` · not run: ${notRun.map(([k]) => k).join(", ")}` : ""} · computed from witnessed lines`}
+        context={`${session?.name ?? turn.termId ?? "session"} · turn ${turnId.slice(0, 8)} · ${v.checks.passed} passed · ${v.checks.failed} failed · ${v.checks.empty} ran nothing${v.checks.unknown ? ` · ${v.checks.unknown} without the runner's exit code` : ""}${v.checks.interrupted ? ` · ${v.checks.interrupted} interrupted` : ""}${notRun.length ? ` · not run: ${notRun.map(([k]) => k).join(", ")}` : ""} · computed from witnessed lines`}
         preview={
           <div className="flex flex-col gap-1.5 px-2 py-1.5 font-sans text-small text-foreground">
             <p className="m-0">{v.reason}</p>

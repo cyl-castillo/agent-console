@@ -7,6 +7,7 @@ import type { TimelineTurn } from "../stores/proofStore";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import type { TestigoPreviewEntry } from "../types/domain";
+import { checkGlyph, checkNote, checkTitle } from "../app/v2/conversation/checkStatus";
 import { Modal } from "./Modal";
 
 /// Public TSA used when the trusted-timestamp toggle is switched on. One
@@ -469,16 +470,14 @@ export function ProofPanel() {
                         <span
                           key={i}
                           className={`proof-check proof-check-${c.status}`}
-                          title={`${c.command}${c.exitCode !== undefined ? ` — exit ${c.exitCode}` : ""}${c.durationMs !== undefined ? ` — ${Math.round(c.durationMs / 1000)}s` : ""}`}
+                          title={`${c.command}${c.exitCode !== undefined ? ` — exit ${c.exitCode}` : ""}${c.durationMs !== undefined ? ` — ${Math.round(c.durationMs / 1000)}s` : ""}${checkTitle(c.status, c.exitCodeOf) ? ` — ${checkTitle(c.status, c.exitCodeOf)}` : ""}`}
                         >
                           {i > 0 && " · "}
-                          {c.status === "passed" ? "✓" : c.status === "failed" ? "✗" : "⏸"}{" "}
+                          {checkGlyph(c.status)}{" "}
                           <code>
                             {c.command.length > 48 ? `${c.command.slice(0, 48)}…` : c.command}
                           </code>
-                          {c.status === "failed" &&
-                            c.exitCode !== undefined &&
-                            ` exit ${c.exitCode}`}
+                          {checkNote(c)}
                         </span>
                       ))}
                     </p>

@@ -157,6 +157,9 @@ export interface TimelineCheck {
   /** test · lint · typecheck · build · format (what the runner checks). */
   kind?: string;
   exitCode?: number;
+  /** Whose exit code that is: the runner's, or the line's (it ended with another command's, or
+   *  was cut). Absent when no code was seen and on ledgers older than the field. */
+  exitCodeOf?: "runner" | "line";
   durationMs?: number;
 }
 
@@ -339,6 +342,7 @@ export function buildTimeline(events: ProofEvent[]): TimelineTurn[] {
         status: typeof p.status === "string" ? p.status : "unknown",
         kind: typeof p.kind === "string" ? p.kind : undefined,
         exitCode: typeof p.exitCode === "number" ? p.exitCode : undefined,
+        exitCodeOf: p.exitCodeOf === "runner" || p.exitCodeOf === "line" ? p.exitCodeOf : undefined,
         durationMs: typeof p.durationMs === "number" ? p.durationMs : undefined,
       });
     } else if (e.kind === "commit") {

@@ -10,6 +10,7 @@ import { fmtUsd } from "../../../lib/usageStats";
 import { useProofStore, type TimelineTurn } from "../../../stores/proofStore";
 import {
   checkGlyph,
+  checkNote,
   checkTitle,
   checkTone,
   verificationGlyph,
@@ -264,11 +265,14 @@ export function TurnDetail() {
         <Section title="Checks">
           <div className="flex flex-wrap gap-1">
             {turn.checks.map((c, i) => (
-              <Chip key={i} mono tone={checkTone(c.status)} title={checkTitle(c.status)}>
+              <Chip
+                key={i}
+                mono
+                tone={checkTone(c.status)}
+                title={checkTitle(c.status, c.exitCodeOf)}
+              >
                 {c.kind ?? "check"} {checkGlyph(c.status)} {c.command}
-                {c.status === "failed" && c.exitCode !== undefined ? ` exit ${c.exitCode}` : ""}
-                {c.status === "empty" ? " · ran 0 tests" : ""}
-                {c.status === "unknown" ? " · exit unknown" : ""}
+                {checkNote(c)}
               </Chip>
             ))}
           </div>

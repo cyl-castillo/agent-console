@@ -74,6 +74,34 @@ describe("verification inbox (F1d)", () => {
     expect(evidencePrompt(unknown)).toContain("project's test suite");
   });
 
+  it("asks again for the check whose exit code was not the runner's, run on its own", () => {
+    // `npm test | tail` ran: the test gate is `unknown`, not `not_run`, and
+    // the build gate nobody ran must not be asked for in its place.
+    const t = {
+      ...base(1),
+      verification: verification("unverified_claim", {
+        checks: { passed: 0, failed: 0, empty: 0, unknown: 1, interrupted: 0 },
+        gates: { build: "not_run", lint: "not_run", test: "unknown" },
+        gateCommands: { build: "npm run build", lint: "npm run lint", test: "npm test" },
+      }),
+    };
+    expect(evidencePrompt(t)).toContain("Run `npm test` now");
+    expect(evidencePrompt(t)).toContain("not piped");
+    // A lint gate left unknown is asked for before a build nobody ran.
+    const lint = {
+      ...base(2),
+      verification: verification("unverified_claim", {
+        gates: { build: "not_run", lint: "unknown" },
+        gateCommands: { build: "npm run build", lint: "npm run lint" },
+      }),
+    };
+    expect(evidencePrompt(lint)).toContain("Run `npm run lint` now");
+    // No gate known: the generic ask says it too.
+    expect(evidencePrompt({ ...base(3), verification: verification("stale_check") })).toContain(
+      "not piped",
+    );
+  });
+
   it("counts the week's habit: claims backed by a passing check after the last edit", () => {
     const now = 100 * 86_400_000;
     const turns: TimelineTurn[] = [
