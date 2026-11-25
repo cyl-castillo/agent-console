@@ -334,10 +334,12 @@ account. Today the thing that keeps an agent away from those files is Claude
 Code's sandbox (Settings → Trust → Permissions), which is optional. Treat the
 ledger as a witness, not as a firewall; closing that gap is in progress.
 
-The ledger witnesses sessions. Turns the console runs headless are not
-written to it tool by tool: a fan-out records its result and your decision, a
+The ledger witnesses sessions. A room, a fan-out candidate, a scheduled job
+and a review run an agent outside one, and their tool calls are not written to
+the ledger one by one: a fan-out records its result and your decision, a
 scheduled job its run, a review its verdict, and a room records nothing. An
-edit or an MCP call an agent makes in a room leaves no ledger line.
+edit or an MCP call an agent makes in a room leaves no ledger line. The
+built-in assistant is different: each console action it takes is recorded.
 
 ## Architecture
 
