@@ -17,6 +17,14 @@
 //! word, after assignments and a short list of prefixes that run what follows
 //! (`env`, `timeout 600`, `uv run`, `npx`, `sh -c '…'`).
 //!
+//! Where the shell reads a line one way and a naive split another, the shell's
+//! reading is followed: `${X:-; cargo test }` is one word, the `<<` of `$((1
+//! << 4))` is a shift, a heredoc ends at the line that is exactly its
+//! delimiter (`<<'E O F'`, `<<''`), `\$'` is no `$'…'`, and a line with a
+//! group left open is refused whole. A command word the shell rewrites first
+//! (`{exit,0}`, `e[x]it`) may be any command, so the line's status is not
+//! followed past it.
+//!
 //! Conservative in one direction only: a miss records nothing, and a claim
 //! without a `check_run` reads `unverified_claim`. Whatever the shell would
 //! not plainly execute as a statement (text inside `$(…)`, an unknown
@@ -118,12 +126,16 @@ struct Pending {
     quoted: bool,
     /// The last word was written bare: `]]`, not `"]]"` or `\]\]`.
     bare: bool,
+    /// The word ends with a `$` written bare, the one that makes a following
+    /// quote `$'…'`. Not the `$` of `\$` or `"$"`.
+    dollar: bool,
 }
 
 impl Pending {
     fn push(&mut self, c: char) {
         self.word.push(c);
         self.in_word = true;
+        self.dollar = false;
     }
 
     fn end_word(&mut self) {
@@ -132,6 +144,7 @@ impl Pending {
         }
         let w = std::mem::take(&mut self.word);
         self.in_word = false;
+        self.dollar = false;
         self.bare = !std::mem::take(&mut self.quoted);
         if self.skip_word {
             self.skip_word = false;
@@ -232,8 +245,17 @@ impl Lexer {
                     _ => p.push('\\'),
                 },
                 '$' if self.peek(0) == Some('(') => {
+                    self.substitution();
+                    p.push(UNKNOWN);
+                }
+                '$' if self.peek(0) == Some('{') => {
                     self.i += 1;
-                    self.skip_nested();
+                    self.braced(true);
+                    p.push(UNKNOWN);
+                }
+                '$' if self.peek(0) == Some('[') => {
+                    self.i += 1;
+                    self.bracketed();
                     p.push(UNKNOWN);
                 }
                 '$' if starts_expansion(self.peek(0)) => {
@@ -245,6 +267,84 @@ impl Lexer {
                     p.push(UNKNOWN);
                 }
                 _ => p.push(c),
+            }
+        }
+        self.bail = true;
+    }
+
+    /// `$(…)` with `self.i` at its `(`: past the closing `)`. `$(( 1 << 2 ))`
+    /// is arithmetic, where `<<` is a shift and opens no heredoc.
+    fn substitution(&mut self) {
+        if self.peek(1) == Some('(') {
+            if self.arithmetic() {
+                return;
+            }
+            if self.probing {
+                // No attempt inside an attempt: skip it as a group, and drop
+                // what a `<<` in it would have registered.
+                let heredocs = self.heredocs.len();
+                self.i += 1;
+                self.skip_nested();
+                self.heredocs.truncate(heredocs);
+                return;
+            }
+        }
+        self.i += 1;
+        self.skip_nested();
+    }
+
+    /// `${…}` with `self.i` just past the `{`: past the `}` that closes it.
+    /// To the shell all of it is one word: `${X:-; cargo test }` holds no
+    /// statement and `${X:+ #}` starts no comment. Quotes and substitutions
+    /// inside are skipped whole, so a `}` in them does not close it early.
+    fn braced(&mut self, in_double_quotes: bool) {
+        if self.depth >= MAX_DEPTH {
+            self.bail = true;
+            self.i = self.chars.len();
+            return;
+        }
+        self.depth += 1;
+        let mut closed = false;
+        while let Some(c) = self.peek(0) {
+            self.i += 1;
+            match c {
+                '}' => {
+                    closed = true;
+                    break;
+                }
+                '\\' => self.i += 1,
+                '\'' if !in_double_quotes => self.single_quoted(&mut Pending::default(), false),
+                '"' => self.double_quoted(&mut Pending::default()),
+                '`' => self.backticks(),
+                '$' if self.peek(0) == Some('(') => self.substitution(),
+                '$' if self.peek(0) == Some('{') => {
+                    self.i += 1;
+                    self.braced(in_double_quotes);
+                }
+                _ => {}
+            }
+        }
+        self.depth -= 1;
+        if !closed {
+            self.bail = true;
+        }
+    }
+
+    /// `$[…]`, the old spelling of `$((…))`, with `self.i` just past the
+    /// `[`: past the `]` that closes it.
+    fn bracketed(&mut self) {
+        let mut open = 1usize;
+        while let Some(c) = self.peek(0) {
+            self.i += 1;
+            match c {
+                '[' => open += 1,
+                ']' => {
+                    open -= 1;
+                    if open == 0 {
+                        return;
+                    }
+                }
+                _ => {}
             }
         }
         self.bail = true;
@@ -311,17 +411,75 @@ impl Lexer {
         while matches!(self.peek(0), Some(' ' | '\t')) {
             self.i += 1;
         }
+        // The delimiter is a word: quotes in it are removed and what they
+        // hold belongs to it, spaces included (`<<'E O F'`). A carriage
+        // return is part of it too, as it is to the shell: a line of the body
+        // ends the heredoc only when it is exactly this word.
         let mut delim = String::new();
+        let mut quoted = false;
         while let Some(c) = self.peek(0) {
-            if c.is_whitespace() || matches!(c, ';' | '&' | '|' | '(' | ')' | '<' | '>') {
-                break;
-            }
-            self.i += 1;
-            if !matches!(c, '\'' | '"' | '\\') {
-                delim.push(c);
+            match c {
+                ' ' | '\t' | '\n' | ';' | '&' | '|' | '(' | ')' | '<' | '>' => break,
+                '\'' => {
+                    quoted = true;
+                    self.i += 1;
+                    loop {
+                        match self.peek(0) {
+                            Some('\'') => {
+                                self.i += 1;
+                                break;
+                            }
+                            Some(q) => {
+                                delim.push(q);
+                                self.i += 1;
+                            }
+                            None => {
+                                self.bail = true;
+                                return;
+                            }
+                        }
+                    }
+                }
+                '"' => {
+                    quoted = true;
+                    self.i += 1;
+                    loop {
+                        match (self.peek(0), self.peek(1)) {
+                            (Some('"'), _) => {
+                                self.i += 1;
+                                break;
+                            }
+                            (Some('\\'), Some(n @ ('"' | '\\' | '$' | '`'))) => {
+                                delim.push(n);
+                                self.i += 2;
+                            }
+                            (Some(q), _) => {
+                                delim.push(q);
+                                self.i += 1;
+                            }
+                            (None, _) => {
+                                self.bail = true;
+                                return;
+                            }
+                        }
+                    }
+                }
+                '\\' => {
+                    quoted = true;
+                    self.i += 1;
+                    if let Some(n) = self.peek(0) {
+                        delim.push(n);
+                        self.i += 1;
+                    }
+                }
+                _ => {
+                    delim.push(c);
+                    self.i += 1;
+                }
             }
         }
-        if !delim.is_empty() {
+        // `<<''` is a heredoc that ends at the first empty line.
+        if !delim.is_empty() || quoted {
             self.heredocs.push((delim, strip_tabs));
         }
     }
@@ -339,11 +497,10 @@ impl Lexer {
                 if self.i < self.chars.len() {
                     self.i += 1; // the newline
                 }
-                let line = line.trim_end_matches('\r');
                 let line = if strip_tabs {
                     line.trim_start_matches('\t')
                 } else {
-                    line
+                    line.as_str()
                 };
                 if line == delim {
                     break;
@@ -413,7 +570,7 @@ impl Lexer {
                     (None, _) => self.i += 1,
                 },
                 '\'' => {
-                    let ansi = p.in_word && p.word.ends_with('$');
+                    let ansi = p.in_word && p.dollar;
                     if ansi {
                         p.word.pop();
                     }
@@ -432,8 +589,18 @@ impl Lexer {
                     p.push(UNKNOWN);
                 }
                 '$' if self.peek(1) == Some('(') => {
+                    self.i += 1;
+                    self.substitution();
+                    p.push(UNKNOWN);
+                }
+                '$' if self.peek(1) == Some('{') => {
                     self.i += 2;
-                    self.skip_nested();
+                    self.braced(false);
+                    p.push(UNKNOWN);
+                }
+                '$' if self.peek(1) == Some('[') => {
+                    self.i += 2;
+                    self.bracketed();
                     p.push(UNKNOWN);
                 }
                 '$' if starts_expansion(self.peek(1)) => {
@@ -533,11 +700,13 @@ impl Lexer {
                 _ => {
                     self.i += 1;
                     p.push(c);
+                    p.dollar = c == '$';
                 }
             }
         }
-        if nested {
-            // the group the caller opened never closed
+        if nested || parens > 0 {
+            // a group never closed: the caller's, or one of the line's own,
+            // which a shell refuses whole
             self.bail = true;
         }
         p.end_statement();
@@ -666,13 +835,17 @@ const RESERVED: &[&str] = &[
 ///   take the next word as its value (`npx -p eslint echo ok` runs `echo`,
 ///   `env -u tsc true` runs `true`), so the line is not read: a miss.
 ///
-/// Only flags known to take no value are listed, plus `--name=value`, which
-/// carries its own. Not `command`: its everyday form is `command -v pytest`,
-/// which looks a runner up and runs nothing.
+/// Only flags known to take no value are listed, plus the `--name=value`
+/// ones whose value is not what gets run: `env --split-string=true cargo
+/// test` runs `true`, and `npx --call=…` its own script. Not `command`: its
+/// everyday form is `command -v pytest`, which looks a runner up and runs
+/// nothing.
 fn prefix_end(words: &[String], i: usize) -> Option<Option<usize>> {
     let name = basename(&words[i]);
     let next = words.get(i + 1).map(String::as_str);
-    let (mut j, flags): (usize, &[&str]) = match (name, next) {
+    // (where its own words start, flags that take no value, `--name=` flags
+    // whose value is not a command)
+    let (mut j, flags, valued): (usize, &[&str], &[&str]) = match (name, next) {
         ("uv", Some("run")) => (
             i + 2,
             &[
@@ -687,31 +860,57 @@ fn prefix_end(words: &[String], i: usize) -> Option<Option<usize>> {
                 "-q",
                 "--quiet",
             ],
+            &[
+                "--python=",
+                "--with=",
+                "--extra=",
+                "--group=",
+                "--env-file=",
+                "--project=",
+                "--directory=",
+            ],
         ),
-        ("poetry" | "pipenv" | "pdm" | "hatch" | "rye", Some("run")) => (i + 2, &[]),
-        ("bundle" | "pnpm" | "yarn", Some("exec")) => (i + 2, &[]),
-        ("npm", Some("exec")) => (i + 2, &["-y", "--yes"]),
-        ("env", _) => (i + 1, &["-i", "--ignore-environment"]),
-        ("time", _) => (i + 1, &["-p"]),
-        ("nice" | "nohup" | "stdbuf", _) => (i + 1, &[]),
-        ("sudo", _) => (i + 1, &["-E", "-H", "-n"]),
+        ("poetry" | "pipenv" | "pdm" | "hatch" | "rye", Some("run")) => (i + 2, &[], &[]),
+        ("bundle" | "pnpm" | "yarn", Some("exec")) => (i + 2, &[], &[]),
+        ("npm", Some("exec")) => (i + 2, &["-y", "--yes"], &["--package="]),
+        ("env", _) => (
+            i + 1,
+            &["-i", "--ignore-environment"],
+            &["--unset=", "--chdir="],
+        ),
+        ("time", _) => (i + 1, &["-p"], &[]),
+        ("nice", _) => (i + 1, &[], &["--adjustment="]),
+        ("nohup", _) => (i + 1, &[], &[]),
+        ("stdbuf", _) => (i + 1, &[], &["--input=", "--output=", "--error="]),
+        ("sudo", _) => (i + 1, &["-E", "-H", "-n"], &["--user=", "--group="]),
         ("timeout", _) => (
             i + 1,
             &["--preserve-status", "--foreground", "-v", "--verbose"],
+            &["--signal=", "--kill-after="],
         ),
-        ("xvfb-run", _) => (i + 1, &["-a", "--auto-servernum"]),
+        ("xvfb-run", _) => (
+            i + 1,
+            &["-a", "--auto-servernum"],
+            &[
+                "--server-args=",
+                "--server-num=",
+                "--error-file=",
+                "--auth-file=",
+            ],
+        ),
         ("npx", _) => (
             i + 1,
             &["-y", "--yes", "--no", "--no-install", "-q", "--quiet"],
+            &["--package="],
         ),
-        ("bunx", _) => (i + 1, &["--bun"]),
+        ("bunx", _) => (i + 1, &["--bun"], &[]),
         _ => return None,
     };
     while let Some(w) = words.get(j).map(String::as_str) {
         let after = words.get(j + 1).map(String::as_str);
         // A word of the prefix's own that carries no separate value.
         let own = flags.contains(&w)
-            || (w.starts_with("--") && w.contains('='))
+            || valued.iter().any(|v| w.starts_with(v))
             || (name == "env" && is_assignment(w))
             || (name == "stdbuf"
                 && w.len() > 2
@@ -760,6 +959,9 @@ fn shell_script<'a>(args: &[&'a str]) -> Option<&'a str> {
     while let Some(a) = args.get(i).copied() {
         if a == "-o" || a == "+o" {
             i += 2;
+        } else if a.starts_with('-') && !a.starts_with("--") && a.contains('n') {
+            // `bash -n -c '…'` reads the script and runs none of it.
+            return None;
         } else if a.starts_with('-') && !a.starts_with("--") && a.ends_with('c') {
             return args
                 .get(i + 1)
@@ -869,14 +1071,15 @@ fn runs_nothing(name: &str, args: &[&str]) -> bool {
                 matches!(pair[0], "-x" | "--exclude-task")
                     && (pair[1].ends_with("test") || pair[1].ends_with("check"))
             });
-            left_out || own.into_iter().any(|a| *a == "-m")
+            left_out || own.into_iter().any(|a| matches!(*a, "-m" | "-v"))
         }
         // `-DskipTests` skips; `-DskipTests=false` turns them back on.
         "mvn" | "mvnw" => own.into_iter().any(|a| {
-            ["-DskipTests", "-Dmaven.test.skip"].iter().any(|skip| {
-                a.strip_prefix(skip)
-                    .is_some_and(|v| v.is_empty() || (v.starts_with('=') && v != "=false"))
-            })
+            *a == "-v"
+                || ["-DskipTests", "-Dmaven.test.skip"].iter().any(|skip| {
+                    a.strip_prefix(skip)
+                        .is_some_and(|v| v.is_empty() || (v.starts_with('=') && v != "=false"))
+                })
         }),
         "dotnet" => own.into_iter().any(|a| *a == "-t"),
         "tox" => {
@@ -884,14 +1087,18 @@ fn runs_nothing(name: &str, args: &[&str]) -> bool {
                 || own.into_iter().any(|a| matches!(*a, "-l" | "-a"))
         }
         "nox" => own.into_iter().any(|a| *a == "-l"),
-        "pytest" => own.into_iter().any(|a| *a == "-V"),
-        "vitest" => matches!(arg(0), "list" | "init"),
+        "pytest" | "mocha" => own.into_iter().any(|a| *a == "-V"),
+        "vitest" => matches!(arg(0), "list" | "init") || own.into_iter().any(|a| *a == "-v"),
+        // `-v` prints the version; `tsc --all` lists the compiler options.
+        "tsc" => own.into_iter().any(|a| matches!(*a, "-v" | "--all")),
+        "eslint" | "prettier" | "jest" | "rspec" => own.into_iter().any(|a| *a == "-v"),
         "swift" => arg(1) == "list",
         _ => false,
     }
 }
 
-/// `make -n`, `-q` and `-t` run no recipe, alone or in a cluster (`-kn`).
+/// `make -n`, `-q` and `-t` run no recipe, and `-v` prints the version,
+/// alone or in a cluster (`-kn`).
 /// The letters after an option that carries a value are that value:
 /// `-Iinclude` and `-Otarget` run the recipe.
 fn make_runs_nothing(arg: &str) -> bool {
@@ -901,7 +1108,7 @@ fn make_runs_nothing(arg: &str) -> bool {
     letters
         .chars()
         .take_while(|c| !"CEfIjloOW".contains(*c))
-        .any(|c| matches!(c, 'n' | 'q' | 't'))
+        .any(|c| matches!(c, 'n' | 'q' | 't' | 'v'))
 }
 
 /// The kind of check one simple command runs, if it runs one.
@@ -1013,14 +1220,45 @@ const CHECK: Reads = Reads {
 const NOT_FOLLOWED: &[&str] = &[
     "if", "then", "elif", "else", "fi", "while", "until", "do", "done", "for", "case", "esac",
     "select", "function", "{", "}", "!", "[[", "coproc", "exit", "return", "exec", "logout",
-    "trap", "eval", "setopt", "unsetopt",
+    "trap", "eval", "setopt", "unsetopt", "alias", "unalias", "hash", "enable",
 ];
+
+/// Where `.` and `source` read the script from the line itself.
+const STDIN_FILES: &[&str] = &["/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"];
+
+/// A command word the shell rewrites before it runs it: a glob (`e[x]it`) or
+/// a brace expansion (`{exit,0}`) may name any command at all. `[` alone is
+/// the test command and `{` the start of a group.
+fn expands(word: &str) -> bool {
+    let brace = word.len() > 2
+        && word
+            .find('{')
+            .is_some_and(|open| word[open..].contains('}'))
+        && (word.contains(',') || word.contains(".."));
+    let glob = word.contains(['*', '?'])
+        || (word != "["
+            && word
+                .find('[')
+                .is_some_and(|open| word[open..].contains(']')));
+    brace || glob
+}
 
 /// The word the shell itself acts on: past assignments and the words that
 /// hand the next one to a builtin (`time exit 0`, `builtin exit 0`).
 fn shell_word(words: &[String]) -> Option<(&str, &[String])> {
+    // After `command`, `builtin` or `time` come their own options (`-p`,
+    // `--`), then the word they hand on.
+    let mut handed = false;
     let i = words.iter().position(|w| {
-        !is_assignment(w) && !matches!(w.as_str(), "time" | "-p" | "command" | "builtin")
+        let skip = match w.as_str() {
+            "time" | "command" | "builtin" => {
+                handed = true;
+                true
+            }
+            w if handed => w.starts_with('-'),
+            w => is_assignment(w),
+        };
+        !skip
     })?;
     Some((words[i].as_str(), &words[i + 1..]))
 }
@@ -1087,7 +1325,12 @@ fn is_followed(toks: &[Tok]) -> bool {
         Tok::Background | Tok::Arithmetic => false,
         Tok::Cmd(words) => match shell_word(words) {
             // An expansion in the command word may name any of the above.
-            Some((w, _)) if NOT_FOLLOWED.contains(&w) || w.contains(UNKNOWN) => false,
+            Some((w, _)) if NOT_FOLLOWED.contains(&w) || w.contains(UNKNOWN) || expands(w) => false,
+            // Text the line itself feeds to the shell: `. /dev/stdin <<<
+            // 'exit 0'`, `source <(echo exit 0)`.
+            Some(("." | "source", args)) => args.first().is_some_and(|file| {
+                !STDIN_FILES.contains(&file.as_str()) && *file != UNKNOWN.to_string()
+            }),
             Some(("set", args)) => is_plain_set(args),
             Some(("shopt", args)) => !args.iter().any(|a| a.starts_with('-') && a.contains('o')),
             _ => true,
@@ -1936,6 +2179,124 @@ mod tests {
         let many = format!("{}cargo test{}", "(".repeat(200), " )".repeat(200));
         assert!(!is_check_command(&many));
         assert!(!exit_speaks_for_checks(&many, true));
+    }
+
+    /// What the ledger would say for a line that exited 0.
+    fn on_zero(c: &str) -> &'static str {
+        match (is_check_command(c), exit_speaks_for_checks(c, true)) {
+            (false, _) => "none",
+            (true, true) => "passed",
+            (true, false) => "unknown",
+        }
+    }
+
+    #[test]
+    fn a_line_bash_reads_another_way_is_not_a_passed_check() {
+        // Each of these exits 0 in bash with the runner failing or never
+        // started (run against bash 5.3 with a `cargo` that logs and exits
+        // 1). None may read `passed`.
+        for (c, want) in [
+            // `<<` in arithmetic is a shift, not a heredoc that swallows the
+            // next line
+            (
+                "N=$((1 << 4)); cargo test\necho \"done with $N\"",
+                "unknown",
+            ),
+            ("N=$[1 << 4]; cargo test\necho done", "unknown"),
+            ("cargo test \"$((1<<2))\"\necho finished", "unknown"),
+            // `${…}` is one word: what is inside is not a statement, and a
+            // `#` in it starts no comment
+            ("echo ${X:-; cargo test }", "none"),
+            (": ${X:=; cargo test }", "none"),
+            ("echo \"${X:-\"a; cargo test \"}\"", "none"),
+            ("cargo test ${X:+ #} || true", "unknown"),
+            (": ${X:- #}; exit 0\ncargo test", "unknown"),
+            // a heredoc ends at the line that IS its delimiter
+            (": <<'#E #'\n#E\ncargo test\n#E #", "none"),
+            ("cat <<''\ncargo test\n", "none"),
+            ("cat <<'#' >/dev/null\n#\r\ncargo test\n#", "none"),
+            // a command word the shell expands may be `exit` or `set -n`
+            ("{exit,0}; cargo test", "unknown"),
+            ("{set,-n}; cargo test", "unknown"),
+            ("e[x]it 0; cargo test", "unknown"),
+            ("command -- exit 0; cargo test", "unknown"),
+            ("builtin -- exit 0; cargo test", "unknown"),
+            // `\$` is a dollar sign, not the start of `$'…'`
+            ("cargo test \\$'\\' || true #'", "unknown"),
+            ("cargo test \"$\"'\\' || true #'", "unknown"),
+            // a prefix flag that replaces the command
+            ("env --split-string=true cargo test", "none"),
+            ("npx --call=true cargo test", "none"),
+            // `bash -n` reads the script and runs nothing
+            ("bash -n -c 'cargo test'", "none"),
+            ("sh -nc 'cargo test'", "none"),
+            // text the line feeds to the shell, a name it redefines
+            (". /dev/stdin <<< 'exit 0'; cargo test", "unknown"),
+            ("source /dev/stdin <<< 'exit 0'; cargo test", "unknown"),
+            ("hash -p /bin/true cargo; cargo test", "unknown"),
+            ("alias cargo=true\ncargo test", "unknown"),
+            // a version or an option list is not a run
+            ("npx tsc -v", "none"),
+            ("npx tsc --all", "none"),
+            ("npx vitest -v", "none"),
+            ("npx eslint -v", "none"),
+            ("npx prettier --check -v", "none"),
+            ("make test -v", "none"),
+            ("npx jest -v", "none"),
+            ("npx mocha -V", "none"),
+            ("rspec -v", "none"),
+            ("mvn -v test", "none"),
+            ("gradle -v test", "none"),
+        ] {
+            assert_eq!(on_zero(c), want, "{c:?}");
+        }
+        // A line the shell refuses: nothing ran, so nothing failed either.
+        for c in ["(cd app && cargo test", "( ( cargo test )"] {
+            assert!(!is_check_command(c), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn the_everyday_forms_of_those_constructs_still_read() {
+        for c in [
+            "cargo test ${CARGO_FLAGS:-}",
+            "cargo test ${CARGO_FLAGS:---workspace}",
+            "FOO=${BAR:-x} cargo test",
+            "cd \"${ROOT:-.}\" && cargo test",
+            "echo ${#ARR[@]} && cargo test",
+            "echo $((1 << 4)) && cargo test",
+            "x=$((1 << 4)); cargo test",
+            "echo $[1 << 4] && cargo test",
+            "cat <<'EOF' > notes.txt\nhello\nEOF\ncargo test",
+            "cat <<\"E O F\"\nx\nE O F\ncargo test",
+            "cat <<-EOF\n\tbody\n\tEOF\ncargo test",
+            "cat <<EOF\r\nbody\r\nEOF\r\ncargo test",
+            "env RUST_BACKTRACE=1 cargo test",
+            "env --unset=FOO cargo test",
+            "env --chdir=app cargo test",
+            "timeout --signal=KILL 600 cargo test",
+            "timeout --kill-after=5 600 cargo test",
+            "stdbuf --output=L cargo test",
+            "npx --package=typescript tsc --noEmit",
+            "uv run --python=3.12 pytest",
+            "source .venv/bin/activate && pytest",
+            ". ./env.sh && cargo test",
+            "bash -c 'cargo test'",
+            "bash -ec 'cargo test'",
+            "(cd app && cargo test)",
+            "pytest -v",
+            "cargo test -v",
+            "go test -v ./...",
+            "npx vitest run",
+            "npx tsc --noEmit",
+            "npx prettier --check .",
+            "make test",
+            "mvn test",
+            "ls src/*.rs && cargo test",
+            "echo a{b,c} && cargo test",
+        ] {
+            assert_eq!(on_zero(c), "passed", "{c:?}");
+        }
     }
 
     #[test]
