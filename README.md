@@ -6,9 +6,10 @@
 
 Agent Console is a desktop app that runs the real agent CLIs (Claude Code,
 Codex or OpenCode, per session) next to a shell and a git diff. A human
-approves each risky step, any turn can be rewound, and every prompt, approval,
-tool result and diff lands in a hash-chained ledger. The verdict on a turn
-comes from what the console witnessed, never from what the agent said it did.
+approves each risky step, any turn can be rewound, and in a session every
+prompt, approval, tool result and diff lands in a hash-chained ledger. The
+verdict on a turn comes from what the console witnessed, never from what the
+agent said it did.
 
 - **Evidence, not claims.** A turn is *verified* only when a check passed with
   exit 0 after the last edit, *claim contradicted* when "tests pass" sits over
@@ -84,7 +85,8 @@ The center of the screen is deliberately small, and it hasn't grown since v0.1:
   with its exit code, the prompt and the end of the turn reach the ledger
   the same way Claude's and Codex's do, and sessions resume by id.  Rooms
   and jobs drive OpenCode over the Agent Client Protocol (`opencode acp`),
-  so every command it runs there arrives with its exit code.
+  so every command it runs there is shown with its exit code (in the room
+  or the fan-out table, not in the ledger: see below).
 - Git diff viewer with per-file revert; per-turn working-tree snapshots with
   one-click restore.
 - **Per-tool approval modal** with keyboard flow, live countdown, and durable
@@ -173,7 +175,7 @@ A **room** is a shared conversation about one problem between you and N agents
 (Claude, Codex and/or OpenCode). You choose what the agents may do: **converse**
 (read-only), **act in the folder** (edit files and use your MCP servers — comment a
 Jira ticket, move it, update a document; changes land directly, no branch, shell
-stays off, every call in the ledger; works without a git repo) or **edit code on a
+stays off; room turns are not recorded in the ledger; works without a git repo) or **edit code on a
 branch** — the **working room**, where agents edit in an isolated git worktree on a
 `room/<id>` branch, committing one checkpoint per turn; your own files stay
 untouched until you review and merge. A folder that is a workspace of several
@@ -331,6 +333,11 @@ itself does not stop an agent that sets out to forge its own record on that
 account. Today the thing that keeps an agent away from those files is Claude
 Code's sandbox (Settings → Trust → Permissions), which is optional. Treat the
 ledger as a witness, not as a firewall; closing that gap is in progress.
+
+The ledger witnesses sessions. Turns the console runs headless are not
+written to it tool by tool: a fan-out records its result and your decision, a
+scheduled job its run, a review its verdict, and a room records nothing. An
+edit or an MCP call an agent makes in a room leaves no ledger line.
 
 ## Architecture
 

@@ -206,7 +206,7 @@ function ConfigForm() {
             {
               mode: "act",
               title: "Act in the folder",
-              hint: "Edit files here and use your MCP servers (Jira, Linear, …) — comment a ticket, move it, update a document. Changes land directly: no branch, no diff review. Shell stays off; every tool call is in the ledger. Works without a git repo.",
+              hint: "Edit files here and use your MCP servers (Jira, Linear, …) — comment a ticket, move it, update a document. Changes land directly: no branch, no diff review. Shell stays off. Room turns are not recorded in the ledger. Works without a git repo.",
             },
             {
               mode: "branch",

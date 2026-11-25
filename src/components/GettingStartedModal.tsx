@@ -101,7 +101,7 @@ export function GettingStartedModal({ onClose, onJumpToTab }: Props) {
         key: "proof",
         title: "See your work witnessed (Proof)",
         description:
-          "Every prompt, approval and result lands in a local evidence ledger. Export a signed proof packet anyone can verify in a browser — attach it to a PR.",
+          "In a session, every prompt, approval and result lands in a local evidence ledger. Export a signed proof packet anyone can verify in a browser — attach it to a PR.",
         done: onboarding.visitedProof,
         action: {
           label: "Open Proof →",

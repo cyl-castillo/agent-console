@@ -655,7 +655,7 @@
       <!-- ============ PROOF ============ -->
       <section id="proof">
         <h2>Proof (Testigo)</h2>
-        <p>Agent Console implements <a href="https://github.com/cyl-castillo/testigo" target="_blank" rel="noopener">Testigo</a>, an open intent-to-proof protocol. When witnessing is on for a project, every prompt, approval, tool result and per-turn diff is appended to a <strong>hash-chained ledger</strong> — each event sealing the one before it. Sessions seeded from a Jira ticket group their events into a case.</p>
+        <p>Agent Console implements <a href="https://github.com/cyl-castillo/testigo" target="_blank" rel="noopener">Testigo</a>, an open intent-to-proof protocol. When witnessing is on for a project, every prompt, approval, tool result and per-turn diff of a session is appended to a <strong>hash-chained ledger</strong> — each event sealing the one before it. Rooms are not witnessed; a fan-out, a scheduled job and a review each leave one record of their outcome, not one per tool call. Sessions seeded from a Jira ticket group their events into a case.</p>
         <ul>
           <li><strong>Export</strong> a case (or the whole ledger) as a signed proof packet — an in-toto/DSSE statement anyone can verify <a href="https://cyl-castillo.github.io/testigo/verifier/testigo-verifier.html" target="_blank" rel="noopener">in a browser</a>, no install.</li>
           <li><strong>Redact</strong> sensitive events before signing: content is withheld, the chain stays verifiable — selective disclosure.</li>

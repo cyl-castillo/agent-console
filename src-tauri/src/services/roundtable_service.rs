@@ -1012,7 +1012,7 @@ impl RoundtableService {
             }
             RoomMode::Act => {
                 notice = Some(
-                    "Acting in the folder: edits land directly (no branch, no diff review); the user's MCP servers are open; shell stays off. Every tool call is in the ledger."
+                    "Acting in the folder: edits land directly (no branch, no diff review); the user's MCP servers are open; shell stays off. Room turns are not recorded in the ledger."
                         .into(),
                 );
                 (repo.clone(), None, None, RoomMode::Act.policy().0)
