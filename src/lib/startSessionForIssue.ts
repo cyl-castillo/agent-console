@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT } from "../agents/profiles";
+import { initialAgentFor } from "./initialAgent";
 import { useSessionStore } from "../stores/sessionStore";
 import { useTerminalsStore } from "../stores/terminalsStore";
 import { useModelStore } from "../stores/modelStore";
@@ -35,7 +35,7 @@ export async function startSessionForIssue(
     return;
   }
   const models = useModelStore.getState();
-  const agent = models.defaultAgentFor(project.root) ?? DEFAULT_AGENT;
+  const agent = initialAgentFor(project.root);
   const model = models.defaultFor(project.root, agent);
   const role = useRoleStore.getState().roleFor(project.root);
   const seed = seedForIssue(issue, role);

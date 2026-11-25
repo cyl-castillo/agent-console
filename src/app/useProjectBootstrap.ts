@@ -15,6 +15,9 @@ import { useToastStore } from "../stores/toastStore";
 import { useWorkbenchStore } from "../stores/workbenchStore";
 import { maybeWorklogNudge } from "../lib/worklogNudge";
 import { sessionCheckout } from "../lib/sessionCheckout";
+import { initialAgentArg } from "../lib/initialAgent";
+import { useModelStore } from "../stores/modelStore";
+import { preflightSettled } from "../stores/preflightStore";
 
 export interface ProjectBootstrap {
   workspace: WorkspaceContext | null;
@@ -113,16 +116,12 @@ export function useProjectBootstrap(project: Project | null): ProjectBootstrap {
       .catch(() => setWorkspace(null));
     (async () => {
       await hydrateTerminals(project.root);
-      // Auto-spawn one live session only when the load SUCCEEDED and restored
-      // nothing. If hydrate failed (ready=false) we must not spawn — doing so
-      // would let the next persist overwrite history we simply couldn't read.
       const st = useTerminalsStore.getState();
-      if (st.ready && st.sessions.length === 0) {
-        addTerminal(project.root);
-      }
       // Clean up managed worktree checkouts no session references any more
       // (branches are kept). Only when hydrate succeeded — a failed load must
-      // not be allowed to orphan every live worktree.
+      // not be allowed to orphan every live worktree. Straight after the
+      // load, before anything below waits: the list of sessions to keep must
+      // be this project's, and the backend's open project still this one.
       if (st.ready) {
         const keep = st.sessions
           .map((s) => s.worktree?.path)
@@ -140,6 +139,20 @@ export function useProjectBootstrap(project: Project | null): ProjectBootstrap {
           .catch(() => {
             /* best-effort */
           });
+      }
+      // Auto-spawn one live session only when the load SUCCEEDED and restored
+      // nothing. If hydrate failed (ready=false) we must not spawn — doing so
+      // would let the next persist overwrite history we simply couldn't read.
+      if (st.ready && st.sessions.length === 0) {
+        // Nobody chose this session's engine. It is the one last used here,
+        // else one the setup check found installed: wait for that check when
+        // it is still running (a project opened right at launch). The person
+        // may switch project meanwhile, so look again before adding.
+        if (!useModelStore.getState().defaultAgentFor(project.root)) await preflightSettled();
+        const now = useTerminalsStore.getState();
+        if (now.ready && now.projectRoot === project.root && now.sessions.length === 0) {
+          addTerminal(project.root, undefined, undefined, initialAgentArg(project.root));
+        }
       }
     })();
   }, [
