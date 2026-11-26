@@ -1664,6 +1664,20 @@ export const defaultFixtures: FixtureMap = {
     source: "project",
     projectSettings: `${ROOT}/.claude/settings.json`,
   },
+  // Firewall mode: not installed in the fixture.
+  firewall_status: {
+    state: "off",
+    problems: [],
+    dropinPath: "/etc/claude-code/managed-settings.d/50-agent-console.json",
+    bridgePath: "/opt/agent-console/hook-bridge",
+    expected: '{\n  "allowManagedHooksOnly": true\n}\n',
+    expectedSha256: "0".repeat(64),
+    engines: [
+      { engine: "claude", covered: false, note: "Not enforced." },
+      { engine: "codex", covered: false, note: "Not supported." },
+      { engine: "opencode", covered: false, note: "Not supported." },
+    ],
+  },
   remote_status: remoteStatus(false),
   remote_server_start: (args: Record<string, unknown>) => ({
     ...remoteStatus(true),
