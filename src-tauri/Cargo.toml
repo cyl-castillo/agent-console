@@ -1,6 +1,6 @@
 [package]
 name = "agent-console"
-version = "0.99.1"
+version = "0.99.2"
 description = "Agent Console — direct coding agents in your repository, with a verifiable record of what they did"
 authors = ["Carlos Castillo"]
 license = "AGPL-3.0-only"
