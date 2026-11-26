@@ -1972,7 +1972,7 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
             // a refusal ends the turn like any other failure, with its reason.
             let permit = crate::services::trust_service::launch_permit(Path::new(&project_t))?;
             let ctx = RunCtx {
-                permit,
+                permit: &permit,
                 cwd: &cwd,
                 model: &model,
                 tools,

@@ -527,6 +527,7 @@ impl FanOutService {
             };
             let id = id.clone();
             let disk = self.disk.clone();
+            let permit = permit.clone();
             std::thread::spawn(move || {
                 // Resolved on the thread: the runners are `'static` but not
                 // `Sync`, so the function pointer travels, not the reference.
@@ -550,7 +551,7 @@ impl FanOutService {
                 };
                 let outcome = agent_run::run_with_runner(
                     &RunSpec {
-                        permit,
+                        permit: &permit,
                         engine: p.engine,
                         cwd: &wt,
                         prompt: &prompt,

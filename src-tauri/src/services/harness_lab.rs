@@ -361,7 +361,7 @@ fn score(
     commit: &str,
     tasks: &[HeldOutTask],
     runner: &dyn EngineRunner,
-    permit: LaunchPermit,
+    permit: &LaunchPermit,
     idle: Duration,
 ) -> (Score, u64, f64) {
     let mut s = Score {
@@ -460,7 +460,7 @@ pub fn run_experiment_with(
     project_root: &str,
     editor: &dyn EngineRunner,
     solver: &dyn EngineRunner,
-    permit: LaunchPermit,
+    permit: &LaunchPermit,
     now_ms: i64,
 ) -> AppResult<Experiment> {
     let mut st = load(project_root)?;
@@ -721,7 +721,7 @@ pub fn run_experiment(
     // worktree, but under the hooks and instructions of this project.
     let permit = crate::services::trust_service::launch_permit(Path::new(project_root))?;
     let r = crate::services::engine_runner::runner_for(Engine::Claude);
-    run_experiment_with(testigo, project_root, r, r, permit, now_ms)
+    run_experiment_with(testigo, project_root, r, r, &permit, now_ms)
 }
 
 #[cfg(test)]
@@ -897,7 +897,7 @@ mod tests {
                 &root,
                 &fake,
                 &fake,
-                LaunchPermit::for_tests(),
+                &LaunchPermit::for_tests(),
                 1_000,
             )
             .unwrap_err();
@@ -927,7 +927,7 @@ mod tests {
                 &root,
                 &idle,
                 &idle,
-                LaunchPermit::for_tests(),
+                &LaunchPermit::for_tests(),
                 1_000,
             )
             .unwrap();
@@ -953,7 +953,7 @@ mod tests {
                 &root,
                 &editor,
                 &idle,
-                LaunchPermit::for_tests(),
+                &LaunchPermit::for_tests(),
                 2_000,
             )
             .unwrap();
@@ -989,7 +989,7 @@ mod tests {
                 &root,
                 &editor,
                 &solver,
-                LaunchPermit::for_tests(),
+                &LaunchPermit::for_tests(),
                 1_000,
             )
             .unwrap();
@@ -1032,7 +1032,7 @@ mod tests {
                 &root,
                 &Fake { write: None },
                 &solver,
-                LaunchPermit::for_tests(),
+                &LaunchPermit::for_tests(),
                 2_000,
             )
             .unwrap();
@@ -1064,7 +1064,7 @@ mod tests {
                 &root,
                 &editor,
                 &Fake { write: None },
-                LaunchPermit::for_tests(),
+                &LaunchPermit::for_tests(),
                 1_000,
             )
             .unwrap();

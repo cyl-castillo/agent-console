@@ -146,7 +146,7 @@ pub fn ask(spec: &AskSpec) -> AppResult<AssistantReply> {
     let prompt = build_prompt(&message, spec.resume.is_none(), tools_attached);
     let out = agent_run::run_attached(
         &RunSpec {
-            permit,
+            permit: &permit,
             engine: spec.engine,
             cwd: spec.project_root,
             prompt: &prompt,

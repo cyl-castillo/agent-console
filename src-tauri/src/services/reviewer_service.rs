@@ -632,7 +632,7 @@ pub fn review_with_runner(
     turn_id: Option<&str>,
     reviewer: (Engine, Option<String>),
     runner: &dyn EngineRunner,
-    permit: LaunchPermit,
+    permit: &LaunchPermit,
     ts: i64,
 ) -> AppResult<ReviewVerdict> {
     let scope = scope_for(testigo, project_root, term_id, turn_id)?;
@@ -782,7 +782,7 @@ pub fn review(
         turn_id,
         reviewer,
         runner,
-        permit,
+        &permit,
         ts,
     )
 }
@@ -1060,7 +1060,7 @@ mod tests {
             None,
             (Engine::Codex, None),
             &FakeReviewer("{\"verdict\":\"approve\",\"findings\":[],\"rationale\":\"looks fine\"}"),
-            LaunchPermit::for_tests(),
+            &LaunchPermit::for_tests(),
             4,
         )
         .unwrap();

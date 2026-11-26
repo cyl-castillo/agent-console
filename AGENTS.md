@@ -76,8 +76,9 @@ A change to one side without the others is a bug even when everything compiles.
   terminal's auto-launch asks `trustStore`; a launch with no terminal (rooms,
   fan-out, reviewer, scheduler, advisor, learning, assistant, harness lab)
   carries a `LaunchPermit` from `trust_service::launch_permit`, asked on the
-  project root, and does not compile without one. Never add another way to
-  make a permit outside tests.
+  project root, and does not compile without one; every engine adapter
+  checks it again (`still_holds`) before it starts a process. Never add
+  another way to make a permit outside tests.
 - **No model output rendered as raw HTML.** Agent prose goes through the
   allowlist in `src/lib/markdownPolicy.ts`; anything else is sanitized
   (DOMPurify) before it reaches the DOM.

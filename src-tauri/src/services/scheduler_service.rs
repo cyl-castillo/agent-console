@@ -861,7 +861,7 @@ fn run_claude(project_root: &Path, prompt: &str) -> ActionOutcome {
         }
     };
     match agent_run::run(&RunSpec {
-        permit,
+        permit: &permit,
         engine: Engine::Claude,
         cwd: project_root,
         prompt,

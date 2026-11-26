@@ -15,8 +15,9 @@
 //!   the installed CLI, retry once with the family alias (see
 //!   `claude_cli::unknown_model_in`).
 //!
-//! A [`RunSpec`] carries the trust gate's permit for the project, so nothing
-//! here starts in a folder the human has not trusted as it is now.
+//! A [`RunSpec`] carries the trust gate's permit for the project, and the
+//! adapters check it again before each process (the retry included), so
+//! nothing here starts in a folder the human has not trusted as it is now.
 //!
 //! Rooms keep their own driver (they interleave turns, pause and inject) but
 //! use the same adapters and the same slot/kill mechanics.
@@ -56,7 +57,7 @@ pub fn idle_timeout_from(raw: Option<&str>) -> Duration {
 
 pub struct RunSpec<'a> {
     /// The trust gate's yes for the project (`trust_service::launch_permit`).
-    pub permit: crate::services::trust_service::LaunchPermit,
+    pub permit: &'a crate::services::trust_service::LaunchPermit,
     pub engine: Engine,
     pub cwd: &'a Path,
     pub prompt: &'a str,
@@ -281,7 +282,7 @@ mod tests {
     #[test]
     fn watchdog_kills_a_turn_that_goes_quiet() {
         let spec = RunSpec {
-            permit: crate::services::trust_service::LaunchPermit::for_tests(),
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             engine: Engine::Claude,
             cwd: std::path::Path::new("."),
             prompt: "p",

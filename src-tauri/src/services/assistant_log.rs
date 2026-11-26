@@ -417,8 +417,9 @@ pub fn propose(
         ));
     }
     let prompt = build_proposal_prompt(&build_digest(&entries));
+    let permit = crate::services::trust_service::launch_permit(project_root)?;
     let out = agent_run::run(&RunSpec {
-        permit: crate::services::trust_service::launch_permit(project_root)?,
+        permit: &permit,
         engine,
         cwd: project_root,
         prompt: &prompt,

@@ -220,7 +220,8 @@ ProofEvent {
   espera la decisión (o, si fue "declined", deja el lanzamiento en manos del humano). Los lanzamientos
   sin terminal (salas, fan-out, revisor, scheduler, advisor, learning, asistente, harness lab) piden lo
   mismo desde el backend: sin "trusted" sobre la carpeta del proyecto tal como está ahora no arrancan y
-  devuelven el motivo (`trust_service::launch_permit`; una sala vuelve a preguntar en cada turno). El
+  devuelven el motivo (`trust_service::launch_permit`; cada adaptador vuelve a preguntar justo antes de
+  arrancar un proceso, así que un fan-out o un experimento largo se cortan si la carpeta cambia). El
   rechazo no es un evento nuevo: un job del scheduler lo deja como `job_run` con error y el asistente
   como `assistant_turn` fallido; el resto no escribe nada porque nada corrió. Export IETF:
   decision / success (trusted) / denied (declined), fase pre_execution. Código: `trust_service.rs`,

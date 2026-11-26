@@ -50,7 +50,7 @@ pub fn analyze(project_root: &Path) -> AppResult<AnalysisResult> {
     // Plan mode, the user's default model, idle watchdog, unknown-model
     // retry — the unattended-run contract lives in agent_run.
     let run = crate::services::agent_run::run(&crate::services::agent_run::RunSpec {
-        permit,
+        permit: &permit,
         engine: crate::services::engine_runner::Engine::Claude,
         cwd: project_root,
         prompt: &prompt,
