@@ -123,12 +123,19 @@ fn toml_str(s: &str) -> Option<String> {
 /// The Codex requirements file. Pure, like the drop-in. Only keys whose
 /// shape was read in Codex's source: a key Codex does not accept would make
 /// it refuse to load its configuration.
+///
+/// The order of `allowed_approval_policies` matters: Codex falls back to
+/// the first one when the configured policy is not allowed, and
+/// `codex exec` always asks for `never`. With `untrusted` first, a headless
+/// run would need an approval for every shell command and has nobody to
+/// ask, so none would run. `on-request` first lets them run inside the
+/// sandbox and fails only the ones that ask to leave it.
 pub fn codex_requirements(bridge: &Path, home: Option<&Path>) -> Option<String> {
     let bridge_s = bridge.to_str()?;
     let mut out = format!(
         "{CODEX_MARKER}\n\
          allow_managed_hooks_only = true\n\
-         allowed_approval_policies = [\"untrusted\", \"on-request\"]\n\
+         allowed_approval_policies = [\"on-request\", \"untrusted\"]\n\
          allowed_sandbox_modes = [\"read-only\", \"workspace-write\"]\n\
          \n\
          [features]\n\
@@ -1150,7 +1157,7 @@ mod tests {
         assert!(text.ends_with('\n'));
         for line in [
             "allow_managed_hooks_only = true",
-            r#"allowed_approval_policies = ["untrusted", "on-request"]"#,
+            r#"allowed_approval_policies = ["on-request", "untrusted"]"#,
             r#"allowed_sandbox_modes = ["read-only", "workspace-write"]"#,
             r#"deny_read = ["/home/u/.ssh", "/home/u/.aws", "/home/u/.gnupg"]"#,
             r#"managed_dir = "/opt/agent-console""#,
