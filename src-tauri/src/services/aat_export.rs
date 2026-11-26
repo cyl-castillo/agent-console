@@ -244,6 +244,18 @@ fn map_kind(e: &ProofEvent) -> Mapped {
             outcome: "success",
             phase: "post_execution",
         },
+        // Firewall mode as found: enforced is a success; drifted or unsafe
+        // is a failure of the control; off (after having been on) is
+        // partial — the record continues without it.
+        "firewall_state" => Mapped {
+            action_type: "lifecycle",
+            outcome: match p.get("state").and_then(Value::as_str).unwrap_or("") {
+                "enforced" => "success",
+                "drifted" | "unsafe" => "failure",
+                _ => "partial",
+            },
+            phase: "concurrent",
+        },
         "remote_device" | "remote_listener" => Mapped {
             action_type: "decision",
             outcome: "success",
@@ -746,6 +758,7 @@ Mapping from the Testigo ledger (the console's native chain):
 | fanout_result | lifecycle | post_execution | success (N agents on the same prompt in twin worktrees: each one's diff, checks and verdict) |
 | fanout_decision | decision | post_execution | success (the human applied one candidate, or discarded all) |
 | remote_device | decision | pre_execution | success (a device paired, re-scoped or revoked by the human) |
+| firewall_state | lifecycle | concurrent | success (enforced) / failure (drifted, unsafe) / partial (off, unsupported) — firewall mode as the console found it, written when it changes |
 | remote_listener | decision | pre_execution | success (the remote-decisions listener started or stopped, with its bind) |
 | pr_autofix | decision | post_execution | success (review comments handed to the agent as a prompt) |
 | pr_decision | decision | post_execution | success (gate = verified) / escalated (gate = human, with reason) |

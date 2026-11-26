@@ -567,7 +567,7 @@ export const pendingApproval: ApprovalRequest = {
   sessionDir: "/home/demo/.claude",
   cwd: ROOT,
   tool: "Bash",
-  input: { command: "npm test -- --run tests/retry.test.ts", description: "Run the retry tests" },
+  input: { command: "git log --oneline -5", description: "List the last commits" },
   termId: "sess-auth",
   timeoutMs: 55_000,
   source: "permission_request",
@@ -1215,7 +1215,7 @@ export const demoTranscript = [
   "\r\n",
   "\x1b[32m✓\x1b[0m Read \x1b[36msrc/retry.ts\x1b[0m\r\n",
   "\x1b[32m✓\x1b[0m Edit \x1b[36msrc/retry.ts\x1b[0m  \x1b[90m+18 −6\x1b[0m\r\n",
-  "\x1b[33m▸\x1b[0m Bash \x1b[90mnpm test -- --run tests/retry.test.ts\x1b[0m\r\n",
+  "\x1b[33m▸\x1b[0m Bash \x1b[90mgit log --oneline -5\x1b[0m\r\n",
   "\r\n",
   "\x1b[90m  waiting for approval…\x1b[0m\r\n",
 ].join("");
@@ -1663,6 +1663,41 @@ export const defaultFixtures: FixtureMap = {
     enabled: true,
     source: "project",
     projectSettings: `${ROOT}/.claude/settings.json`,
+  },
+  // Firewall mode: not installed in the fixture, with the commands that
+  // would install it.
+  firewall_status: {
+    state: "off",
+    problems: [],
+    dropinPath: "/etc/claude-code/managed-settings.d/50-agent-console.json",
+    bridgePath: "/opt/agent-console/hook-bridge",
+    expected: '{\n  "allowManagedHooksOnly": true\n}\n',
+    expectedSha256: "0".repeat(64),
+    installScript: [
+      "sh -eu <<'AGENT_CONSOLE_INSTALL'",
+      "sudo install -d -o 0 -g 0 -m 0755 '/etc/claude-code/managed-settings.d' '/opt/agent-console'",
+      "sudo install -o 0 -g 0 -m 0700 '/usr/bin/hook-bridge' '/opt/agent-console/hook-bridge.new'",
+      "sudo mv -f '/opt/agent-console/hook-bridge.new' '/opt/agent-console/hook-bridge'",
+      "AGENT_CONSOLE_INSTALL",
+      "",
+    ].join("\n"),
+    engines: [
+      {
+        engine: "claude",
+        covered: false,
+        note: "Not enforced.",
+      },
+      {
+        engine: "codex",
+        covered: false,
+        note: "Not supported: firewall mode writes no Codex policy.",
+      },
+      {
+        engine: "opencode",
+        covered: false,
+        note: "Not supported: OpenCode has no sandbox and no managed tier.",
+      },
+    ],
   },
   remote_status: remoteStatus(false),
   remote_server_start: (args: Record<string, unknown>) => ({
