@@ -2,7 +2,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::error::{AppError, AppResult};
 use crate::services::path_guard;
@@ -57,6 +57,17 @@ pub fn open_project(
         ) {
             tracing::warn!("snapshot retention sweep: {e}");
         }
+    });
+    // Firewall mode as it stands when this project opens: a change since the
+    // ledger's last `firewall_state` line (turned on, drifted, removed) is
+    // witnessed without anyone opening Settings. Off the open path: the
+    // check runs `claude --version` the first time.
+    let witness_app = app.clone();
+    let ledger_root = project.root.to_string_lossy().to_string();
+    std::thread::spawn(move || {
+        let status = crate::services::firewall_service::status();
+        let state = witness_app.state::<AppState>();
+        crate::commands::hooks::witness_firewall(&state.testigo, &ledger_root, &status);
     });
     // Start the git filesystem watcher so the UI auto-refreshes Changes.
     state.git_watcher.watch(app, path_buf);

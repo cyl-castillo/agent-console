@@ -635,6 +635,32 @@ export interface SandboxStatus {
   projectSettings: string;
 }
 
+/// Firewall mode (mirrors Rust `FirewallStatus`): the console's hooks and a
+/// baseline policy in Claude Code's managed settings, where the agent cannot
+/// edit them. Claude only; `engines` says so for Codex and OpenCode.
+export interface FirewallEngineCoverage {
+  engine: "claude" | "codex" | "opencode" | string;
+  covered: boolean;
+  note: string;
+  /** The engine's own policy file, where firewall mode writes one. */
+  path?: string;
+}
+export interface FirewallStatus {
+  state: "unsupported" | "off" | "enforced" | "drifted" | "unsafe" | string;
+  problems: string[];
+  dropinPath?: string;
+  bridgePath?: string;
+  /// The drop-in this version would install, and its sha256.
+  expected?: string;
+  expectedSha256?: string;
+  /// sha256 of the drop-in on disk, when there is one.
+  installedSha256?: string;
+  /// Shell text for the user's own terminal; the console never runs it.
+  installScript?: string;
+  uninstallScript?: string;
+  engines: FirewallEngineCoverage[];
+}
+
 /// F6: the project's approval policy as code (mirrors the Rust PolicyStatus).
 export interface PolicyRule {
   effect: "allow" | "ask" | "block" | string;
