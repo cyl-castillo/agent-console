@@ -567,7 +567,7 @@ export const pendingApproval: ApprovalRequest = {
   sessionDir: "/home/demo/.claude",
   cwd: ROOT,
   tool: "Bash",
-  input: { command: "npm test -- --run tests/retry.test.ts", description: "Run the retry tests" },
+  input: { command: "git log --oneline -5", description: "List the last commits" },
   termId: "sess-auth",
   timeoutMs: 55_000,
   source: "permission_request",
@@ -1215,7 +1215,7 @@ export const demoTranscript = [
   "\r\n",
   "\x1b[32m✓\x1b[0m Read \x1b[36msrc/retry.ts\x1b[0m\r\n",
   "\x1b[32m✓\x1b[0m Edit \x1b[36msrc/retry.ts\x1b[0m  \x1b[90m+18 −6\x1b[0m\r\n",
-  "\x1b[33m▸\x1b[0m Bash \x1b[90mnpm test -- --run tests/retry.test.ts\x1b[0m\r\n",
+  "\x1b[33m▸\x1b[0m Bash \x1b[90mgit log --oneline -5\x1b[0m\r\n",
   "\r\n",
   "\x1b[90m  waiting for approval…\x1b[0m\r\n",
 ].join("");

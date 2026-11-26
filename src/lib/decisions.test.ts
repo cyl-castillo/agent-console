@@ -14,7 +14,7 @@ const req = (tool: string, input: Record<string, unknown>): ApprovalRequest => (
 describe("tierFor", () => {
   it("read-only commands are low", () => {
     expect(tierFor(req("Bash", { command: "git status" })).tier).toBe("low");
-    expect(tierFor(req("Bash", { command: "npm test -- --run x" })).tier).toBe("low");
+    expect(tierFor(req("Bash", { command: "npm test -- --run x" })).tier).toBe("medium");
     expect(tierFor(req("Bash", { command: "find . -name '*.ts'" })).tier).toBe("low");
     // Readers that run or write through an option, and `env` as a shell:
     // the same rows as the Rust evasion table.
@@ -57,13 +57,62 @@ describe("tierFor", () => {
     expect(tierFor(req("mcp__mail__send_message", {})).tier).toBe("high");
   });
 
+  /// Mirrors `runners_and_secret_reads_are_never_low` in remote_decisions.rs.
+  it("runners and secret reads are never low", () => {
+    const tier = (c: string) => tierFor(req("Bash", { command: c }));
+    for (const c of [
+      "npm test",
+      "npm run lint",
+      "npm run build",
+      "npx eslint .",
+      "npx tsc --noEmit",
+      "cargo test",
+      "cargo check",
+      "cargo clippy",
+      "make test",
+      "pytest -q",
+      "go test ./...",
+      "go vet -vettool=./x ./...",
+    ]) {
+      expect(tier(c).tier, c).toBe("medium");
+      expect(tier(c).label, c).toBe("Runs project code");
+    }
+    expect(tier("printenv").tier).toBe("medium");
+    for (const c of [
+      "cat ~/.ssh/id_rsa",
+      "cat .env",
+      "head -3 config/.env.production",
+      "grep -r TOKEN ~/.aws/credentials",
+      'cat "$HOME/.netrc"',
+      "base64 ~/.ssh/id_ed25519",
+      "git diff --no-index /dev/null server.pem",
+      "tail --lines=5 --file=.env",
+    ]) {
+      expect(tier(c).tier, c).toBe("high");
+      expect(tier(c).label, c).toBe("Reads or touches secrets");
+    }
+    for (const c of [
+      "cat .env.example",
+      "ls .claude/skills",
+      "cat /etc/os-release",
+      "cat README.md",
+    ])
+      expect(tier(c).tier, c).toBe("low");
+    for (const c of ["cargo tree", "cargo fmt --check", "npm ls", "npm outdated"])
+      expect(tier(c).tier, c).toBe("low");
+    expect(tierFor(req("Read", { file_path: "/home/u/.ssh/id_rsa" })).tier).toBe("high");
+    expect(tierFor(req("Read", { file_path: "/home/u/proj/.env" })).tier).toBe("high");
+    expect(tierFor(req("Grep", { pattern: "x", path: ".aws" })).tier).toBe("high");
+    expect(tierFor(req("Read", { file_path: "src/main.rs" })).tier).toBe("low");
+    expect(tier("rm -rf ~/.ssh").label).toBe("Irreversible");
+  });
+
   /// SEGURIDAD-MOVIL F1 (A2): the evasion table, mirrored from the Rust test
   /// row for row — the Inbox card and the remote gate must agree.
   it("resists the evasion table", () => {
     const bash = (c: string) => tierFor(req("Bash", { command: c })).tier;
     for (const c of [
       "git status",
-      "npm test",
       "git log --oneline | head -20",
       "grep -rn foo src | wc -l",
       "find . -name '*.rs'",
