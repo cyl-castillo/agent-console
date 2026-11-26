@@ -110,6 +110,7 @@ import type {
   PairedDevice,
   DeviceScope,
   PolicyStatus,
+  FirewallStatus,
   SandboxStatus,
 } from "../types/domain";
 
@@ -331,6 +332,8 @@ export const ipc = {
   /// SEGURIDAD-MOVIL F2: the engine's sandbox flag for a project.
   sandboxStatus: (projectRoot: string) => invoke<SandboxStatus>("sandbox_status", { projectRoot }),
   sandboxEnable: (projectRoot: string) => invoke<SandboxStatus>("sandbox_enable", { projectRoot }),
+  firewallStatus: (projectRoot?: string) =>
+    invoke<FirewallStatus>("firewall_status", { projectRoot }),
 
   permissionsSnapshot: () => invoke<PermissionsSnapshot>("permissions_snapshot"),
   permissionsAdd: (

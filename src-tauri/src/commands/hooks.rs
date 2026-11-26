@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 
 use crate::error::AppResult;
+use crate::services::firewall_service::{self, FirewallStatus};
 use crate::services::hooks_service::HooksStatus;
 use crate::services::sandbox_service::{self, SandboxStatus};
 use crate::state::AppState;
@@ -74,4 +75,46 @@ pub fn sandbox_status(project_root: String) -> AppResult<SandboxStatus> {
 #[tauri::command(async)]
 pub fn sandbox_enable(project_root: String) -> AppResult<SandboxStatus> {
     sandbox_service::enable(std::path::Path::new(&project_root))
+}
+
+/// Firewall mode: are the console's hooks and baseline policy installed in
+/// Claude Code's managed settings (and Codex's requirements file), owned by
+/// the administrator, and what this version would install? Installing is the user's action; this only
+/// reads. With a project, a change since the ledger's last `firewall_state`
+/// line is witnessed there (see `witness_firewall`).
+#[tauri::command(async)]
+pub fn firewall_status(
+    project_root: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<FirewallStatus> {
+    let status = firewall_service::status();
+    if let Some(root) = project_root.as_deref().filter(|r| !r.is_empty()) {
+        witness_firewall(&state.testigo, root, &status);
+    }
+    Ok(status)
+}
+
+/// Write `firewall_state` to the project's ledger when the mode is not what
+/// that ledger last saw. Best effort: a project with witnessing off, or a
+/// ledger that cannot be read, never fails the caller.
+pub fn witness_firewall(
+    testigo: &crate::services::testigo_service::TestigoService,
+    project_root: &str,
+    status: &FirewallStatus,
+) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    if let Err(e) = testigo.on_firewall_state(
+        project_root,
+        ts,
+        &status.state,
+        status.installed_sha256.as_deref(),
+        status.expected_sha256.as_deref(),
+        &status.problems,
+        status.codex.as_ref(),
+    ) {
+        tracing::debug!("firewall_state not witnessed: {e}");
+    }
 }

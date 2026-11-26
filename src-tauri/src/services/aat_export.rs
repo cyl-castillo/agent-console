@@ -244,6 +244,27 @@ fn map_kind(e: &ProofEvent) -> Mapped {
             outcome: "success",
             phase: "post_execution",
         },
+        // Firewall mode as found: enforced is a success; drifted or unsafe
+        // (Claude Code's part or Codex's file) is a failure of the control;
+        // off (after having been on) is partial — the record continues
+        // without it.
+        "firewall_state" => Mapped {
+            action_type: "lifecycle",
+            outcome: {
+                let state = |v: &Value| v.get("state").and_then(Value::as_str).map(String::from);
+                let claude = state(p).unwrap_or_default();
+                let codex = p.get("codex").and_then(state).unwrap_or_default();
+                let broken = |s: &str| matches!(s, "drifted" | "unsafe");
+                if broken(&claude) || broken(&codex) {
+                    "failure"
+                } else if claude == "enforced" {
+                    "success"
+                } else {
+                    "partial"
+                }
+            },
+            phase: "concurrent",
+        },
         "remote_device" | "remote_listener" => Mapped {
             action_type: "decision",
             outcome: "success",
@@ -746,6 +767,7 @@ Mapping from the Testigo ledger (the console's native chain):
 | fanout_result | lifecycle | post_execution | success (N agents on the same prompt in twin worktrees: each one's diff, checks and verdict) |
 | fanout_decision | decision | post_execution | success (the human applied one candidate, or discarded all) |
 | remote_device | decision | pre_execution | success (a device paired, re-scoped or revoked by the human) |
+| firewall_state | lifecycle | concurrent | success (enforced) / failure (drifted or unsafe, on Claude Code's part or on Codex's file in `codex.state`) / partial (off, unsupported) — firewall mode as the console found it, written when it changes |
 | remote_listener | decision | pre_execution | success (the remote-decisions listener started or stopped, with its bind) |
 | pr_autofix | decision | post_execution | success (review comments handed to the agent as a prompt) |
 | pr_decision | decision | post_execution | success (gate = verified) / escalated (gate = human, with reason) |
@@ -809,6 +831,36 @@ mod tests {
             prev_hash: "0".repeat(64),
             hash: format!("{seq:064x}"),
         }
+    }
+
+    /// Firewall mode exports as a failure when either engine's part is
+    /// broken, and as a success only when Claude Code's part is enforced.
+    #[test]
+    fn firewall_state_is_a_failure_when_either_part_is_broken() {
+        let outcome =
+            |payload: Value| map_kind(&ev(1, 1, "firewall_state", "t", "console", payload)).outcome;
+        assert_eq!(outcome(json!({"state": "enforced"})), "success");
+        assert_eq!(
+            outcome(json!({"state": "enforced", "codex": {"state": "enforced"}})),
+            "success"
+        );
+        assert_eq!(
+            outcome(json!({"state": "enforced", "codex": {"state": "off"}})),
+            "success"
+        );
+        assert_eq!(
+            outcome(json!({"state": "enforced", "codex": {"state": "unsafe"}})),
+            "failure"
+        );
+        assert_eq!(
+            outcome(json!({"state": "off", "codex": {"state": "drifted"}})),
+            "failure"
+        );
+        assert_eq!(outcome(json!({"state": "drifted"})), "failure");
+        assert_eq!(
+            outcome(json!({"state": "off", "codex": {"state": "enforced"}})),
+            "partial"
+        );
     }
 
     #[test]

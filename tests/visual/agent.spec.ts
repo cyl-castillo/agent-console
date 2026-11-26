@@ -263,14 +263,14 @@ test("the sponsor policy decides low-risk requests alone; the human sees the res
         ).__fixtures.emit("approval://request", payload),
       p,
     );
-  // Low tier (npm test): taken by the policy, witnessed with the policy name.
+  // Low tier (git status; a runner like npm test is medium): taken by the policy, witnessed with the policy name.
   await emit({
     id: "apr-9001",
     ts: Date.now(),
     sessionDir: "/home/demo/.claude",
     cwd: "/home/demo/code/demo-playground",
     tool: "Bash",
-    input: { command: "npm test -- --run" },
+    input: { command: "git status" },
     termId: "sess-auth",
   });
   await expect
@@ -602,6 +602,25 @@ test("F8: remote devices — the listener starts on this machine, a pairing wait
   page,
 }) => {
   await open(page, "app-v2--settings-permissions");
+  // Firewall mode: off, what it changes said before the commands, every
+  // engine's coverage visible, and commands to copy — never a button that
+  // installs.
+  const firewall = page.getByTestId("firewall-section");
+  await expect(firewall.getByTestId("firewall-state")).toHaveText("off");
+  await expect(firewall.getByTestId("firewall-consequences")).toContainText(
+    "your own hooks in ~/.claude/settings.json are ignored",
+  );
+  await expect(firewall.getByTestId("firewall-engine-codex")).toContainText(
+    "The install commands cover it",
+  );
+  await expect(firewall.getByTestId("firewall-codex-consequences")).toContainText(
+    "cannot send a request to a person",
+  );
+  await expect(firewall.getByTestId("firewall-engine-opencode")).toContainText("Not supported");
+  await expect(firewall.getByTestId("firewall-install-script")).toContainText("sudo install");
+  await expect(firewall.getByRole("button", { name: "Copy install commands" })).toBeVisible();
+  await expect(firewall.getByRole("button", { name: "Check again" })).toBeEnabled();
+  await expect(firewall.getByTestId("firewall-uninstall-script")).toHaveCount(0);
   // SEGURIDAD-MOVIL F2: the agent sandbox is the wall; the console says so
   // and turns it on in one click.
   const sandbox = page.getByTestId("sandbox-section");

@@ -281,6 +281,19 @@ ProofEvent {
   referencia `phone-sim` (pair / pending / decide sobre TCP real); test E2E sobre loopback real:
   pair → aprobar → pending → allow bajo (registrado con razón) → allow alto RECHAZADO → deny alto →
   readOnly no decide. La app del dispositivo vive en otro repo; voz diferida hasta segundo factor.
+- **Modo firewall (2026-11-23)**: el estado del modo (`off`, `enforced`, `drifted`, `unsafe`,
+  `unsupported`) se lee de los managed settings de Claude Code y de la copia del bridge propiedad
+  del administrador. Al abrir un proyecto y al consultarlo desde Settings se registra
+  `firewall_state {state, previous?, installedSha256?, expectedSha256?, problems}` (actor `console`,
+  `unbound`) **sólo cuando difiere** de la última línea `firewall_state` de ese ledger; un ledger
+  que nunca vio el modo activo no recibe línea por `off` ni `unsupported`. Es una observación de
+  la consola, no una decisión. Export IETF: `firewall_state` → lifecycle / concurrent /
+  success (`enforced`), failure (`drifted`, `unsafe`), partial (el resto). `state` es la parte de
+  Claude Code. Con el CLI de Codex en la máquina el payload lleva además
+  `codex {state, installedSha256?, problems}`, el estado de `/etc/codex/requirements.toml`
+  (`off`, `foreign` = archivo ajeno que la consola no toca, `enforced`, `drifted`, `unsafe`); un
+  cambio ahí también escribe línea una vez que el archivo de la consola estuvo instalado, y
+  `drifted`/`unsafe` en Codex exporta como failure. OpenCode no tiene modo firewall y no figura.
 - **Revisión cruzada y fan-out (COMPETENCIA-2026-10 F9, 2026-10-24)**: (1) la regla "el revisor nunca es
   el productor" vive en un solo lugar, `reviewer_service::distinct_identity`: otro engine, o el mismo
   engine en otra familia de modelo (Claude opus/sonnet/haiku/fable; OpenCode otro id); Codex con otro

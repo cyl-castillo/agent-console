@@ -15,10 +15,17 @@ export interface TierInfo {
 }
 
 // One simple command whose head is here. Code runners (`node -e`,
-// `python -c`) are not: they are shells with another syntax. Mirrors
+// `python -c`) are not: they are shells with another syntax. Neither are
+// test, lint and build runners (see `RUNNER`), nor `printenv`. Mirrors
 // `remote_decisions.rs` (READ_ONLY / FIND_ACTS / GIT_BRANCH_*).
 const READ_ONLY_HEAD =
-  /^\s*(ls|pwd|cat|head|tail|wc|echo|which|type|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|find(?![^|]*\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b)|git\s+(status|log|diff|show|remote\s+-v|rev-parse|describe|blame|stash\s+list)|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))(?:\s|$)/;
+  /^\s*(ls|pwd|cat|head|tail|wc|echo|which|type|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|find(?![^|]*\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b)|git\s+(status|log|diff|show|remote\s+-v|rev-parse|describe|blame|stash\s+list)|npm\s+(ls|outdated|view)|cargo\s+(fmt\s+--check|tree|metadata))(?:\s|$)/;
+// Tests, linters and builds execute what the repository says (a script in
+// `package.json`, a `Makefile` target, `conftest.py`, `build.rs`, an ESLint
+// config), and the agent can edit all of those: never read-only. Mirrors
+// `RUNNER` in `remote_decisions.rs`.
+const RUNNER =
+  /^\s*(npm\s+(test|t|run(-script)?)|pnpm\s+(test|run|exec)|yarn\s+(test|run)|npx|bunx?|cargo\s+(check|test|clippy|build|run|bench)|make|pytest|tox|go\s+(test|vet|build|run|generate))(?:\s|$)/;
 // `git branch` only when it lists: no flag that deletes, moves, copies or
 // sets upstream, and no bare name (which creates). Mirrors `GIT_BRANCH_*`.
 const GIT_BRANCH_HEAD = /^\s*git\s+branch(?:\s|$)/;
@@ -60,6 +67,27 @@ export function isReadOnlyCommand(cmd: string): boolean {
 /// secrets — high whatever the tool. Mirrors `SENSITIVE_PATH` in Rust.
 const SENSITIVE_PATH =
   /(^|\/)(\.ssh|\.claude|\.codex|\.config\/opencode|\.git\/hooks|\.git\/config|\.gnupg|\.aws|\.kube|\.docker|\.npmrc|\.netrc|\.bashrc|\.zshrc|\.profile|\.bash_profile|\.zprofile|\.env(\.[^/]+)?)(\/|$)|^\/etc\/|\.(pem|key|p12|pfx)$/i;
+/// Paths that hold credentials: reading one hands a secret to the model, so a
+/// read of these is high whatever the tool. Narrower than `SENSITIVE_PATH` on
+/// purpose (`.claude/` or `/etc/` are dangerous to write, not to list).
+/// Mirrors `SECRET_PATH` / `ENV_TEMPLATE` / `secret_arg` in Rust.
+const SECRET_PATH =
+  /(^|\/)(\.ssh|\.gnupg|\.aws|\.kube|\.docker|\.npmrc|\.netrc|\.git-credentials|\.env(\.[^/]+)?)(\/|$)|(^|\/)\.(claude|codex)\/[^/]*(credentials|auth)[^/]*$|\.(pem|key|p12|pfx)$/i;
+const ENV_TEMPLATE = /\.env\.(example|sample|template|dist)$/i;
+
+function isSecretPath(path: string): boolean {
+  return SECRET_PATH.test(path) && !ENV_TEMPLATE.test(path);
+}
+
+/// The first argument of a shell command that names a credential path.
+function secretArg(cmd: string): string | null {
+  for (const raw of cmd.split(/[\s=|;&<>()`,:]+/)) {
+    const word = raw.replace(/^["']+|["']+$/g, "");
+    if (word && isSecretPath(word)) return word;
+  }
+  return null;
+}
+
 const MCP_DESTRUCTIVE = /(delete|remove|destroy|drop|purge|send|publish|deploy|merge|push|force)/i;
 
 /// The engines name the shell differently (Claude `Bash`, Codex `shell`,
@@ -119,13 +147,21 @@ export function tierFor(req: ApprovalRequest, perimeter?: Perimeter): TierInfo {
     const cmd = commandOf(inp);
     const a = assessCommand(cmd);
     if (a?.level === "dangerous") return { tier: "high", label: "Irreversible", reason: a.reason };
+    const secret = secretArg(cmd);
+    if (secret) return { tier: "high", label: "Reads or touches secrets", reason: secret };
     if (a) {
       return HIGH_REASON.test(a.reason)
         ? { tier: "high", label: "Irreversible or external", reason: a.reason }
         : { tier: "medium", label: "Changes the machine", reason: a.reason };
     }
     if (isReadOnlyCommand(cmd))
-      return { tier: "low", label: "Read-only", reason: "inspects, builds or tests" };
+      return { tier: "low", label: "Read-only", reason: "inspects without changing anything" };
+    if (RUNNER.test(cmd))
+      return {
+        tier: "medium",
+        label: "Runs project code",
+        reason: "tests, linters and builds execute what the repository says",
+      };
     return { tier: "medium", label: "Runs a command", reason: "not in the read-only allowlist" };
   }
   if (tool === "Edit" || tool === "Write" || tool === "MultiEdit" || tool === "NotebookEdit") {
@@ -156,6 +192,15 @@ export function tierFor(req: ApprovalRequest, perimeter?: Perimeter): TierInfo {
         reason: "test files are the evidence; review the diff",
       };
     return { tier: "medium", label: "Edits a file", reason: rel ?? path };
+  }
+  if (tool === "Read" || tool === "Grep" || tool === "Glob") {
+    const path =
+      typeof inp.file_path === "string"
+        ? inp.file_path
+        : typeof inp.path === "string"
+          ? inp.path
+          : "";
+    if (isSecretPath(path)) return { tier: "high", label: "Reads secrets", reason: path };
   }
   if (["Read", "Glob", "Grep", "LS", "TodoWrite", "Task", "TaskOutput"].includes(tool)) {
     return { tier: "low", label: "Read-only", reason: tool };
