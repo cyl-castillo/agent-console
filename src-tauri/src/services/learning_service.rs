@@ -84,6 +84,9 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
             raw_excerpt: String::new(),
         });
     }
+    // Plan mode stops the agent from changing anything; it does not stop the
+    // folder's hooks and MCP servers from starting with it.
+    let permit = crate::services::trust_service::launch_permit(project_root)?;
 
     let digest = build_digest(events);
     let existing_skills = list_existing_skills(project_root);
@@ -120,6 +123,7 @@ pub fn reflect(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Refle
     // Plan mode, the user's default model, idle watchdog, unknown-model
     // retry — the unattended-run contract lives in agent_run.
     let run = crate::services::agent_run::run(&crate::services::agent_run::RunSpec {
+        permit,
         engine: crate::services::engine_runner::Engine::Claude,
         cwd: project_root,
         prompt: &prompt,
@@ -571,6 +575,7 @@ pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Curati
             raw_excerpt: String::new(),
         });
     }
+    let permit = crate::services::trust_service::launch_permit(project_root)?;
 
     let mut prompt = build_curation_prompt(&entries);
     // Point the model at REAL merge candidates: top similar memory pairs from
@@ -609,6 +614,7 @@ pub fn curate(project_root: &Path, events: &[ActivityEvent]) -> AppResult<Curati
     // Plan mode, the user's default model, idle watchdog, unknown-model
     // retry — the unattended-run contract lives in agent_run.
     let run = crate::services::agent_run::run(&crate::services::agent_run::RunSpec {
+        permit,
         engine: crate::services::engine_runner::Engine::Claude,
         cwd: project_root,
         prompt: &prompt,

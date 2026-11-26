@@ -937,6 +937,9 @@ impl RoundtableService {
         if !repo.is_dir() {
             return Err(AppError::NotADirectory(repo.display().to_string()));
         }
+        // Asked here so an untrusted folder gets no room at all; each turn
+        // asks again, because a room outlives the moment it was opened.
+        crate::services::trust_service::launch_permit(&repo)?;
         if config.problem.trim().is_empty() {
             return Err(AppError::InvalidArgument("problem is empty".into()));
         }
@@ -1965,7 +1968,11 @@ async fn drive(app: AppHandle, id: String, control: Arc<RunControl>) {
                 caller: &caller_t,
                 server: engine_runner::McpServerKind::Connector,
             });
+            // The folder as it is now, not as it was when the room opened:
+            // a refusal ends the turn like any other failure, with its reason.
+            let permit = crate::services::trust_service::launch_permit(Path::new(&project_t))?;
             let ctx = RunCtx {
+                permit,
                 cwd: &cwd,
                 model: &model,
                 tools,

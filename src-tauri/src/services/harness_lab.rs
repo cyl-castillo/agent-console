@@ -26,6 +26,7 @@ use crate::error::{AppError, AppResult};
 use crate::services::agent_run::{self, RunSpec};
 use crate::services::engine_runner::{Engine, EngineRunner, ToolPolicy};
 use crate::services::testigo_service::TestigoService;
+use crate::services::trust_service::LaunchPermit;
 use crate::services::{fs_names, proc, worktree_service};
 
 /// What an experiment may touch: the harness, not the code it drives.
@@ -360,6 +361,7 @@ fn score(
     commit: &str,
     tasks: &[HeldOutTask],
     runner: &dyn EngineRunner,
+    permit: LaunchPermit,
     idle: Duration,
 ) -> (Score, u64, f64) {
     let mut s = Score {
@@ -371,6 +373,7 @@ fn score(
         reset_worktree(worktree, commit);
         let run = agent_run::run_with_runner(
             &RunSpec {
+                permit,
                 engine: Engine::Claude,
                 cwd: worktree,
                 prompt: &t.prompt,
@@ -457,6 +460,7 @@ pub fn run_experiment_with(
     project_root: &str,
     editor: &dyn EngineRunner,
     solver: &dyn EngineRunner,
+    permit: LaunchPermit,
     now_ms: i64,
 ) -> AppResult<Experiment> {
     let mut st = load(project_root)?;
@@ -579,7 +583,7 @@ pub fn run_experiment_with(
     let baseline = match st.baselines.get(&key) {
         Some(b) => b.clone(),
         None => {
-            let (b, t, c) = score(&wt_path, &base_commit, &selected, solver, idle);
+            let (b, t, c) = score(&wt_path, &base_commit, &selected, solver, permit, idle);
             exp.tokens += t;
             exp.cost_usd += c;
             st.baselines.insert(key.clone(), b.clone());
@@ -598,6 +602,7 @@ pub fn run_experiment_with(
     );
     let edit = agent_run::run_with_runner(
         &RunSpec {
+            permit,
             engine: Engine::Claude,
             cwd: &wt_path,
             prompt: &prompt,
@@ -681,7 +686,7 @@ pub fn run_experiment_with(
         .trim()
         .to_string();
     exp.commit = Some(harness_commit.clone());
-    let (sc, t, c) = score(&wt_path, &harness_commit, &selected, solver, idle);
+    let (sc, t, c) = score(&wt_path, &harness_commit, &selected, solver, permit, idle);
     exp.tokens += t;
     exp.cost_usd += c;
     exp.score = Some(sc.clone());
@@ -712,8 +717,11 @@ pub fn run_experiment(
     project_root: &str,
     now_ms: i64,
 ) -> AppResult<Experiment> {
+    // Asked before anything is recorded or created: the agents run in a
+    // worktree, but under the hooks and instructions of this project.
+    let permit = crate::services::trust_service::launch_permit(Path::new(project_root))?;
     let r = crate::services::engine_runner::runner_for(Engine::Claude);
-    run_experiment_with(testigo, project_root, r, r, now_ms)
+    run_experiment_with(testigo, project_root, r, r, permit, now_ms)
 }
 
 #[cfg(test)]
@@ -884,7 +892,15 @@ mod tests {
             .unwrap();
             let testigo = TestigoService::new();
             let fake = Fake { write: None };
-            let err = run_experiment_with(&testigo, &root, &fake, &fake, 1_000).unwrap_err();
+            let err = run_experiment_with(
+                &testigo,
+                &root,
+                &fake,
+                &fake,
+                LaunchPermit::for_tests(),
+                1_000,
+            )
+            .unwrap_err();
             assert!(err.to_string().contains("ignored by git"), "{err}");
             assert!(load(&root).unwrap().experiments.is_empty());
             assert!(testigo.list(&root, None, None).unwrap().is_empty());
@@ -906,7 +922,15 @@ mod tests {
             .unwrap();
             let testigo = TestigoService::new();
             let idle = Fake { write: None };
-            let first = run_experiment_with(&testigo, &root, &idle, &idle, 1_000).unwrap();
+            let first = run_experiment_with(
+                &testigo,
+                &root,
+                &idle,
+                &idle,
+                LaunchPermit::for_tests(),
+                1_000,
+            )
+            .unwrap();
             assert_eq!(first.baseline.as_ref().unwrap().passed, 0);
             assert!(first.finished_ms.unwrap() > first.created_ms);
             // main moves: the harness now passes the task on its own.
@@ -924,7 +948,15 @@ mod tests {
             let editor = Fake {
                 write: Some(("CLAUDE.md", "# project\nnpm test\nand lint\n")),
             };
-            let second = run_experiment_with(&testigo, &root, &editor, &idle, 2_000).unwrap();
+            let second = run_experiment_with(
+                &testigo,
+                &root,
+                &editor,
+                &idle,
+                LaunchPermit::for_tests(),
+                2_000,
+            )
+            .unwrap();
             assert_eq!(second.baseline.as_ref().unwrap().passed, 1);
             assert_eq!(second.status, "reverted", "{:?}", second.stop_reason);
             assert_eq!(load(&root).unwrap().baselines.len(), 1);
@@ -952,7 +984,15 @@ mod tests {
                 )),
             };
             let solver = Fake { write: None };
-            let exp = run_experiment_with(&testigo, &root, &editor, &solver, 1_000).unwrap();
+            let exp = run_experiment_with(
+                &testigo,
+                &root,
+                &editor,
+                &solver,
+                LaunchPermit::for_tests(),
+                1_000,
+            )
+            .unwrap();
             assert_eq!(exp.status, "kept", "{:?}", exp.stop_reason);
             assert_eq!(exp.baseline.as_ref().unwrap().passed, 0);
             assert_eq!(exp.score.as_ref().unwrap().passed, 1);
@@ -987,8 +1027,15 @@ mod tests {
             assert!(kinds.contains(&"experiment_result".into()));
 
             // A second experiment names the first as its parent in the trailer.
-            let exp2 = run_experiment_with(&testigo, &root, &Fake { write: None }, &solver, 2_000)
-                .unwrap();
+            let exp2 = run_experiment_with(
+                &testigo,
+                &root,
+                &Fake { write: None },
+                &solver,
+                LaunchPermit::for_tests(),
+                2_000,
+            )
+            .unwrap();
             assert_eq!(exp2.parent_id.as_deref(), Some(exp.id.as_str()));
             assert_eq!(exp2.status, "reverted");
             assert_eq!(exp2.stop_reason.as_deref(), Some("no change proposed"));
@@ -1012,8 +1059,15 @@ mod tests {
             let editor = Fake {
                 write: Some(("evaluator.txt", "hacked\n")),
             };
-            let exp = run_experiment_with(&testigo, &root, &editor, &Fake { write: None }, 1_000)
-                .unwrap();
+            let exp = run_experiment_with(
+                &testigo,
+                &root,
+                &editor,
+                &Fake { write: None },
+                LaunchPermit::for_tests(),
+                1_000,
+            )
+            .unwrap();
             assert_eq!(exp.status, "rejected");
             assert_eq!(exp.outside_files, vec!["evaluator.txt"]);
             assert_eq!(summary(&root).unwrap().clean_runs, 0);

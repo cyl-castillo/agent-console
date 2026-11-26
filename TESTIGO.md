@@ -217,7 +217,12 @@ ProofEvent {
   en el Inbox (tier alto si hay archivos que ejecutan, medio si sólo instrucciones). Ambas respuestas
   se registran como `trust_decision {decision, digest, surface}` (actor `human`, `unbound`); el digest
   cambia → vuelve a preguntar (`changed`). Sin "trusted" el terminal no tipea el comando del agente:
-  espera la decisión (o, si fue "declined", deja el lanzamiento en manos del humano). Export IETF:
+  espera la decisión (o, si fue "declined", deja el lanzamiento en manos del humano). Los lanzamientos
+  sin terminal (salas, fan-out, revisor, scheduler, advisor, learning, asistente, harness lab) piden lo
+  mismo desde el backend: sin "trusted" sobre la carpeta del proyecto tal como está ahora no arrancan y
+  devuelven el motivo (`trust_service::launch_permit`; una sala vuelve a preguntar en cada turno). El
+  rechazo no es un evento nuevo: un job del scheduler lo deja como `job_run` con error y el asistente
+  como `assistant_turn` fallido; el resto no escribe nada porque nada corrió. Export IETF:
   decision / success (trusted) / denied (declined), fase pre_execution. Código: `trust_service.rs`,
   `commands/trust.rs`, `trustStore.ts`, `TrustDecision.tsx`, sección "workspace trust" en Permissions.
 - **Política de aprobaciones como código (COMPETENCIA-2026-10 F6, 2026-10-23)**: un archivo versionado

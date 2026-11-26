@@ -131,6 +131,9 @@ pub struct AskSpec<'a> {
 /// Run one turn. Blocking: call from `spawn_blocking`.
 pub fn ask(spec: &AskSpec) -> AppResult<AssistantReply> {
     let message = clean_message(spec.message)?;
+    // The engine starts in the project folder, with whatever the folder
+    // hooks into it: the assistant waits for the human's word like the rest.
+    let permit = crate::services::trust_service::launch_permit(spec.project_root)?;
     let project = spec.project_root.to_string_lossy();
     let mcp = spec.bridge.map(|bridge| McpAttach {
         bridge,
@@ -143,6 +146,7 @@ pub fn ask(spec: &AskSpec) -> AppResult<AssistantReply> {
     let prompt = build_prompt(&message, spec.resume.is_none(), tools_attached);
     let out = agent_run::run_attached(
         &RunSpec {
+            permit,
             engine: spec.engine,
             cwd: spec.project_root,
             prompt: &prompt,
