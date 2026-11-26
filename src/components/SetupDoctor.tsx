@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { usePreflightStore } from "../stores/preflightStore";
+import { useSessionStore } from "../stores/sessionStore";
 import { startLoginSession } from "../lib/loginSession";
 import { startInstallSession } from "../lib/installSession";
 import { useToastStore } from "../stores/toastStore";
@@ -27,7 +28,16 @@ const TOOL_ROLES: Record<string, string> = {
   git: "snapshots, diffs and proof",
 };
 
-function ToolRow({ tool }: { tool: PreflightTool }) {
+/// What the doctor needs from where it is shown. Its Install and Fix login
+/// buttons open a terminal, and terminals live inside a project: without one
+/// the buttons are replaced by the reason. `onTerminalOpened` lets a dialog
+/// that would cover the new terminal get out of the way.
+interface DoctorHost {
+  hasProject: boolean;
+  onTerminalOpened?: () => void;
+}
+
+function ToolRow({ tool, host }: { tool: PreflightTool; host: DoctorHost }) {
   const toast = useToastStore((s) => s.show);
   return (
     <li className={`doctor-row ${tool.found ? "ok" : "miss"}`}>
@@ -47,12 +57,18 @@ function ToolRow({ tool }: { tool: PreflightTool }) {
             {tool.fixCommand && (
               <div className="doctor-fix">
                 <code className="doctor-cmd">{tool.fixCommand}</code>
-                <button
-                  className="wb-cta wb-cta-sm"
-                  onClick={() => void startInstallSession(tool.name, tool.fixCommand as string)}
-                >
-                  Install
-                </button>
+                {host.hasProject && (
+                  <button
+                    className="wb-cta wb-cta-sm"
+                    onClick={() =>
+                      void startInstallSession(tool.name, tool.fixCommand as string).then(
+                        (opened) => opened && host.onTerminalOpened?.(),
+                      )
+                    }
+                  >
+                    Install
+                  </button>
+                )}
                 <button
                   className="wb-link"
                   onClick={() =>
@@ -65,6 +81,12 @@ function ToolRow({ tool }: { tool: PreflightTool }) {
                 </button>
               </div>
             )}
+            {tool.fixCommand && !host.hasProject && (
+              <div className="doctor-note">
+                Open a project folder to install from here (the terminal opens inside it), or copy
+                the command into your own terminal.
+              </div>
+            )}
             {tool.fixNote && <div className="doctor-note">{tool.fixNote}</div>}
           </>
         )}
@@ -73,7 +95,7 @@ function ToolRow({ tool }: { tool: PreflightTool }) {
   );
 }
 
-function AuthRow({ auth }: { auth: EngineAuth }) {
+function AuthRow({ auth, host }: { auth: EngineAuth; host: DoctorHost }) {
   const state = auth.loggedIn === null ? "unknown" : auth.loggedIn ? "ok" : "miss";
   return (
     <li className={`doctor-row ${state}`}>
@@ -92,11 +114,20 @@ function AuthRow({ auth }: { auth: EngineAuth }) {
               ? "not logged in"
               : "state unknown"}
         </div>
+        {state === "miss" && !host.hasProject && (
+          <div className="doctor-note">
+            Open a project folder to log in from here: the terminal opens inside it.
+          </div>
+        )}
       </div>
-      {state === "miss" && (
+      {state === "miss" && host.hasProject && (
         <button
           className="wb-cta wb-cta-sm"
-          onClick={() => startLoginSession(auth.engine as AgentKind)}
+          onClick={() =>
+            void startLoginSession(auth.engine as AgentKind).then(
+              (opened) => opened && host.onTerminalOpened?.(),
+            )
+          }
         >
           Fix login
         </button>
@@ -109,7 +140,9 @@ function AuthRow({ auth }: { auth: EngineAuth }) {
 /// official fix for anything missing. Fix commands are never run silently —
 /// they are surfaced for the user to copy (and, since F2, typed review-first
 /// into a visible terminal).
-export function SetupDoctor() {
+export function SetupDoctor({ onTerminalOpened }: { onTerminalOpened?: () => void }) {
+  const hasProject = useSessionStore((s) => !!s.project);
+  const host: DoctorHost = { hasProject, onTerminalOpened };
   const result = usePreflightStore((s) => s.result);
   const checking = usePreflightStore((s) => s.checking);
   const check = usePreflightStore((s) => s.check);
@@ -127,10 +160,10 @@ export function SetupDoctor() {
     <div className="doctor">
       <ul className="doctor-list">
         {result.tools.map((t) => (
-          <ToolRow key={t.name} tool={t} />
+          <ToolRow key={t.name} tool={t} host={host} />
         ))}
         {result.auth.map((a) => (
-          <AuthRow key={a.engine} auth={a} />
+          <AuthRow key={a.engine} auth={a} host={host} />
         ))}
       </ul>
       <button className="wb-link doctor-recheck" disabled={checking} onClick={() => void check()}>

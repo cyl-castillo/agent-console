@@ -34,6 +34,21 @@ describe("toasts", () => {
     expect(useToastStore.getState().toasts).toHaveLength(0);
   });
 
+  it("a toast asked to stay (timeout 0) stays until dismissed, whatever its tone", () => {
+    const back = useToastStore.getState().show("Setup is waiting", "info", {
+      action: { label: "Back", onClick: () => {} },
+      timeoutMs: 0,
+    });
+    useToastStore.getState().show("copied", "info", { timeoutMs: 500 });
+    useToastStore.getState().show("boom", "error", { timeoutMs: 500 });
+
+    vi.advanceTimersByTime(60 * 60 * 1000);
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual(["Setup is waiting"]);
+
+    useToastStore.getState().dismiss(back);
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+
   it("keeps only the 4 most recent toasts", () => {
     for (let i = 1; i <= 6; i++) useToastStore.getState().show(`t${i}`, "error");
     const msgs = useToastStore.getState().toasts.map((t) => t.message);

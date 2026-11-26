@@ -1193,3 +1193,92 @@ test("F2 Interrupt is taken at its word: the turn reads cut short and the queue 
     .toEqual(["\x1b", "After that, the docs", "\r"]);
   await expect(page.getByTestId("prompt-queue")).toHaveCount(0);
 });
+
+// The doctor's Install opens a terminal. A modal covers the terminal, and
+// closing the wizard to reach it marks the wizard done for good: the wizard
+// steps aside instead, and a toast that stays brings it back.
+const withMissing = (page: Page, missing: string, fixCommand: string) =>
+  page.evaluate(
+    ([name, cmd]) => {
+      const w = window as unknown as {
+        __fixtures: {
+          getFixture: (c: string) => unknown;
+          setFixture: (c: string, v: unknown) => void;
+        };
+      };
+      const base = w.__fixtures.getFixture("preflight_check") as {
+        tools: { name: string }[];
+        auth: { engine: string }[];
+      };
+      w.__fixtures.setFixture("preflight_check", {
+        tools: base.tools.map((t) =>
+          t.name === name
+            ? { name, found: false, version: null, fixCommand: cmd, fixNote: null }
+            : t,
+        ),
+        auth: base.auth.filter((a) => a.engine !== name),
+      });
+    },
+    [missing, fixCommand],
+  );
+
+test("the setup wizard steps aside for the install terminal and comes back", async ({ page }) => {
+  await openV2(page, "app-v2--sessions");
+  await withMissing(page, "claude", "curl -fsSL https://claude.ai/install.sh | bash");
+  await fire(page, "ac:open-wizard");
+  const wizard = page.getByRole("dialog", { name: "Welcome" });
+  await wizard.getByRole("button", { name: /Claude Code/ }).click();
+  await expect(wizard).toContainText("Step 3 of 4");
+
+  await wizard.getByRole("button", { name: "Install" }).click();
+  // Out of the way, with the installer typed in a session that is in front.
+  await expect(wizard).toBeHidden();
+  await expect(page.getByTestId("sessions-list")).toContainText("install claude");
+  const back = page.getByRole("button", { name: "Back to setup" });
+  await expect(back).toBeVisible();
+  // It stays: an install outlasts a transient toast.
+  await page.waitForTimeout(3500);
+  await expect(back).toBeVisible();
+
+  await back.click();
+  // Same step, same engine: nothing was finished by stepping aside.
+  await expect(wizard).toContainText("Step 3 of 4");
+  await expect(back).toHaveCount(0);
+
+  // The install finished: the re-check finds the engine and the wizard moves
+  // on to the login step. (Stories run with the guide already seen, so that
+  // the guide stays shut on a first run is covered by the unit test.)
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __fixtures: {
+        getFixture: (c: string) => unknown;
+        setFixture: (c: string, v: unknown) => void;
+      };
+    };
+    const now = w.__fixtures.getFixture("preflight_check") as {
+      tools: { name: string }[];
+      auth: unknown[];
+    };
+    w.__fixtures.setFixture("preflight_check", {
+      tools: now.tools.map((t) =>
+        t.name === "claude"
+          ? { name: "claude", found: true, version: "2.1.296", fixCommand: null, fixNote: null }
+          : t,
+      ),
+      auth: [...now.auth, { engine: "claude", loggedIn: false, detail: null }],
+    });
+  });
+  await wizard.getByRole("button", { name: /re-check/ }).click();
+  await expect(wizard).toContainText("Step 4 of 4");
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+});
+
+test("the guide closes when its doctor opens an install terminal", async ({ page }) => {
+  await openV2(page, "app-v2--sessions");
+  await withMissing(page, "codex", "npm install -g @openai/codex");
+  await fire(page, "ac:open-getting-started");
+  const guide = page.getByRole("dialog");
+  await guide.getByRole("button", { name: "Install" }).click();
+  await expect(guide).toBeHidden();
+  await expect(page.getByTestId("sessions-list")).toContainText("install codex");
+});

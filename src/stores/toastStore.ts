@@ -13,7 +13,8 @@ export interface Toast {
 interface ToastState {
   toasts: Toast[];
   /// Returns the toast id. `action` adds a trailing button ("Undo");
-  /// `timeoutMs` overrides the transient delay.
+  /// `timeoutMs` overrides the transient delay, and 0 keeps the toast until
+  /// it is dismissed (a way back that must not vanish while it is needed).
   show: (
     message: string,
     tone?: ToastTone,
@@ -37,7 +38,8 @@ export const useToastStore = create<ToastState>((set, get) => ({
         : undefined);
     const id = showToast(message, tone, action ? { action } : undefined, opts?.timeoutMs);
     set((s) => ({ toasts: [...s.toasts, { id, message, tone }].slice(-4) }));
-    if (tone !== "error" || opts?.timeoutMs) {
+    const stays = opts?.timeoutMs === 0 || (tone === "error" && opts?.timeoutMs === undefined);
+    if (!stays) {
       window.setTimeout(() => get().dismiss(id), opts?.timeoutMs ?? 2600);
     }
     return id;
