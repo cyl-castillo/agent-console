@@ -981,6 +981,66 @@ fn decision_output(decision: Option<&Value>) -> String {
     .to_string()
 }
 
+/// Firewall guard (PreToolUse, installed from managed settings): what the
+/// hook says about one tool request, before the tool runs and whether or not
+/// the console is open.
+///
+/// It never allows. A high-tier request (irreversible, external, secrets,
+/// hooks and shell profiles, outside the project) gets `ask`, which puts it
+/// in front of a person even where the session would not have asked: an
+/// accept-edits or auto mode, an "allow for this session" given earlier.
+/// Everything else gets no output, so the normal permission flow — and the
+/// approval bridge behind it — decides. `Err` is input the guard cannot
+/// classify; the caller exits non-zero and, under `onFailure: "block"`,
+/// the tool does not run.
+fn guard_output(input: &Value) -> Result<Option<String>, &'static str> {
+    let tool = input
+        .get("tool_name")
+        .and_then(|v| v.as_str())
+        .filter(|t| !t.is_empty())
+        .ok_or("no tool_name in the hook input")?;
+    let empty = json!({});
+    let tool_input = input.get("tool_input").unwrap_or(&empty);
+    let cwd = input.get("cwd").and_then(|v| v.as_str());
+    let (tier, label, _) = risk_tier::tier_for(tool, tool_input, cwd);
+    if tier != "high" {
+        return Ok(None);
+    }
+    Ok(Some(
+        json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": format!("Agent Console firewall: {label}"),
+            }
+        })
+        .to_string(),
+    ))
+}
+
+/// `guard` mode. Reads the hook input itself rather than through
+/// `read_stdin_json`: that one turns unreadable input into `{}`, and a guard
+/// that classifies nothing as "fine" would fail open.
+fn run_guard() {
+    let mut raw = String::new();
+    let parsed = std::io::stdin()
+        .read_to_string(&mut raw)
+        .ok()
+        .and_then(|_| serde_json::from_str::<Value>(&raw).ok());
+    let verdict = match parsed {
+        Some(input) => guard_output(&input),
+        None => Err("the hook input is not JSON"),
+    };
+    match verdict {
+        Ok(Some(out)) => println!("{out}"),
+        Ok(None) => {}
+        Err(why) => {
+            eprintln!("agent-console firewall guard: {why}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Shared half of both approval bridges: write the request where the app's
 /// watcher sees it, poll for the answer until the deadline, clean up. None ⇒
 /// no decision arrived in time.
@@ -1860,6 +1920,12 @@ fn main() {
     // it stands in for the user's own status line command and chains to it.
     if mode == "statusline" {
         run_statusline();
+        return;
+    }
+    // The firewall guard also runs outside the console: it is installed
+    // machine-wide and classifies the request by itself.
+    if mode == "guard" {
+        run_guard();
         return;
     }
     // The MCP server is addressed by argv, not by a session dir: the app
@@ -2976,5 +3042,54 @@ mod tests {
         let bad: Value = serde_json::from_str(&bad).unwrap();
         assert_eq!(bad["result"]["isError"], true);
         assert_eq!(McpServer::Console.route(), "/console");
+    }
+
+    #[test]
+    fn the_guard_asks_on_high_tier_and_stays_silent_otherwise() {
+        let ask = |v: Value| {
+            let out = guard_output(&v).unwrap().expect("a decision");
+            let out: Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(out["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+            assert_eq!(out["hookSpecificOutput"]["permissionDecision"], "ask");
+            out["hookSpecificOutput"]["permissionDecisionReason"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let bash = |c: &str| json!({ "tool_name": "Bash", "tool_input": { "command": c }, "cwd": "/home/u/proj" });
+        assert!(ask(bash("rm -rf /")).contains("Irreversible"));
+        assert!(ask(bash("git push --force origin main")).starts_with("Agent Console firewall: "));
+        // A read that Claude Code would not ask about.
+        ask(
+            json!({ "tool_name": "Read", "tool_input": { "file_path": "/home/u/.ssh/id_ed25519" } }),
+        );
+        // An edit that an accept-edits session would wave through.
+        ask(json!({
+            "tool_name": "Edit",
+            "tool_input": { "file_path": "/home/u/proj/.git/hooks/pre-commit" },
+            "cwd": "/home/u/proj",
+            "permission_mode": "acceptEdits",
+        }));
+        ask(
+            json!({ "tool_name": "Write", "tool_input": { "file_path": "/home/u/.bashrc" }, "cwd": "/home/u/proj" }),
+        );
+
+        // Never an allow, never a deny: the rest is the normal flow's to decide.
+        for quiet in [
+            bash("git status"),
+            bash("npm test"),
+            json!({ "tool_name": "Edit", "tool_input": { "file_path": "/home/u/proj/src/a.rs" }, "cwd": "/home/u/proj" }),
+            json!({ "tool_name": "Read", "tool_input": { "file_path": "src/main.rs" } }),
+            json!({ "tool_name": "mcp__jira__get_issue" }),
+        ] {
+            assert_eq!(guard_output(&quiet).unwrap(), None, "{quiet}");
+        }
+    }
+
+    #[test]
+    fn the_guard_refuses_input_it_cannot_classify() {
+        assert!(guard_output(&json!({})).is_err());
+        assert!(guard_output(&json!({ "tool_name": "" })).is_err());
+        assert!(guard_output(&json!({ "tool_input": { "command": "ls" } })).is_err());
     }
 }

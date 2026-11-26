@@ -206,6 +206,7 @@ pub fn run() {
             commands::hooks::hooks_start_watcher,
             commands::hooks::sandbox_status,
             commands::hooks::sandbox_enable,
+            commands::hooks::firewall_status,
             commands::hooks::approval_respond,
             commands::permissions::permissions_snapshot,
             commands::permissions::permissions_add,
