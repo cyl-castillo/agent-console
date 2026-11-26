@@ -2249,6 +2249,7 @@ fn handle_event(v: &Value, app: &AppHandle) {
             let agent_id = str_field(v, "agentId");
             let command = str_field(v, "command");
             let output_sha256 = str_field(v, "outputSha256");
+            let command_sha256 = str_field(v, "commandSha256");
             let exit_code_via = str_field(v, "exitCodeVia");
             let excerpt_tail = str_field(v, "excerptTail");
             let observed_via = str_field(v, "observedVia");
@@ -2266,6 +2267,9 @@ fn handle_event(v: &Value, app: &AppHandle) {
                     tool_use_id: tool_use_id.as_deref(),
                     agent_id: agent_id.as_deref(),
                     command: command.as_deref(),
+                    command_truncated: v.get("commandTruncated").and_then(|t| t.as_bool())
+                        == Some(true),
+                    command_sha256: command_sha256.as_deref(),
                     output_sha256: output_sha256.as_deref(),
                     // PostToolUseFailure, or a result whose stated exit was
                     // non-zero (Codex has no failure event: the bridge flags it).

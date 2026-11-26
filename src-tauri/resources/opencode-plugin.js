@@ -93,9 +93,19 @@ export const AgentConsoleWitness = async ({ directory }) => {
       if (t !== undefined) e.excerptTail = t;
       if (input?.callID) e.toolUseId = input.callID;
       const command = input?.args?.command;
-      if (typeof command === "string" && command) e.command = cap(command, COMMAND_MAX)[0];
+      // Same rule as the hook-bridge: a cut command says so and carries the
+      // digest of the whole line, so a prefix never reads as all of it.
+      const setCommand = (line) => {
+        const [shown, cut] = cap(line, COMMAND_MAX);
+        e.command = shown;
+        if (cut) {
+          e.commandTruncated = true;
+          e.commandSha256 = sha256(line);
+        }
+      };
+      if (typeof command === "string" && command) setCommand(command);
       else if (Array.isArray(command) && command.length) {
-        e.command = cap(command.join(" "), COMMAND_MAX)[0];
+        setCommand(command.join(" "));
         e.commandArgv = command.filter((a) => typeof a === "string");
       }
       // The bash tool reports its exit code in metadata.exit (OpenCode 1.19).
@@ -165,7 +175,13 @@ export const AgentConsoleWitness = async ({ directory }) => {
             engine: "opencode",
             source: "plugin",
             costUsd: Math.round(sum.cost * 1e6) / 1e6,
-            tokens: { input: sum.input, output: sum.output, reasoning: sum.reasoning, cacheRead: sum.cacheRead, cacheWrite: sum.cacheWrite },
+            tokens: {
+              input: sum.input,
+              output: sum.output,
+              reasoning: sum.reasoning,
+              cacheRead: sum.cacheRead,
+              cacheWrite: sum.cacheWrite,
+            },
             ...(lastModel ? { model: lastModel } : {}),
           };
         }
