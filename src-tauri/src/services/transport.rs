@@ -990,7 +990,7 @@ mod tests {
             Ok((
                 vec![
                     decision_from(
-                        &json!({ "id": "a-low", "ts": 1, "tool": "Bash", "input": {"command": "npm test"}, "cwd": "/p", "termId": "t1" }),
+                        &json!({ "id": "a-low", "ts": 1, "tool": "Bash", "input": {"command": "git status"}, "cwd": "/p", "termId": "t1" }),
                         Some("auth".into()),
                         &[],
                     ),

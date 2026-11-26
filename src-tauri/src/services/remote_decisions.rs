@@ -12,9 +12,6 @@
 //! approved from afar — `deny` is always possible, `allow` needs the
 //! keyboard. Per-device scope narrows further (`ReadOnly` may only look).
 
-use std::sync::LazyLock;
-
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -72,308 +69,7 @@ pub struct RemoteDecision {
     pub evidence: Evidence,
 }
 
-static DANGEROUS: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
-    [
-        // Remote code execution in every spelling: `curl … | sh`, `| zsh`,
-        // `sh <(curl …)`, `bash -c "$(curl …)"`, `source <(wget …)`.
-        (
-            r"(?i)\b(curl|wget)\b[^|#\n]*\|\s*(sudo\s+)?(ba|z|da|k|fi|c|tc)?sh\b",
-            "downloads and executes remote code",
-        ),
-        (
-            r"(?i)\b(ba|z|da|k)?sh\b[^\n]*\$\(\s*(curl|wget)\b",
-            "downloads and executes remote code",
-        ),
-        (
-            r"(?i)\b(source|\.|(ba|z|da|k)?sh)\s+<\(\s*(curl|wget)\b",
-            "downloads and executes remote code",
-        ),
-        (
-            r"(?i)>\s*/dev/(sda|hda|nvme|disk)\d*",
-            "raw block device write",
-        ),
-        (r"(?i)\bdd\s+if=", "raw block device write"),
-        (r"(?i)\bmkfs\b", "formats a filesystem"),
-        // Deleting with any flag spelling, or through find/xargs.
-        (
-            r"(?i)\brm\b(\s+\S+)*\s+(-[a-z]*[rf]|--recursive|--force|--no-preserve-root)\b",
-            "removes files recursively or by force",
-        ),
-        (
-            r"(?i)\bfind\b[^\n]*\s-(exec|execdir|ok|okdir)\s+(sudo\s+)?rm\b",
-            "removes matched files",
-        ),
-        (r"(?i)\bxargs\b[^\n]*\brm\b", "removes files through xargs"),
-        // Rewriting remote history, with `-c k=v` / `-C dir` allowed between.
-        (
-            r"(?i)\bgit\b(\s+-[cC]\s*\S+)*\s+push\b[^\n]*(--force\b|--force-with-lease\b|\s-f\b|\s\+\S)",
-            "force-push rewrites remote history",
-        ),
-        // Publishing and infrastructure.
-        (r"(?i)\b(npm|pnpm|yarn|cargo|gem|twine)\s+publish\b", "publishes a package"),
-        (
-            r"(?i)\bterraform\s+(apply|destroy)\b",
-            "changes infrastructure",
-        ),
-        (
-            r"(?i)\bkubectl\s+(apply|delete|drain|replace)\b",
-            "changes Kubernetes resources",
-        ),
-        (
-            r"(?i)\b(aws|gcloud|az)\b[^\n]*\b(rm|delete|terminate|destroy)\b",
-            "destroys cloud resources",
-        ),
-        // Writing where the next prompt or the next login runs code.
-        (
-            r"(?i)>>?\s*~?/?[^\s]*(\.ssh/|\.claude/|\.bashrc|\.zshrc|\.profile|\.bash_profile|\.zprofile|\.git/hooks/|/etc/)",
-            "writes where code runs on the next prompt or login",
-        ),
-        (
-            r"(?i)\b(tee|cp|mv|install)\b[^\n]*\s~?/?[^\s]*(\.ssh/|\.claude/|\.bashrc|\.zshrc|\.profile|\.git/hooks/|/etc/)",
-            "writes where code runs on the next prompt or login",
-        ),
-    ]
-    .into_iter()
-    .map(|(re, why)| (Regex::new(re).expect("static regex"), why))
-    .collect()
-});
-
-static CAUTION: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
-    [
-        (r"(?i)\bgit\b(\s+-[cC]\s*\S+)*\s+push\b", "pushes to remote"),
-        (
-            r"(?i)\bgit\s+reset\s+--hard\b",
-            "discards uncommitted changes",
-        ),
-        (r"(?i)\bgit\s+rebase\b", "rewrites commit history"),
-        (r"(?i)\bgit\s+clean\s+-[a-z]*f", "removes untracked files"),
-        (r"(?i)\bgit\s+restore\b", "discards working-tree changes"),
-        (
-            r"(?i)\bgit\s+checkout\s+(--\s|\.(\s|$))",
-            "discards working-tree changes",
-        ),
-        (r"\bgit\s+branch\s+-[a-z]*D", "force-deletes a branch"),
-        (r"(?i)\btruncate\b", "truncates a file"),
-        (r"(?i)\bfind\b[^|]*\s-delete\b", "deletes matched files"),
-        (r"(?i)\bsudo\b", "elevated privileges"),
-        (r"(?i)\bchmod\b", "changes file permissions"),
-        (
-            r"(?i)\bapt(-get)?\s+(install|remove|purge)\b",
-            "modifies system packages",
-        ),
-        (
-            r"(?i)\bnpm\s+(install|uninstall)\s+-g\b",
-            "modifies global packages",
-        ),
-        (r"(?i)\bpip\s+install\b", "installs Python package"),
-        (r"(?i)\byarn\s+global\b", "modifies global packages"),
-        (
-            r"(?i)\bdocker\s+(rm|rmi|system\s+prune)\b",
-            "destroys containers or images",
-        ),
-    ]
-    .into_iter()
-    .map(|(re, why)| (Regex::new(re).expect("static regex"), why))
-    .collect()
-});
-
-static HIGH_REASON: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)remote|delete|discards|destroys|removes|elevated|truncates|rewrites")
-        .expect("static regex")
-});
-
-/// The read-only allowlist: one simple command whose head is here, followed
-/// by whitespace or the end (`pwd=1 sh ./x.sh` is a shell with an assignment
-/// in front, not `pwd`). Code runners (`node -e`, `python -c`) are not: they
-/// are shells with another syntax. Mirrors `lib/decisions.ts`.
-static READ_ONLY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"^\s*(ls|pwd|cat|head|tail|wc|echo|which|type|printenv|date|whoami|stat|file|du|df|tree|rg|grep|egrep|fgrep|git\s+(status|log|diff|show|rev-parse|describe|blame|stash\s+list)|git\s+remote\s+-v|npm\s+(test|run\s+test|run\s+lint|run\s+build|ls|outdated|view)|npx\s+(tsc|vitest|eslint|prettier\s+--check|playwright\s+test)|cargo\s+(check|test|clippy|fmt\s+--check|tree|metadata)|make\s+test|pytest|go\s+(test|vet|build))(?:\s|$)",
-    )
-    .expect("static regex")
-});
-
-/// `find` unless it deletes, executes or writes; `git branch` only when it
-/// lists (no flag that deletes, moves, copies or sets upstream, and no bare
-/// name, which creates a branch). Spelled out as separate expressions because
-/// the regex crate has no lookahead; `lib/decisions.ts` does the same.
-static FIND_HEAD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*find(?:\s|$)").expect("static"));
-static FIND_ACTS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s-(delete|exec|execdir|ok|okdir|fprint0?|fprintf|fls)\b").expect("static")
-});
-static GIT_BRANCH_HEAD: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*git\s+branch(?:\s|$)").expect("static"));
-static GIT_BRANCH_WRITES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"\s(?:-[a-zA-Z]*[dDfFmMcCu][a-zA-Z]*|--(?:delete|force|move|copy|set-upstream-to(?:=\S*)?|unset-upstream|edit-description|track|no-track))(?:\s|$)",
-    )
-    .expect("static")
-});
-static GIT_BRANCH_LISTS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"\s(?:--list|--contains|--no-contains|--merged|--no-merged|--points-at|--show-current|-[a-zA-Z]*l[a-zA-Z]*)(?:\s|=|$)",
-    )
-    .expect("static")
-});
-/// A non-option argument after the flags: a branch to create unless a
-/// listing flag gives it another meaning.
-static GIT_BRANCH_POSITIONAL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*git\s+branch(?:\s+-\S+)*\s+[^-\s]").expect("static"));
-/// Anything that chains, redirects, substitutes or backgrounds is not "one
-/// read-only command", whatever its head says.
-static COMPOUND: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[;&>`\n]|\$\(|<<|<\(|\|\|").expect("static"));
-static XARGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bxargs\b").expect("static"));
-/// Options that turn a reader into a runner or a writer: `rg --pre <cmd>`
-/// executes it per file, `git diff --output=<file>` writes one, `--ext-diff`
-/// runs the configured driver, `tree -o` writes. (`env` and `less` left the
-/// allowlist for the same reason: `env sh x.sh` is a shell.) Mirrors
-/// `READER_ESCAPES` in `lib/decisions.ts`.
-static READER_ESCAPES: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"^\s*rg\b.*\s--(pre|pre-glob|hostname-bin)\b|^\s*git\b.*\s--(output|ext-diff|textconv)\b|^\s*git\b.*\s-O\S|^\s*tree\b.*\s-[a-zA-Z]*o\b|^\s*file\b.*\s-[a-zA-Z]*C",
-    )
-    .expect("static")
-});
-
-fn read_only_head(segment: &str) -> bool {
-    if READER_ESCAPES.is_match(segment) {
-        return false;
-    }
-    READ_ONLY.is_match(segment)
-        || (FIND_HEAD.is_match(segment) && !FIND_ACTS.is_match(segment))
-        || (GIT_BRANCH_HEAD.is_match(segment)
-            && !GIT_BRANCH_WRITES.is_match(segment)
-            && (!GIT_BRANCH_POSITIONAL.is_match(segment) || GIT_BRANCH_LISTS.is_match(segment)))
-}
-
-/// Read-only = no compound syntax, no xargs, and every pipe segment's head
-/// in the allowlist (`git log | head` is fine; `ls | xargs rm` is not).
-fn read_only_bash(cmd: &str) -> bool {
-    if COMPOUND.is_match(cmd) || XARGS.is_match(cmd) {
-        return false;
-    }
-    let mut segments = cmd.split('|').peekable();
-    segments.peek().is_some() && segments.all(|seg| read_only_head(seg.trim()))
-}
-
-/// Paths where a write runs code later (hooks, shells, keys) or holds
-/// secrets — high whatever the tool.
-static SENSITIVE_PATH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"(?i)(^|/)(\.ssh|\.claude|\.codex|\.config/opencode|\.git/hooks|\.git/config|\.gnupg|\.aws|\.kube|\.docker|\.npmrc|\.netrc|\.bashrc|\.zshrc|\.profile|\.bash_profile|\.zprofile|\.env(\.[^/]+)?)(/|$)|^/etc/|\.(pem|key|p12|pfx)$",
-    )
-    .expect("static regex")
-});
-
-/// Tool servers whose operation name says it destroys, sends or publishes.
-static MCP_DESTRUCTIVE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(delete|remove|destroy|drop|purge|send|publish|deploy|merge|push|force)")
-        .expect("static regex")
-});
-
-/// The engines name the shell differently (Claude `Bash`, Codex
-/// `shell`/`local_shell`, OpenCode `bash`); the command may be an argv
-/// array. One shape before classifying.
-pub fn normalize_tool(tool: &str) -> &str {
-    match tool {
-        "Bash" | "bash" | "shell" | "local_shell" | "LocalShell" | "commandExecution"
-        | "exec_command" => "Bash",
-        "Edit" | "edit" => "Edit",
-        "Write" | "write" => "Write",
-        "MultiEdit" | "multiedit" => "MultiEdit",
-        "NotebookEdit" => "NotebookEdit",
-        "Read" | "read" => "Read",
-        other => other,
-    }
-}
-
-/// The command string of a shell request, whatever its shape.
-pub fn command_of(input: &Value) -> String {
-    match input.get("command").or_else(|| input.get("cmd")) {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Array(parts)) => parts
-            .iter()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>()
-            .join(" "),
-        _ => String::new(),
-    }
-}
-
-/// The tier the desktop computes for a request before it leaves the machine.
-/// Mirrors `lib/decisions.ts`: for the shell the same patterns and allowlist;
-/// for file tools a sensitive or out-of-project path is high; tool servers
-/// are high when their operation's name says it destroys, sends or
-/// publishes, medium otherwise. Only `low` is ever approvable from a device.
-pub fn tier_for(
-    tool: &str,
-    input: &Value,
-    cwd: Option<&str>,
-) -> (&'static str, &'static str, String) {
-    let tool = normalize_tool(tool);
-    if tool == "Bash" {
-        let cmd = command_of(input);
-        if let Some((_, why)) = DANGEROUS.iter().find(|(re, _)| re.is_match(&cmd)) {
-            return ("high", "Irreversible", why.to_string());
-        }
-        if let Some((_, why)) = CAUTION.iter().find(|(re, _)| re.is_match(&cmd)) {
-            return if HIGH_REASON.is_match(why) {
-                ("high", "Irreversible or external", why.to_string())
-            } else {
-                ("medium", "Changes the machine", why.to_string())
-            };
-        }
-        if read_only_bash(&cmd) {
-            return ("low", "Read-only", "inspects, builds or tests".into());
-        }
-        return (
-            "medium",
-            "Runs a command",
-            "not in the read-only allowlist".into(),
-        );
-    }
-    match tool {
-        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => {
-            let path = ["file_path", "path", "notebook_path"]
-                .iter()
-                .find_map(|k| input.get(k).and_then(Value::as_str))
-                .unwrap_or("");
-            if SENSITIVE_PATH.is_match(path) {
-                return (
-                    "high",
-                    "Touches secrets, hooks or a shell profile",
-                    path.to_string(),
-                );
-            }
-            if let Some(root) = cwd.filter(|c| !c.is_empty()) {
-                let root = root.trim_end_matches('/');
-                if path.starts_with('/') && path != root && !path.starts_with(&format!("{root}/")) {
-                    return ("high", "Writes outside the project", path.to_string());
-                }
-            }
-            (
-                "medium",
-                "Edits a file",
-                "the diff is not on the device".into(),
-            )
-        }
-        "WebFetch" | "WebSearch" => ("medium", "Reaches a host", "outside the machine".into()),
-        t if t.starts_with("mcp__") => {
-            if MCP_DESTRUCTIVE.is_match(t) {
-                (
-                    "high",
-                    "Tool server: destructive or external",
-                    t.to_string(),
-                )
-            } else {
-                ("medium", "Calls a tool server", t.to_string())
-            }
-        }
-        _ => ("medium", "Uses a tool", format!("{tool} is not classified")),
-    }
-}
+pub use risk_tier::{command_of, normalize_tool, tier_for};
 
 fn cap(s: &str) -> String {
     crate::services::text::cap_chars(s, SUMMARY_CAP)
@@ -1058,7 +754,7 @@ mod tests {
     fn tiers_mirror_the_console_rules() {
         assert_eq!(
             tier_for("Bash", &json!({"command": "npm test"}), None).0,
-            "low"
+            "medium"
         );
         assert_eq!(
             tier_for("Bash", &json!({"command": "git status"}), None).0,
@@ -1130,7 +826,6 @@ mod tests {
         // Still low: one read-only command, or a pipe of read-only commands.
         for c in [
             "git status",
-            "npm test",
             "git log --oneline | head -20",
             "grep -rn foo src | wc -l",
             "find . -name '*.rs'",
@@ -1282,9 +977,82 @@ mod tests {
         );
     }
 
+    /// Running the tests is running a program the agent can edit, and
+    /// reading a credential hands it to the model: neither is "read-only",
+    /// so neither is approvable from a device. Mirrored in decisions.test.ts.
+    #[test]
+    fn runners_and_secret_reads_are_never_low() {
+        let tier = |c: &str| tier_for("Bash", &json!({ "command": c }), Some("/home/u/proj"));
+        for c in [
+            "npm test",
+            "npm run lint",
+            "npm run build",
+            "npx eslint .",
+            "npx tsc --noEmit",
+            "cargo test",
+            "cargo check",
+            "cargo clippy",
+            "make test",
+            "pytest -q",
+            "go test ./...",
+            "go vet -vettool=./x ./...",
+        ] {
+            let (t, label, _) = tier(c);
+            assert_eq!(t, "medium", "{c}");
+            assert_eq!(label, "Runs project code", "{c}");
+        }
+        assert_eq!(tier("printenv").0, "medium");
+        for c in [
+            "cat ~/.ssh/id_rsa",
+            "cat .env",
+            "head -3 config/.env.production",
+            "grep -r TOKEN ~/.aws/credentials",
+            "cat \"$HOME/.netrc\"",
+            "base64 ~/.ssh/id_ed25519",
+            "git diff --no-index /dev/null server.pem",
+            "tail --lines=5 --file=.env",
+        ] {
+            let (t, label, _) = tier(c);
+            assert_eq!(t, "high", "{c}");
+            assert_eq!(label, "Reads or touches secrets", "{c}");
+        }
+        // Not secrets: templates, and directories that are only risky to write.
+        for c in [
+            "cat .env.example",
+            "ls .claude/skills",
+            "cat /etc/os-release",
+            "cat README.md",
+        ] {
+            assert_eq!(tier(c).0, "low", "{c}");
+        }
+        // Still inspection: these do not run the project.
+        for c in ["cargo tree", "cargo fmt --check", "npm ls", "npm outdated"] {
+            assert_eq!(tier(c).0, "low", "{c}");
+        }
+        // The file tools read secrets too.
+        assert_eq!(
+            tier_for("Read", &json!({"file_path": "/home/u/.ssh/id_rsa"}), None).0,
+            "high"
+        );
+        assert_eq!(
+            tier_for("Read", &json!({"file_path": "/home/u/proj/.env"}), None).0,
+            "high"
+        );
+        assert_eq!(
+            tier_for("Grep", &json!({"pattern": "x", "path": ".aws"}), None).0,
+            "high"
+        );
+        assert_eq!(
+            tier_for("Read", &json!({"file_path": "src/main.rs"}), None).0,
+            "medium"
+        );
+        // A destructive command keeps its own reason.
+        assert_eq!(tier("rm -rf ~/.ssh").1, "Irreversible");
+    }
+
     #[test]
     fn gate_never_lets_a_device_allow_a_dangerous_action() {
-        let low = item("Bash", json!({"command": "npm test"}));
+        let low = item("Bash", json!({"command": "git status"}));
         let high = item("Bash", json!({"command": "rm -rf /tmp/x"}));
         assert!(gate(DeviceScope::ReadApprovals, &low, "allow").is_ok());
         assert!(gate(DeviceScope::ReadApprovals, &low, "deny").is_ok());
@@ -1338,7 +1106,7 @@ mod tests {
         // else (the id names a file).
         let a_low = uuid::Uuid::new_v4().to_string();
         let a_high = uuid::Uuid::new_v4().to_string();
-        write(&a_low, 10, "npm test");
+        write(&a_low, 10, "git status");
         write(&a_high, 20, "rm -rf dist");
         let core = BridgeCore {
             hooks: &hooks,
