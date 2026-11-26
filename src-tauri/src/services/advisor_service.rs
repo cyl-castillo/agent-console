@@ -36,6 +36,9 @@ pub fn analyze(project_root: &Path) -> AppResult<AnalysisResult> {
     if !project_root.is_dir() {
         return Err(AppError::NotADirectory(project_root.display().to_string()));
     }
+    // Plan mode stops the agent from changing anything; it does not stop the
+    // folder's hooks and MCP servers from starting with it.
+    let permit = crate::services::trust_service::launch_permit(project_root)?;
 
     let context = gather_context(project_root)?;
     let prompt = build_prompt(&context);
@@ -47,6 +50,7 @@ pub fn analyze(project_root: &Path) -> AppResult<AnalysisResult> {
     // Plan mode, the user's default model, idle watchdog, unknown-model
     // retry — the unattended-run contract lives in agent_run.
     let run = crate::services::agent_run::run(&crate::services::agent_run::RunSpec {
+        permit: &permit,
         engine: crate::services::engine_runner::Engine::Claude,
         cwd: project_root,
         prompt: &prompt,

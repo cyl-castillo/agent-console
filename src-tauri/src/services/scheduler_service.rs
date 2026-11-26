@@ -848,7 +848,20 @@ fn step_should_run(when: &Option<StepCondition>, prev: Option<(&str, &str)>) -> 
 fn run_claude(project_root: &Path, prompt: &str) -> ActionOutcome {
     use crate::services::agent_run::{self, RunSpec};
     use crate::services::engine_runner::{Engine, ToolPolicy};
+    // Nobody is watching a scheduled run: a folder that is not trusted as it
+    // is now fails the run with the reason, in the history and the ledger.
+    let permit = match crate::services::trust_service::launch_permit(project_root) {
+        Ok(p) => p,
+        Err(e) => {
+            return ActionOutcome {
+                status: "error".into(),
+                output: e.to_string(),
+                ..Default::default()
+            }
+        }
+    };
     match agent_run::run(&RunSpec {
+        permit: &permit,
         engine: Engine::Claude,
         cwd: project_root,
         prompt,
@@ -1009,6 +1022,34 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Nobody is at the screen when a job fires: on a folder that is not
+    /// trusted the run fails with the reason and starts nothing, a prompt
+    /// and a skill alike (a pipeline's steps go through the same door).
+    #[test]
+    fn a_job_does_not_start_an_agent_in_a_folder_nobody_trusted() {
+        let _env = crate::test_support::lock_env();
+        let base = std::env::temp_dir().join(format!("ac-sched-trust-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let root = base.join("proj");
+        fs::create_dir_all(&root).unwrap();
+        for action in [
+            Action::Prompt {
+                text: "summarise the week".into(),
+            },
+            Action::Skill {
+                name: "release-watch".into(),
+                args: None,
+            },
+        ] {
+            let out = run_action(&root, &action);
+            assert_eq!(out.status, "error");
+            assert!(out.output.contains("not trusted yet"), "{}", out.output);
+            assert_eq!((out.tokens, out.session_id), (0, None));
+        }
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn next_daily_wraps_to_tomorrow_when_past() {

@@ -25,6 +25,7 @@ use crate::services::check_commands::exit_speaks_for_checks;
 use crate::services::engine_runner::{Engine, EngineRunner, ToolPolicy};
 use crate::services::roundtable_service::Participant;
 use crate::services::testigo_service::{check_kind, is_check_command};
+use crate::services::trust_service::LaunchPermit;
 use crate::services::verification_rules::{self, TurnFacts};
 use crate::services::{proc, worktree_service};
 
@@ -424,6 +425,7 @@ impl FanOutService {
     pub fn start(
         &self,
         repo: &Path,
+        permit: LaunchPermit,
         config: FanOutConfig,
         runner_for: fn(Engine) -> &'static dyn EngineRunner,
         notify: Notify,
@@ -525,6 +527,7 @@ impl FanOutService {
             };
             let id = id.clone();
             let disk = self.disk.clone();
+            let permit = permit.clone();
             std::thread::spawn(move || {
                 // Resolved on the thread: the runners are `'static` but not
                 // `Sync`, so the function pointer travels, not the reference.
@@ -548,6 +551,7 @@ impl FanOutService {
                 };
                 let outcome = agent_run::run_with_runner(
                     &RunSpec {
+                        permit: &permit,
                         engine: p.engine,
                         cwd: &wt,
                         prompt: &prompt,
@@ -1011,6 +1015,7 @@ mod tests {
         let id = svc
             .start(
                 &repo,
+                LaunchPermit::for_tests(),
                 FanOutConfig {
                     problem: "add a greeting file".into(),
                     participants: vec![participant("p1", "opus"), participant("p2", "sonnet")],
@@ -1082,6 +1087,7 @@ mod tests {
         assert!(svc
             .start(
                 &repo,
+                LaunchPermit::for_tests(),
                 FanOutConfig {
                     problem: "x".into(),
                     participants: vec![bad_id, participant("p2", "sonnet")],
@@ -1093,6 +1099,7 @@ mod tests {
         assert!(svc
             .start(
                 &repo,
+                LaunchPermit::for_tests(),
                 FanOutConfig {
                     problem: "x".into(),
                     participants: vec![
@@ -1107,6 +1114,7 @@ mod tests {
         assert!(
             svc.start(
                 &repo,
+                LaunchPermit::for_tests(),
                 FanOutConfig {
                     problem: "x".into(),
                     participants: vec![participant("p1", "opus"), participant("p1", "sonnet")],
@@ -1120,6 +1128,7 @@ mod tests {
         assert!(svc
             .start(
                 &repo,
+                LaunchPermit::for_tests(),
                 FanOutConfig {
                     problem: " ".into(),
                     participants: vec![participant("p1", "opus"), participant("p2", "sonnet")],
@@ -1131,6 +1140,7 @@ mod tests {
         assert!(svc
             .start(
                 &repo,
+                LaunchPermit::for_tests(),
                 FanOutConfig {
                     problem: "x".into(),
                     participants: vec![participant("p1", "opus")],
@@ -1189,6 +1199,7 @@ mod tests {
         let id = svc
             .start(
                 &repo,
+                LaunchPermit::for_tests(),
                 FanOutConfig {
                     problem: "slow".into(),
                     participants: vec![participant("p1", "opus"), participant("p2", "sonnet")],

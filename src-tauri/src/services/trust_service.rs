@@ -8,7 +8,12 @@
 //! engines, and the hash means a changed surface asks again.
 //!
 //! The console never executes any of these files itself; the CLIs do, the
-//! moment they start. That is why the gate sits in front of the auto-launch.
+//! moment they start. That is why the gate sits in front of every launch the
+//! console makes: the terminal's auto-launch asks the frontend store, and a
+//! launch with no terminal (rooms, fan-out, reviewer, scheduler, advisor,
+//! reflect, curator, the assistant, the harness lab) has to show a
+//! [`LaunchPermit`], which only [`launch_permit`] hands out and which is
+//! checked again before each process starts.
 
 use std::collections::HashMap;
 use std::fs;
@@ -83,6 +88,74 @@ struct TrustFile {
 
 pub struct TrustService {
     lock: Mutex<()>,
+}
+
+/// The trust gate was asked about a folder and the human's word on it, as it
+/// was then, was "trusted". A headless turn cannot be described without one
+/// (`RunCtx` and `RunSpec` have it as a field) and outside tests nothing but
+/// [`launch_permit`] makes one, so a new feature that starts an agent cannot
+/// skip the question: it does not compile until it asks.
+///
+/// It is the answer at the moment of asking, and a fan-out or an experiment
+/// outlives that moment. So the permit remembers which folder it was given
+/// for, and every engine adapter asks [`LaunchPermit::still_holds`] right
+/// before it starts a process: a folder that changed or was declined in
+/// between stops the next launch, however old the permit.
+#[derive(Debug, Clone)]
+pub struct LaunchPermit {
+    /// The project the gate was asked about. `None` only in tests.
+    root: Option<PathBuf>,
+}
+
+impl LaunchPermit {
+    /// Tests drive fake runners in throwaway folders nobody decided on.
+    #[cfg(test)]
+    pub fn for_tests() -> Self {
+        Self { root: None }
+    }
+
+    /// Ask the gate again, now. What the adapters call before each spawn.
+    pub fn still_holds(&self) -> AppResult<()> {
+        match &self.root {
+            Some(root) => launch_permit(root).map(drop),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Where a decision stands against the surface as it is now.
+fn state_of(surface: &ProjectSurface, decision: Option<&TrustDecision>) -> &'static str {
+    match decision {
+        None => "undecided",
+        Some(d) if d.digest != surface.digest => "changed",
+        Some(d) if d.decision == "trusted" => "trusted",
+        Some(_) => "declined",
+    }
+}
+
+/// Why no agent is started, in words the human can act on.
+fn refusal(state: &str) -> String {
+    match state {
+        "declined" => "You chose not to trust this folder, so the console starts no agent in it. To change that: Settings → Permissions → workspace trust.".into(),
+        "changed" => "This folder changed since you trusted it (hooks, MCP, plugins, rules, instructions, skills or setup), so the console starts no agent in it until you decide again: open it and answer the trust question in the Inbox.".into(),
+        _ => "This folder is not trusted yet, so the console starts no agent in it. Open it and answer the trust question in the Inbox, then try again.".into(),
+    }
+}
+
+/// Ask the gate for a launch in `project_root`: the folder the human opened
+/// and decided on, not the worktree a turn may run in. Reads the surface and
+/// the decision fresh; anything but "trusted" is a refusal that says what to
+/// do, and a trust file that cannot be read refuses too.
+pub fn launch_permit(project_root: &Path) -> AppResult<LaunchPermit> {
+    let surface = scan(project_root);
+    let file = TrustService::load_file()?;
+    let decision = file.by_project.get(project_root.to_string_lossy().as_ref());
+    match state_of(&surface, decision) {
+        "trusted" => Ok(LaunchPermit {
+            root: Some(project_root.to_path_buf()),
+        }),
+        other => Err(AppError::Other(refusal(other))),
+    }
 }
 
 impl Default for TrustService {
@@ -275,12 +348,7 @@ impl TrustService {
         let _g = self.lock.lock();
         let surface = scan(Path::new(project_root));
         let decision = Self::load_file()?.by_project.get(project_root).cloned();
-        let state = match &decision {
-            None => "undecided",
-            Some(d) if d.digest != surface.digest => "changed",
-            Some(d) if d.decision == "trusted" => "trusted",
-            Some(_) => "declined",
-        };
+        let state = state_of(&surface, decision.as_ref());
         Ok(TrustStatus {
             surface,
             decision,
@@ -441,6 +509,177 @@ mod tests {
         assert_eq!(
             svc.status(other.to_str().unwrap()).unwrap().state,
             "undecided"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_launch_is_permitted_only_on_a_folder_trusted_as_it_is_now() {
+        let _env = crate::test_support::lock_env();
+        let base = tmp("permit");
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let root = base.join("proj");
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        fs::write(
+            root.join(".claude/settings.json"),
+            r#"{"hooks":{"Stop":[]}}"#,
+        )
+        .unwrap();
+        let r = root.to_str().unwrap();
+        let svc = TrustService::new();
+        let refused = |folder: &Path, why: &str| {
+            let e = launch_permit(folder).expect_err(why).to_string();
+            assert!(e.contains("starts no agent"), "{why}: {e}");
+            e
+        };
+        // Nobody decided: refused, and sent to the Inbox.
+        assert!(refused(&root, "undecided").contains("Inbox"));
+        svc.decide(r, "trusted", 1).unwrap();
+        assert!(launch_permit(&root).is_ok());
+        // The hooks change under the decision: the old word does not cover them.
+        fs::write(
+            root.join(".claude/settings.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[]}]}}"#,
+        )
+        .unwrap();
+        assert!(refused(&root, "changed").contains("changed since you trusted it"));
+        // Declined: refused, and told where the word can be changed.
+        svc.decide(r, "declined", 2).unwrap();
+        assert!(refused(&root, "declined").contains("Settings"));
+        svc.decide(r, "trusted", 3).unwrap();
+        let permit = launch_permit(&root).unwrap();
+        assert!(permit.still_holds().is_ok());
+        // The decision is the folder's: a worktree or a sibling has none.
+        let other = base.join("other");
+        fs::create_dir_all(&other).unwrap();
+        refused(&other, "another folder");
+        // A trust file that cannot be read refuses instead of letting through.
+        fs::write(base.join("agent-console").join("trust.json"), "{not json").unwrap();
+        assert!(launch_permit(&root).is_err());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// A permit is the answer of a moment; a fan-out or an experiment goes on
+    /// after it. The folder is asked again before every process: an old
+    /// permit starts nothing once the folder changed or was declined, on any
+    /// of the three engines.
+    #[test]
+    fn an_old_permit_starts_nothing_once_the_folder_changed_or_was_declined() {
+        use crate::services::engine_runner::{runner_for, Engine, RunCtx, ToolPolicy};
+
+        let _env = crate::test_support::lock_env();
+        let base = tmp("stale");
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let root = base.join("proj");
+        fs::create_dir_all(root.join(".claude")).unwrap();
+        fs::write(
+            root.join(".claude/settings.json"),
+            r#"{"hooks":{"Stop":[]}}"#,
+        )
+        .unwrap();
+        let r = root.to_str().unwrap();
+        let svc = TrustService::new();
+        svc.decide(r, "trusted", 1).unwrap();
+        let permit = launch_permit(&root).unwrap();
+        assert!(permit.still_holds().is_ok());
+
+        let every_engine_refuses = |needle: &str| {
+            let e = permit.still_holds().unwrap_err().to_string();
+            assert!(e.contains(needle), "{e}");
+            for engine in [Engine::Claude, Engine::Codex, Engine::Opencode] {
+                let ctx = RunCtx {
+                    permit: &permit,
+                    cwd: &root,
+                    model: "",
+                    tools: ToolPolicy::ReadOnly,
+                    prompt: "say hi",
+                    resume: None,
+                    child_slot: None,
+                    extra_allowed_tools: &[],
+                    mcp: None,
+                };
+                let e = match runner_for(engine).run(&ctx, &|_, _, _| {}) {
+                    Err(e) => e.to_string(),
+                    Ok(_) => panic!("{} started on a stale permit", engine.bin_name()),
+                };
+                assert!(e.contains(needle), "{}: {e}", engine.bin_name());
+            }
+        };
+        // A hook is edited after the permit was given.
+        fs::write(
+            root.join(".claude/settings.json"),
+            r#"{"hooks":{"Stop":[{"hooks":[]}]}}"#,
+        )
+        .unwrap();
+        every_engine_refuses("changed since you trusted it");
+        // The human trusts the new surface: the same permit holds again.
+        svc.decide(r, "trusted", 2).unwrap();
+        assert!(permit.still_holds().is_ok());
+        // The human takes the word back.
+        svc.decide(r, "declined", 3).unwrap();
+        every_engine_refuses("chose not to trust");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    /// The launches that have no terminal, each through its real entry point
+    /// (rooms and fan-out need a running app: they ask in `start` and in the
+    /// command). None of them reaches an engine in a folder nobody decided on.
+    #[test]
+    fn no_launch_without_a_terminal_starts_in_a_folder_nobody_trusted() {
+        use crate::services::activity_service::ActivityEvent;
+        use crate::services::engine_runner::Engine;
+        use crate::services::testigo_service::TestigoService;
+        use crate::services::{
+            advisor_service, assistant_service, harness_lab, learning_service, reviewer_service,
+        };
+
+        let _env = crate::test_support::lock_env();
+        let base = tmp("headless");
+        std::env::set_var("XDG_DATA_HOME", &base);
+        let root = base.join("proj");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("CLAUDE.md"), "be nice").unwrap();
+        let r = root.to_str().unwrap();
+        let testigo = TestigoService::new();
+        let refused = |what: &str, e: AppError| {
+            let e = e.to_string();
+            assert!(e.contains("not trusted yet"), "{what}: {e}");
+        };
+
+        refused("advisor", advisor_service::analyze(&root).unwrap_err());
+        let prompt = ActivityEvent {
+            ts: 1,
+            kind: "user_prompt".into(),
+            prompt: Some("fix the build".into()),
+            skill: None,
+            term_id: None,
+            session_id: None,
+            snapshot_sha: None,
+        };
+        refused(
+            "reflect",
+            learning_service::reflect(&root, &[prompt]).unwrap_err(),
+        );
+        refused(
+            "assistant",
+            assistant_service::ask(&assistant_service::AskSpec {
+                project_root: &root,
+                bridge: None,
+                engine: Engine::Claude,
+                model: None,
+                resume: None,
+                message: "where is the ledger?",
+                on_activity: None,
+            })
+            .unwrap_err(),
+        );
+        refused(
+            "reviewer",
+            reviewer_service::review(&testigo, r, "t1", None, None, 1).unwrap_err(),
+        );
+        refused(
+            "harness lab",
+            harness_lab::run_experiment(&testigo, r, 1).unwrap_err(),
         );
         let _ = fs::remove_dir_all(&base);
     }

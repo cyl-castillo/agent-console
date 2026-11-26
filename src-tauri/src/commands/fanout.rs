@@ -35,6 +35,9 @@ pub fn fanout_start(
     state: State<'_, AppState>,
 ) -> AppResult<String> {
     let repo = repo_of(&state)?;
+    // Asked before a worktree exists: every candidate is an agent started
+    // under this project's hooks and instructions.
+    let permit = crate::services::trust_service::launch_permit(&repo)?;
     let notify_app = app.clone();
     let root = repo.to_string_lossy().to_string();
     let notify: Notify = Arc::new(move |id: &str, finished: bool| {
@@ -57,6 +60,7 @@ pub fn fanout_start(
     });
     state.fanout.start(
         &repo,
+        permit,
         config,
         crate::services::engine_runner::runner_for,
         notify,

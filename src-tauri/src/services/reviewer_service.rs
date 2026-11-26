@@ -22,6 +22,7 @@ use crate::error::{AppError, AppResult};
 use crate::services::agent_run::{self, RunSpec};
 use crate::services::engine_runner::{Engine, EngineRunner, ToolPolicy};
 use crate::services::testigo_service::{ProofEvent, TestigoService};
+use crate::services::trust_service::LaunchPermit;
 use crate::services::{claude_cli, proc};
 
 /// Hard cap on the diff the reviewer reads: enough for a real turn, bounded
@@ -631,6 +632,7 @@ pub fn review_with_runner(
     turn_id: Option<&str>,
     reviewer: (Engine, Option<String>),
     runner: &dyn EngineRunner,
+    permit: &LaunchPermit,
     ts: i64,
 ) -> AppResult<ReviewVerdict> {
     let scope = scope_for(testigo, project_root, term_id, turn_id)?;
@@ -643,6 +645,7 @@ pub fn review_with_runner(
     let (engine, model) = reviewer;
     let run = agent_run::run_with_runner(
         &RunSpec {
+            permit,
             engine,
             cwd: Path::new(project_root),
             prompt: &prompt,
@@ -742,6 +745,9 @@ pub fn review(
     explicit: Option<(Engine, Option<String>)>,
     ts: i64,
 ) -> AppResult<ReviewVerdict> {
+    // The reviewer is an agent started in the project folder: asked for by
+    // the human or by another agent over MCP, it needs the folder trusted.
+    let permit = crate::services::trust_service::launch_permit(Path::new(project_root))?;
     let scope = scope_for(testigo, project_root, term_id, turn_id)?;
     let reviewer = match explicit {
         Some(r) => r,
@@ -776,6 +782,7 @@ pub fn review(
         turn_id,
         reviewer,
         runner,
+        &permit,
         ts,
     )
 }
@@ -1053,6 +1060,7 @@ mod tests {
             None,
             (Engine::Codex, None),
             &FakeReviewer("{\"verdict\":\"approve\",\"findings\":[],\"rationale\":\"looks fine\"}"),
+            &LaunchPermit::for_tests(),
             4,
         )
         .unwrap();

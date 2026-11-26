@@ -95,6 +95,10 @@ pub fn kill_parked(slot: &ChildSlot) {
 
 /// Everything a single headless turn needs, independent of engine.
 pub struct RunCtx<'a> {
+    /// The trust gate's yes for the project this turn belongs to. A turn
+    /// nobody asked the gate about cannot be described at all, and each
+    /// adapter asks `still_holds` before it starts its process.
+    pub permit: &'a crate::services::trust_service::LaunchPermit,
     /// Working directory the turn runs in.
     pub cwd: &'a Path,
     /// Claude: model alias (`opus`/`sonnet`). Codex: reasoning effort
@@ -716,6 +720,8 @@ fn claude_args(ctx: &RunCtx) -> Vec<String> {
 
 impl EngineRunner for ClaudeRunner {
     fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
+        // The folder as it is at this instant, not when the permit was given.
+        ctx.permit.still_holds()?;
         let args = claude_args(ctx);
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let mut cmd = claude_cli::command_with_stdin(&arg_refs);
@@ -850,6 +856,8 @@ impl EngineRunner for CodexRunner {
     /// did for `exec`. `AGENT_CONSOLE_CODEX_LEGACY=1` or a failed spawn falls
     /// back to `codex exec --json`.
     fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
+        // The folder as it is at this instant, not when the permit was given.
+        ctx.permit.still_holds()?;
         if std::env::var_os("AGENT_CONSOLE_CODEX_LEGACY").is_some() {
             return self.run_exec(ctx, on_activity);
         }
@@ -1040,6 +1048,8 @@ impl EngineRunner for OpencodeRunner {
     /// never gave — and the connector's MCP server travels in `session/new`
     /// instead of being written into the folder's `opencode.json`.
     fn run(&self, ctx: &RunCtx, on_activity: &ActivitySink) -> AppResult<TurnOutput> {
+        // The folder as it is at this instant, not when the permit was given.
+        ctx.permit.still_holds()?;
         if std::env::var_os("AGENT_CONSOLE_OPENCODE_LEGACY").is_some() {
             return self.run_legacy(ctx, on_activity);
         }
@@ -1363,6 +1373,7 @@ mod tests {
     #[test]
     fn plan_policy_and_empty_model_map_to_the_unattended_shape() {
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: std::path::Path::new("."),
             model: "",
             tools: ToolPolicy::Plan,
@@ -1390,6 +1401,7 @@ mod tests {
         let extra = vec!["mcp__jira".to_string(), "mcp__linear".to_string()];
         let bridge = std::path::Path::new("/opt/hook-bridge");
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: std::path::Path::new("."),
             model: "",
             tools: ToolPolicy::AcceptEdits,
@@ -1420,6 +1432,7 @@ mod tests {
         let i = args.iter().position(|a| a == "--allowedTools").unwrap();
         assert_eq!(args[i + 1], "mcp__jira,mcp__linear");
         let none = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             extra_allowed_tools: &[],
             ..solo
         };
@@ -1430,6 +1443,7 @@ mod tests {
     fn claude_argv_carries_no_prompt_and_reads_stdin() {
         let prompt = "A room prompt\nlong enough to matter & full of | shell < chars >";
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: std::path::Path::new("."),
             model: "opus",
             tools: ToolPolicy::AcceptEdits,
@@ -1502,6 +1516,7 @@ mod tests {
     #[test]
     fn claude_turn_with_connector_registers_the_mcp_server_and_allows_its_tools() {
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: Path::new("."),
             model: "",
             tools: ToolPolicy::ReadOnly,
@@ -1541,6 +1556,7 @@ mod tests {
     #[test]
     fn a_plain_turn_has_no_mcp_flags() {
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: Path::new("."),
             model: "",
             tools: ToolPolicy::ReadOnly,
@@ -1559,6 +1575,7 @@ mod tests {
     #[test]
     fn codex_turn_with_connector_passes_a_toml_override_with_escaped_strings() {
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: Path::new("."),
             model: "",
             tools: ToolPolicy::ReadOnly,
@@ -1585,6 +1602,7 @@ mod tests {
     #[test]
     fn opencode_run_args_map_policy_model_and_prompt() {
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: Path::new("."),
             model: "anthropic/claude-sonnet-4",
             tools: ToolPolicy::ReadOnly,
@@ -1612,6 +1630,7 @@ mod tests {
         assert!(!args.iter().any(|a| a == "--variant"));
         assert_eq!(args.last().map(String::as_str), Some(ctx.prompt));
         let edits = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             tools: ToolPolicy::AcceptEdits,
             model: "openai/gpt-5#high",
             ..ctx
@@ -1675,6 +1694,7 @@ mod tests {
             server: McpServerKind::Connector,
         };
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: &dir,
             model: "",
             tools: ToolPolicy::ReadOnly,
@@ -1787,6 +1807,7 @@ mod tests {
     fn codex_exec_reads_prompt_from_stdin_for_fresh_turn() {
         let prompt = "Investigate this room turn\nwith symbols like & | < >";
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: std::path::Path::new("."),
             model: "high",
             tools: ToolPolicy::ReadOnly,
@@ -1807,6 +1828,7 @@ mod tests {
     fn codex_resume_reads_prompt_from_stdin_without_sandbox_arg() {
         let prompt = "Continue the debate with a multiline prompt\nthat stays off argv.";
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: std::path::Path::new("."),
             model: "medium",
             tools: ToolPolicy::ReadOnly,
@@ -1835,6 +1857,7 @@ mod tests {
         let dir = std::env::temp_dir().join("engine-runner-codex-test");
         std::fs::create_dir_all(&dir).unwrap();
         let ctx = RunCtx {
+            permit: &crate::services::trust_service::LaunchPermit::for_tests(),
             cwd: &dir,
             model: "low",
             tools: ToolPolicy::ReadOnly,
